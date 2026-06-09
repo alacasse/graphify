@@ -441,14 +441,82 @@ def test_json_marker_assertion_recurses_into_valid_json() -> None:
             install_command=("true",),
             uninstall_command=None,
             cwd_root="project",
-            expected=(runner.ExpectedPath("project", ".codebuddy/settings.json", marker="graphify"),),
+            expected=(runner.ExpectedPath("project", "custom/settings.json", marker="graphify"),),
         )
-        path = roots["project"] / ".codebuddy/settings.json"
+        path = roots["project"] / "custom/settings.json"
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps({"hooks": {"PreToolUse": [{"command": "graphify query"}]}}), encoding="utf-8")
         check = runner.assert_expected_files(scenario)[0]
         assert_true(check["ok"] is True, "valid JSON with nested graphify command should pass")
         assert_true("valid_json=true" in str(check["detail"]), "valid JSON detail should be explicit")
+
+
+def _json_shape_check(relative: str, data: object) -> dict[str, object]:
+    with patched_roots() as roots:
+        scenario = runner.Scenario(
+            platform="unit",
+            scope="project",
+            install_command=("true",),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", relative, marker="graphify"),),
+        )
+        path = roots["project"] / relative
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return runner.assert_expected_files(scenario)[0]
+
+
+def test_claude_like_json_shape_validation() -> None:
+    valid = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo graphify context"}]},
+                {"matcher": "Read|Glob", "hooks": [{"type": "command", "command": "echo graphify context"}]},
+            ]
+        }
+    }
+    positive = _json_shape_check(".claude/settings.json", valid)
+    assert_true(positive["ok"] is True, "Claude settings should require both Graphify PreToolUse hooks")
+    assert_true("schema=claude_settings" in str(positive["detail"]), "Claude detail should identify schema")
+
+    negative = _json_shape_check(".codebuddy/settings.json", {"note": "graphify in wrong location"})
+    assert_true(negative["ok"] is False, "CodeBuddy settings should reject unrelated graphify markers")
+    assert_true("schema=codebuddy_settings" in str(negative["detail"]), "CodeBuddy detail should identify schema")
+
+
+def test_codex_json_shape_validation() -> None:
+    valid = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/tmp/bin/graphify hook-check"}]}]}}
+    positive = _json_shape_check(".codex/hooks.json", valid)
+    assert_true(positive["ok"] is True, "Codex hooks should accept absolute graphify hook-check commands")
+
+    negative = _json_shape_check(".codex/hooks.json", {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "graphify query"}]}]}})
+    assert_true(negative["ok"] is False, "Codex hooks should require hook-check command shape")
+
+
+def test_gemini_json_shape_validation() -> None:
+    valid = {"hooks": {"BeforeTool": [{"matcher": "read_file|list_directory", "hooks": [{"type": "command", "command": "python -c 'print(\"graphify\")'"}]}]}}
+    positive = _json_shape_check(".gemini/settings.json", valid)
+    assert_true(positive["ok"] is True, "Gemini settings should accept the Graphify BeforeTool hook")
+
+    negative = _json_shape_check(".gemini/settings.json", {"hooks": {"PreToolUse": [{"matcher": "read_file|list_directory", "hooks": [{"type": "command", "command": "graphify"}]}]}})
+    assert_true(negative["ok"] is False, "Gemini settings should reject graphify in the wrong hook event")
+
+
+def test_kilo_json_shape_validation() -> None:
+    positive = _json_shape_check(".kilo/kilo.json", {"plugin": ["file:///tmp/project/.kilo/plugins/graphify.js"]})
+    assert_true(positive["ok"] is True, "Kilo config should accept the generated plugin file URI")
+
+    negative = _json_shape_check(".kilo/kilo.json", {"plugin": ["graphify"]})
+    assert_true(negative["ok"] is False, "Kilo config should reject unrelated graphify plugin strings")
+
+
+def test_opencode_json_shape_validation() -> None:
+    positive = _json_shape_check(".opencode/opencode.json", {"plugin": [".opencode/plugins/graphify.js"]})
+    assert_true(positive["ok"] is True, "OpenCode config should accept the generated plugin path")
+
+    negative = _json_shape_check(".opencode/opencode.json", {"plugin": ["file:///tmp/project/.opencode/plugins/graphify.js"]})
+    assert_true(negative["ok"] is False, "OpenCode config should require the relative generated plugin path")
 
 
 def test_expected_path_kind_is_enforced() -> None:
@@ -671,6 +739,50 @@ def test_install_graphify_version_probe_failure_is_precondition() -> None:
     assert_true("version probe failed" in message, "version probe failure should have a clear precondition error")
 
 
+def test_install_graphify_rejects_wrong_package_provenance_after_probe() -> None:
+    old_output = runner.OUTPUT
+    patched_names = ("run_capture", "read_installed_package_metadata")
+    old_values = {name: getattr(runner, name) for name in patched_names}
+    with tempfile.TemporaryDirectory() as tmp:
+        runner.OUTPUT = Path(tmp)
+        calls: list[str] = []
+
+        def fake_run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
+            calls.append(command_class)
+            if command_class == "package_install":
+                return subprocess.CompletedProcess(list(command), 0, "installed", "")
+            if command_class == "graphify_version":
+                return subprocess.CompletedProcess(list(command), 0, "graphify 9.9.9", "")
+            raise AssertionError(f"unexpected command_class={command_class}")
+
+        def fake_metadata(package_name, source):
+            return {
+                "package_name": package_name,
+                "version": "9.9.9",
+                "location": "/tmp/site-packages",
+                "direct_url": {"url": "file:///tmp/wrong-source", "dir_info": {}},
+                "installed_from_copied_source": False,
+            }
+
+        runner.run_capture = fake_run_capture
+        runner.read_installed_package_metadata = fake_metadata
+        try:
+            try:
+                runner.install_graphify({})
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                raise AssertionError("install_graphify should reject packages not installed from copied source")
+        finally:
+            runner.OUTPUT = old_output
+            for name, value in old_values.items():
+                setattr(runner, name, value)
+
+    assert_true(calls == ["package_install", "graphify_version"], "provenance should be checked after the version probe")
+    assert_true("provenance check failed" in message, "provenance failure should be explicit")
+    assert_true("direct_url=" in message and "expected_source=" in message, "provenance failure should include diagnostic paths")
+
+
 def test_risk_report_is_file_effect_only() -> None:
     scenario = runner.make_scenario("codex", "project")
     assert_true(scenario is not None, "codex project scenario should exist")
@@ -737,6 +849,84 @@ def test_package_provenance_parsing() -> None:
     assert_true(metadata["version"] == "1.2.3", "package version should be parsed")
     assert_true(metadata["location"].endswith("site-packages"), "install location should be dist-info parent")
     assert_true(metadata["installed_from_copied_source"] is True, "direct_url should identify copied source install")
+
+
+def _patch_source_roots(repo: Path, src: Path):
+    old_repo_mount = runner.REPO_MOUNT
+    old_src = runner.SRC
+    runner.REPO_MOUNT = repo
+    runner.SRC = src
+    return old_repo_mount, old_src
+
+
+def test_tracked_source_copy_preserves_safe_in_repo_symlink() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        src = root / "src"
+        repo.mkdir()
+        (repo / "target.txt").write_text("target\n", encoding="utf-8")
+        (repo / "link.txt").symlink_to("target.txt")
+        subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["git", "add", "target.txt", "link.txt"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        old_repo_mount, old_src = _patch_source_roots(repo, src)
+        try:
+            manifest = runner.copy_tracked_source_tree()
+        finally:
+            runner.REPO_MOUNT = old_repo_mount
+            runner.SRC = old_src
+
+        assert_true(manifest is not None, "tracked source copy should be available for a git repo")
+        assert_true((src / "link.txt").is_symlink(), "safe in-repo symlink should be preserved")
+        assert_true(os.readlink(src / "link.txt") == "target.txt", "preserved symlink target should remain relative")
+
+
+def test_tracked_source_copy_rejects_out_of_repo_symlink() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        src = root / "src"
+        repo.mkdir()
+        (root / "outside.txt").write_text("outside\n", encoding="utf-8")
+        (repo / "link.txt").symlink_to("../outside.txt")
+        subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["git", "add", "link.txt"], cwd=repo, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        old_repo_mount, old_src = _patch_source_roots(repo, src)
+        try:
+            try:
+                runner.copy_tracked_source_tree()
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                raise AssertionError("tracked copy should reject out-of-repo symlinks")
+        finally:
+            runner.REPO_MOUNT = old_repo_mount
+            runner.SRC = old_src
+
+    assert_true("outside repository" in message, "tracked copy symlink rejection should identify repository escape")
+
+
+def test_fallback_source_copy_rejects_out_of_repo_symlink() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = root / "repo"
+        src = root / "src"
+        repo.mkdir()
+        (root / "outside.txt").write_text("outside\n", encoding="utf-8")
+        (repo / "link.txt").symlink_to("../outside.txt")
+        old_repo_mount, old_src = _patch_source_roots(repo, src)
+        try:
+            try:
+                runner.copy_source_tree("always")
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                raise AssertionError("fallback copy should reject out-of-repo symlinks")
+        finally:
+            runner.REPO_MOUNT = old_repo_mount
+            runner.SRC = old_src
+
+    assert_true("outside repository" in message, "fallback copy symlink rejection should identify repository escape")
 
 
 def test_generated_files_filtering() -> None:
@@ -1105,6 +1295,11 @@ def main(argv: list[str] | None = None) -> int:
         test_uninstall_requires_seeded_user_content_to_survive,
         test_json_marker_assertion_rejects_invalid_json,
         test_json_marker_assertion_recurses_into_valid_json,
+        test_claude_like_json_shape_validation,
+        test_codex_json_shape_validation,
+        test_gemini_json_shape_validation,
+        test_kilo_json_shape_validation,
+        test_opencode_json_shape_validation,
         test_expected_path_kind_is_enforced,
         test_idempotency_state_detects_content_change,
         test_universal_scenario_selection_requires_multiple_platforms,
@@ -1115,11 +1310,15 @@ def main(argv: list[str] | None = None) -> int:
         test_run_capture_timeout_serialization,
         test_shell_safe_command_display,
         test_install_graphify_version_probe_failure_is_precondition,
+        test_install_graphify_rejects_wrong_package_provenance_after_probe,
         test_risk_report_is_file_effect_only,
         test_combined_status_separates_graphify_and_runtime,
         test_docker_command_construction,
         test_source_excludes_nested_sandbox_out,
         test_package_provenance_parsing,
+        test_tracked_source_copy_preserves_safe_in_repo_symlink,
+        test_tracked_source_copy_rejects_out_of_repo_symlink,
+        test_fallback_source_copy_rejects_out_of_repo_symlink,
         test_generated_files_filtering,
         test_run_scenario_skips_followups_when_initial_install_fails,
         test_matrix_collects_graphify_failures,

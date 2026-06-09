@@ -90,6 +90,36 @@ def test_every_scope_is_runnable_or_explained() -> None:
                 assert_true(scenario.expected, f"{platform_name}/{scope} should assert at least one file effect")
 
 
+def test_sandbox_registry_defines_all_platforms() -> None:
+    specs = runner.sandbox_platform_specs()
+    assert_true(list(specs) == runner.ALL_PLATFORMS, "ALL_PLATFORMS should be derived from the sandbox registry order")
+    for platform_name, spec in specs.items():
+        assert_true(spec.name == platform_name, f"{platform_name} registry key and spec name should match")
+        assert_true(bool(spec.scopes or spec.unsupported_scopes), f"{platform_name} should define runnable or unsupported scopes")
+
+
+def test_make_scenario_projects_registry_scope_specs() -> None:
+    for platform_name in ("claude", "codex", "codebuddy", "kilo", "vscode", "antigravity", "windows"):
+        spec = runner.platform_spec(platform_name)
+        for scope, scope_spec in spec.scopes.items():
+            scenario = runner.make_scenario(platform_name, scope)
+            assert_true(scenario is not None, f"{platform_name}/{scope} should project to a scenario")
+            assert_true(scenario.install_command == scope_spec.install_command, f"{platform_name}/{scope} install command should come from registry")
+            assert_true(scenario.uninstall_command == scope_spec.uninstall_command, f"{platform_name}/{scope} uninstall command should come from registry")
+            assert_true(scenario.cwd_root == scope_spec.cwd_root, f"{platform_name}/{scope} cwd root should come from registry")
+            assert_true(scenario.expected == scope_spec.expected, f"{platform_name}/{scope} expected effects should come from registry")
+            assert_true(scenario.risk_notes == scope_spec.risk_notes, f"{platform_name}/{scope} risk notes should come from registry")
+
+
+def test_direct_equivalence_uses_registry_scope_specs() -> None:
+    for platform_name in runner.ALL_PLATFORMS:
+        spec = runner.platform_spec(platform_name)
+        for scope, scope_spec in spec.scopes.items():
+            scenario = runner.make_scenario(platform_name, scope)
+            assert_true(scenario is not None, f"{platform_name}/{scope} should project to a scenario")
+            assert_true(runner.equivalent_install_command(scenario) == scope_spec.equivalent_install_command, f"{platform_name}/{scope} equivalence should come from registry")
+
+
 def test_platform_coverage_records_unsupported_scopes() -> None:
     records = runner.platform_coverage_records(["cursor"], "both")
     user = next(record for record in records if record["scope"] == "user")
@@ -969,6 +999,9 @@ def main(argv: list[str] | None = None) -> int:
         test_expected_path_manifest_logic,
         test_registry_mirrors_install_surface,
         test_every_scope_is_runnable_or_explained,
+        test_sandbox_registry_defines_all_platforms,
+        test_make_scenario_projects_registry_scope_specs,
+        test_direct_equivalence_uses_registry_scope_specs,
         test_platform_coverage_records_unsupported_scopes,
         test_codebuddy_scopes_are_runnable,
         test_generic_direct_equivalence_applicability,

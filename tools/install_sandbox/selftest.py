@@ -62,8 +62,13 @@ def test_expected_path_manifest_logic() -> None:
     project = runner.make_scenario("codex", "project")
     assert_true(user is not None, "codex user scenario should exist")
     assert_true(project is not None, "codex project scenario should exist")
-    assert_true(any(entry.root == "home" and entry.relative == ".agents/skills/graphify/SKILL.md" for entry in user.expected), "codex user skill path should be under home")
-    assert_true(any(entry.root == "project" and entry.relative == ".agents/skills/graphify/SKILL.md" for entry in project.expected), "codex project skill path should be under project")
+    assert_true(any(entry.root == "home" and entry.relative == ".codex/skills/graphify/SKILL.md" for entry in user.expected), "codex user skill path should be under home")
+    assert_true(any(entry.root == "project" and entry.relative == ".codex/skills/graphify/SKILL.md" for entry in project.expected), "codex project skill path should be under project")
+    assert_true(any(entry.root == "project" and entry.relative == ".codex/hooks.json" for entry in project.expected), "codex project hook should remain separate from skill path")
+    codebuddy = runner.make_scenario("codebuddy", "project")
+    assert_true(codebuddy is not None, "codebuddy project scenario should exist")
+    assert_true(any(entry.relative == "CODEBUDDY.md" for entry in codebuddy.expected), "codebuddy project scenario should assert CODEBUDDY.md")
+    assert_true(any(entry.relative == ".codebuddy/settings.json" for entry in codebuddy.expected), "codebuddy project scenario should assert settings hook")
     both = runner.platform_scenarios("cursor", "both")
     assert_true([scenario.scope for scenario in both] == ["project"], "cursor coverage should be project-only")
 
@@ -92,34 +97,35 @@ def test_platform_coverage_records_unsupported_scopes() -> None:
     assert_true(user["status"] == "unsupported", "cursor user scope should be explicitly unsupported")
     assert_true("reason" in user, "unsupported scope should include a reason")
     assert_true(project["status"] == "runnable", "cursor project scope should remain runnable")
-    assert_true(user["target_tool_runtime_probe"]["tool"] == "cursor", "coverage should include target runtime probe metadata")
 
 
-def test_target_tool_registry_covers_platforms() -> None:
-    assert_true(set(runner.TOOL_PROBES) == set(runner.ALL_PLATFORMS), "each sandbox platform should define target runtime evidence")
-    for platform_name in runner.ALL_PLATFORMS:
-        probe = runner.target_tool_probe_for_platform(platform_name)
-        assert_true(probe.command is not None or probe.unavailable_reason, f"{platform_name} should have a probe command or explicit unavailable reason")
-    codex = runner.target_tool_probe_for_platform("codex")
-    assert_true(codex.command_kind == "install", "codex should attempt package installation, not only discovery")
-    assert_true("@openai/codex" in codex.command, "codex runtime probe should install the public npm package")
-    kilo = runner.target_tool_probe_for_platform("kilo")
-    assert_true(kilo.command_kind == "install", "kilo should attempt package installation, not only be marked unavailable")
-    assert_true("@kilocode/cli" in kilo.command, "kilo runtime probe should install the public npm package")
+def test_codebuddy_scopes_are_runnable() -> None:
+    for scope in ("user", "project"):
+        scenario = runner.make_scenario("codebuddy", scope)
+        assert_true(scenario is not None, f"codebuddy {scope} scenario should be runnable")
+        assert_true(any(entry.relative.endswith("SKILL.md") for entry in scenario.expected), f"codebuddy {scope} should assert skill")
+        assert_true(any(entry.relative.endswith("CODEBUDDY.md") for entry in scenario.expected), f"codebuddy {scope} should assert CODEBUDDY.md")
+        assert_true(any(entry.relative == ".codebuddy/settings.json" for entry in scenario.expected), f"codebuddy {scope} should assert settings hook")
 
 
 def test_generic_direct_equivalence_applicability() -> None:
     gemini_user = runner.make_scenario("gemini", "user")
     codex_user = runner.make_scenario("codex", "user")
     codex_project = runner.make_scenario("codex", "project")
+    codebuddy_user = runner.make_scenario("codebuddy", "user")
+    codebuddy_project = runner.make_scenario("codebuddy", "project")
     cursor_project = runner.make_scenario("cursor", "project")
     assert_true(gemini_user is not None, "gemini user scenario should exist")
     assert_true(codex_user is not None, "codex user scenario should exist")
     assert_true(codex_project is not None, "codex project scenario should exist")
+    assert_true(codebuddy_user is not None, "codebuddy user scenario should exist")
+    assert_true(codebuddy_project is not None, "codebuddy project scenario should exist")
     assert_true(cursor_project is not None, "cursor project scenario should exist")
     assert_true(runner.equivalent_install_command(gemini_user) == ("graphify", "gemini", "install"), "gemini user generic install should compare with direct install")
     assert_true(runner.equivalent_install_command(codex_user) is None, "codex user direct install intentionally differs from generic user install")
     assert_true(runner.equivalent_install_command(codex_project) == ("graphify", "codex", "install", "--project"), "codex project generic install should compare with direct project install")
+    assert_true(runner.equivalent_install_command(codebuddy_user) is None, "codebuddy user direct install intentionally differs from generic user install")
+    assert_true(runner.equivalent_install_command(codebuddy_project) == ("graphify", "codebuddy", "install"), "codebuddy project generic install should compare with direct project install")
     assert_true(runner.equivalent_install_command(cursor_project) == ("graphify", "install", "--project", "--platform", "cursor"), "cursor project direct install should compare with generic project install")
 
 
@@ -367,22 +373,15 @@ def test_report_serialization_includes_risks() -> None:
     assert_true(scenario is not None, "codex project scenario should exist")
     report = runner.risk_report(scenario, True)
     encoded = json.dumps(report)
-    for status in (
-        runner.RISK_GRAPHIFY_VERIFIED,
-        runner.RISK_RUNTIME_VERIFIED,
-        runner.RISK_RUNTIME_UNVERIFIED,
-        runner.RISK_TOOL_UNAVAILABLE,
-    ):
+    for status in (runner.RISK_GRAPHIFY_VERIFIED,):
         assert_true(status in encoded, f"risk status missing from serialized report: {status}")
+    assert_true("target_tool_runtime" not in encoded, "risk report should not carry runtime probe fields")
 
 
 def test_report_markdown_generation() -> None:
     manifest = {
         "graphify_file_effect_pass_count": 1,
         "graphify_file_effect_fail_count": 1,
-        "target_tool_runtime_verified_scenario_count": 1,
-        "target_tool_runtime_unavailable_scenario_count": 1,
-        "target_tool_runtime_unverified_scenario_count": 0,
         "scenario_count": 2,
         "architecture": "x86_64",
         "python_version": "3.12 synthetic",
@@ -396,26 +395,20 @@ def test_report_markdown_generation() -> None:
         },
         "source_snapshot": {"root": "/tmp/graphify-src"},
         "preflight": {"project": "/tmp/graphify-project"},
-        "risk_status_values": runner.known_runtime_status_values(),
-        "target_tool_runtime": {
-            "statuses": {
-                "codex": {"status": runner.RISK_RUNTIME_VERIFIED, "evidence_path": "tool-install/codex"},
-                "cursor": {"status": runner.RISK_TOOL_UNAVAILABLE, "evidence_path": "tool-install/cursor", "unavailable_reason": "GUI runtime"},
-            }
-        },
+        "risk_status_values": runner.known_status_values(),
+        "target_runtime_verification": {"performed": False},
         "platform_coverage": [
             {
                 "platform": "codex",
                 "scope": "project",
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--project", "--platform", "codex"],
-                "target_tool_runtime_probe": {"status": runner.RISK_RUNTIME_VERIFIED, "evidence_path": "tool-install/codex"},
             }
         ],
         "windows_validation": {
-            "status": "risk",
+            "status": "payload_consistency_only",
             "evidence_path": None,
-            "strategy": "separate Windows host/CI validation path",
+            "strategy": "payload consistency only",
             "targets": ["windows", "antigravity mapping"],
             "notes": ["Linux sandbox does not prove Windows-specific behavior."],
         },
@@ -426,9 +419,7 @@ def test_report_markdown_generation() -> None:
                 "scope": "project",
                 "passed": True,
                 "graphify_file_effects_passed": True,
-                "target_tool_runtime_status": runner.RISK_RUNTIME_VERIFIED,
-                "target_tool_runtime_verified": True,
-                "overall_status": "graphify_install_verified_and_target_runtime_verified",
+                "overall_status": runner.RISK_GRAPHIFY_VERIFIED,
                 "duration_ms": 42,
                 "command_artifact": {
                     "command": "graphify install --project --platform codex",
@@ -444,9 +435,7 @@ def test_report_markdown_generation() -> None:
                 "scope": "project",
                 "passed": False,
                 "graphify_file_effects_passed": False,
-                "target_tool_runtime_status": runner.RISK_TOOL_UNAVAILABLE,
-                "target_tool_runtime_verified": False,
-                "overall_status": "graphify_install_failed",
+                "overall_status": runner.RISK_GRAPHIFY_FAILED,
                 "duration_ms": 7,
                 "reproduction_command": "graphify cursor install",
                 "command_artifact": {
@@ -468,17 +457,15 @@ def test_report_markdown_generation() -> None:
         "# Graphify Install Sandbox Report",
         "## Environment",
         "Synthetic Linux",
-        "| Platform | Scope | Scenario | Graphify Install | Target Runtime | Overall Status | Duration | Transcript |",
+        "| Platform | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |",
         "codex-project",
-        "target_tool_runtime_verified",
-        "tool_unavailable_in_docker",
-        "tool-install/cursor",
+        "Target runtime verification: not performed by this Tier 1 file-effect sandbox.",
         "graphify cursor install",
         "boom",
         "scenarios/codex-project/transcript.txt",
         "2026-06-02T00:00:00Z",
         "## Windows Validation",
-        "separate Windows host/CI validation path",
+        "payload consistency only",
         "Linux sandbox does not prove Windows-specific behavior.",
     ):
         assert_true(expected in markdown, f"report markdown should include {expected}")
@@ -486,79 +473,100 @@ def test_report_markdown_generation() -> None:
 
 def test_default_windows_validation_status_marks_linux_as_risk() -> None:
     status = runner.default_windows_validation_status()
-    assert_true(status["status"] == "risk", "Linux sandbox should not claim Windows validation passed")
-    assert_true("windows user/project" in " ".join(status["targets"]), "Windows validation targets should be explicit")
-    assert_true("residual risk" in " ".join(status["notes"]), "risk notes should avoid implying local Windows validation exists")
+    assert_true(status["status"] == "payload_consistency_only", "Linux sandbox should not claim Windows validation passed")
+    assert_true("payload" in " ".join(status["targets"]), "Windows validation targets should be explicit")
+    assert_true("does not validate" in " ".join(status["notes"]), "notes should avoid implying local Windows validation exists")
 
 
 def test_write_report_markdown() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "report.md"
-        runner.write_report_md(path, {"results": [], "platform_coverage": [], "target_tool_runtime": {"statuses": {}}})
+        runner.write_report_md(path, {"results": [], "platform_coverage": []})
         content = path.read_text(encoding="utf-8")
     assert_true("Graphify Install Sandbox Report" in content, "write_report_md should write rendered markdown")
 
 
-def test_runtime_probe_serialization() -> None:
+def test_run_capture_timeout_serialization() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        probe = runner.TargetToolProbe(
-            tool="unit",
-            command=(sys.executable, "-c", "print('discovered')"),
-            version_command=(sys.executable, "-c", "print('unit 1.0')"),
-            credentials_required=False,
-            docker_headless_expected=True,
+        artifact = root / "artifact"
+        result = runner.run_capture(
+            (sys.executable, "-c", "import time; time.sleep(1)"),
+            cwd=root,
+            env=os.environ.copy(),
+            artifact_dir=artifact,
+            command_class="unit_timeout",
+            timeout_seconds=0,
         )
-        status = runner.run_target_tool_probe(probe, os.environ.copy(), artifact_root=root)
-        artifact = root / "tool-install" / "unit"
-        saved_status = json.loads((artifact / "status.json").read_text(encoding="utf-8"))
-        assert_true(status["status"] == runner.RISK_RUNTIME_VERIFIED, "passing probe should verify target runtime")
-        assert_true(saved_status["target_tool_runtime_verified"] is True, "status json should preserve verification boolean")
-        assert_true((artifact / "install.command.txt").exists(), "probe should write install/discovery command artifact")
-        assert_true("discovered" in (artifact / "stdout.txt").read_text(encoding="utf-8"), "probe should write command stdout")
-        assert_true("unit 1.0" in (artifact / "version.txt").read_text(encoding="utf-8"), "probe should write version transcript")
+        saved = json.loads((artifact / "command-result.json").read_text(encoding="utf-8"))
+        assert_true(result.returncode == 124, "timed out command should use exit code 124")
+        assert_true(saved["timed_out"] is True, "command-result should record timeout")
+        assert_true(saved["timeout_seconds"] == 0, "command-result should record timeout seconds")
+        assert_true(saved["command_class"] == "unit_timeout", "command-result should record command class")
 
 
-def test_unavailable_runtime_probe_serialization() -> None:
+def test_shell_safe_command_display() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        probe = runner.TargetToolProbe(
-            tool="unit-unavailable",
-            command=None,
-            version_command=None,
-            credentials_required=True,
-            docker_headless_expected=False,
-            unavailable_reason="requires a GUI runtime",
+        artifact = root / "artifact"
+        runner.run_capture(
+            (sys.executable, "-c", "print('hello world')"),
+            cwd=root,
+            env=os.environ.copy(),
+            artifact_dir=artifact,
+            command_class="unit",
         )
-        status = runner.run_target_tool_probe(probe, os.environ.copy(), artifact_root=root)
-        artifact = root / "tool-install" / "unit-unavailable"
-        saved_status = json.loads((artifact / "status.json").read_text(encoding="utf-8"))
-        assert_true(status["status"] == runner.RISK_TOOL_UNAVAILABLE, "unavailable probe should record docker unavailability")
-        assert_true(saved_status["target_tool_runtime_verified"] is False, "status json should preserve unavailable runtime boolean")
-        assert_true("not attempted" in (artifact / "install.command.txt").read_text(encoding="utf-8"), "unavailable probe should still write command evidence")
+        saved = json.loads((artifact / "command-result.json").read_text(encoding="utf-8"))
+        command_text = saved["command_display"]
+        assert_true("'hello world'" in command_text or '"hello world"' in command_text, "command display should shell-quote arguments with spaces")
+        assert_true((artifact / "command.txt").read_text(encoding="utf-8").strip() == command_text, "command.txt should use command display")
 
 
-def test_risk_report_uses_runtime_status() -> None:
+def test_install_graphify_version_probe_failure_is_precondition() -> None:
+    old_output = runner.OUTPUT
+    patched_names = ("run_capture", "read_installed_package_metadata")
+    old_values = {name: getattr(runner, name) for name in patched_names}
+    with tempfile.TemporaryDirectory() as tmp:
+        runner.OUTPUT = Path(tmp)
+        calls: list[str] = []
+
+        def fake_run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
+            calls.append(command_class)
+            if command_class == "package_install":
+                return subprocess.CompletedProcess(list(command), 0, "installed", "")
+            if command_class == "graphify_version":
+                return subprocess.CompletedProcess(list(command), 124, "", "timed out after 60 seconds")
+            raise AssertionError(f"unexpected command_class={command_class}")
+
+        runner.run_capture = fake_run_capture
+        runner.read_installed_package_metadata = lambda package_name, source: {"package_name": package_name, "version": None}
+        try:
+            try:
+                runner.install_graphify({})
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                raise AssertionError("install_graphify should fail when graphify --version fails")
+        finally:
+            runner.OUTPUT = old_output
+            for name, value in old_values.items():
+                setattr(runner, name, value)
+
+    assert_true(calls == ["package_install", "graphify_version"], "package install and version probe should run before precondition failure")
+    assert_true("version probe failed" in message, "version probe failure should have a clear precondition error")
+
+
+def test_risk_report_is_file_effect_only() -> None:
     scenario = runner.make_scenario("codex", "project")
     assert_true(scenario is not None, "codex project scenario should exist")
-    verified = runner.risk_report(scenario, True, {"status": runner.RISK_RUNTIME_VERIFIED, "evidence_path": "tool-install/codex"})
-    unavailable = runner.risk_report(scenario, True, {"status": runner.RISK_TOOL_UNAVAILABLE, "evidence_path": "tool-install/codex"})
-    assert_true(runner.RISK_RUNTIME_VERIFIED in verified["statuses"], "verified runtime should appear in scenario risk statuses")
-    assert_true(verified["target_tool_runtime_verified"] is True, "verified runtime should set boolean")
-    assert_true(runner.RISK_TOOL_UNAVAILABLE in unavailable["statuses"], "unavailable runtime should appear in scenario risk statuses")
-    assert_true(unavailable["target_tool_runtime_verified"] is False, "unavailable runtime should not set boolean")
+    report = runner.risk_report(scenario, True)
+    assert_true(report["statuses"] == [runner.RISK_GRAPHIFY_VERIFIED], "passing risk report should contain only Graphify file-effect status")
+    assert_true("target_tool_runtime_verified" not in report, "risk report should not include runtime verification fields")
 
 
 def test_combined_status_separates_graphify_and_runtime() -> None:
-    assert_true(
-        runner.combined_status(True, runner.RISK_RUNTIME_VERIFIED) == "graphify_install_verified_and_target_runtime_verified",
-        "verified runtime should produce full verification status",
-    )
-    assert_true(
-        runner.combined_status(True, runner.RISK_TOOL_UNAVAILABLE) == "graphify_install_verified_but_target_runtime_unavailable",
-        "unavailable runtime should not be presented as full success",
-    )
-    assert_true(runner.combined_status(False, runner.RISK_RUNTIME_VERIFIED) == "graphify_install_failed", "Graphify failure should dominate combined status")
+    assert_true(runner.combined_status(True) == runner.RISK_GRAPHIFY_VERIFIED, "passing file effects should produce verified status")
+    assert_true(runner.combined_status(False) == runner.RISK_GRAPHIFY_FAILED, "failing file effects should produce failed status")
 
 
 def test_docker_command_construction() -> None:
@@ -590,6 +598,7 @@ def test_docker_command_construction() -> None:
 
 
 def test_source_excludes_nested_sandbox_out() -> None:
+    assert_true(runner.should_exclude_source_path(".kilo/plans/private.md"), ".kilo personal planning files should be excluded")
     assert_true(runner.should_exclude_source_path("tools/install_sandbox/out"), "nested sandbox output root should be excluded")
     assert_true(runner.should_exclude_source_path("tools/install_sandbox/out/codex/manifest.json"), "nested sandbox output files should be excluded")
     assert_true(runner.should_exclude_source_path("graphifyy.egg-info/PKG-INFO"), "egg-info directories should be excluded")
@@ -629,7 +638,7 @@ def test_generated_files_filtering() -> None:
         runner.ROOTS.clear()
         runner.ROOTS.update(roots)
         try:
-            skill = roots["home"] / ".agents/skills/graphify/SKILL.md"
+            skill = roots["home"] / ".codex/skills/graphify/SKILL.md"
             skill.parent.mkdir(parents=True)
             skill.write_text("# graphify skill\n", encoding="utf-8")
             (skill.parent / ".graphify_version").write_text("1.2.3", encoding="utf-8")
@@ -646,7 +655,7 @@ def test_generated_files_filtering() -> None:
                 install_command=("true",),
                 uninstall_command=None,
                 cwd_root="user_cwd",
-                expected=(runner.ExpectedPath("home", ".agents/skills/graphify/SKILL.md"),),
+                expected=(runner.ExpectedPath("home", ".codex/skills/graphify/SKILL.md"),),
             )
             artifact_dir = base / "artifact"
             runner.copy_generated_files(scenario, artifact_dir)
@@ -655,8 +664,8 @@ def test_generated_files_filtering() -> None:
             runner.ROOTS.update(old_roots)
 
         generated = artifact_dir / "generated-files"
-        assert_true((generated / "home/.agents/skills/graphify/SKILL.md").exists(), "expected Graphify skill should be copied")
-        assert_true((generated / "home/.agents/skills/graphify/.graphify_version").exists(), "version stamp should be copied")
+        assert_true((generated / "home/.codex/skills/graphify/SKILL.md").exists(), "expected Graphify skill should be copied")
+        assert_true((generated / "home/.codex/skills/graphify/.graphify_version").exists(), "version stamp should be copied")
         assert_true((generated / "project/AGENTS.md").exists(), "shared marker-bearing file should be copied")
         assert_true(not (generated / "home/.local/lib/python3.12/site-packages/example.py").exists(), "site-packages should not be copied")
         assert_true(not (generated / "project/notes.md").exists(), "unrelated files should not be copied")
@@ -672,6 +681,7 @@ def test_run_scenario_skips_followups_when_initial_install_fails() -> None:
         "scenario_file_state",
         "assert_expected_files",
         "assert_scope_boundaries",
+        "assert_no_unexpected_graphify_files",
         "copy_generated_files",
     )
     old_values = {name: getattr(runner, name) for name in patched_names}
@@ -679,7 +689,7 @@ def test_run_scenario_skips_followups_when_initial_install_fails() -> None:
         runner.OUTPUT = Path(tmp)
         calls: list[tuple[str, ...]] = []
 
-        def fake_run_capture(command, *, cwd, env, artifact_dir=None):
+        def fake_run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
             command_tuple = tuple(command)
             calls.append(command_tuple)
             assert_true(len(calls) == 1, "repeat install, uninstall, and equivalence commands should be skipped after initial install failure")
@@ -696,11 +706,12 @@ def test_run_scenario_skips_followups_when_initial_install_fails() -> None:
 
         runner.reset_sandbox_dirs = lambda: None
         runner.seed_user_owned_content = lambda scenario: None
-        runner.write_file_manifest = lambda path, roots: None
+        runner.write_file_manifest = lambda path, roots, **kwargs: None
         runner.run_capture = fake_run_capture
         runner.scenario_file_state = lambda scenario: {}
         runner.assert_expected_files = lambda scenario: []
         runner.assert_scope_boundaries = lambda scenario: []
+        runner.assert_no_unexpected_graphify_files = lambda scenario, *, phase: []
         runner.copy_generated_files = lambda scenario, artifact_dir: None
         scenario = runner.Scenario(
             platform="codex",
@@ -711,7 +722,7 @@ def test_run_scenario_skips_followups_when_initial_install_fails() -> None:
             expected=(runner.ExpectedPath("project", "AGENTS.md"),),
         )
         try:
-            result = runner.run_scenario(scenario, {}, {})
+            result = runner.run_scenario(scenario, {})
             assertions = json.loads((runner.OUTPUT / "scenarios" / "codex-project" / "assertions.json").read_text(encoding="utf-8"))
         finally:
             runner.OUTPUT = old_output
@@ -724,7 +735,7 @@ def test_run_scenario_skips_followups_when_initial_install_fails() -> None:
     assert_true(assertions["uninstall_exit_code"] is None, "uninstall should be recorded as skipped")
 
 
-def test_matrix_stops_after_first_graphify_failure() -> None:
+def test_matrix_collects_graphify_failures() -> None:
     old_platform_scenarios = runner.platform_scenarios
     old_run_scenario = runner.run_scenario
     old_universal_uninstall_scenarios = runner.universal_uninstall_scenarios
@@ -743,7 +754,7 @@ def test_matrix_stops_after_first_graphify_failure() -> None:
             )
         ]
 
-    def fake_run_scenario(scenario, env, target_tool_statuses):
+    def fake_run_scenario(scenario, env):
         calls.append(scenario.platform)
         return {
             "id": runner.scenario_id(scenario.platform, scenario.scope),
@@ -764,18 +775,105 @@ def test_matrix_stops_after_first_graphify_failure() -> None:
     runner.universal_uninstall_scenarios = unexpected_universal
     runner.run_purge_scenario = unexpected_purge
     try:
-        results = runner.run_matrix_scenarios(["first", "second"], "project", {}, {})
+        results = runner.run_matrix_scenarios(["first", "second"], "project", {})
     finally:
         runner.platform_scenarios = old_platform_scenarios
         runner.run_scenario = old_run_scenario
         runner.universal_uninstall_scenarios = old_universal_uninstall_scenarios
         runner.run_purge_scenario = old_run_purge_scenario
 
-    assert_true(calls == ["first"], "matrix should stop immediately after the first Graphify scenario failure")
-    assert_true(len(results) == 1 and results[0]["passed"] is False, "matrix should return only the failing scenario result")
+    assert_true(calls == ["first", "second"], "matrix should collect scenario failures across selected platforms")
+    assert_true(len(results) == 2 and all(result["passed"] is False for result in results), "matrix should return every failing scenario result")
 
 
-def test_main_skips_runtime_probes_after_graphify_failure() -> None:
+def test_matrix_fail_fast_stops_first_graphify_failure() -> None:
+    old_platform_scenarios = runner.platform_scenarios
+    old_run_scenario = runner.run_scenario
+    calls: list[str] = []
+
+    def fake_platform_scenarios(platform_name: str, scope: str):
+        return [
+            runner.Scenario(
+                platform=platform_name,
+                scope="project",
+                install_command=("graphify", "install", "--platform", platform_name),
+                uninstall_command=None,
+                cwd_root="project",
+                expected=(runner.ExpectedPath("project", f"{platform_name}.md"),),
+            )
+        ]
+
+    def fake_run_scenario(scenario, env):
+        calls.append(scenario.platform)
+        return {"id": runner.scenario_id(scenario.platform, scenario.scope), "platform": scenario.platform, "scope": scenario.scope, "passed": False}
+
+    runner.platform_scenarios = fake_platform_scenarios
+    runner.run_scenario = fake_run_scenario
+    try:
+        results = runner.run_matrix_scenarios(["first", "second"], "project", {}, fail_fast_scenarios=True)
+    finally:
+        runner.platform_scenarios = old_platform_scenarios
+        runner.run_scenario = old_run_scenario
+
+    assert_true(calls == ["first"], "fail-fast should stop at the first platform scenario failure")
+    assert_true(len(results) == 1 and results[0]["passed"] is False, "fail-fast should return only the first failing result")
+
+
+def test_matrix_collects_universal_failures_and_runs_purge() -> None:
+    old_platform_scenarios = runner.platform_scenarios
+    old_run_scenario = runner.run_scenario
+    old_universal_uninstall_scenarios = runner.universal_uninstall_scenarios
+    old_run_universal_uninstall_scenario = runner.run_universal_uninstall_scenario
+    old_run_purge_scenario = runner.run_purge_scenario
+    calls: list[str] = []
+
+    def scenario(platform_name: str, scope: str) -> runner.Scenario:
+        return runner.Scenario(
+            platform=platform_name,
+            scope=scope,
+            install_command=("graphify", "install", "--platform", platform_name),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", f"{platform_name}-{scope}.md"),),
+        )
+
+    def fake_platform_scenarios(platform_name: str, scope: str):
+        return [scenario(platform_name, "project")]
+
+    def fake_run_scenario(item, env):
+        calls.append(f"scenario:{item.platform}")
+        return {"id": runner.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
+
+    def fake_universal_uninstall_scenarios(platforms, scope):
+        return [("user", [scenario("first", "user"), scenario("second", "user")]), ("project", [scenario("first", "project"), scenario("second", "project")])]
+
+    def fake_run_universal_uninstall_scenario(universal_scope, scenarios, env):
+        calls.append(f"universal:{universal_scope}")
+        return {"id": f"universal-uninstall-{universal_scope}", "platform": "multiple", "scope": universal_scope, "passed": False}
+
+    def fake_run_purge_scenario(env):
+        calls.append("purge")
+        return {"id": "purge-disposable-graphify-out", "platform": "purge", "scope": "project", "passed": False}
+
+    runner.platform_scenarios = fake_platform_scenarios
+    runner.run_scenario = fake_run_scenario
+    runner.universal_uninstall_scenarios = fake_universal_uninstall_scenarios
+    runner.run_universal_uninstall_scenario = fake_run_universal_uninstall_scenario
+    runner.run_purge_scenario = fake_run_purge_scenario
+    try:
+        results = runner.run_matrix_scenarios(["first", "second"], "both", {})
+    finally:
+        runner.platform_scenarios = old_platform_scenarios
+        runner.run_scenario = old_run_scenario
+        runner.universal_uninstall_scenarios = old_universal_uninstall_scenarios
+        runner.run_universal_uninstall_scenario = old_run_universal_uninstall_scenario
+        runner.run_purge_scenario = old_run_purge_scenario
+
+    assert_true(calls == ["scenario:first", "scenario:second", "universal:user", "universal:project", "purge"], "matrix should keep collecting meaningful universal and purge failures")
+    assert_true([result["id"] for result in results][-3:] == ["universal-uninstall-user", "universal-uninstall-project", "purge-disposable-graphify-out"], "universal failures and purge should all be returned")
+
+
+def test_main_records_tier1_runtime_boundary() -> None:
     old_output = runner.OUTPUT
     patched_names = (
         "sandbox_env",
@@ -785,7 +883,6 @@ def test_main_skips_runtime_probes_after_graphify_failure() -> None:
         "selected_platforms",
         "selected_scenarios",
         "run_matrix_scenarios",
-        "run_target_tool_probes",
         "platform_coverage_records",
         "read_os_release",
         "write_report_md",
@@ -794,28 +891,22 @@ def test_main_skips_runtime_probes_after_graphify_failure() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         runner.OUTPUT = Path(tmp)
 
-        def fail_if_runtime_probes_run(platforms, env):
-            raise AssertionError("target runtime probes should be skipped when Graphify install scenarios fail")
-
         runner.sandbox_env = lambda: {}
         runner.preflight = lambda: {"project": "/tmp/graphify-project"}
-        runner.copy_source_tree = lambda: {"root": "/tmp/graphify-src"}
+        runner.copy_source_tree = lambda copy_source="always": {"root": "/tmp/graphify-src", "copy_source_mode": copy_source}
         runner.install_graphify = lambda env: {"version": "test", "install_mode": "normal"}
         runner.selected_platforms = lambda args: ["codex"]
         runner.selected_scenarios = lambda args: [runner.make_scenario("codex", "project")]
-        runner.run_matrix_scenarios = lambda platforms, scope, env, statuses: [
+        runner.run_matrix_scenarios = lambda platforms, scope, env, fail_fast_scenarios=False: [
             {
                 "id": "codex-project",
                 "platform": "codex",
                 "scope": "project",
                 "passed": False,
                 "graphify_file_effects_passed": False,
-                "target_tool_runtime_status": runner.RISK_RUNTIME_UNVERIFIED,
-                "target_tool_runtime_verified": False,
             }
         ]
-        runner.run_target_tool_probes = fail_if_runtime_probes_run
-        runner.platform_coverage_records = lambda platforms, scope, statuses=None: []
+        runner.platform_coverage_records = lambda platforms, scope: []
         runner.read_os_release = lambda: {"PRETTY_NAME": "Synthetic Linux"}
         runner.write_report_md = lambda path, manifest: path.write_text("report\n", encoding="utf-8")
         try:
@@ -827,28 +918,8 @@ def test_main_skips_runtime_probes_after_graphify_failure() -> None:
                 setattr(runner, name, value)
 
     assert_true(exit_code == 1, "main should fail when Graphify install scenarios fail")
-    assert_true(manifest["target_tool_runtime"]["skipped"] is True, "manifest should record skipped target runtime probes")
-    assert_true(manifest["target_tool_runtime"]["statuses"] == {}, "skipped target runtime probes should not create statuses")
-
-
-def test_attach_target_tool_statuses_updates_results() -> None:
-    results = [
-        {
-            "id": "codex-project",
-            "platform": "codex",
-            "scope": "project",
-            "passed": True,
-            "graphify_file_effects_passed": True,
-            "overall_status": "graphify_install_verified_but_target_runtime_unverified",
-        }
-    ]
-    updated = runner.attach_target_tool_statuses(results, {"codex": {"status": runner.RISK_RUNTIME_VERIFIED}})
-    assert_true(updated[0]["target_tool_runtime_verified"] is True, "verified runtime should be attached to scenario result")
-    assert_true(updated[0]["target_tool_runtime_status"] == runner.RISK_RUNTIME_VERIFIED, "runtime status should be updated")
-    assert_true(
-        updated[0]["overall_status"] == "graphify_install_verified_and_target_runtime_verified",
-        "overall status should combine Graphify and target runtime success",
-    )
+    assert_true(manifest["target_runtime_verification"]["performed"] is False, "manifest should record runtime verification as out of scope")
+    assert_true("target_tool_runtime" not in manifest, "manifest should not include legacy target runtime probe schema")
 
 
 def run_python_compile() -> None:
@@ -899,7 +970,7 @@ def main(argv: list[str] | None = None) -> int:
         test_registry_mirrors_install_surface,
         test_every_scope_is_runnable_or_explained,
         test_platform_coverage_records_unsupported_scopes,
-        test_target_tool_registry_covers_platforms,
+        test_codebuddy_scopes_are_runnable,
         test_generic_direct_equivalence_applicability,
         test_assertion_detects_missing_file,
         test_skill_assertion_detects_missing_version_stamp,
@@ -917,18 +988,20 @@ def main(argv: list[str] | None = None) -> int:
         test_report_markdown_generation,
         test_default_windows_validation_status_marks_linux_as_risk,
         test_write_report_markdown,
-        test_runtime_probe_serialization,
-        test_unavailable_runtime_probe_serialization,
-        test_risk_report_uses_runtime_status,
+        test_run_capture_timeout_serialization,
+        test_shell_safe_command_display,
+        test_install_graphify_version_probe_failure_is_precondition,
+        test_risk_report_is_file_effect_only,
         test_combined_status_separates_graphify_and_runtime,
         test_docker_command_construction,
         test_source_excludes_nested_sandbox_out,
         test_package_provenance_parsing,
         test_generated_files_filtering,
         test_run_scenario_skips_followups_when_initial_install_fails,
-        test_matrix_stops_after_first_graphify_failure,
-        test_main_skips_runtime_probes_after_graphify_failure,
-        test_attach_target_tool_statuses_updates_results,
+        test_matrix_collects_graphify_failures,
+        test_matrix_fail_fast_stops_first_graphify_failure,
+        test_matrix_collects_universal_failures_and_runs_purge,
+        test_main_records_tier1_runtime_boundary,
     ]
     for test in tests:
         test()

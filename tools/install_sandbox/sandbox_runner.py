@@ -19,7 +19,60 @@ import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Literal, cast
+from typing import Iterable, cast
+
+try:
+    from .platform_specs import (
+        ALL_PLATFORMS,
+        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+        MIXED_SCOPE_PROJECT_WIRING_NOTE,
+        PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+        SANDBOX_PLATFORM_SPECS,
+        SIMULATED_LINUX_LAYOUT_NOTE,
+        ExpectedPath,
+        PlatformSpec,
+        Scenario,
+        ScopeSpec,
+        direct_install_command,
+        direct_uninstall_command,
+        equivalence_status,
+        equivalent_install_command,
+        generic_install_command,
+        make_scenario,
+        platform_scenarios,
+        platform_spec,
+        project_skill,
+        risk_notes,
+        sandbox_platform_specs,
+        unsupported_scope_reason,
+        user_skill,
+    )
+except ImportError:
+    from platform_specs import (
+        ALL_PLATFORMS,
+        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+        MIXED_SCOPE_PROJECT_WIRING_NOTE,
+        PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+        SANDBOX_PLATFORM_SPECS,
+        SIMULATED_LINUX_LAYOUT_NOTE,
+        ExpectedPath,
+        PlatformSpec,
+        Scenario,
+        ScopeSpec,
+        direct_install_command,
+        direct_uninstall_command,
+        equivalence_status,
+        equivalent_install_command,
+        generic_install_command,
+        make_scenario,
+        platform_scenarios,
+        platform_spec,
+        project_skill,
+        risk_notes,
+        sandbox_platform_specs,
+        unsupported_scope_reason,
+        user_skill,
+    )
 
 
 HOME = Path(os.environ.get("HOME", "/tmp/graphify-home"))
@@ -83,46 +136,32 @@ MANIFEST_PRUNE_DIRS = set(GENERATED_COPY_EXCLUDES) | {".mypy_cache", ".ruff_cach
 
 
 @dataclass(frozen=True)
-class ExpectedPath:
-    root: str
-    relative: str
-    kind: str = "file"
-    marker: str | None = None
-    remove_on_uninstall: bool = True
+class ScenarioRunContext:
+    scenario: Scenario
+    env: dict[str, str]
+    artifact_dir: Path
+    cwd: Path
+    started_at: str
+    started_monotonic: float
 
 
-@dataclass(frozen=True)
-class Scenario:
-    platform: str
-    scope: str
-    install_command: tuple[str, ...]
-    uninstall_command: tuple[str, ...] | None
-    cwd_root: str
-    expected: tuple[ExpectedPath, ...]
-    risk_notes: tuple[str, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class ScopeSpec:
-    install_command: tuple[str, ...]
-    uninstall_command: tuple[str, ...] | None
-    cwd_root: str
-    expected: tuple[ExpectedPath, ...]
-    risk_notes: tuple[str, ...] = field(default_factory=tuple)
-    equivalent_install_command: tuple[str, ...] | None = None
-
-
-@dataclass(frozen=True)
-class PlatformSpec:
-    name: str
-    user_skill: str | None = None
-    project_skill: str | None = None
-    scopes: dict[str, ScopeSpec] = field(default_factory=dict)
-    unsupported_scopes: dict[str, str] = field(default_factory=dict)
-    uses_packaged_references: bool = True
-    reference_bundles: tuple[str, ...] = ()
-    simulated_linux_layout: bool = False
-    universal_uninstall_scopes: tuple[str, ...] = ()
+@dataclass
+class StandardScenarioStages:
+    install_1: subprocess.CompletedProcess[str]
+    state_after_install: dict[str, dict[str, object]]
+    install_checks: list[dict[str, object]]
+    scope_checks: list[dict[str, object]]
+    unexpected_install_checks: list[dict[str, object]]
+    install_2: subprocess.CompletedProcess[str] | None = None
+    idempotency_checks: list[dict[str, object]] = field(default_factory=list)
+    stale_sidecar_repair_seeded: list[dict[str, object]] = field(default_factory=list)
+    stale_sidecar_repair_result: subprocess.CompletedProcess[str] | None = None
+    stale_sidecar_repair_checks: list[dict[str, object]] = field(default_factory=list)
+    uninstall_result: subprocess.CompletedProcess[str] | None = None
+    uninstall_checks: list[dict[str, object]] = field(default_factory=list)
+    unexpected_uninstall_checks: list[dict[str, object]] = field(default_factory=list)
+    equivalence_checks: list[dict[str, object]] = field(default_factory=list)
+    state_after_repeat: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
 ROOTS = {
@@ -130,471 +169,6 @@ ROOTS = {
     "project": PROJECT,
     "user_cwd": USER_CWD,
 }
-
-
-PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE = "public_cli_lacks_user_skill_uninstall"
-MIXED_SCOPE_PROJECT_WIRING_NOTE = "mixed_scope_project_wiring"
-MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE = "mixed_scope_global_skill_plus_project_wiring"
-SIMULATED_LINUX_LAYOUT_NOTE = "simulated_linux_file_layout_only"
-
-
-def _dedupe_notes(*notes: str) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(note for note in notes if note))
-
-
-def _generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
-    if scope == "project":
-        return ("graphify", "install", "--project", "--platform", platform_name)
-    return ("graphify", "install", "--platform", platform_name)
-
-
-def _generic_uninstall_command(platform_name: str, scope: str) -> tuple[str, ...]:
-    if scope == "project":
-        return ("graphify", "uninstall", "--project", "--platform", platform_name)
-    return ("graphify", "uninstall", "--platform", platform_name)
-
-
-def _direct_project_install(platform_name: str) -> tuple[str, ...]:
-    return ("graphify", platform_name, "install", "--project")
-
-
-def _skill(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(root, relative)
-
-
-def _section(root: str, relative: str, marker: str = GRAPHIFY_MARKER, *, remove_on_uninstall: bool = True) -> ExpectedPath:
-    return ExpectedPath(root, relative, marker=marker, remove_on_uninstall=remove_on_uninstall)
-
-
-def _json_marker(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(root, relative, marker="graphify")
-
-
-def _scenario(
-    platform_name: str,
-    scope: str,
-    expected: tuple[ExpectedPath, ...],
-    *,
-    install_command: tuple[str, ...] | None = None,
-    uninstall_command: tuple[str, ...] | None | Literal["generic"] = "generic",
-    cwd_root: str | None = None,
-    risk_notes: tuple[str, ...] = (),
-    equivalent_install_command: tuple[str, ...] | None = None,
-) -> ScopeSpec:
-    if uninstall_command == "generic":
-        uninstall = _generic_uninstall_command(platform_name, scope)
-    else:
-        uninstall = uninstall_command
-    return ScopeSpec(
-        install_command=install_command or _generic_install_command(platform_name, scope),
-        uninstall_command=uninstall,
-        cwd_root=cwd_root or ("project" if scope == "project" else "user_cwd"),
-        expected=expected,
-        risk_notes=risk_notes,
-        equivalent_install_command=equivalent_install_command,
-    )
-
-
-def _generic_user_scope(platform_name: str, skill_relative: str, *, extra_expected: tuple[ExpectedPath, ...] = (), notes: tuple[str, ...] = ()) -> ScopeSpec:
-    return _scenario(
-        platform_name,
-        "user",
-        (_skill("home", skill_relative), *extra_expected),
-        uninstall_command=None,
-        risk_notes=notes,
-    )
-
-
-def _agents_project_scope(platform_name: str, skill_relative: str, *, extra_expected: tuple[ExpectedPath, ...] = (), equivalent: bool = True) -> ScopeSpec:
-    return _scenario(
-        platform_name,
-        "project",
-        (_skill("project", skill_relative), _section("project", "AGENTS.md"), *extra_expected),
-        equivalent_install_command=_direct_project_install(platform_name) if equivalent else None,
-    )
-
-
-def _skill_only_project_scope(platform_name: str, skill_relative: str, *, notes: tuple[str, ...] = (), equivalent: bool = False) -> ScopeSpec:
-    return _scenario(
-        platform_name,
-        "project",
-        (_skill("project", skill_relative),),
-        risk_notes=notes,
-        equivalent_install_command=_direct_project_install(platform_name) if equivalent else None,
-    )
-
-
-# Temporary sandbox-owned source of platform file effects. The app installer
-# refactor should eventually expose an app-owned install plan that this adapter
-# can consume instead of maintaining sandbox-local tool specifics.
-SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
-    "claude": PlatformSpec(
-        name="claude",
-        user_skill=".claude/skills/graphify/SKILL.md",
-        project_skill=".claude/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope(
-                "claude",
-                ".claude/skills/graphify/SKILL.md",
-                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", remove_on_uninstall=False),),
-                notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,),
-            ),
-            "project": _scenario(
-                "claude",
-                "project",
-                (
-                    _skill("project", ".claude/skills/graphify/SKILL.md"),
-                    _section("project", ".claude/CLAUDE.md", "# graphify"),
-                    _section("project", "CLAUDE.md"),
-                    _json_marker("project", ".claude/settings.json"),
-                ),
-                equivalent_install_command=_direct_project_install("claude"),
-            ),
-        },
-        universal_uninstall_scopes=("project",),
-    ),
-    "codex": PlatformSpec(
-        name="codex",
-        user_skill=".codex/skills/graphify/SKILL.md",
-        project_skill=".codex/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("codex", ".codex/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("codex", ".codex/skills/graphify/SKILL.md", extra_expected=(_json_marker("project", ".codex/hooks.json"),)),
-        },
-        universal_uninstall_scopes=("project",),
-    ),
-    "codebuddy": PlatformSpec(
-        name="codebuddy",
-        user_skill=".codebuddy/skills/graphify/SKILL.md",
-        project_skill=".codebuddy/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario(
-                "codebuddy",
-                "user",
-                (
-                    _skill("home", ".codebuddy/skills/graphify/SKILL.md"),
-                    _section("home", ".codebuddy/CODEBUDDY.md"),
-                    _json_marker("home", ".codebuddy/settings.json"),
-                ),
-                uninstall_command=("graphify", "uninstall"),
-            ),
-            "project": _scenario(
-                "codebuddy",
-                "project",
-                (
-                    _skill("project", ".codebuddy/skills/graphify/SKILL.md"),
-                    _section("project", "CODEBUDDY.md"),
-                    _json_marker("project", ".codebuddy/settings.json"),
-                ),
-                equivalent_install_command=("graphify", "codebuddy", "install"),
-            ),
-        },
-        universal_uninstall_scopes=("user", "project"),
-    ),
-    "opencode": PlatformSpec(
-        name="opencode",
-        user_skill=".config/opencode/skills/graphify/SKILL.md",
-        project_skill=".opencode/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario(
-                "opencode",
-                "user",
-                (
-                    _skill("home", ".config/opencode/skills/graphify/SKILL.md"),
-                    ExpectedPath("user_cwd", ".opencode/plugins/graphify.js"),
-                    _json_marker("user_cwd", ".opencode/opencode.json"),
-                ),
-                uninstall_command=None,
-                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE, PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE),
-            ),
-            "project": _agents_project_scope(
-                "opencode",
-                ".opencode/skills/graphify/SKILL.md",
-                extra_expected=(ExpectedPath("project", ".opencode/plugins/graphify.js"), _json_marker("project", ".opencode/opencode.json")),
-            ),
-        },
-    ),
-    "kilo": PlatformSpec(
-        name="kilo",
-        user_skill=".config/kilo/skills/graphify/SKILL.md",
-        project_skill=".config/kilo/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario(
-                "kilo",
-                "user",
-                (_skill("home", ".config/kilo/skills/graphify/SKILL.md"), ExpectedPath("home", ".config/kilo/command/graphify.md")),
-                uninstall_command=("graphify", "kilo", "uninstall"),
-            ),
-            "project": _scenario(
-                "kilo",
-                "project",
-                (
-                    _skill("home", ".config/kilo/skills/graphify/SKILL.md"),
-                    ExpectedPath("home", ".config/kilo/command/graphify.md"),
-                    _section("project", "AGENTS.md"),
-                    ExpectedPath("project", ".kilo/plugins/graphify.js"),
-                    _json_marker("project", ".kilo/kilo.json"),
-                ),
-                install_command=("graphify", "kilo", "install"),
-                uninstall_command=("graphify", "kilo", "uninstall"),
-                risk_notes=(MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
-            ),
-        },
-    ),
-    "gemini": PlatformSpec(
-        name="gemini",
-        user_skill=".gemini/skills/graphify/SKILL.md",
-        project_skill=".gemini/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario(
-                "gemini",
-                "user",
-                (
-                    _skill("home", ".gemini/skills/graphify/SKILL.md"),
-                    _section("user_cwd", "GEMINI.md"),
-                    _json_marker("user_cwd", ".gemini/settings.json"),
-                ),
-                uninstall_command=("graphify", "gemini", "uninstall"),
-                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
-                equivalent_install_command=("graphify", "gemini", "install"),
-            ),
-            "project": _scenario(
-                "gemini",
-                "project",
-                (_skill("project", ".gemini/skills/graphify/SKILL.md"), _section("project", "GEMINI.md"), _json_marker("project", ".gemini/settings.json")),
-                equivalent_install_command=_direct_project_install("gemini"),
-            ),
-        },
-        universal_uninstall_scopes=("user", "project"),
-    ),
-    "cursor": PlatformSpec(
-        name="cursor",
-        scopes={
-            "project": _scenario(
-                "cursor",
-                "project",
-                (ExpectedPath("project", ".cursor/rules/graphify.mdc"),),
-                install_command=("graphify", "cursor", "install"),
-                uninstall_command=("graphify", "cursor", "uninstall"),
-                equivalent_install_command=_generic_install_command("cursor", "project"),
-            ),
-        },
-        unsupported_scopes={"user": "cursor install writes a project-local .cursor rule in the current working directory; sandbox covers that file effect as project scope"},
-        uses_packaged_references=False,
-        universal_uninstall_scopes=("project",),
-    ),
-    "devin": PlatformSpec(
-        name="devin",
-        user_skill=".config/devin/skills/graphify/SKILL.md",
-        project_skill=".devin/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario(
-                "devin",
-                "user",
-                (_skill("home", ".config/devin/skills/graphify/SKILL.md"),),
-                uninstall_command=("graphify", "devin", "uninstall"),
-                equivalent_install_command=("graphify", "devin", "install"),
-            ),
-            "project": _scenario(
-                "devin",
-                "project",
-                (_skill("project", ".devin/skills/graphify/SKILL.md"), ExpectedPath("project", ".windsurf/rules/graphify.md")),
-                equivalent_install_command=_direct_project_install("devin"),
-            ),
-        },
-        universal_uninstall_scopes=("project",),
-    ),
-    "aider": PlatformSpec(
-        name="aider",
-        user_skill=".aider/graphify/SKILL.md",
-        project_skill=".aider/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("aider", ".aider/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("aider", ".aider/graphify/SKILL.md"),
-        },
-    ),
-    "copilot": PlatformSpec(
-        name="copilot",
-        user_skill=".copilot/skills/graphify/SKILL.md",
-        project_skill=".copilot/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario("copilot", "user", (_skill("home", ".copilot/skills/graphify/SKILL.md"),), uninstall_command=("graphify", "copilot", "uninstall"), equivalent_install_command=("graphify", "copilot", "install")),
-            "project": _skill_only_project_scope("copilot", ".copilot/skills/graphify/SKILL.md", equivalent=True),
-        },
-    ),
-    "vscode": PlatformSpec(
-        name="vscode",
-        user_skill=".copilot/skills/graphify/SKILL.md",
-        uses_packaged_references=False,
-        reference_bundles=("vscode", "copilot"),
-        scopes={
-            "user": _scenario(
-                "vscode",
-                "user",
-                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("user_cwd", ".github/copilot-instructions.md")),
-                install_command=("graphify", "vscode", "install"),
-                uninstall_command=("graphify", "vscode", "uninstall"),
-                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
-            ),
-            "project": _scenario(
-                "vscode",
-                "project",
-                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("project", ".github/copilot-instructions.md")),
-                install_command=("graphify", "vscode", "install"),
-                uninstall_command=("graphify", "vscode", "uninstall"),
-                risk_notes=(MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
-            ),
-        },
-        universal_uninstall_scopes=("user",),
-    ),
-    "claw": PlatformSpec(
-        name="claw",
-        user_skill=".openclaw/skills/graphify/SKILL.md",
-        project_skill=".openclaw/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("claw", ".openclaw/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("claw", ".openclaw/skills/graphify/SKILL.md"),
-        },
-    ),
-    "droid": PlatformSpec(
-        name="droid",
-        user_skill=".factory/skills/graphify/SKILL.md",
-        project_skill=".factory/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("droid", ".factory/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("droid", ".factory/skills/graphify/SKILL.md"),
-        },
-    ),
-    "trae": PlatformSpec(
-        name="trae",
-        user_skill=".trae/skills/graphify/SKILL.md",
-        project_skill=".trae/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("trae", ".trae/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("trae", ".trae/skills/graphify/SKILL.md"),
-        },
-    ),
-    "trae-cn": PlatformSpec(
-        name="trae-cn",
-        user_skill=".trae-cn/skills/graphify/SKILL.md",
-        project_skill=".trae-cn/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("trae-cn", ".trae-cn/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("trae-cn", ".trae-cn/skills/graphify/SKILL.md"),
-        },
-    ),
-    "hermes": PlatformSpec(
-        name="hermes",
-        user_skill=".hermes/skills/graphify/SKILL.md",
-        project_skill=".hermes/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("hermes", ".hermes/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("hermes", ".hermes/skills/graphify/SKILL.md"),
-        },
-    ),
-    "kiro": PlatformSpec(
-        name="kiro",
-        user_skill=".kiro/skills/graphify/SKILL.md",
-        project_skill=".kiro/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("kiro", ".kiro/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _scenario(
-                "kiro",
-                "project",
-                (_skill("project", ".kiro/skills/graphify/SKILL.md"), _section("project", ".kiro/steering/graphify.md", "graphify:")),
-                install_command=("graphify", "kiro", "install"),
-                uninstall_command=("graphify", "kiro", "uninstall"),
-                equivalent_install_command=_generic_install_command("kiro", "project"),
-            ),
-        },
-    ),
-    "pi": PlatformSpec(
-        name="pi",
-        user_skill=".pi/agent/skills/graphify/SKILL.md",
-        project_skill=".pi/agent/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario("pi", "user", (_skill("home", ".pi/agent/skills/graphify/SKILL.md"),), uninstall_command=("graphify", "pi", "uninstall"), equivalent_install_command=("graphify", "pi", "install")),
-            "project": _skill_only_project_scope("pi", ".pi/agent/skills/graphify/SKILL.md", equivalent=True),
-        },
-    ),
-    "antigravity": PlatformSpec(
-        name="antigravity",
-        user_skill=".gemini/config/skills/graphify/SKILL.md",
-        project_skill=".agents/skills/graphify/SKILL.md",
-        scopes={
-            "user": _scenario(
-                "antigravity",
-                "user",
-                (_skill("home", ".gemini/config/skills/graphify/SKILL.md"), _section("user_cwd", ".agents/rules/graphify.md"), ExpectedPath("user_cwd", ".agents/workflows/graphify.md")),
-                install_command=("graphify", "antigravity", "install"),
-                uninstall_command=("graphify", "antigravity", "uninstall"),
-                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
-            ),
-            "project": _scenario(
-                "antigravity",
-                "project",
-                (_skill("project", ".agents/skills/graphify/SKILL.md"), _section("project", ".agents/rules/graphify.md"), ExpectedPath("project", ".agents/workflows/graphify.md")),
-                equivalent_install_command=_direct_project_install("antigravity"),
-            ),
-        },
-        universal_uninstall_scopes=("user",),
-    ),
-    "antigravity-windows": PlatformSpec(
-        name="antigravity-windows",
-        user_skill=".gemini/config/skills/graphify/SKILL.md",
-        project_skill=".agents/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("antigravity-windows", ".gemini/config/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, SIMULATED_LINUX_LAYOUT_NOTE)),
-            "project": _skill_only_project_scope("antigravity-windows", ".agents/skills/graphify/SKILL.md", notes=(SIMULATED_LINUX_LAYOUT_NOTE,)),
-        },
-        simulated_linux_layout=True,
-    ),
-    "windows": PlatformSpec(
-        name="windows",
-        user_skill=".claude/skills/graphify/SKILL.md",
-        project_skill=".claude/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope(
-                "windows",
-                ".claude/skills/graphify/SKILL.md",
-                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", remove_on_uninstall=False),),
-                notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, SIMULATED_LINUX_LAYOUT_NOTE),
-            ),
-            "project": _scenario(
-                "windows",
-                "project",
-                (
-                    _skill("project", ".claude/skills/graphify/SKILL.md"),
-                    _section("project", ".claude/CLAUDE.md", "# graphify"),
-                    _section("project", "CLAUDE.md"),
-                    _json_marker("project", ".claude/settings.json"),
-                ),
-                risk_notes=(SIMULATED_LINUX_LAYOUT_NOTE,),
-            ),
-        },
-        simulated_linux_layout=True,
-    ),
-    "kimi": PlatformSpec(
-        name="kimi",
-        user_skill=".kimi/skills/graphify/SKILL.md",
-        project_skill=".kimi/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("kimi", ".kimi/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _skill_only_project_scope("kimi", ".kimi/skills/graphify/SKILL.md"),
-        },
-    ),
-    "amp": PlatformSpec(
-        name="amp",
-        user_skill=".config/agents/skills/graphify/SKILL.md",
-        project_skill=".agents/skills/graphify/SKILL.md",
-        scopes={
-            "user": _generic_user_scope("amp", ".config/agents/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("amp", ".agents/skills/graphify/SKILL.md"),
-        },
-    ),
-}
-
-ALL_PLATFORMS = list(SANDBOX_PLATFORM_SPECS)
 
 
 def scenario_id(platform: str, scope: str) -> str:
@@ -674,7 +248,7 @@ def packaged_reference_names(platform_name: str) -> list[str] | None:
 
 
 def skill_assertion_record(entry: ExpectedPath, relative: Path, ok: bool, detail: str) -> dict[str, object]:
-    return {"path": str(root_path(entry.root) / relative), "root": entry.root, "relative": relative.as_posix(), "ok": ok, "detail": detail}
+    return check_record(root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
 
 
 def installed_reference_names(refs_dir: Path) -> list[str]:
@@ -687,13 +261,8 @@ def skill_reference_pointers(skill_text: str) -> list[str]:
     return sorted(set(re.findall(r"references/([A-Za-z0-9_.-]+\.md)\b", skill_text)))
 
 
-def assert_installed_skill_sidecar(scenario: Scenario, entry: ExpectedPath) -> list[dict[str, object]]:
-    if not is_skill_expected(entry):
-        return []
-
-    checks: list[dict[str, object]] = []
-    skill_path = expected_path(entry)
-    skill_dir = skill_path.parent
+def check_skill_version(entry: ExpectedPath) -> dict[str, object]:
+    skill_dir = skill_dir_for_entry(entry)
     relative_dir = skill_relative_dir(entry)
     version_path = skill_dir / ".graphify_version"
     version_relative = relative_dir / ".graphify_version"
@@ -705,21 +274,24 @@ def assert_installed_skill_sidecar(scenario: Scenario, entry: ExpectedPath) -> l
     else:
         version_ok = False
         version_detail = f"missing; expected={expected_version}"
-    checks.append(skill_assertion_record(entry, version_relative, version_ok, version_detail))
+    return skill_assertion_record(entry, version_relative, version_ok, version_detail)
 
+
+def check_references_tmp_absent(entry: ExpectedPath) -> dict[str, object]:
+    skill_dir = skill_dir_for_entry(entry)
+    relative_dir = skill_relative_dir(entry)
     refs_tmp = skill_dir / "references.tmp"
-    checks.append(
-        skill_assertion_record(
-            entry,
-            relative_dir / "references.tmp",
-            not refs_tmp.exists(),
-            "absent" if not refs_tmp.exists() else "present",
-        )
+    return skill_assertion_record(
+        entry,
+        relative_dir / "references.tmp",
+        not refs_tmp.exists(),
+        "absent" if not refs_tmp.exists() else "present",
     )
 
-    skill_text = skill_path.read_text(encoding="utf-8", errors="replace") if skill_path.is_file() else ""
-    mentions_references = "references/" in skill_text
-    pointers = skill_reference_pointers(skill_text)
+
+def check_packaged_references(scenario: Scenario, entry: ExpectedPath) -> dict[str, object]:
+    skill_dir = skill_dir_for_entry(entry)
+    relative_dir = skill_relative_dir(entry)
     refs_dir = skill_dir / "references"
     refs_relative = relative_dir / "references"
     expected_names = packaged_reference_names(scenario.platform)
@@ -739,8 +311,13 @@ def assert_installed_skill_sidecar(scenario: Scenario, entry: ExpectedPath) -> l
         extra = sorted(set(actual_names) - set(expected_names))
         refs_ok = not missing and not extra
         refs_detail = f"actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
-    checks.append(skill_assertion_record(entry, refs_relative, refs_ok, refs_detail))
+    return skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
+
+def check_skill_reference_pointers(entry: ExpectedPath, skill_text: str) -> dict[str, object]:
+    mentions_references = "references/" in skill_text
+    pointers = skill_reference_pointers(skill_text)
+    refs_dir = skill_dir_for_entry(entry) / "references"
     if mentions_references and not refs_dir.is_dir():
         pointer_ok = False
         pointer_detail = f"references_missing; skill_mentions_references=true; pointers={pointers}"
@@ -751,8 +328,21 @@ def assert_installed_skill_sidecar(scenario: Scenario, entry: ExpectedPath) -> l
     else:
         pointer_ok = True
         pointer_detail = "no_reference_pointers"
-    checks.append(skill_assertion_record(entry, Path(entry.relative), pointer_ok, pointer_detail))
-    return checks
+    return skill_assertion_record(entry, Path(entry.relative), pointer_ok, pointer_detail)
+
+
+def assert_installed_skill_sidecar(scenario: Scenario, entry: ExpectedPath) -> list[dict[str, object]]:
+    if not is_skill_expected(entry):
+        return []
+
+    skill_path = expected_path(entry)
+    skill_text = skill_path.read_text(encoding="utf-8", errors="replace") if skill_path.is_file() else ""
+    return [
+        check_skill_version(entry),
+        check_references_tmp_absent(entry),
+        check_packaged_references(scenario, entry),
+        check_skill_reference_pointers(entry, skill_text),
+    ]
 
 
 def assert_installed_skill_sidecars(scenario: Scenario) -> list[dict[str, object]]:
@@ -787,114 +377,6 @@ def seed_stale_skill_sidecars(scenario: Scenario) -> list[dict[str, object]]:
         partial.write_text("partial staged reference fragment\n", encoding="utf-8")
         seeded.append(skill_assertion_record(entry, relative_dir / "references.tmp" / partial.name, True, "seeded_staged_reference_fragment"))
     return seeded
-
-
-def risk_notes(*notes: str, platform_name: str | None = None) -> tuple[str, ...]:
-    ordered = list(notes)
-    spec = SANDBOX_PLATFORM_SPECS.get(platform_name or "")
-    if spec is not None and spec.simulated_linux_layout:
-        ordered.append(SIMULATED_LINUX_LAYOUT_NOTE)
-    return _dedupe_notes(*ordered)
-
-
-def sandbox_platform_specs() -> dict[str, PlatformSpec]:
-    return SANDBOX_PLATFORM_SPECS
-
-
-def platform_spec(platform_name: str) -> PlatformSpec:
-    try:
-        return sandbox_platform_specs()[platform_name]
-    except KeyError as exc:
-        raise RuntimeError(f"unknown sandbox platform: {platform_name}") from exc
-
-
-def user_skill(platform_name: str) -> ExpectedPath:
-    skill = platform_spec(platform_name).user_skill
-    if skill is None:
-        raise RuntimeError(f"sandbox platform has no user skill path: {platform_name}")
-    return ExpectedPath("home", skill)
-
-
-def project_skill(platform_name: str) -> ExpectedPath:
-    skill = platform_spec(platform_name).project_skill
-    if skill is None:
-        raise RuntimeError(f"sandbox platform has no project skill path: {platform_name}")
-    return ExpectedPath("project", skill)
-
-
-def unsupported_scope_reason(platform_name: str, scope: str) -> str | None:
-    return platform_spec(platform_name).unsupported_scopes.get(scope)
-
-
-def direct_uninstall_command(platform_name: str) -> tuple[str, ...] | None:
-    scope = platform_spec(platform_name).scopes.get("user")
-    return None if scope is None else scope.uninstall_command
-
-
-def generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
-    return _generic_install_command(platform_name, scope)
-
-
-def direct_install_command(platform_name: str, scope: str) -> tuple[str, ...] | None:
-    scope_spec = platform_spec(platform_name).scopes.get(scope)
-    if scope_spec is None:
-        return None
-    generic = generic_install_command(platform_name, scope)
-    alternate = scope_spec.equivalent_install_command
-    if scope_spec.install_command != generic:
-        return scope_spec.install_command
-    if alternate is not None and alternate != generic:
-        return alternate
-    return None
-
-
-def equivalent_install_command(scenario: Scenario) -> tuple[str, ...] | None:
-    scope_spec = platform_spec(scenario.platform).scopes.get(scenario.scope)
-    if scope_spec is None or scope_spec.equivalent_install_command is None:
-        return None
-    if scenario.install_command == scope_spec.install_command:
-        return scope_spec.equivalent_install_command
-    if scenario.install_command == scope_spec.equivalent_install_command:
-        return scope_spec.install_command
-    return None
-
-
-def equivalence_status(scenario: Scenario) -> dict[str, object]:
-    equivalent = equivalent_install_command(scenario)
-    if equivalent is not None:
-        return {"status": "runnable", "command": list(equivalent)}
-    return {
-        "status": "not_applicable",
-        "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
-    }
-
-
-def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
-    scopes = ["user", "project"] if scope == "both" else [scope]
-    scenarios: list[Scenario] = []
-    for one_scope in scopes:
-        scenario = make_scenario(platform_name, one_scope)
-        if scenario is not None:
-            scenarios.append(scenario)
-    return scenarios
-
-
-def make_scenario(platform_name: str, scope: str) -> Scenario | None:
-    spec = platform_spec(platform_name)
-    if scope in spec.unsupported_scopes:
-        return None
-    scope_spec = spec.scopes.get(scope)
-    if scope_spec is None:
-        return None
-    return Scenario(
-        platform=spec.name,
-        scope=scope,
-        install_command=scope_spec.install_command,
-        uninstall_command=scope_spec.uninstall_command,
-        cwd_root=scope_spec.cwd_root,
-        expected=scope_spec.expected,
-        risk_notes=scope_spec.risk_notes,
-    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -936,6 +418,70 @@ def timeout_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def command_display(command: Iterable[str]) -> tuple[list[str], str]:
+    command_list = list(command)
+    return command_list, shlex.join(command_list)
+
+
+def write_command_start_artifacts(artifact_dir: Path, command_text: str, env: dict[str, str]) -> None:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "command.txt").write_text(command_text + "\n", encoding="utf-8")
+    (artifact_dir / "env.json").write_text(json.dumps({k: env.get(k, "") for k in sorted(("HOME", "XDG_CONFIG_HOME", "PATH", "GRAPHIFY_PROJECT"))}, indent=2) + "\n", encoding="utf-8")
+
+
+def execute_command(command_list: list[str], *, cwd: Path, env: dict[str, str], timeout: int) -> tuple[subprocess.CompletedProcess[str], bool]:
+    try:
+        return subprocess.run(command_list, cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout), False
+    except FileNotFoundError as exc:
+        return subprocess.CompletedProcess(command_list, 127, "", str(exc)), False
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(command_list, 124, timeout_text(exc.stdout), timeout_text(exc.stderr) or f"timed out after {timeout} seconds"), True
+
+
+def command_result_metadata(
+    *,
+    command_list: list[str],
+    command_text: str,
+    command_class: str,
+    cwd: Path,
+    started_at: str,
+    duration_ms: int,
+    exit_code: int,
+    timeout: int,
+    timed_out: bool,
+) -> dict[str, object]:
+    return {
+        "command": command_list,
+        "command_display": command_text,
+        "command_class": command_class,
+        "cwd": str(cwd),
+        "started_at": started_at,
+        "duration_ms": duration_ms,
+        "exit_code": exit_code,
+        "timeout_seconds": timeout,
+        "timed_out": timed_out,
+    }
+
+
+def write_command_result_artifacts(artifact_dir: Path, result: subprocess.CompletedProcess[str], metadata: dict[str, object]) -> None:
+    (artifact_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")
+    (artifact_dir / "stderr.txt").write_text(result.stderr, encoding="utf-8")
+    (artifact_dir / "exit-code.txt").write_text(f"{result.returncode}\n", encoding="utf-8")
+    (artifact_dir / "command-result.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (artifact_dir / "transcript.txt").write_text(
+        f"$ {metadata['command_display']}\n[command-class]\n{metadata['command_class']}\n[timeout-seconds]\n{metadata['timeout_seconds']}\n[started-at]\n{metadata['started_at']}\n[duration-ms]\n{metadata['duration_ms']}\n[timed-out]\n{str(metadata['timed_out']).lower()}\n\n[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}\n[exit-code]\n{result.returncode}\n",
+        encoding="utf-8",
+    )
+
+
+def attach_command_metadata(result: subprocess.CompletedProcess[str], metadata: dict[str, object]) -> None:
+    result.started_at = metadata["started_at"]  # type: ignore[attr-defined]
+    result.duration_ms = metadata["duration_ms"]  # type: ignore[attr-defined]
+    result.timed_out = metadata["timed_out"]  # type: ignore[attr-defined]
+    result.timeout_seconds = metadata["timeout_seconds"]  # type: ignore[attr-defined]
+    result.command_class = metadata["command_class"]  # type: ignore[attr-defined]
+
+
 def run_capture(
     command: Iterable[str],
     *,
@@ -945,56 +491,28 @@ def run_capture(
     command_class: str = "installer",
     timeout_seconds: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    command_list = list(command)
-    command_text = shlex.join(command_list)
+    command_list, command_text = command_display(command)
     timeout = timeout_for(command_class, timeout_seconds)
     started_at = utc_timestamp()
     start = time.monotonic()
     if artifact_dir is not None:
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        (artifact_dir / "command.txt").write_text(command_text + "\n", encoding="utf-8")
-        (artifact_dir / "env.json").write_text(json.dumps({k: env.get(k, "") for k in sorted(("HOME", "XDG_CONFIG_HOME", "PATH", "GRAPHIFY_PROJECT"))}, indent=2) + "\n", encoding="utf-8")
-    timed_out = False
-    try:
-        result = subprocess.run(command_list, cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout)
-    except FileNotFoundError as exc:
-        result = subprocess.CompletedProcess(command_list, 127, "", str(exc))
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        result = subprocess.CompletedProcess(command_list, 124, timeout_text(exc.stdout), timeout_text(exc.stderr) or f"timed out after {timeout} seconds")
+        write_command_start_artifacts(artifact_dir, command_text, env)
+    result, timed_out = execute_command(command_list, cwd=cwd, env=env, timeout=timeout)
     duration_ms = int((time.monotonic() - start) * 1000)
+    metadata = command_result_metadata(
+        command_list=command_list,
+        command_text=command_text,
+        command_class=command_class,
+        cwd=cwd,
+        started_at=started_at,
+        duration_ms=duration_ms,
+        exit_code=result.returncode,
+        timeout=timeout,
+        timed_out=timed_out,
+    )
     if artifact_dir is not None:
-        (artifact_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")
-        (artifact_dir / "stderr.txt").write_text(result.stderr, encoding="utf-8")
-        (artifact_dir / "exit-code.txt").write_text(f"{result.returncode}\n", encoding="utf-8")
-        (artifact_dir / "command-result.json").write_text(
-            json.dumps(
-                {
-                    "command": command_list,
-                    "command_display": command_text,
-                    "command_class": command_class,
-                    "cwd": str(cwd),
-                    "started_at": started_at,
-                    "duration_ms": duration_ms,
-                    "exit_code": result.returncode,
-                    "timeout_seconds": timeout,
-                    "timed_out": timed_out,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        (artifact_dir / "transcript.txt").write_text(
-            f"$ {command_text}\n[command-class]\n{command_class}\n[timeout-seconds]\n{timeout}\n[started-at]\n{started_at}\n[duration-ms]\n{duration_ms}\n[timed-out]\n{str(timed_out).lower()}\n\n[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}\n[exit-code]\n{result.returncode}\n",
-            encoding="utf-8",
-        )
-    result.started_at = started_at  # type: ignore[attr-defined]
-    result.duration_ms = duration_ms  # type: ignore[attr-defined]
-    result.timed_out = timed_out  # type: ignore[attr-defined]
-    result.timeout_seconds = timeout  # type: ignore[attr-defined]
-    result.command_class = command_class  # type: ignore[attr-defined]
+        write_command_result_artifacts(artifact_dir, result, metadata)
+    attach_command_metadata(result, metadata)
     return result
 
 
@@ -1385,6 +903,22 @@ def md_code(value: object) -> str:
     return "`" + text.replace("`", "'") + "`"
 
 
+def md_row(cells: Iterable[object]) -> str:
+    return "| " + " | ".join(md_cell(cell) for cell in cells) + " |"
+
+
+def md_separator(column_count: int, *, right_align: Iterable[int] = ()) -> str:
+    aligned = set(right_align)
+    return "|" + "|".join("---:" if index in aligned else "---" for index in range(column_count)) + "|"
+
+
+def md_table(headers: Iterable[str], rows: Iterable[Iterable[object]], *, right_align: Iterable[int] = ()) -> list[str]:
+    header_list = list(headers)
+    lines = [md_row(header_list), md_separator(len(header_list), right_align=right_align)]
+    lines.extend(md_row(row) for row in rows)
+    return lines
+
+
 def object_dict(value: object) -> dict[str, object]:
     return cast(dict[str, object], value) if isinstance(value, dict) else {}
 
@@ -1395,6 +929,16 @@ def object_list(value: object) -> list[object]:
 
 def object_dicts(value: object) -> list[dict[str, object]]:
     return [object_dict(item) for item in object_list(value) if isinstance(item, dict)]
+
+
+def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = None, relative: str | Path | None = None, **extra: object) -> dict[str, object]:
+    record: dict[str, object] = {"path": str(path), "ok": ok, "detail": detail}
+    if root is not None:
+        record["root"] = root
+    if relative is not None:
+        record["relative"] = relative.as_posix() if isinstance(relative, Path) else relative
+    record.update(extra)
+    return record
 
 
 def render_report_md(manifest: dict[str, object]) -> str:
@@ -1418,18 +962,21 @@ def render_report_md(manifest: dict[str, object]) -> str:
             "",
             "## Environment",
             "",
-            "| Field | Value |",
-            "|---|---|",
-            f"| OS | {md_cell(os_release.get('PRETTY_NAME') or os_release.get('NAME'))} |",
-            f"| Architecture | {md_cell(manifest.get('architecture'))} |",
-            f"| Python | {md_cell(manifest.get('python_version'))} |",
-            f"| Graphify version | {md_cell(manifest.get('graphify_version'))} |",
-            f"| Install mode | {md_cell(package.get('install_mode'))} |",
-            f"| Package name | {md_cell(package.get('package_name'))} |",
-            f"| Install location | {md_cell(package.get('location'))} |",
-            f"| Installed from copied source | {md_cell(package.get('installed_from_copied_source'))} |",
-            f"| Source root | {md_cell(source_snapshot.get('root'))} |",
-            f"| Sandbox project | {md_cell(preflight_data.get('project'))} |",
+            *md_table(
+                ["Field", "Value"],
+                [
+                    ("OS", os_release.get("PRETTY_NAME") or os_release.get("NAME")),
+                    ("Architecture", manifest.get("architecture")),
+                    ("Python", manifest.get("python_version")),
+                    ("Graphify version", manifest.get("graphify_version")),
+                    ("Install mode", package.get("install_mode")),
+                    ("Package name", package.get("package_name")),
+                    ("Install location", package.get("location")),
+                    ("Installed from copied source", package.get("installed_from_copied_source")),
+                    ("Source root", source_snapshot.get("root")),
+                    ("Sandbox project", preflight_data.get("project")),
+                ],
+            ),
             "",
             "## Status Vocabulary",
             "",
@@ -1437,44 +984,33 @@ def render_report_md(manifest: dict[str, object]) -> str:
     )
     for status in risk_status_values:
         lines.append(f"- {md_code(status)}")
-    lines.extend(["", "## Scenario Status", "", "| Platform | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |", "|---|---|---|---|---|---:|---|"])
+    lines.extend(["", "## Scenario Status", ""])
+    scenario_rows = []
     for item in results:
         graphify_status = RISK_GRAPHIFY_VERIFIED if item.get("graphify_file_effects_passed", item.get("passed")) else "graphify_install_failed"
         command_artifact = object_dict(item.get("command_artifact"))
         duration = item.get("duration_ms") or command_artifact.get("duration_ms")
         transcript = command_artifact.get("transcript_path") or item.get("transcript_path") or ""
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    md_cell(item.get("platform")),
-                    md_cell(item.get("scope")),
-                    md_cell(item.get("id")),
-                    md_cell(graphify_status),
-                    md_cell(status_label(item)),
-                    md_cell(f"{duration} ms" if duration is not None else ""),
-                    md_cell(transcript),
-                ]
+        scenario_rows.append(
+            (
+                item.get("platform"),
+                item.get("scope"),
+                item.get("id"),
+                graphify_status,
+                status_label(item),
+                f"{duration} ms" if duration is not None else "",
+                transcript,
             )
-            + " |"
         )
+    lines.extend(md_table(["Platform", "Scope", "Scenario", "Graphify File Effects", "Overall Status", "Duration", "Transcript"], scenario_rows, right_align={5}))
 
-    lines.extend(["", "## Platform Coverage", "", "| Platform | Scope | Coverage | Graphify Installer Command |", "|---|---|---|---|"])
+    lines.extend(["", "## Platform Coverage", ""])
+    coverage_rows = []
     for record in coverage:
         command = record.get("install_command")
         command_text = shlex.join([str(part) for part in command]) if isinstance(command, list) else record.get("reason", "")
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    md_cell(record.get("platform")),
-                    md_cell(record.get("scope")),
-                    md_cell(record.get("status")),
-                    md_cell(command_text),
-                ]
-            )
-            + " |"
-        )
+        coverage_rows.append((record.get("platform"), record.get("scope"), record.get("status"), command_text))
+    lines.extend(md_table(["Platform", "Scope", "Coverage", "Graphify Installer Command"], coverage_rows))
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 
@@ -1513,25 +1049,23 @@ def render_report_md(manifest: dict[str, object]) -> str:
     else:
         lines.append("- None.")
 
-    lines.extend(["", "## Command Transcripts", "", "| Scenario | Command | Started | Duration | Exit | Transcript |", "|---|---|---|---:|---:|---|"])
+    lines.extend(["", "## Command Transcripts", ""])
+    transcript_rows = []
     for item in results:
         command_artifact = object_dict(item.get("command_artifact"))
         if not command_artifact:
             continue
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    md_cell(item.get("id")),
-                    md_cell(command_artifact.get("command")),
-                    md_cell(command_artifact.get("started_at")),
-                    md_cell(command_artifact.get("duration_ms")),
-                    md_cell(command_artifact.get("exit_code")),
-                    md_cell(command_artifact.get("transcript_path")),
-                ]
+        transcript_rows.append(
+            (
+                item.get("id"),
+                command_artifact.get("command"),
+                command_artifact.get("started_at"),
+                command_artifact.get("duration_ms"),
+                command_artifact.get("exit_code"),
+                command_artifact.get("transcript_path"),
             )
-            + " |"
         )
+    lines.extend(md_table(["Scenario", "Command", "Started", "Duration", "Exit", "Transcript"], transcript_rows, right_align={3, 4}))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -1740,32 +1274,79 @@ def json_marker_status(path: Path, entry: ExpectedPath) -> tuple[bool, str]:
     return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"
 
 
+def text_marker_status(path: Path, entry: ExpectedPath) -> tuple[bool, str]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    marker_count = text.count(entry.marker or "")
+    ok = marker_count == 1
+    detail = f"marker_count={marker_count}"
+    if USER_SENTINEL in text:
+        detail += "; user_content_preserved"
+    elif should_seed_user_content(entry):
+        ok = False
+        detail += "; user_content_missing"
+    if should_seed_stale_graphify_section(entry):
+        stale_replaced = STALE_GRAPHIFY_SENTINEL not in text
+        ok = ok and stale_replaced
+        detail += f"; stale_replaced={stale_replaced}"
+    return ok, detail
+
+
+def expected_entry_status(entry: ExpectedPath) -> tuple[bool, str]:
+    path = expected_path(entry)
+    ok, detail = expected_kind_status(path, entry.kind)
+    if not ok or not entry.marker:
+        return ok, detail
+    if path.suffix == ".json":
+        return json_marker_status(path, entry)
+    return text_marker_status(path, entry)
+
+
 def assert_expected_files(scenario: Scenario) -> list[dict[str, object]]:
     checks: list[dict[str, object]] = []
     for entry in scenario.expected:
         path = expected_path(entry)
-        ok, detail = expected_kind_status(path, entry.kind)
-        if ok and entry.marker:
-            if path.suffix == ".json":
-                marker_ok, marker_detail = json_marker_status(path, entry)
-                ok = marker_ok
-                detail = marker_detail
-            else:
-                text = path.read_text(encoding="utf-8", errors="replace")
-                marker_count = text.count(entry.marker)
-                ok = marker_count == 1
-                detail = f"marker_count={marker_count}"
-                if USER_SENTINEL in text:
-                    detail += "; user_content_preserved"
-                elif should_seed_user_content(entry):
-                    ok = False
-                    detail += "; user_content_missing"
-                if should_seed_stale_graphify_section(entry):
-                    stale_replaced = STALE_GRAPHIFY_SENTINEL not in text
-                    ok = ok and stale_replaced
-                    detail += f"; stale_replaced={stale_replaced}"
-        checks.append({"path": str(path), "root": entry.root, "relative": entry.relative, "ok": ok, "detail": detail})
+        ok, detail = expected_entry_status(entry)
+        checks.append(check_record(path, ok, detail, root=entry.root, relative=entry.relative))
         checks.extend(assert_installed_skill_sidecar(scenario, entry))
+    return checks
+
+
+def uninstalled_entry_status(entry: ExpectedPath) -> tuple[bool, str]:
+    path = expected_path(entry)
+    if entry.marker and should_seed_user_content(entry):
+        if path.exists() and path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            graphify_removed = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
+            user_preserved = USER_SENTINEL in text
+            return graphify_removed and user_preserved, f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}"
+        return False, "user_content_file_missing"
+    if entry.marker and path.exists():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        ok = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
+        detail = "graphify_removed; user_content_preserved" if USER_SENTINEL in text else "graphify_removed"
+        return ok, detail
+    ok = not path.exists()
+    return ok, "removed" if ok else "still_exists"
+
+
+def uninstalled_skill_sidecar_checks(entry: ExpectedPath) -> list[dict[str, object]]:
+    if not is_skill_expected(entry):
+        return []
+    skill_dir = skill_dir_for_entry(entry)
+    relative_dir = skill_relative_dir(entry)
+    checks: list[dict[str, object]] = []
+    for sidecar in (".graphify_version", "references", "references.tmp"):
+        sidecar_path = skill_dir / sidecar
+        sidecar_ok = not sidecar_path.exists()
+        checks.append(
+            check_record(
+                sidecar_path,
+                sidecar_ok,
+                "removed" if sidecar_ok else "sidecar_still_exists",
+                root=entry.root,
+                relative=relative_dir / sidecar,
+            )
+        )
     return checks
 
 
@@ -1775,42 +1356,9 @@ def assert_uninstalled(scenario: Scenario) -> list[dict[str, object]]:
         path = expected_path(entry)
         if not entry.remove_on_uninstall:
             continue
-        if entry.marker and should_seed_user_content(entry):
-            if path.exists() and path.is_file():
-                text = path.read_text(encoding="utf-8", errors="replace")
-                graphify_removed = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
-                user_preserved = USER_SENTINEL in text
-                ok = graphify_removed and user_preserved
-                detail = f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}"
-            else:
-                ok = False
-                detail = "user_content_file_missing"
-        elif entry.marker and path.exists():
-            text = path.read_text(encoding="utf-8", errors="replace")
-            ok = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
-            if USER_SENTINEL in text:
-                detail = "graphify_removed; user_content_preserved"
-            else:
-                detail = "graphify_removed"
-        else:
-            ok = not path.exists()
-            detail = "removed" if ok else "still_exists"
-        checks.append({"path": str(path), "root": entry.root, "relative": entry.relative, "ok": ok, "detail": detail})
-        if is_skill_expected(entry):
-            skill_dir = skill_dir_for_entry(entry)
-            relative_dir = skill_relative_dir(entry)
-            for sidecar in (".graphify_version", "references", "references.tmp"):
-                sidecar_path = skill_dir / sidecar
-                sidecar_ok = not sidecar_path.exists()
-                checks.append(
-                    {
-                        "path": str(sidecar_path),
-                        "root": entry.root,
-                        "relative": (relative_dir / sidecar).as_posix(),
-                        "ok": sidecar_ok,
-                        "detail": "removed" if sidecar_ok else "sidecar_still_exists",
-                    }
-                )
+        ok, detail = uninstalled_entry_status(entry)
+        checks.append(check_record(path, ok, detail, root=entry.root, relative=entry.relative))
+        checks.extend(uninstalled_skill_sidecar_checks(entry))
     return checks
 
 
@@ -1849,16 +1397,16 @@ def assert_no_unexpected_graphify_files(
             if not is_relevant_generated_file(scenario, root_name, relative, path):
                 continue
             checks.append(
-                {
-                    "path": str(path),
-                    "root": root_name,
-                    "relative": rel,
-                    "ok": False,
-                    "detail": f"unexpected_graphify_related_file_after_{phase}",
-                }
+                check_record(
+                    path,
+                    False,
+                    f"unexpected_graphify_related_file_after_{phase}",
+                    root=root_name,
+                    relative=rel,
+                )
             )
     if not checks:
-        checks.append({"path": "unexpected-graphify-files", "ok": True, "detail": f"none_after_{phase}"})
+        checks.append(check_record("unexpected-graphify-files", True, f"none_after_{phase}"))
     return checks
 
 
@@ -1870,7 +1418,7 @@ def assert_scope_boundaries(scenario: Scenario) -> list[dict[str, object]]:
             allowed = "mixed_scope_project_wiring" in scenario.risk_notes
         if scenario.scope == "project" and entry.root not in ("project",):
             allowed = "mixed_scope_global_skill_plus_project_wiring" in scenario.risk_notes
-        checks.append({"path": str(expected_path(entry)), "ok": allowed, "detail": "allowed_root" if allowed else "unexpected_root"})
+        checks.append(check_record(expected_path(entry), allowed, "allowed_root" if allowed else "unexpected_root"))
     return checks
 
 
@@ -1918,7 +1466,7 @@ def assert_idempotent_state(before: dict[str, dict[str, object]], after: dict[st
     checks: list[dict[str, object]] = []
     for key in sorted(set(before) | set(after)):
         stable = before.get(key) == after.get(key)
-        checks.append({"path": key, "ok": stable, "detail": "unchanged_after_repeat_install" if stable else "changed_after_repeat_install"})
+        checks.append(check_record(key, stable, "unchanged_after_repeat_install" if stable else "changed_after_repeat_install"))
     return checks
 
 
@@ -1926,34 +1474,35 @@ def should_exclude_generated_path(relative: Path) -> bool:
     return any(part in GENERATED_COPY_EXCLUDES for part in relative.parts)
 
 
-def is_relevant_generated_file(scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
-    rel = relative.as_posix()
+def is_expected_generated_key(scenario: Scenario, root_name: str, relative: Path) -> bool:
     expected = {(entry.root, entry.relative) for entry in scenario.expected}
-    if (root_name, rel) in expected:
-        return True
+    return (root_name, relative.as_posix()) in expected
+
+
+def is_skill_sidecar_relative(scenario: Scenario, root_name: str, relative: Path) -> bool:
     for entry in scenario.expected:
         if root_name != entry.root or not is_skill_expected(entry):
             continue
         skill_rel_dir = skill_relative_dir(entry)
         if relative == skill_rel_dir / ".graphify_version":
             return True
-        try:
-            relative.relative_to(skill_rel_dir / "references")
-            return True
-        except ValueError:
-            pass
-        try:
-            relative.relative_to(skill_rel_dir / "references.tmp")
-            return True
-        except ValueError:
-            pass
-    if relative.name == ".graphify_version" and any(
+        for sidecar_dir in ("references", "references.tmp"):
+            try:
+                relative.relative_to(skill_rel_dir / sidecar_dir)
+                return True
+            except ValueError:
+                pass
+    return False
+
+
+def is_adjacent_graphify_version(scenario: Scenario, root_name: str, relative: Path) -> bool:
+    return relative.name == ".graphify_version" and any(
         root_name == entry.root and relative.parent.as_posix() == Path(entry.relative).parent.as_posix()
         for entry in scenario.expected
-    ):
-        return True
-    if "graphify" in rel.lower():
-        return True
+    )
+
+
+def is_small_text_candidate(path: Path) -> bool:
     try:
         size = path.stat().st_size
     except OSError:
@@ -1961,13 +1510,30 @@ def is_relevant_generated_file(scenario: Scenario, root_name: str, relative: Pat
     if size > 1024 * 1024:
         return False
     text_suffixes = {".json", ".js", ".md", ".mdc", ".txt", ""}
-    if path.suffix not in text_suffixes:
-        return False
+    return path.suffix in text_suffixes
+
+
+def file_mentions_graphify_or_sentinel(path: Path) -> bool:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
     return "graphify" in text.lower() or USER_SENTINEL in text
+
+
+def is_relevant_generated_file(scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
+    rel = relative.as_posix()
+    if is_expected_generated_key(scenario, root_name, relative):
+        return True
+    if is_skill_sidecar_relative(scenario, root_name, relative):
+        return True
+    if is_adjacent_graphify_version(scenario, root_name, relative):
+        return True
+    if "graphify" in rel.lower():
+        return True
+    if not is_small_text_candidate(path):
+        return False
+    return file_mentions_graphify_or_sentinel(path)
 
 
 def copy_generated_files(scenario: Scenario, artifact_dir: Path) -> None:
@@ -2054,92 +1620,56 @@ def risk_report(scenario: Scenario, passed: bool) -> dict[str, object]:
     }
 
 
-def run_scenario(scenario: Scenario, env: dict[str, str]) -> dict[str, object]:
-    scenario_started_at = utc_timestamp()
-    scenario_start = time.monotonic()
+def scenario_artifact_dir(scenario_name: str) -> Path:
+    return OUTPUT / "scenarios" / scenario_name
+
+
+def prepare_scenario_run(scenario: Scenario, env: dict[str, str], *, scenario_name: str | None = None) -> ScenarioRunContext:
+    started_at = utc_timestamp()
+    started_monotonic = time.monotonic()
     reset_sandbox_dirs()
-    artifact_dir = OUTPUT / "scenarios" / scenario_id(scenario.platform, scenario.scope)
+    artifact_dir = scenario_artifact_dir(scenario_name or scenario_id(scenario.platform, scenario.scope))
     if artifact_dir.exists():
         shutil.rmtree(artifact_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    seed_user_owned_content(scenario)
-    write_file_manifest(artifact_dir / "before-install-files.json", ROOTS, scenario=scenario)
-
-    cwd = root_path(scenario.cwd_root)
-    install_1 = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class="installer")
-    state_after_install = scenario_file_state(scenario)
-    install_checks = assert_expected_files(scenario)
-    scope_checks = assert_scope_boundaries(scenario)
-    unexpected_install_checks = assert_no_unexpected_graphify_files(scenario, phase="install")
-    write_file_manifest(artifact_dir / "after-install-files.json", ROOTS, scenario=scenario)
-    copy_generated_files(scenario, artifact_dir)
-    idempotency_checks: list[dict[str, object]] = []
-    uninstall_checks: list[dict[str, object]] = []
-    unexpected_uninstall_checks: list[dict[str, object]] = []
-    equivalence_checks: list[dict[str, object]] = []
-    stale_sidecar_repair_seeded: list[dict[str, object]] = []
-    stale_sidecar_repair_checks: list[dict[str, object]] = []
-    install_2 = None
-    stale_sidecar_repair_result = None
-    uninstall_result = None
-    state_after_repeat: dict[str, dict[str, object]] = {}
-
-    if install_1.returncode == 0:
-        install_2 = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "repeat-install", command_class="installer")
-        state_after_repeat = scenario_file_state(scenario)
-        idempotency_checks = assert_idempotent_state(state_after_install, state_after_repeat)
-        idempotency_checks.extend(assert_no_unexpected_graphify_files(scenario, phase="repeat_install"))
-        write_file_manifest(artifact_dir / "after-repeat-install-files.json", ROOTS, scenario=scenario)
-        if install_2.returncode == 0:
-            stale_sidecar_repair_seeded = seed_stale_skill_sidecars(scenario)
-            if stale_sidecar_repair_seeded:
-                stale_sidecar_repair_result = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "stale-sidecar-repair", command_class="installer")
-                if stale_sidecar_repair_result.returncode == 0:
-                    stale_sidecar_repair_checks = assert_installed_skill_sidecars(scenario)
-                    stale_sidecar_repair_checks.extend(assert_no_unexpected_graphify_files(scenario, phase="stale_sidecar_repair"))
-                write_file_manifest(artifact_dir / "after-stale-sidecar-repair-files.json", ROOTS, scenario=scenario)
-        if scenario.uninstall_command:
-            uninstall_result = run_capture(scenario.uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall", command_class="installer")
-            uninstall_checks = assert_uninstalled(scenario)
-            unexpected_uninstall_checks = assert_no_unexpected_graphify_files(scenario, phase="uninstall")
-            write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS, scenario=scenario)
-        equivalence_checks = run_equivalence_check(scenario, env, artifact_dir)
-
-    command_ok = (
-        install_1.returncode == 0
-        and install_2 is not None
-        and install_2.returncode == 0
-        and (stale_sidecar_repair_result is None or stale_sidecar_repair_result.returncode == 0)
-        and (uninstall_result is None or uninstall_result.returncode == 0)
+    return ScenarioRunContext(
+        scenario=scenario,
+        env=env,
+        artifact_dir=artifact_dir,
+        cwd=root_path(scenario.cwd_root),
+        started_at=started_at,
+        started_monotonic=started_monotonic,
     )
-    checks = install_checks + scope_checks + unexpected_install_checks + idempotency_checks + stale_sidecar_repair_checks + uninstall_checks + unexpected_uninstall_checks + equivalence_checks
-    passed = command_ok and all(check["ok"] for check in checks)
-    assertions = {
-        "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": scenario_id(scenario.platform, scenario.scope)},
-        "passed": passed,
-        "install_exit_code": install_1.returncode,
-        "repeat_install_exit_code": None if install_2 is None else install_2.returncode,
-        "stale_sidecar_repair_exit_code": None if stale_sidecar_repair_result is None else stale_sidecar_repair_result.returncode,
-        "stale_sidecar_repair_seeded": stale_sidecar_repair_seeded,
-        "stale_sidecar_repair_checks": stale_sidecar_repair_checks,
-        "uninstall_exit_code": None if uninstall_result is None else uninstall_result.returncode,
-        "state_after_install": state_after_install,
-        "state_after_repeat_install": state_after_repeat,
-        "generic_direct_equivalence": equivalence_status(scenario),
-        "checks": checks,
-    }
-    risks = risk_report(scenario, passed)
+
+
+def scenario_duration_ms(context: ScenarioRunContext) -> int:
+    return int((time.monotonic() - context.started_monotonic) * 1000)
+
+
+def write_scenario_artifacts(artifact_dir: Path, assertions: dict[str, object], risks: dict[str, object]) -> None:
     (artifact_dir / "assertions.json").write_text(json.dumps(assertions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (artifact_dir / "risk.json").write_text(json.dumps(risks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    duration_ms = int((time.monotonic() - scenario_start) * 1000)
+
+
+def scenario_result_record(
+    context: ScenarioRunContext,
+    *,
+    scenario_name: str,
+    platform_name: str,
+    scope: str,
+    passed: bool,
+    risks: dict[str, object],
+    reproduction_command: tuple[str, ...],
+    command_artifact_dir: Path,
+) -> dict[str, object]:
     return {
-        "id": scenario_id(scenario.platform, scenario.scope),
-        "platform": scenario.platform,
-        "scope": scenario.scope,
-        "started_at": scenario_started_at,
-        "duration_ms": duration_ms,
-        "reproduction_command": shlex.join(scenario.install_command),
-        "command_artifact": command_artifact_summary(artifact_dir),
+        "id": scenario_name,
+        "platform": platform_name,
+        "scope": scope,
+        "started_at": context.started_at,
+        "duration_ms": scenario_duration_ms(context),
+        "reproduction_command": shlex.join(reproduction_command),
+        "command_artifact": command_artifact_summary(command_artifact_dir),
         "overall_status": combined_status(passed),
         "graphify_file_effects_passed": passed,
         "passed": passed,
@@ -2147,15 +1677,141 @@ def run_scenario(scenario: Scenario, env: dict[str, str]) -> dict[str, object]:
     }
 
 
+def run_initial_install(context: ScenarioRunContext) -> StandardScenarioStages:
+    scenario = context.scenario
+    seed_user_owned_content(scenario)
+    write_file_manifest(context.artifact_dir / "before-install-files.json", ROOTS, scenario=scenario)
+
+    install_1 = run_capture(scenario.install_command, cwd=context.cwd, env=context.env, artifact_dir=context.artifact_dir, command_class="installer")
+    state_after_install = scenario_file_state(scenario)
+    install_checks = assert_expected_files(scenario)
+    scope_checks = assert_scope_boundaries(scenario)
+    unexpected_install_checks = assert_no_unexpected_graphify_files(scenario, phase="install")
+    write_file_manifest(context.artifact_dir / "after-install-files.json", ROOTS, scenario=scenario)
+    copy_generated_files(scenario, context.artifact_dir)
+    return StandardScenarioStages(
+        install_1=install_1,
+        state_after_install=state_after_install,
+        install_checks=install_checks,
+        scope_checks=scope_checks,
+        unexpected_install_checks=unexpected_install_checks,
+    )
+
+
+def run_repeat_install(context: ScenarioRunContext, stages: StandardScenarioStages) -> None:
+    scenario = context.scenario
+    stages.install_2 = run_capture(scenario.install_command, cwd=context.cwd, env=context.env, artifact_dir=context.artifact_dir / "repeat-install", command_class="installer")
+    stages.state_after_repeat = scenario_file_state(scenario)
+    stages.idempotency_checks = assert_idempotent_state(stages.state_after_install, stages.state_after_repeat)
+    stages.idempotency_checks.extend(assert_no_unexpected_graphify_files(scenario, phase="repeat_install"))
+    write_file_manifest(context.artifact_dir / "after-repeat-install-files.json", ROOTS, scenario=scenario)
+
+
+def run_stale_sidecar_repair(context: ScenarioRunContext, stages: StandardScenarioStages) -> None:
+    scenario = context.scenario
+    stages.stale_sidecar_repair_seeded = seed_stale_skill_sidecars(scenario)
+    if not stages.stale_sidecar_repair_seeded:
+        return
+    stages.stale_sidecar_repair_result = run_capture(scenario.install_command, cwd=context.cwd, env=context.env, artifact_dir=context.artifact_dir / "stale-sidecar-repair", command_class="installer")
+    if stages.stale_sidecar_repair_result.returncode == 0:
+        stages.stale_sidecar_repair_checks = assert_installed_skill_sidecars(scenario)
+        stages.stale_sidecar_repair_checks.extend(assert_no_unexpected_graphify_files(scenario, phase="stale_sidecar_repair"))
+    write_file_manifest(context.artifact_dir / "after-stale-sidecar-repair-files.json", ROOTS, scenario=scenario)
+
+
+def run_uninstall_stage(context: ScenarioRunContext, stages: StandardScenarioStages) -> None:
+    scenario = context.scenario
+    if not scenario.uninstall_command:
+        return
+    stages.uninstall_result = run_capture(scenario.uninstall_command, cwd=context.cwd, env=context.env, artifact_dir=context.artifact_dir / "uninstall", command_class="installer")
+    stages.uninstall_checks = assert_uninstalled(scenario)
+    stages.unexpected_uninstall_checks = assert_no_unexpected_graphify_files(scenario, phase="uninstall")
+    write_file_manifest(context.artifact_dir / "after-uninstall-files.json", ROOTS, scenario=scenario)
+
+
+def run_equivalence_stage(context: ScenarioRunContext, stages: StandardScenarioStages) -> None:
+    stages.equivalence_checks = run_equivalence_check(context.scenario, context.env, context.artifact_dir)
+
+
+def standard_scenario_checks(stages: StandardScenarioStages) -> list[dict[str, object]]:
+    return (
+        stages.install_checks
+        + stages.scope_checks
+        + stages.unexpected_install_checks
+        + stages.idempotency_checks
+        + stages.stale_sidecar_repair_checks
+        + stages.uninstall_checks
+        + stages.unexpected_uninstall_checks
+        + stages.equivalence_checks
+    )
+
+
+def standard_scenario_command_ok(stages: StandardScenarioStages) -> bool:
+    return (
+        stages.install_1.returncode == 0
+        and stages.install_2 is not None
+        and stages.install_2.returncode == 0
+        and (stages.stale_sidecar_repair_result is None or stages.stale_sidecar_repair_result.returncode == 0)
+        and (stages.uninstall_result is None or stages.uninstall_result.returncode == 0)
+    )
+
+
+def finalize_standard_scenario(context: ScenarioRunContext, stages: StandardScenarioStages) -> dict[str, object]:
+    scenario = context.scenario
+    checks = standard_scenario_checks(stages)
+    passed = standard_scenario_command_ok(stages) and all(check["ok"] for check in checks)
+    assertions = {
+        "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": scenario_id(scenario.platform, scenario.scope)},
+        "passed": passed,
+        "install_exit_code": stages.install_1.returncode,
+        "repeat_install_exit_code": None if stages.install_2 is None else stages.install_2.returncode,
+        "stale_sidecar_repair_exit_code": None if stages.stale_sidecar_repair_result is None else stages.stale_sidecar_repair_result.returncode,
+        "stale_sidecar_repair_seeded": stages.stale_sidecar_repair_seeded,
+        "stale_sidecar_repair_checks": stages.stale_sidecar_repair_checks,
+        "uninstall_exit_code": None if stages.uninstall_result is None else stages.uninstall_result.returncode,
+        "state_after_install": stages.state_after_install,
+        "state_after_repeat_install": stages.state_after_repeat,
+        "generic_direct_equivalence": equivalence_status(scenario),
+        "checks": checks,
+    }
+    risks = risk_report(scenario, passed)
+    write_scenario_artifacts(context.artifact_dir, assertions, risks)
+    return scenario_result_record(
+        context,
+        scenario_name=scenario_id(scenario.platform, scenario.scope),
+        platform_name=scenario.platform,
+        scope=scenario.scope,
+        passed=passed,
+        risks=risks,
+        reproduction_command=scenario.install_command,
+        command_artifact_dir=context.artifact_dir,
+    )
+
+
+def run_scenario(scenario: Scenario, env: dict[str, str]) -> dict[str, object]:
+    context = prepare_scenario_run(scenario, env)
+    stages = run_initial_install(context)
+    if stages.install_1.returncode == 0:
+        run_repeat_install(context, stages)
+        if stages.install_2 is not None and stages.install_2.returncode == 0:
+            run_stale_sidecar_repair(context, stages)
+        run_uninstall_stage(context, stages)
+        run_equivalence_stage(context, stages)
+    return finalize_standard_scenario(context, stages)
+
+
 def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env: dict[str, str]) -> dict[str, object]:
-    scenario_started_at = utc_timestamp()
-    scenario_start = time.monotonic()
-    reset_sandbox_dirs()
     scenario_name = f"universal-uninstall-{scope}"
-    artifact_dir = OUTPUT / "scenarios" / scenario_name
-    if artifact_dir.exists():
-        shutil.rmtree(artifact_dir)
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    runner_scenario = Scenario(
+        platform="multiple",
+        scope=scope,
+        install_command=("graphify", "uninstall", "--project") if scope == "project" else ("graphify", "uninstall"),
+        uninstall_command=None,
+        cwd_root="project" if scope == "project" else "user_cwd",
+        expected=tuple(entry for scenario in scenarios for entry in scenario.expected),
+    )
+    context = prepare_scenario_run(runner_scenario, env, scenario_name=scenario_name)
+    artifact_dir = context.artifact_dir
 
     for scenario in scenarios:
         seed_user_owned_content(scenario)
@@ -2187,15 +1843,7 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
     uninstall_result = run_capture(uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall", command_class="installer")
     checks = install_checks + [check for scenario in scenarios for check in assert_uninstalled(scenario)]
     expected_keys = set().union(*(expected_generated_relative_keys(scenario) for scenario in scenarios))
-    combined_scenario = Scenario(
-        platform="multiple",
-        scope=scope,
-        install_command=uninstall_command,
-        uninstall_command=None,
-        cwd_root="project" if scope == "project" else "user_cwd",
-        expected=tuple(entry for scenario in scenarios for entry in scenario.expected),
-    )
-    checks.extend(assert_no_unexpected_graphify_files(combined_scenario, phase="universal_uninstall", expected_keys=expected_keys))
+    checks.extend(assert_no_unexpected_graphify_files(runner_scenario, phase="universal_uninstall", expected_keys=expected_keys))
     write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS, debug_full=True)
     passed = all(result["exit_code"] == 0 for result in install_results) and uninstall_result.returncode == 0 and all(check["ok"] for check in checks)
     assertions = {
@@ -2211,41 +1859,40 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
         "notes": ["universal uninstall covers Graphify-owned file effects after multiple installs"],
         "known_status_values": known_status_values(),
     }
-    (artifact_dir / "assertions.json").write_text(json.dumps(assertions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (artifact_dir / "risk.json").write_text(json.dumps(risks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {
-        "id": scenario_name,
-        "platform": "multiple",
-        "scope": scope,
-        "started_at": scenario_started_at,
-        "duration_ms": int((time.monotonic() - scenario_start) * 1000),
-        "reproduction_command": shlex.join(uninstall_command),
-        "command_artifact": command_artifact_summary(artifact_dir / "uninstall"),
-        "graphify_file_effects_passed": passed,
-        "overall_status": combined_status(passed),
-        "passed": passed,
-        "risks": risks["statuses"],
-    }
+    write_scenario_artifacts(artifact_dir, assertions, risks)
+    return scenario_result_record(
+        context,
+        scenario_name=scenario_name,
+        platform_name="multiple",
+        scope=scope,
+        passed=passed,
+        risks=risks,
+        reproduction_command=uninstall_command,
+        command_artifact_dir=artifact_dir / "uninstall",
+    )
 
 
 def run_purge_scenario(env: dict[str, str]) -> dict[str, object]:
-    scenario_started_at = utc_timestamp()
-    scenario_start = time.monotonic()
-    reset_sandbox_dirs()
     scenario_name = "purge-disposable-graphify-out"
-    artifact_dir = OUTPUT / "scenarios" / scenario_name
-    if artifact_dir.exists():
-        shutil.rmtree(artifact_dir)
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    command = ("graphify", "uninstall", "--purge")
+    runner_scenario = Scenario(
+        platform="purge",
+        scope="project",
+        install_command=command,
+        uninstall_command=None,
+        cwd_root="project",
+        expected=(),
+    )
+    context = prepare_scenario_run(runner_scenario, env, scenario_name=scenario_name)
+    artifact_dir = context.artifact_dir
     graphify_out = PROJECT / "graphify-out"
     graphify_out.mkdir(parents=True, exist_ok=True)
     (graphify_out / "graph.json").write_text('{"nodes": [], "edges": []}\n', encoding="utf-8")
     write_file_manifest(artifact_dir / "before-install-files.json", ROOTS)
-    command = ("graphify", "uninstall", "--purge")
     result = run_capture(command, cwd=PROJECT, env=env, artifact_dir=artifact_dir / "uninstall-purge", command_class="installer")
     purged = not graphify_out.exists()
     write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS)
-    checks = [{"path": str(graphify_out), "ok": purged, "detail": "purged" if purged else "still_exists"}]
+    checks = [check_record(graphify_out, purged, "purged" if purged else "still_exists")]
     passed = result.returncode == 0 and purged
     assertions = {
         "scenario": {"id": scenario_name, "scope": "project", "platform": "purge"},
@@ -2258,21 +1905,17 @@ def run_purge_scenario(env: dict[str, str]) -> dict[str, object]:
         "notes": ["purge verified only against disposable sandbox graphify-out state"],
         "known_status_values": known_status_values(),
     }
-    (artifact_dir / "assertions.json").write_text(json.dumps(assertions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (artifact_dir / "risk.json").write_text(json.dumps(risks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {
-        "id": scenario_name,
-        "platform": "purge",
-        "scope": "project",
-        "started_at": scenario_started_at,
-        "duration_ms": int((time.monotonic() - scenario_start) * 1000),
-        "reproduction_command": shlex.join(command),
-        "command_artifact": command_artifact_summary(artifact_dir / "uninstall-purge"),
-        "graphify_file_effects_passed": passed,
-        "overall_status": combined_status(passed),
-        "passed": passed,
-        "risks": risks["statuses"],
-    }
+    write_scenario_artifacts(artifact_dir, assertions, risks)
+    return scenario_result_record(
+        context,
+        scenario_name=scenario_name,
+        platform_name="purge",
+        scope="project",
+        passed=passed,
+        risks=risks,
+        reproduction_command=command,
+        command_artifact_dir=artifact_dir / "uninstall-purge",
+    )
 
 
 def universal_uninstall_scenarios(platforms: list[str], scope: str) -> list[tuple[str, list[Scenario]]]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import fnmatch
 import hashlib
 import importlib.metadata
@@ -10,6 +11,7 @@ import os
 import platform as platform_mod
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -35,31 +37,13 @@ USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"
 STALE_GRAPHIFY_SENTINEL = "STALE_GRAPHIFY_OWNED_CONTENT_SHOULD_BE_REPLACED"
 GRAPHIFY_MARKER = "## graphify"
 RISK_GRAPHIFY_VERIFIED = "graphify_install_verified"
-RISK_RUNTIME_VERIFIED = "target_tool_runtime_verified"
-RISK_RUNTIME_UNVERIFIED = "risk_unverified_tool_runtime"
-RISK_TOOL_UNAVAILABLE = "tool_unavailable_in_docker"
-DIRECT_USER_EQUIVALENT_PLATFORMS = {"gemini", "copilot", "devin", "pi"}
-DIRECT_PROJECT_EQUIVALENT_PLATFORMS = {
-    "claude",
-    "gemini",
-    "cursor",
-    "devin",
-    "aider",
-    "amp",
-    "codex",
-    "opencode",
-    "claw",
-    "droid",
-    "trae",
-    "trae-cn",
-    "hermes",
-    "kiro",
-    "copilot",
-    "pi",
-    "antigravity",
+RISK_GRAPHIFY_FAILED = "graphify_install_failed"
+COMMAND_TIMEOUTS = {
+    "package_install": 600,
+    "graphify_version": 60,
+    "installer": 120,
+    "precondition": 60,
 }
-UNIVERSAL_USER_PLATFORMS = ("gemini", "vscode", "antigravity")
-UNIVERSAL_PROJECT_PLATFORMS = ("codex", "claude", "gemini", "cursor", "devin")
 USER_CONTENT_PRESERVING_RELATIVES = {
     "AGENTS.md",
     "CLAUDE.md",
@@ -68,61 +52,15 @@ USER_CONTENT_PRESERVING_RELATIVES = {
     ".github/copilot-instructions.md",
 }
 
-ALL_PLATFORMS = [
-    "claude",
-    "codex",
-    "opencode",
-    "kilo",
-    "gemini",
-    "cursor",
-    "devin",
-    "aider",
-    "copilot",
-    "vscode",
-    "claw",
-    "droid",
-    "trae",
-    "trae-cn",
-    "hermes",
-    "kiro",
-    "pi",
-    "antigravity",
-    "antigravity-windows",
-    "windows",
-    "kimi",
-    "amp",
-]
-AGENTS_MD_PLATFORMS = {"aider", "amp", "codex", "opencode", "claw", "droid", "trae", "trae-cn", "hermes"}
-SKILL_ONLY_PROJECT_PLATFORMS = {"copilot", "pi", "antigravity", "antigravity-windows", "kimi"}
-SIMULATED_LINUX_LAYOUT_PLATFORMS = {"antigravity-windows", "windows"}
 WINDOWS_VALIDATION_TARGETS = (
-    "windows user/project install file effects",
+    "windows payload file-effect simulation",
     "antigravity remapping to antigravity-windows",
-    "command entrypoint invocation after package install",
-    "Windows-specific skill payload and hook JSON generation",
-    "Windows install/uninstall cleanup behavior",
+    "Windows-specific skill payload and references generation",
+    "payload consistency for explicit Windows platform selection",
 )
-PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL = {
-    "aider",
-    "amp",
-    "claude",
-    "codex",
-    "opencode",
-    "claw",
-    "droid",
-    "trae",
-    "trae-cn",
-    "hermes",
-    "kiro",
-    "windows",
-    "kimi",
-    "antigravity-windows",
-}
-UNSUPPORTED_SCOPES = {
-    ("cursor", "user"): "cursor install writes a project-local .cursor rule in the current working directory; sandbox covers that file effect as project scope",
-}
 COPY_EXCLUDES = (
     ".git",
+    ".kilo",
     ".venv",
     "__pycache__",
     ".pytest_cache",
@@ -141,6 +79,7 @@ GENERATED_COPY_EXCLUDES = (
     "__pycache__",
     ".pytest_cache",
 )
+MANIFEST_PRUNE_DIRS = set(GENERATED_COPY_EXCLUDES) | {".mypy_cache", ".ruff_cache", "node_modules"}
 
 
 @dataclass(frozen=True)
@@ -164,16 +103,26 @@ class Scenario:
 
 
 @dataclass(frozen=True)
-class TargetToolProbe:
-    tool: str
-    command: tuple[str, ...] | None
-    version_command: tuple[str, ...] | None
-    credentials_required: bool
-    docker_headless_expected: bool
-    unavailable_reason: str | None = None
-    docs_checked: tuple[str, ...] = field(default_factory=tuple)
-    command_kind: str = "discovery"
-    timeout_seconds: int = 60
+class ScopeSpec:
+    install_command: tuple[str, ...]
+    uninstall_command: tuple[str, ...] | None
+    cwd_root: str
+    expected: tuple[ExpectedPath, ...]
+    risk_notes: tuple[str, ...] = field(default_factory=tuple)
+    equivalent_install_command: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
+class PlatformSpec:
+    name: str
+    user_skill: str | None = None
+    project_skill: str | None = None
+    scopes: dict[str, ScopeSpec] = field(default_factory=dict)
+    unsupported_scopes: dict[str, str] = field(default_factory=dict)
+    uses_packaged_references: bool = True
+    reference_bundles: tuple[str, ...] = ()
+    simulated_linux_layout: bool = False
+    universal_uninstall_scopes: tuple[str, ...] = ()
 
 
 ROOTS = {
@@ -183,197 +132,469 @@ ROOTS = {
 }
 
 
-TOOL_PROBES: dict[str, TargetToolProbe] = {
-    "claude": TargetToolProbe(
-        tool="claude",
-        command=("claude", "--version"),
-        version_command=("claude", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://docs.anthropic.com/en/docs/claude-code",),
+PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE = "public_cli_lacks_user_skill_uninstall"
+MIXED_SCOPE_PROJECT_WIRING_NOTE = "mixed_scope_project_wiring"
+MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE = "mixed_scope_global_skill_plus_project_wiring"
+SIMULATED_LINUX_LAYOUT_NOTE = "simulated_linux_file_layout_only"
+
+
+def _dedupe_notes(*notes: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(note for note in notes if note))
+
+
+def _generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
+    if scope == "project":
+        return ("graphify", "install", "--project", "--platform", platform_name)
+    return ("graphify", "install", "--platform", platform_name)
+
+
+def _generic_uninstall_command(platform_name: str, scope: str) -> tuple[str, ...]:
+    if scope == "project":
+        return ("graphify", "uninstall", "--project", "--platform", platform_name)
+    return ("graphify", "uninstall", "--platform", platform_name)
+
+
+def _direct_project_install(platform_name: str) -> tuple[str, ...]:
+    return ("graphify", platform_name, "install", "--project")
+
+
+def _skill(root: str, relative: str) -> ExpectedPath:
+    return ExpectedPath(root, relative)
+
+
+def _section(root: str, relative: str, marker: str = GRAPHIFY_MARKER, *, remove_on_uninstall: bool = True) -> ExpectedPath:
+    return ExpectedPath(root, relative, marker=marker, remove_on_uninstall=remove_on_uninstall)
+
+
+def _json_marker(root: str, relative: str) -> ExpectedPath:
+    return ExpectedPath(root, relative, marker="graphify")
+
+
+def _scenario(
+    platform_name: str,
+    scope: str,
+    expected: tuple[ExpectedPath, ...],
+    *,
+    install_command: tuple[str, ...] | None = None,
+    uninstall_command: tuple[str, ...] | None | str = "generic",
+    cwd_root: str | None = None,
+    risk_notes: tuple[str, ...] = (),
+    equivalent_install_command: tuple[str, ...] | None = None,
+) -> ScopeSpec:
+    if uninstall_command == "generic":
+        uninstall = _generic_uninstall_command(platform_name, scope)
+    else:
+        uninstall = uninstall_command
+    return ScopeSpec(
+        install_command=install_command or _generic_install_command(platform_name, scope),
+        uninstall_command=uninstall,
+        cwd_root=cwd_root or ("project" if scope == "project" else "user_cwd"),
+        expected=expected,
+        risk_notes=risk_notes,
+        equivalent_install_command=equivalent_install_command,
+    )
+
+
+def _generic_user_scope(platform_name: str, skill_relative: str, *, extra_expected: tuple[ExpectedPath, ...] = (), notes: tuple[str, ...] = ()) -> ScopeSpec:
+    return _scenario(
+        platform_name,
+        "user",
+        (_skill("home", skill_relative), *extra_expected),
+        uninstall_command=None,
+        risk_notes=notes,
+    )
+
+
+def _agents_project_scope(platform_name: str, skill_relative: str, *, extra_expected: tuple[ExpectedPath, ...] = (), equivalent: bool = True) -> ScopeSpec:
+    return _scenario(
+        platform_name,
+        "project",
+        (_skill("project", skill_relative), _section("project", "AGENTS.md"), *extra_expected),
+        equivalent_install_command=_direct_project_install(platform_name) if equivalent else None,
+    )
+
+
+def _skill_only_project_scope(platform_name: str, skill_relative: str, *, notes: tuple[str, ...] = (), equivalent: bool = False) -> ScopeSpec:
+    return _scenario(
+        platform_name,
+        "project",
+        (_skill("project", skill_relative),),
+        risk_notes=notes,
+        equivalent_install_command=_direct_project_install(platform_name) if equivalent else None,
+    )
+
+
+# Temporary sandbox-owned source of platform file effects. The app installer
+# refactor should eventually expose an app-owned install plan that this adapter
+# can consume instead of maintaining sandbox-local tool specifics.
+SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
+    "claude": PlatformSpec(
+        name="claude",
+        user_skill=".claude/skills/graphify/SKILL.md",
+        project_skill=".claude/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope(
+                "claude",
+                ".claude/skills/graphify/SKILL.md",
+                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", remove_on_uninstall=False),),
+                notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,),
+            ),
+            "project": _scenario(
+                "claude",
+                "project",
+                (
+                    _skill("project", ".claude/skills/graphify/SKILL.md"),
+                    _section("project", ".claude/CLAUDE.md", "# graphify"),
+                    _section("project", "CLAUDE.md"),
+                    _json_marker("project", ".claude/settings.json"),
+                ),
+                equivalent_install_command=_direct_project_install("claude"),
+            ),
+        },
+        universal_uninstall_scopes=("project",),
     ),
-    "codex": TargetToolProbe(
-        tool="codex",
-        command=("npm", "install", "--global", "--prefix", str(HOME / ".local"), "@openai/codex"),
-        version_command=("codex", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://github.com/openai/codex",),
-        command_kind="install",
-        timeout_seconds=300,
+    "codex": PlatformSpec(
+        name="codex",
+        user_skill=".codex/skills/graphify/SKILL.md",
+        project_skill=".codex/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("codex", ".codex/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("codex", ".codex/skills/graphify/SKILL.md", extra_expected=(_json_marker("project", ".codex/hooks.json"),)),
+        },
+        universal_uninstall_scopes=("project",),
     ),
-    "opencode": TargetToolProbe(
-        tool="opencode",
-        command=("opencode", "--version"),
-        version_command=("opencode", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://opencode.ai/docs",),
+    "codebuddy": PlatformSpec(
+        name="codebuddy",
+        user_skill=".codebuddy/skills/graphify/SKILL.md",
+        project_skill=".codebuddy/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario(
+                "codebuddy",
+                "user",
+                (
+                    _skill("home", ".codebuddy/skills/graphify/SKILL.md"),
+                    _section("home", ".codebuddy/CODEBUDDY.md"),
+                    _json_marker("home", ".codebuddy/settings.json"),
+                ),
+                uninstall_command=("graphify", "uninstall"),
+            ),
+            "project": _scenario(
+                "codebuddy",
+                "project",
+                (
+                    _skill("project", ".codebuddy/skills/graphify/SKILL.md"),
+                    _section("project", "CODEBUDDY.md"),
+                    _json_marker("project", ".codebuddy/settings.json"),
+                ),
+                equivalent_install_command=("graphify", "codebuddy", "install"),
+            ),
+        },
+        universal_uninstall_scopes=("user", "project"),
     ),
-    "kilo": TargetToolProbe(
-        tool="kilo",
-        command=("npm", "install", "--global", "--prefix", str(HOME / ".local"), "@kilocode/cli"),
-        version_command=("kilo", "--version"),
-        credentials_required=False,
-        docker_headless_expected=True,
-        docs_checked=("https://github.com/Kilo-Org/kilocode",),
-        command_kind="install",
-        timeout_seconds=300,
+    "opencode": PlatformSpec(
+        name="opencode",
+        user_skill=".config/opencode/skills/graphify/SKILL.md",
+        project_skill=".opencode/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario(
+                "opencode",
+                "user",
+                (
+                    _skill("home", ".config/opencode/skills/graphify/SKILL.md"),
+                    ExpectedPath("user_cwd", ".opencode/plugins/graphify.js"),
+                    _json_marker("user_cwd", ".opencode/opencode.json"),
+                ),
+                uninstall_command=None,
+                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE, PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE),
+            ),
+            "project": _agents_project_scope(
+                "opencode",
+                ".opencode/skills/graphify/SKILL.md",
+                extra_expected=(ExpectedPath("project", ".opencode/plugins/graphify.js"), _json_marker("project", ".opencode/opencode.json")),
+            ),
+        },
     ),
-    "gemini": TargetToolProbe(
-        tool="gemini",
-        command=("gemini", "--version"),
-        version_command=("gemini", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://github.com/google-gemini/gemini-cli",),
+    "kilo": PlatformSpec(
+        name="kilo",
+        user_skill=".config/kilo/skills/graphify/SKILL.md",
+        project_skill=".config/kilo/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario(
+                "kilo",
+                "user",
+                (_skill("home", ".config/kilo/skills/graphify/SKILL.md"), ExpectedPath("home", ".config/kilo/command/graphify.md")),
+                uninstall_command=("graphify", "kilo", "uninstall"),
+            ),
+            "project": _scenario(
+                "kilo",
+                "project",
+                (
+                    _skill("home", ".config/kilo/skills/graphify/SKILL.md"),
+                    ExpectedPath("home", ".config/kilo/command/graphify.md"),
+                    _section("project", "AGENTS.md"),
+                    ExpectedPath("project", ".kilo/plugins/graphify.js"),
+                    _json_marker("project", ".kilo/kilo.json"),
+                ),
+                install_command=("graphify", "kilo", "install"),
+                uninstall_command=("graphify", "kilo", "uninstall"),
+                risk_notes=(MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
+            ),
+        },
     ),
-    "cursor": TargetToolProbe(
-        tool="cursor",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Cursor is a GUI/editor runtime; the Linux sandbox verifies generated file layout only.",
-        docs_checked=("https://cursor.com/",),
+    "gemini": PlatformSpec(
+        name="gemini",
+        user_skill=".gemini/skills/graphify/SKILL.md",
+        project_skill=".gemini/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario(
+                "gemini",
+                "user",
+                (
+                    _skill("home", ".gemini/skills/graphify/SKILL.md"),
+                    _section("user_cwd", "GEMINI.md"),
+                    _json_marker("user_cwd", ".gemini/settings.json"),
+                ),
+                uninstall_command=("graphify", "gemini", "uninstall"),
+                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
+                equivalent_install_command=("graphify", "gemini", "install"),
+            ),
+            "project": _scenario(
+                "gemini",
+                "project",
+                (_skill("project", ".gemini/skills/graphify/SKILL.md"), _section("project", "GEMINI.md"), _json_marker("project", ".gemini/settings.json")),
+                equivalent_install_command=_direct_project_install("gemini"),
+            ),
+        },
+        universal_uninstall_scopes=("user", "project"),
     ),
-    "devin": TargetToolProbe(
-        tool="devin",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Devin is a hosted authenticated assistant runtime, not a public headless CLI installed in this sandbox.",
-        docs_checked=("https://devin.ai/",),
+    "cursor": PlatformSpec(
+        name="cursor",
+        scopes={
+            "project": _scenario(
+                "cursor",
+                "project",
+                (ExpectedPath("project", ".cursor/rules/graphify.mdc"),),
+                install_command=("graphify", "cursor", "install"),
+                uninstall_command=("graphify", "cursor", "uninstall"),
+                equivalent_install_command=_generic_install_command("cursor", "project"),
+            ),
+        },
+        unsupported_scopes={"user": "cursor install writes a project-local .cursor rule in the current working directory; sandbox covers that file effect as project scope"},
+        uses_packaged_references=False,
+        universal_uninstall_scopes=("project",),
     ),
-    "aider": TargetToolProbe(
-        tool="aider",
-        command=(sys.executable, "-m", "pip", "install", "--user", "aider-chat"),
-        version_command=("aider", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://aider.chat/docs/install.html",),
-        command_kind="install",
-        timeout_seconds=300,
+    "devin": PlatformSpec(
+        name="devin",
+        user_skill=".config/devin/skills/graphify/SKILL.md",
+        project_skill=".devin/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario(
+                "devin",
+                "user",
+                (_skill("home", ".config/devin/skills/graphify/SKILL.md"),),
+                uninstall_command=("graphify", "devin", "uninstall"),
+                equivalent_install_command=("graphify", "devin", "install"),
+            ),
+            "project": _scenario(
+                "devin",
+                "project",
+                (_skill("project", ".devin/skills/graphify/SKILL.md"), ExpectedPath("project", ".windsurf/rules/graphify.md")),
+                equivalent_install_command=_direct_project_install("devin"),
+            ),
+        },
+        universal_uninstall_scopes=("project",),
     ),
-    "copilot": TargetToolProbe(
-        tool="copilot",
-        command=("gh", "copilot", "--version"),
-        version_command=("gh", "copilot", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://docs.github.com/en/copilot/how-tos/copilot-cli",),
+    "aider": PlatformSpec(
+        name="aider",
+        user_skill=".aider/graphify/SKILL.md",
+        project_skill=".aider/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("aider", ".aider/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("aider", ".aider/graphify/SKILL.md"),
+        },
     ),
-    "vscode": TargetToolProbe(
-        tool="vscode",
-        command=("code", "--version"),
-        version_command=("code", "--version"),
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="VS Code/Copilot Chat runtime requires editor installation and authentication; sandbox covers generated files only unless code is preinstalled.",
-        docs_checked=("https://code.visualstudio.com/docs/copilot/overview",),
+    "copilot": PlatformSpec(
+        name="copilot",
+        user_skill=".copilot/skills/graphify/SKILL.md",
+        project_skill=".copilot/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario("copilot", "user", (_skill("home", ".copilot/skills/graphify/SKILL.md"),), uninstall_command=("graphify", "copilot", "uninstall"), equivalent_install_command=("graphify", "copilot", "install")),
+            "project": _skill_only_project_scope("copilot", ".copilot/skills/graphify/SKILL.md", equivalent=True),
+        },
     ),
-    "claw": TargetToolProbe(
-        tool="claw",
-        command=("claw", "--version"),
-        version_command=("claw", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://openclaw.ai/",),
+    "vscode": PlatformSpec(
+        name="vscode",
+        user_skill=".copilot/skills/graphify/SKILL.md",
+        uses_packaged_references=False,
+        reference_bundles=("vscode", "copilot"),
+        scopes={
+            "user": _scenario(
+                "vscode",
+                "user",
+                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("user_cwd", ".github/copilot-instructions.md")),
+                install_command=("graphify", "vscode", "install"),
+                uninstall_command=("graphify", "vscode", "uninstall"),
+                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
+            ),
+            "project": _scenario(
+                "vscode",
+                "project",
+                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("project", ".github/copilot-instructions.md")),
+                install_command=("graphify", "vscode", "install"),
+                uninstall_command=("graphify", "vscode", "uninstall"),
+                risk_notes=(MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
+            ),
+        },
+        universal_uninstall_scopes=("user",),
     ),
-    "droid": TargetToolProbe(
-        tool="droid",
-        command=("droid", "--version"),
-        version_command=("droid", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://factory.ai/",),
+    "claw": PlatformSpec(
+        name="claw",
+        user_skill=".openclaw/skills/graphify/SKILL.md",
+        project_skill=".openclaw/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("claw", ".openclaw/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("claw", ".openclaw/skills/graphify/SKILL.md"),
+        },
     ),
-    "trae": TargetToolProbe(
-        tool="trae",
-        command=("trae", "--version"),
-        version_command=("trae", "--version"),
-        credentials_required=True,
-        docker_headless_expected=False,
-        docs_checked=("https://trae.ai/",),
+    "droid": PlatformSpec(
+        name="droid",
+        user_skill=".factory/skills/graphify/SKILL.md",
+        project_skill=".factory/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("droid", ".factory/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("droid", ".factory/skills/graphify/SKILL.md"),
+        },
     ),
-    "trae-cn": TargetToolProbe(
-        tool="trae-cn",
-        command=("trae", "--version"),
-        version_command=("trae", "--version"),
-        credentials_required=True,
-        docker_headless_expected=False,
-        docs_checked=("https://www.trae.cn/",),
+    "trae": PlatformSpec(
+        name="trae",
+        user_skill=".trae/skills/graphify/SKILL.md",
+        project_skill=".trae/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("trae", ".trae/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("trae", ".trae/skills/graphify/SKILL.md"),
+        },
     ),
-    "hermes": TargetToolProbe(
-        tool="hermes",
-        command=("hermes", "--version"),
-        version_command=("hermes", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        unavailable_reason="Hermes runtime is not packaged in the base sandbox image; discovery is recorded when attempted.",
+    "trae-cn": PlatformSpec(
+        name="trae-cn",
+        user_skill=".trae-cn/skills/graphify/SKILL.md",
+        project_skill=".trae-cn/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("trae-cn", ".trae-cn/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("trae-cn", ".trae-cn/skills/graphify/SKILL.md"),
+        },
     ),
-    "kiro": TargetToolProbe(
-        tool="kiro",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Kiro is an editor/agent runtime; no headless CLI is installed in this Linux sandbox image.",
-        docs_checked=("https://kiro.dev/",),
+    "hermes": PlatformSpec(
+        name="hermes",
+        user_skill=".hermes/skills/graphify/SKILL.md",
+        project_skill=".hermes/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("hermes", ".hermes/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("hermes", ".hermes/skills/graphify/SKILL.md"),
+        },
     ),
-    "pi": TargetToolProbe(
-        tool="pi",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Pi agent runtime availability is not represented by a public headless CLI in this sandbox.",
+    "kiro": PlatformSpec(
+        name="kiro",
+        user_skill=".kiro/skills/graphify/SKILL.md",
+        project_skill=".kiro/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("kiro", ".kiro/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _scenario(
+                "kiro",
+                "project",
+                (_skill("project", ".kiro/skills/graphify/SKILL.md"), _section("project", ".kiro/steering/graphify.md", "graphify:")),
+                install_command=("graphify", "kiro", "install"),
+                uninstall_command=("graphify", "kiro", "uninstall"),
+                equivalent_install_command=_generic_install_command("kiro", "project"),
+            ),
+        },
     ),
-    "antigravity": TargetToolProbe(
-        tool="antigravity",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Google Antigravity is a GUI/editor runtime; the Linux sandbox verifies generated file layout only.",
-        docs_checked=("https://antigravity.google/",),
+    "pi": PlatformSpec(
+        name="pi",
+        user_skill=".pi/agent/skills/graphify/SKILL.md",
+        project_skill=".pi/agent/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario("pi", "user", (_skill("home", ".pi/agent/skills/graphify/SKILL.md"),), uninstall_command=("graphify", "pi", "uninstall"), equivalent_install_command=("graphify", "pi", "install")),
+            "project": _skill_only_project_scope("pi", ".pi/agent/skills/graphify/SKILL.md", equivalent=True),
+        },
     ),
-    "antigravity-windows": TargetToolProbe(
-        tool="antigravity-windows",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Windows Antigravity behavior is simulated as Linux file-layout coverage; runtime verification requires a real Windows validation path.",
-        docs_checked=("https://antigravity.google/",),
+    "antigravity": PlatformSpec(
+        name="antigravity",
+        user_skill=".gemini/config/skills/graphify/SKILL.md",
+        project_skill=".agents/skills/graphify/SKILL.md",
+        scopes={
+            "user": _scenario(
+                "antigravity",
+                "user",
+                (_skill("home", ".gemini/config/skills/graphify/SKILL.md"), _section("user_cwd", ".agents/rules/graphify.md"), ExpectedPath("user_cwd", ".agents/workflows/graphify.md")),
+                install_command=("graphify", "antigravity", "install"),
+                uninstall_command=("graphify", "antigravity", "uninstall"),
+                risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
+            ),
+            "project": _scenario(
+                "antigravity",
+                "project",
+                (_skill("project", ".agents/skills/graphify/SKILL.md"), _section("project", ".agents/rules/graphify.md"), ExpectedPath("project", ".agents/workflows/graphify.md")),
+                equivalent_install_command=_direct_project_install("antigravity"),
+            ),
+        },
+        universal_uninstall_scopes=("user",),
     ),
-    "windows": TargetToolProbe(
-        tool="windows",
-        command=None,
-        version_command=None,
-        credentials_required=True,
-        docker_headless_expected=False,
-        unavailable_reason="Windows Claude runtime behavior is simulated as Linux file-layout coverage; runtime verification requires a real Windows validation path.",
-        docs_checked=("https://docs.anthropic.com/en/docs/claude-code",),
+    "antigravity-windows": PlatformSpec(
+        name="antigravity-windows",
+        user_skill=".gemini/config/skills/graphify/SKILL.md",
+        project_skill=".agents/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("antigravity-windows", ".gemini/config/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, SIMULATED_LINUX_LAYOUT_NOTE)),
+            "project": _skill_only_project_scope("antigravity-windows", ".agents/skills/graphify/SKILL.md", notes=(SIMULATED_LINUX_LAYOUT_NOTE,)),
+        },
+        simulated_linux_layout=True,
     ),
-    "kimi": TargetToolProbe(
-        tool="kimi",
-        command=("kimi", "--version"),
-        version_command=("kimi", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        unavailable_reason="Kimi runtime is not packaged in the base sandbox image; discovery is recorded when attempted.",
+    "windows": PlatformSpec(
+        name="windows",
+        user_skill=".claude/skills/graphify/SKILL.md",
+        project_skill=".claude/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope(
+                "windows",
+                ".claude/skills/graphify/SKILL.md",
+                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", remove_on_uninstall=False),),
+                notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, SIMULATED_LINUX_LAYOUT_NOTE),
+            ),
+            "project": _scenario(
+                "windows",
+                "project",
+                (
+                    _skill("project", ".claude/skills/graphify/SKILL.md"),
+                    _section("project", ".claude/CLAUDE.md", "# graphify"),
+                    _section("project", "CLAUDE.md"),
+                    _json_marker("project", ".claude/settings.json"),
+                ),
+                risk_notes=(SIMULATED_LINUX_LAYOUT_NOTE,),
+            ),
+        },
+        simulated_linux_layout=True,
     ),
-    "amp": TargetToolProbe(
-        tool="amp",
-        command=("amp", "--version"),
-        version_command=("amp", "--version"),
-        credentials_required=True,
-        docker_headless_expected=True,
-        docs_checked=("https://ampcode.com/",),
+    "kimi": PlatformSpec(
+        name="kimi",
+        user_skill=".kimi/skills/graphify/SKILL.md",
+        project_skill=".kimi/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("kimi", ".kimi/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _skill_only_project_scope("kimi", ".kimi/skills/graphify/SKILL.md"),
+        },
+    ),
+    "amp": PlatformSpec(
+        name="amp",
+        user_skill=".config/agents/skills/graphify/SKILL.md",
+        project_skill=".agents/skills/graphify/SKILL.md",
+        scopes={
+            "user": _generic_user_scope("amp", ".config/agents/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
+            "project": _agents_project_scope("amp", ".agents/skills/graphify/SKILL.md"),
+        },
     ),
 }
+
+ALL_PLATFORMS = list(SANDBOX_PLATFORM_SPECS)
 
 
 def scenario_id(platform: str, scope: str) -> str:
@@ -406,6 +627,7 @@ def skill_relative_dir(entry: ExpectedPath) -> Path:
     return Path(entry.relative).parent
 
 
+@functools.lru_cache(maxsize=None)
 def graphify_main_module():
     try:
         from graphify import __main__ as graphify_main
@@ -419,24 +641,29 @@ def graphify_main_module():
     return graphify_main
 
 
+@functools.lru_cache(maxsize=None)
 def expected_graphify_version() -> str:
     return str(graphify_main_module().__version__)
 
 
 def packaged_references_dir(platform_name: str) -> Path | None:
     graphify_main = graphify_main_module()
-    if platform_name == "vscode":
+    spec = platform_spec(platform_name)
+    if spec.reference_bundles:
         package_dir = Path(graphify_main.__file__).parent
-        bundle = "vscode" if (package_dir / "skill-vscode.md").exists() else "copilot"
-        bundle_dir = package_dir / "skills" / bundle
-        if not bundle_dir.is_dir():
-            return None
-        return bundle_dir / "references"
-    if platform_name == "gemini" or platform_name in graphify_main._PLATFORM_CONFIG:
-        return graphify_main._packaged_skill_refs_dir(platform_name)
+        for bundle in spec.reference_bundles:
+            if bundle == "vscode" and not (package_dir / "skill-vscode.md").exists():
+                continue
+            bundle_dir = package_dir / "skills" / bundle
+            if bundle_dir.is_dir():
+                return bundle_dir / "references"
+        return None
+    if spec.uses_packaged_references:
+        return graphify_main._packaged_skill_refs_dir(spec.name)
     return None
 
 
+@functools.lru_cache(maxsize=None)
 def packaged_reference_names(platform_name: str) -> list[str] | None:
     refs_dir = packaged_references_dir(platform_name)
     if refs_dir is None:
@@ -564,101 +791,71 @@ def seed_stale_skill_sidecars(scenario: Scenario) -> list[dict[str, object]]:
 
 def risk_notes(*notes: str, platform_name: str | None = None) -> tuple[str, ...]:
     ordered = list(notes)
-    if platform_name in SIMULATED_LINUX_LAYOUT_PLATFORMS:
-        ordered.append("simulated_linux_file_layout_only")
-    return tuple(dict.fromkeys(ordered))
+    spec = SANDBOX_PLATFORM_SPECS.get(platform_name or "")
+    if spec is not None and spec.simulated_linux_layout:
+        ordered.append(SIMULATED_LINUX_LAYOUT_NOTE)
+    return _dedupe_notes(*ordered)
+
+
+def sandbox_platform_specs() -> dict[str, PlatformSpec]:
+    return SANDBOX_PLATFORM_SPECS
+
+
+def platform_spec(platform_name: str) -> PlatformSpec:
+    try:
+        return sandbox_platform_specs()[platform_name]
+    except KeyError as exc:
+        raise RuntimeError(f"unknown sandbox platform: {platform_name}") from exc
 
 
 def user_skill(platform_name: str) -> ExpectedPath:
-    mapping = {
-        "claude": ".claude/skills/graphify/SKILL.md",
-        "codex": ".agents/skills/graphify/SKILL.md",
-        "opencode": ".config/opencode/skills/graphify/SKILL.md",
-        "kilo": ".config/kilo/skills/graphify/SKILL.md",
-        "gemini": ".gemini/skills/graphify/SKILL.md",
-        "devin": ".config/devin/skills/graphify/SKILL.md",
-        "aider": ".aider/graphify/SKILL.md",
-        "copilot": ".copilot/skills/graphify/SKILL.md",
-        "vscode": ".copilot/skills/graphify/SKILL.md",
-        "claw": ".openclaw/skills/graphify/SKILL.md",
-        "droid": ".factory/skills/graphify/SKILL.md",
-        "trae": ".trae/skills/graphify/SKILL.md",
-        "trae-cn": ".trae-cn/skills/graphify/SKILL.md",
-        "hermes": ".hermes/skills/graphify/SKILL.md",
-        "kiro": ".kiro/skills/graphify/SKILL.md",
-        "pi": ".pi/agent/skills/graphify/SKILL.md",
-        "antigravity": ".gemini/config/skills/graphify/SKILL.md",
-        "antigravity-windows": ".gemini/config/skills/graphify/SKILL.md",
-        "windows": ".claude/skills/graphify/SKILL.md",
-        "kimi": ".kimi/skills/graphify/SKILL.md",
-        "amp": ".config/agents/skills/graphify/SKILL.md",
-    }
-    return ExpectedPath("home", mapping[platform_name])
+    skill = platform_spec(platform_name).user_skill
+    if skill is None:
+        raise RuntimeError(f"sandbox platform has no user skill path: {platform_name}")
+    return ExpectedPath("home", skill)
 
 
 def project_skill(platform_name: str) -> ExpectedPath:
-    mapping = {
-        "claude": ".claude/skills/graphify/SKILL.md",
-        "codex": ".agents/skills/graphify/SKILL.md",
-        "opencode": ".opencode/skills/graphify/SKILL.md",
-        "kilo": ".config/kilo/skills/graphify/SKILL.md",
-        "gemini": ".gemini/skills/graphify/SKILL.md",
-        "devin": ".devin/skills/graphify/SKILL.md",
-        "aider": ".aider/graphify/SKILL.md",
-        "copilot": ".copilot/skills/graphify/SKILL.md",
-        "claw": ".openclaw/skills/graphify/SKILL.md",
-        "droid": ".factory/skills/graphify/SKILL.md",
-        "trae": ".trae/skills/graphify/SKILL.md",
-        "trae-cn": ".trae-cn/skills/graphify/SKILL.md",
-        "hermes": ".hermes/skills/graphify/SKILL.md",
-        "kiro": ".kiro/skills/graphify/SKILL.md",
-        "pi": ".pi/agent/skills/graphify/SKILL.md",
-        "antigravity": ".agents/skills/graphify/SKILL.md",
-        "antigravity-windows": ".agents/skills/graphify/SKILL.md",
-        "windows": ".claude/skills/graphify/SKILL.md",
-        "kimi": ".kimi/skills/graphify/SKILL.md",
-        "amp": ".agents/skills/graphify/SKILL.md",
-    }
-    return ExpectedPath("project", mapping[platform_name])
+    skill = platform_spec(platform_name).project_skill
+    if skill is None:
+        raise RuntimeError(f"sandbox platform has no project skill path: {platform_name}")
+    return ExpectedPath("project", skill)
 
 
 def unsupported_scope_reason(platform_name: str, scope: str) -> str | None:
-    return UNSUPPORTED_SCOPES.get((platform_name, scope))
+    return platform_spec(platform_name).unsupported_scopes.get(scope)
 
 
 def direct_uninstall_command(platform_name: str) -> tuple[str, ...] | None:
-    if platform_name in {"copilot", "devin", "pi"}:
-        return ("graphify", platform_name, "uninstall")
-    return None
+    scope = platform_spec(platform_name).scopes.get("user")
+    return None if scope is None else scope.uninstall_command
 
 
 def generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
-    if scope == "project":
-        return ("graphify", "install", "--project", "--platform", platform_name)
-    return ("graphify", "install", "--platform", platform_name)
+    return _generic_install_command(platform_name, scope)
 
 
 def direct_install_command(platform_name: str, scope: str) -> tuple[str, ...] | None:
-    if scope == "user" and platform_name in DIRECT_USER_EQUIVALENT_PLATFORMS:
-        return ("graphify", platform_name, "install")
-    if scope == "project" and platform_name in DIRECT_PROJECT_EQUIVALENT_PLATFORMS:
-        if platform_name in {"cursor", "kiro"}:
-            return ("graphify", platform_name, "install")
-        return ("graphify", platform_name, "install", "--project")
+    scope_spec = platform_spec(platform_name).scopes.get(scope)
+    if scope_spec is None:
+        return None
+    generic = generic_install_command(platform_name, scope)
+    alternate = scope_spec.equivalent_install_command
+    if scope_spec.install_command != generic:
+        return scope_spec.install_command
+    if alternate is not None and alternate != generic:
+        return alternate
     return None
 
 
 def equivalent_install_command(scenario: Scenario) -> tuple[str, ...] | None:
-    if scenario.scope not in {"user", "project"}:
+    scope_spec = platform_spec(scenario.platform).scopes.get(scenario.scope)
+    if scope_spec is None or scope_spec.equivalent_install_command is None:
         return None
-    generic = generic_install_command(scenario.platform, scenario.scope)
-    direct = direct_install_command(scenario.platform, scenario.scope)
-    if direct is None:
-        return None
-    if scenario.install_command == generic:
-        return direct
-    if scenario.install_command == direct:
-        return generic
+    if scenario.install_command == scope_spec.install_command:
+        return scope_spec.equivalent_install_command
+    if scenario.install_command == scope_spec.equivalent_install_command:
+        return scope_spec.install_command
     return None
 
 
@@ -672,51 +869,6 @@ def equivalence_status(scenario: Scenario) -> dict[str, object]:
     }
 
 
-def generic_user_skill_scenario(platform_name: str, *, extra_expected: tuple[ExpectedPath, ...] = (), extra_risks: tuple[str, ...] = ()) -> Scenario:
-    uninstall = direct_uninstall_command(platform_name)
-    notes = list(extra_risks)
-    if platform_name in PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL and uninstall is None:
-        notes.append("public_cli_lacks_user_skill_uninstall")
-    return Scenario(
-        platform_name,
-        "user",
-        ("graphify", "install", "--platform", platform_name),
-        uninstall,
-        "user_cwd",
-        (user_skill(platform_name), *extra_expected),
-        risk_notes(*notes, platform_name=platform_name),
-    )
-
-
-def agents_project_scenario(platform_name: str) -> Scenario:
-    expected = [project_skill(platform_name), ExpectedPath("project", "AGENTS.md", marker=GRAPHIFY_MARKER)]
-    if platform_name == "codex":
-        expected.append(ExpectedPath("project", ".codex/hooks.json", marker="graphify"))
-    if platform_name == "opencode":
-        expected.extend((ExpectedPath("project", ".opencode/plugins/graphify.js"), ExpectedPath("project", ".opencode/opencode.json", marker="graphify")))
-    return Scenario(
-        platform_name,
-        "project",
-        ("graphify", "install", "--project", "--platform", platform_name),
-        ("graphify", "uninstall", "--project", "--platform", platform_name),
-        "project",
-        tuple(expected),
-        (),
-    )
-
-
-def skill_only_project_scenario(platform_name: str) -> Scenario:
-    return Scenario(
-        platform_name,
-        "project",
-        ("graphify", "install", "--project", "--platform", platform_name),
-        ("graphify", "uninstall", "--project", "--platform", platform_name),
-        "project",
-        (project_skill(platform_name),),
-        risk_notes(platform_name=platform_name),
-    )
-
-
 def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
     scopes = ["user", "project"] if scope == "both" else [scope]
     scenarios: list[Scenario] = []
@@ -728,209 +880,21 @@ def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
 
 
 def make_scenario(platform_name: str, scope: str) -> Scenario | None:
-    if platform_name not in ALL_PLATFORMS:
-        raise RuntimeError(f"unknown sandbox platform: {platform_name}")
-    if unsupported_scope_reason(platform_name, scope):
+    spec = platform_spec(platform_name)
+    if scope in spec.unsupported_scopes:
         return None
-
-    if scope == "user":
-        if platform_name == "claude":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--platform", "claude"),
-                None,
-                "user_cwd",
-                (user_skill("claude"), ExpectedPath("home", ".claude/CLAUDE.md", marker="# graphify", remove_on_uninstall=False)),
-                risk_notes("public_cli_lacks_user_skill_uninstall", platform_name=platform_name),
-            )
-        if platform_name == "codex":
-            return generic_user_skill_scenario("codex")
-        if platform_name == "opencode":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--platform", "opencode"),
-                None,
-                "user_cwd",
-                (
-                    user_skill("opencode"),
-                    ExpectedPath("user_cwd", ".opencode/plugins/graphify.js"),
-                    ExpectedPath("user_cwd", ".opencode/opencode.json", marker="graphify"),
-                ),
-                risk_notes("mixed_scope_project_wiring", "public_cli_lacks_user_skill_uninstall", platform_name=platform_name),
-            )
-        if platform_name == "kilo":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--platform", "kilo"),
-                ("graphify", "kilo", "uninstall"),
-                "user_cwd",
-                (user_skill("kilo"), ExpectedPath("home", ".config/kilo/command/graphify.md")),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name == "gemini":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--platform", "gemini"),
-                ("graphify", "gemini", "uninstall"),
-                "user_cwd",
-                (
-                    user_skill("gemini"),
-                    ExpectedPath("user_cwd", "GEMINI.md", marker=GRAPHIFY_MARKER),
-                    ExpectedPath("user_cwd", ".gemini/settings.json", marker="graphify"),
-                ),
-                risk_notes("mixed_scope_project_wiring", platform_name=platform_name),
-            )
-        if platform_name == "devin":
-            return generic_user_skill_scenario("devin")
-        if platform_name in {"aider", "amp", "claw", "droid", "trae", "trae-cn", "hermes", "kiro", "windows", "kimi", "antigravity-windows"}:
-            return generic_user_skill_scenario(platform_name)
-        if platform_name in {"copilot", "pi"}:
-            return generic_user_skill_scenario(platform_name)
-        if platform_name == "vscode":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "vscode", "install"),
-                ("graphify", "vscode", "uninstall"),
-                "user_cwd",
-                (user_skill("vscode"), ExpectedPath("user_cwd", ".github/copilot-instructions.md", marker=GRAPHIFY_MARKER)),
-                risk_notes("mixed_scope_project_wiring", platform_name=platform_name),
-            )
-        if platform_name == "antigravity":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "antigravity", "install"),
-                ("graphify", "antigravity", "uninstall"),
-                "user_cwd",
-                (
-                    user_skill("antigravity"),
-                    ExpectedPath("user_cwd", ".agents/rules/graphify.md", marker=GRAPHIFY_MARKER),
-                    ExpectedPath("user_cwd", ".agents/workflows/graphify.md"),
-                ),
-                risk_notes("mixed_scope_project_wiring", platform_name=platform_name),
-            )
-
-    if scope == "project":
-        if platform_name == "claude":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--project", "--platform", "claude"),
-                ("graphify", "uninstall", "--project", "--platform", "claude"),
-                "project",
-                (
-                    project_skill("claude"),
-                    ExpectedPath("project", ".claude/CLAUDE.md", marker="# graphify"),
-                    ExpectedPath("project", "CLAUDE.md", marker=GRAPHIFY_MARKER),
-                    ExpectedPath("project", ".claude/settings.json", marker="graphify"),
-                ),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name == "codex":
-            return agents_project_scenario("codex")
-        if platform_name == "opencode":
-            return agents_project_scenario("opencode")
-        if platform_name == "kilo":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "kilo", "install"),
-                ("graphify", "kilo", "uninstall"),
-                "project",
-                (
-                    user_skill("kilo"),
-                    ExpectedPath("home", ".config/kilo/command/graphify.md"),
-                    ExpectedPath("project", "AGENTS.md", marker=GRAPHIFY_MARKER),
-                    ExpectedPath("project", ".kilo/plugins/graphify.js"),
-                    ExpectedPath("project", ".kilo/kilo.json", marker="graphify"),
-                ),
-                risk_notes("mixed_scope_global_skill_plus_project_wiring", platform_name=platform_name),
-            )
-        if platform_name == "gemini":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--project", "--platform", "gemini"),
-                ("graphify", "uninstall", "--project", "--platform", "gemini"),
-                "project",
-                (
-                    project_skill("gemini"),
-                    ExpectedPath("project", "GEMINI.md", marker=GRAPHIFY_MARKER),
-                    ExpectedPath("project", ".gemini/settings.json", marker="graphify"),
-                ),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name == "cursor":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "cursor", "install"),
-                ("graphify", "cursor", "uninstall"),
-                "project",
-                (ExpectedPath("project", ".cursor/rules/graphify.mdc"),),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name == "devin":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--project", "--platform", "devin"),
-                ("graphify", "uninstall", "--project", "--platform", "devin"),
-                "project",
-                (
-                    project_skill("devin"),
-                    ExpectedPath("project", ".windsurf/rules/graphify.md"),
-                ),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name in AGENTS_MD_PLATFORMS:
-            return agents_project_scenario(platform_name)
-        if platform_name in SKILL_ONLY_PROJECT_PLATFORMS:
-            return skill_only_project_scenario(platform_name)
-        if platform_name == "windows":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "install", "--project", "--platform", "windows"),
-                ("graphify", "uninstall", "--project", "--platform", "windows"),
-                "project",
-                (
-                    project_skill("windows"),
-                    ExpectedPath("project", ".claude/CLAUDE.md", marker="# graphify"),
-                    ExpectedPath("project", "CLAUDE.md", marker=GRAPHIFY_MARKER),
-                    ExpectedPath("project", ".claude/settings.json", marker="graphify"),
-                ),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name == "kiro":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "kiro", "install"),
-                ("graphify", "kiro", "uninstall"),
-                "project",
-                (
-                    ExpectedPath("project", ".kiro/skills/graphify/SKILL.md"),
-                    ExpectedPath("project", ".kiro/steering/graphify.md", marker="graphify:"),
-                ),
-                risk_notes(platform_name=platform_name),
-            )
-        if platform_name == "vscode":
-            return Scenario(
-                platform_name,
-                scope,
-                ("graphify", "vscode", "install"),
-                ("graphify", "vscode", "uninstall"),
-                "project",
-                (user_skill("vscode"), ExpectedPath("project", ".github/copilot-instructions.md", marker=GRAPHIFY_MARKER)),
-                risk_notes("mixed_scope_global_skill_plus_project_wiring", platform_name=platform_name),
-            )
-    return None
+    scope_spec = spec.scopes.get(scope)
+    if scope_spec is None:
+        return None
+    return Scenario(
+        platform=spec.name,
+        scope=scope,
+        install_command=scope_spec.install_command,
+        uninstall_command=scope_spec.uninstall_command,
+        cwd_root=scope_spec.cwd_root,
+        expected=scope_spec.expected,
+        risk_notes=scope_spec.risk_notes,
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -940,6 +904,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     target.add_argument("--all", action="store_true")
     parser.add_argument("--scope", choices=("user", "project", "both"), default="both")
     parser.add_argument("--copy-source", choices=("always", "auto"), default="always")
+    parser.add_argument("--fail-fast-scenarios", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -959,15 +924,44 @@ def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def run_capture(command: Iterable[str], *, cwd: Path, env: dict[str, str], artifact_dir: Path | None = None) -> subprocess.CompletedProcess[str]:
+def timeout_for(command_class: str, timeout_seconds: int | None = None) -> int:
+    return timeout_seconds if timeout_seconds is not None else COMMAND_TIMEOUTS.get(command_class, COMMAND_TIMEOUTS["installer"])
+
+
+def timeout_text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return "" if value is None else str(value)
+
+
+def run_capture(
+    command: Iterable[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    artifact_dir: Path | None = None,
+    command_class: str = "installer",
+    timeout_seconds: int | None = None,
+) -> subprocess.CompletedProcess[str]:
     command_list = list(command)
+    command_text = shlex.join(command_list)
+    timeout = timeout_for(command_class, timeout_seconds)
     started_at = utc_timestamp()
     start = time.monotonic()
     if artifact_dir is not None:
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        (artifact_dir / "command.txt").write_text(" ".join(command_list) + "\n", encoding="utf-8")
+        (artifact_dir / "command.txt").write_text(command_text + "\n", encoding="utf-8")
         (artifact_dir / "env.json").write_text(json.dumps({k: env.get(k, "") for k in sorted(("HOME", "XDG_CONFIG_HOME", "PATH", "GRAPHIFY_PROJECT"))}, indent=2) + "\n", encoding="utf-8")
-    result = subprocess.run(command_list, cwd=cwd, env=env, text=True, capture_output=True)
+    timed_out = False
+    try:
+        result = subprocess.run(command_list, cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        result = subprocess.CompletedProcess(command_list, 127, "", str(exc))
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        result = subprocess.CompletedProcess(command_list, 124, timeout_text(exc.stdout), timeout_text(exc.stderr) or f"timed out after {timeout} seconds")
     duration_ms = int((time.monotonic() - start) * 1000)
     if artifact_dir is not None:
         (artifact_dir / "stdout.txt").write_text(result.stdout, encoding="utf-8")
@@ -977,10 +971,14 @@ def run_capture(command: Iterable[str], *, cwd: Path, env: dict[str, str], artif
             json.dumps(
                 {
                     "command": command_list,
+                    "command_display": command_text,
+                    "command_class": command_class,
                     "cwd": str(cwd),
                     "started_at": started_at,
                     "duration_ms": duration_ms,
                     "exit_code": result.returncode,
+                    "timeout_seconds": timeout,
+                    "timed_out": timed_out,
                 },
                 indent=2,
                 sort_keys=True,
@@ -989,30 +987,64 @@ def run_capture(command: Iterable[str], *, cwd: Path, env: dict[str, str], artif
             encoding="utf-8",
         )
         (artifact_dir / "transcript.txt").write_text(
-            f"$ {' '.join(command_list)}\n[started-at]\n{started_at}\n[duration-ms]\n{duration_ms}\n\n[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}\n[exit-code]\n{result.returncode}\n",
+            f"$ {command_text}\n[command-class]\n{command_class}\n[timeout-seconds]\n{timeout}\n[started-at]\n{started_at}\n[duration-ms]\n{duration_ms}\n[timed-out]\n{str(timed_out).lower()}\n\n[stdout]\n{result.stdout}\n[stderr]\n{result.stderr}\n[exit-code]\n{result.returncode}\n",
             encoding="utf-8",
         )
     result.started_at = started_at  # type: ignore[attr-defined]
     result.duration_ms = duration_ms  # type: ignore[attr-defined]
+    result.timed_out = timed_out  # type: ignore[attr-defined]
+    result.timeout_seconds = timeout  # type: ignore[attr-defined]
+    result.command_class = command_class  # type: ignore[attr-defined]
     return result
 
 
-def list_files(base: Path) -> list[dict[str, object]]:
+def pruned_file_walk(base: Path) -> Iterable[Path]:
+    if not base.exists():
+        return
+    for root, dirs, files in os.walk(base):
+        root_path_obj = Path(root)
+        dirs[:] = sorted(d for d in dirs if d not in MANIFEST_PRUNE_DIRS)
+        for name in sorted(files):
+            yield root_path_obj / name
+
+
+def expected_manifest_relatives(scenario: Scenario, root_name: str) -> set[Path]:
+    relatives: set[Path] = set()
+    for entry in scenario.expected:
+        if entry.root != root_name:
+            continue
+        relative = Path(entry.relative)
+        relatives.add(relative)
+        if is_skill_expected(entry):
+            skill_dir = relative.parent
+            relatives.add(skill_dir / ".graphify_version")
+            relatives.add(skill_dir / "references.tmp")
+            expected_names = packaged_reference_names(scenario.platform) or []
+            for name in expected_names:
+                relatives.add(skill_dir / "references" / name)
+    return relatives
+
+
+def list_files(base: Path, *, scenario: Scenario | None = None, root_name: str | None = None) -> list[dict[str, object]]:
     if not base.exists():
         return []
     files: list[dict[str, object]] = []
-    for path in sorted(p for p in base.rglob("*") if p.is_file()):
+    expected_relatives = expected_manifest_relatives(scenario, root_name) if scenario is not None and root_name is not None else None
+    for path in pruned_file_walk(base):
         try:
             rel = path.relative_to(base).as_posix()
             stat = path.stat()
         except OSError:
             continue
+        relative = Path(rel)
+        if expected_relatives is not None and relative not in expected_relatives and not is_relevant_generated_file(scenario, root_name or "", relative, path):
+            continue
         files.append({"path": rel, "size": stat.st_size})
     return files
 
 
-def write_file_manifest(path: Path, roots: dict[str, Path]) -> None:
-    data = {name: list_files(root) for name, root in roots.items()}
+def write_file_manifest(path: Path, roots: dict[str, Path], *, scenario: Scenario | None = None, debug_full: bool = False) -> None:
+    data = {name: list_files(root, scenario=None if debug_full else scenario, root_name=name) for name, root in roots.items()}
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -1051,14 +1083,16 @@ def copy_source_ignore(directory: str, names: list[str]) -> set[str]:
 
 def source_manifest(src: Path) -> dict[str, object]:
     files: list[dict[str, object]] = []
-    for path in sorted(p for p in src.rglob("*") if p.is_file()):
+    file_count = 0
+    for path in pruned_file_walk(src):
+        file_count += 1
         rel = path.relative_to(src).as_posix()
         if len(files) < 5000:
             entry = {"path": rel, "size": path.stat().st_size}
             if rel in ("pyproject.toml", "graphify/__main__.py"):
                 entry["sha256"] = sha256(path)
             files.append(entry)
-    return {"root": str(src), "file_count": sum(1 for _ in src.rglob("*") if _.is_file()), "files_sample": files, "excluded_patterns": list(COPY_EXCLUDES)}
+    return {"root": str(src), "file_count": file_count, "files_sample": files, "excluded_patterns": list(COPY_EXCLUDES)}
 
 
 def probe_read_only(path: Path) -> bool:
@@ -1075,11 +1109,47 @@ def probe_read_only(path: Path) -> bool:
         return False
 
 
-def copy_source_tree() -> dict[str, object]:
+def copy_tracked_source_tree() -> dict[str, object] | None:
+    result = subprocess.run(["git", "-C", str(REPO_MOUNT), "ls-files", "-z"], text=False, capture_output=True)
+    if result.returncode != 0:
+        return None
+    SRC.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", errors="surrogateescape")
+        if should_exclude_source_path(rel):
+            continue
+        src_path = REPO_MOUNT / rel
+        dst_path = SRC / rel
+        if src_path.is_symlink():
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            dst_path.symlink_to(os.readlink(src_path))
+            copied += 1
+        elif src_path.is_file():
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_path, dst_path)
+            copied += 1
+    manifest = source_manifest(SRC)
+    manifest["copy_source_mode"] = "auto"
+    manifest["snapshot_strategy"] = "git_tracked_files"
+    manifest["copied_tracked_file_count"] = copied
+    return manifest
+
+
+def copy_source_tree(copy_source: str = "always") -> dict[str, object]:
     if SRC.exists():
         shutil.rmtree(SRC)
+    if copy_source == "auto":
+        tracked = copy_tracked_source_tree()
+        if tracked is not None:
+            return tracked
     shutil.copytree(REPO_MOUNT, SRC, symlinks=True, ignore=copy_source_ignore)
-    return source_manifest(SRC)
+    manifest = source_manifest(SRC)
+    manifest["copy_source_mode"] = copy_source
+    manifest["snapshot_strategy"] = "copytree_with_exclusions"
+    return manifest
 
 
 def package_search_paths() -> list[Path]:
@@ -1176,147 +1246,16 @@ def command_probe_summary(result: subprocess.CompletedProcess[str], command: tup
         "exit_code": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
+        "timed_out": bool(getattr(result, "timed_out", False)),
     }
 
 
-def known_runtime_status_values() -> list[str]:
-    return [RISK_GRAPHIFY_VERIFIED, RISK_RUNTIME_VERIFIED, RISK_RUNTIME_UNVERIFIED, RISK_TOOL_UNAVAILABLE]
+def known_status_values() -> list[str]:
+    return [RISK_GRAPHIFY_VERIFIED, RISK_GRAPHIFY_FAILED]
 
 
-def target_tool_probe_for_platform(platform_name: str) -> TargetToolProbe:
-    try:
-        return TOOL_PROBES[platform_name]
-    except KeyError as exc:
-        raise RuntimeError(f"missing target runtime probe for platform: {platform_name}") from exc
-
-
-def command_display(command: tuple[str, ...] | None) -> str:
-    return "not attempted" if command is None else " ".join(command)
-
-
-def run_tool_command(command: tuple[str, ...], *, cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
-    started_at = utc_timestamp()
-    start = time.monotonic()
-    try:
-        result = subprocess.run(list(command), cwd=cwd, env=env, text=True, capture_output=True, timeout=timeout_seconds)
-        duration_ms = int((time.monotonic() - start) * 1000)
-        return {"command": list(command), "exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr, "timed_out": False, "started_at": started_at, "duration_ms": duration_ms}
-    except FileNotFoundError as exc:
-        duration_ms = int((time.monotonic() - start) * 1000)
-        return {"command": list(command), "exit_code": 127, "stdout": "", "stderr": str(exc), "timed_out": False, "started_at": started_at, "duration_ms": duration_ms}
-    except subprocess.TimeoutExpired as exc:
-        duration_ms = int((time.monotonic() - start) * 1000)
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-        return {"command": list(command), "exit_code": 124, "stdout": stdout, "stderr": stderr, "timed_out": True, "started_at": started_at, "duration_ms": duration_ms}
-
-
-def no_tool_command_status(probe: TargetToolProbe, artifact_dir: Path, artifact_root: Path) -> dict[str, object]:
-    reason = probe.unavailable_reason or "no install or discovery command is defined for this target runtime"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "install.command.txt").write_text(f"not attempted: {reason}\n", encoding="utf-8")
-    (artifact_dir / "stdout.txt").write_text("", encoding="utf-8")
-    (artifact_dir / "stderr.txt").write_text(reason + "\n", encoding="utf-8")
-    (artifact_dir / "version.txt").write_text("not verified\n", encoding="utf-8")
-    status = {
-        "tool": probe.tool,
-        "status": RISK_TOOL_UNAVAILABLE,
-        "target_tool_runtime_verified": False,
-        "credentials_required": probe.credentials_required,
-        "docker_headless_expected": probe.docker_headless_expected,
-        "command_kind": probe.command_kind,
-        "command": None,
-        "version_command": None,
-        "install_exit_code": None,
-        "version_exit_code": None,
-        "unavailable_reason": reason,
-        "docs_checked": list(probe.docs_checked),
-        "evidence_path": artifact_dir.relative_to(artifact_root).as_posix(),
-    }
-    (artifact_dir / "status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return status
-
-
-def run_target_tool_probe(probe: TargetToolProbe, env: dict[str, str], *, artifact_root: Path = OUTPUT) -> dict[str, object]:
-    artifact_dir = artifact_root / "tool-install" / probe.tool
-    if artifact_dir.exists():
-        shutil.rmtree(artifact_dir)
-    if probe.command is None:
-        return no_tool_command_status(probe, artifact_dir, artifact_root)
-
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "install.command.txt").write_text(command_display(probe.command) + "\n", encoding="utf-8")
-    install_result = run_tool_command(probe.command, cwd=Path("/tmp"), env=env, timeout_seconds=probe.timeout_seconds)
-    (artifact_dir / "stdout.txt").write_text(str(install_result["stdout"]), encoding="utf-8")
-    (artifact_dir / "stderr.txt").write_text(str(install_result["stderr"]), encoding="utf-8")
-
-    version_result: dict[str, object] | None = None
-    if install_result["exit_code"] == 0 and probe.version_command is not None:
-        version_result = run_tool_command(probe.version_command, cwd=Path("/tmp"), env=env, timeout_seconds=probe.timeout_seconds)
-        version_text = (
-            f"$ {command_display(probe.version_command)}\n\n"
-            f"[stdout]\n{version_result['stdout']}\n"
-            f"[stderr]\n{version_result['stderr']}\n"
-            f"[exit-code]\n{version_result['exit_code']}\n"
-        )
-    elif install_result["exit_code"] == 0:
-        version_text = "version command not defined\n"
-    else:
-        version_text = "version command not run because discovery/install command failed\n"
-    (artifact_dir / "version.txt").write_text(version_text, encoding="utf-8")
-
-    verified = install_result["exit_code"] == 0 and (probe.version_command is None or (version_result is not None and version_result["exit_code"] == 0))
-    unavailable_reason = None if verified else probe.unavailable_reason or "target runtime command unavailable or version probe failed in Docker"
-    status = {
-        "tool": probe.tool,
-        "status": RISK_RUNTIME_VERIFIED if verified else RISK_TOOL_UNAVAILABLE,
-        "target_tool_runtime_verified": verified,
-        "credentials_required": probe.credentials_required,
-        "docker_headless_expected": probe.docker_headless_expected,
-        "command_kind": probe.command_kind,
-        "command": list(probe.command),
-        "version_command": None if probe.version_command is None else list(probe.version_command),
-        "install_exit_code": install_result["exit_code"],
-        "version_exit_code": None if version_result is None else version_result["exit_code"],
-        "install_started_at": install_result.get("started_at"),
-        "install_duration_ms": install_result.get("duration_ms"),
-        "version_started_at": None if version_result is None else version_result.get("started_at"),
-        "version_duration_ms": None if version_result is None else version_result.get("duration_ms"),
-        "timed_out": bool(install_result.get("timed_out")) or bool(version_result and version_result.get("timed_out")),
-        "unavailable_reason": unavailable_reason,
-        "docs_checked": list(probe.docs_checked),
-        "evidence_path": artifact_dir.relative_to(artifact_root).as_posix(),
-    }
-    (artifact_dir / "status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return status
-
-
-def run_target_tool_probes(platforms: list[str], env: dict[str, str]) -> dict[str, dict[str, object]]:
-    statuses: dict[str, dict[str, object]] = {}
-    for platform_name in platforms:
-        statuses[platform_name] = run_target_tool_probe(target_tool_probe_for_platform(platform_name), env)
-    return statuses
-
-
-def runtime_status_summary(statuses: dict[str, dict[str, object]]) -> dict[str, int]:
-    summary = {RISK_RUNTIME_VERIFIED: 0, RISK_TOOL_UNAVAILABLE: 0, RISK_RUNTIME_UNVERIFIED: 0}
-    for status in statuses.values():
-        value = status.get("status")
-        if value in summary:
-            summary[str(value)] += 1
-        else:
-            summary[RISK_RUNTIME_UNVERIFIED] += 1
-    return summary
-
-
-def combined_status(graphify_passed: bool, runtime_status: str | None) -> str:
-    if not graphify_passed:
-        return "graphify_install_failed"
-    if runtime_status == RISK_RUNTIME_VERIFIED:
-        return "graphify_install_verified_and_target_runtime_verified"
-    if runtime_status == RISK_TOOL_UNAVAILABLE:
-        return "graphify_install_verified_but_target_runtime_unavailable"
-    return "graphify_install_verified_but_target_runtime_unverified"
+def combined_status(graphify_passed: bool) -> str:
+    return RISK_GRAPHIFY_VERIFIED if graphify_passed else RISK_GRAPHIFY_FAILED
 
 
 def artifact_relpath(path: Path, root: Path = OUTPUT) -> str:
@@ -1351,15 +1290,15 @@ def text_snippet(path: Path, limit: int = 500) -> str:
 def command_artifact_summary(artifact_dir: Path) -> dict[str, object]:
     result = read_json_object(artifact_dir / "command-result.json")
     command = result.get("command")
-    if isinstance(command, list):
-        command_text = " ".join(str(part) for part in command)
-    else:
-        command_text = text_snippet(artifact_dir / "command.txt", 1000)
+    command_text = str(result.get("command_display") or (shlex.join([str(part) for part in command]) if isinstance(command, list) else text_snippet(artifact_dir / "command.txt", 1000)))
     return {
         "command": command_text,
+        "command_class": result.get("command_class"),
         "started_at": result.get("started_at"),
         "duration_ms": result.get("duration_ms"),
         "exit_code": result.get("exit_code"),
+        "timeout_seconds": result.get("timeout_seconds"),
+        "timed_out": result.get("timed_out"),
         "transcript_path": artifact_relpath(artifact_dir / "transcript.txt"),
         "stdout_snippet": text_snippet(artifact_dir / "stdout.txt"),
         "stderr_snippet": text_snippet(artifact_dir / "stderr.txt"),
@@ -1388,8 +1327,6 @@ def render_report_md(manifest: dict[str, object]) -> str:
     package = manifest.get("package_install") if isinstance(manifest.get("package_install"), dict) else {}
     preflight_data = manifest.get("preflight") if isinstance(manifest.get("preflight"), dict) else {}
     os_release = manifest.get("os_release") if isinstance(manifest.get("os_release"), dict) else {}
-    runtime = manifest.get("target_tool_runtime") if isinstance(manifest.get("target_tool_runtime"), dict) else {}
-    runtime_statuses = runtime.get("statuses") if isinstance(runtime.get("statuses"), dict) else {}
     results = manifest.get("results") if isinstance(manifest.get("results"), list) else []
     coverage = manifest.get("platform_coverage") if isinstance(manifest.get("platform_coverage"), list) else []
 
@@ -1399,10 +1336,9 @@ def render_report_md(manifest: dict[str, object]) -> str:
             "## Summary",
             "",
             f"- Graphify file effects: {manifest.get('graphify_file_effect_pass_count', manifest.get('pass_count', 0))} passed, {manifest.get('graphify_file_effect_fail_count', manifest.get('fail_count', 0))} failed.",
-            f"- Target runtimes: {manifest.get('target_tool_runtime_verified_scenario_count', 0)} verified, {manifest.get('target_tool_runtime_unavailable_scenario_count', 0)} unavailable, {manifest.get('target_tool_runtime_unverified_scenario_count', 0)} unverified.",
-            *([f"- Target runtime probes skipped: {md_cell(runtime.get('skip_reason') or 'Graphify checks failed')}."] if runtime.get("skipped") else []),
+            "- Target runtime verification: not performed by this Tier 1 file-effect sandbox.",
             f"- Scenario count: {manifest.get('scenario_count', len(results))}.",
-            f"- Artifacts: {md_code('manifest.json')}, {md_code('preflight.json')}, {md_code('package-install/')}, {md_code('tool-install/')}, {md_code('scenarios/')}.",
+            f"- Artifacts: {md_code('manifest.json')}, {md_code('preflight.json')}, {md_code('package-install/')}, {md_code('scenarios/')}.",
             "",
             "## Environment",
             "",
@@ -1423,9 +1359,9 @@ def render_report_md(manifest: dict[str, object]) -> str:
             "",
         ]
     )
-    for status in manifest.get("risk_status_values", known_runtime_status_values()):
+    for status in manifest.get("risk_status_values", known_status_values()):
         lines.append(f"- {md_code(status)}")
-    lines.extend(["", "## Scenario Status", "", "| Platform | Scope | Scenario | Graphify Install | Target Runtime | Overall Status | Duration | Transcript |", "|---|---|---|---|---|---|---:|---|"])
+    lines.extend(["", "## Scenario Status", "", "| Platform | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |", "|---|---|---|---|---|---:|---|"])
     for item in results:
         if not isinstance(item, dict):
             continue
@@ -1441,7 +1377,6 @@ def render_report_md(manifest: dict[str, object]) -> str:
                     md_cell(item.get("scope")),
                     md_cell(item.get("id")),
                     md_cell(graphify_status),
-                    md_cell(item.get("target_tool_runtime_status", RISK_RUNTIME_UNVERIFIED)),
                     md_cell(status_label(item)),
                     md_cell(f"{duration} ms" if duration is not None else ""),
                     md_cell(transcript),
@@ -1450,13 +1385,12 @@ def render_report_md(manifest: dict[str, object]) -> str:
             + " |"
         )
 
-    lines.extend(["", "## Platform Coverage", "", "| Platform | Scope | Coverage | Install Command | Runtime Status | Runtime Evidence |", "|---|---|---|---|---|---|"])
+    lines.extend(["", "## Platform Coverage", "", "| Platform | Scope | Coverage | Graphify Installer Command |", "|---|---|---|---|"])
     for record in coverage:
         if not isinstance(record, dict):
             continue
-        probe = record.get("target_tool_runtime_probe") if isinstance(record.get("target_tool_runtime_probe"), dict) else {}
         command = record.get("install_command")
-        command_text = " ".join(str(part) for part in command) if isinstance(command, list) else record.get("reason", "")
+        command_text = shlex.join([str(part) for part in command]) if isinstance(command, list) else record.get("reason", "")
         lines.append(
             "| "
             + " | ".join(
@@ -1465,24 +1399,12 @@ def render_report_md(manifest: dict[str, object]) -> str:
                     md_cell(record.get("scope")),
                     md_cell(record.get("status")),
                     md_cell(command_text),
-                    md_cell(probe.get("status")),
-                    md_cell(probe.get("evidence_path")),
                 ]
             )
             + " |"
         )
 
-    lines.extend(["", "## Runtime Risks", ""])
-    risk_rows: list[str] = []
-    for platform_name, status in runtime_statuses.items():
-        if not isinstance(status, dict):
-            continue
-        runtime_status = status.get("status")
-        if runtime_status == RISK_RUNTIME_VERIFIED:
-            continue
-        reason = status.get("unavailable_reason") or "runtime was not verified"
-        risk_rows.append(f"- {md_code(platform_name)}: {md_code(runtime_status)}; evidence {md_code(status.get('evidence_path'))}; {reason}")
-    lines.extend(risk_rows or ["- None."])
+    lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 
     windows_validation = manifest.get("windows_validation") if isinstance(manifest.get("windows_validation"), dict) else default_windows_validation_status()
     lines.extend(
@@ -1550,13 +1472,13 @@ def write_report_md(path: Path, manifest: dict[str, object]) -> None:
 
 def default_windows_validation_status() -> dict[str, object]:
     return {
-        "status": "risk",
+        "status": "payload_consistency_only",
         "evidence_path": None,
-        "strategy": "separate Windows host/CI validation path; Linux Docker only simulates file layout for Windows platforms",
+        "strategy": "Linux Docker validates Windows-named payload consistency only; real Windows runtime/path semantics require separate Windows validation",
         "targets": list(WINDOWS_VALIDATION_TARGETS),
         "notes": [
-            "Linux sandbox results for windows and antigravity-windows are Graphify-owned file-layout checks only.",
-            "No local Windows validation path is configured; real Windows path, payload, and cleanup behavior remain residual risk.",
+            "Linux sandbox results for windows and antigravity-windows check packaged payloads, references, and generated file consistency only.",
+            "This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, permissions, or target-app discovery.",
         ],
     }
 
@@ -1572,13 +1494,15 @@ def version_from_probe(probe: dict[str, object]) -> str | None:
 def install_graphify(env: dict[str, str]) -> dict[str, object]:
     artifact_dir = OUTPUT / "package-install"
     install_command = (sys.executable, "-m", "pip", "install", "--user", str(SRC))
-    result = run_capture(install_command, cwd=Path("/tmp"), env=env, artifact_dir=artifact_dir)
+    result = run_capture(install_command, cwd=Path("/tmp"), env=env, artifact_dir=artifact_dir, command_class="package_install")
     if result.returncode != 0:
         raise RuntimeError("pip install failed; see package-install artifacts")
 
     metadata = read_installed_package_metadata(PACKAGE_NAME, SRC)
     version_command = ("graphify", "--version")
-    probe_result = run_capture(version_command, cwd=Path("/tmp"), env=env, artifact_dir=artifact_dir / "graphify-version")
+    probe_result = run_capture(version_command, cwd=Path("/tmp"), env=env, artifact_dir=artifact_dir / "graphify-version", command_class="graphify_version")
+    if probe_result.returncode != 0:
+        raise RuntimeError("graphify version probe failed; see package-install/graphify-version artifacts")
     probe = command_probe_summary(probe_result, version_command)
     metadata["version"] = metadata.get("version") or version_from_probe(probe)
     metadata["install_mode"] = INSTALL_MODE
@@ -1682,6 +1606,64 @@ def assert_uninstalled(scenario: Scenario) -> list[dict[str, object]]:
             ok = not path.exists()
             detail = "removed" if ok else "still_exists"
         checks.append({"path": str(path), "root": entry.root, "relative": entry.relative, "ok": ok, "detail": detail})
+        if is_skill_expected(entry):
+            skill_dir = skill_dir_for_entry(entry)
+            relative_dir = skill_relative_dir(entry)
+            for sidecar in (".graphify_version", "references", "references.tmp"):
+                sidecar_path = skill_dir / sidecar
+                sidecar_ok = not sidecar_path.exists()
+                checks.append(
+                    {
+                        "path": str(sidecar_path),
+                        "root": entry.root,
+                        "relative": (relative_dir / sidecar).as_posix(),
+                        "ok": sidecar_ok,
+                        "detail": "removed" if sidecar_ok else "sidecar_still_exists",
+                    }
+                )
+    return checks
+
+
+def expected_generated_relative_keys(scenario: Scenario) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for entry in scenario.expected:
+        keys.add((entry.root, entry.relative))
+        if is_skill_expected(entry):
+            relative_dir = skill_relative_dir(entry)
+            keys.add((entry.root, (relative_dir / ".graphify_version").as_posix()))
+            keys.add((entry.root, (relative_dir / "references").as_posix()))
+            keys.add((entry.root, (relative_dir / "references.tmp").as_posix()))
+            for name in packaged_reference_names(scenario.platform) or []:
+                keys.add((entry.root, (relative_dir / "references" / name).as_posix()))
+    return keys
+
+
+def assert_no_unexpected_graphify_files(scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
+    expected = expected_generated_relative_keys(scenario)
+    checks: list[dict[str, object]] = []
+    for root_name, root in ROOTS.items():
+        if not root.exists():
+            continue
+        for path in pruned_file_walk(root):
+            relative = path.relative_to(root)
+            rel = relative.as_posix()
+            if should_exclude_generated_path(relative):
+                continue
+            if (root_name, rel) in expected:
+                continue
+            if not is_relevant_generated_file(scenario, root_name, relative, path):
+                continue
+            checks.append(
+                {
+                    "path": str(path),
+                    "root": root_name,
+                    "relative": rel,
+                    "ok": False,
+                    "detail": f"unexpected_graphify_related_file_after_{phase}",
+                }
+            )
+    if not checks:
+        checks.append({"path": "unexpected-graphify-files", "ok": True, "detail": f"none_after_{phase}"})
     return checks
 
 
@@ -1777,7 +1759,11 @@ def is_relevant_generated_file(scenario: Scenario, root_name: str, relative: Pat
         return True
     if "graphify" in rel.lower():
         return True
-    if path.stat().st_size > 1024 * 1024:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    if size > 1024 * 1024:
         return False
     text_suffixes = {".json", ".js", ".md", ".mdc", ".txt", ""}
     if path.suffix not in text_suffixes:
@@ -1797,14 +1783,13 @@ def copy_generated_files(scenario: Scenario, artifact_dir: Path) -> None:
         if not root.exists():
             continue
         target = out / root_name
-        for path in root.rglob("*"):
-            if path.is_file():
-                rel = path.relative_to(root)
-                if should_exclude_generated_path(rel) or not is_relevant_generated_file(scenario, root_name, rel, path):
-                    continue
-                dest = target / rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, dest)
+        for path in pruned_file_walk(root):
+            rel = path.relative_to(root)
+            if should_exclude_generated_path(rel) or not is_relevant_generated_file(scenario, root_name, rel, path):
+                continue
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dest)
 
 
 def command_style(command: tuple[str, ...], platform_name: str) -> str:
@@ -1819,12 +1804,12 @@ def run_install_variant(scenario: Scenario, command: tuple[str, ...], env: dict[
     reset_sandbox_dirs()
     artifact_dir.mkdir(parents=True, exist_ok=True)
     seed_user_owned_content(scenario)
-    write_file_manifest(artifact_dir / "before-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "before-install-files.json", ROOTS, scenario=scenario)
     cwd = root_path(scenario.cwd_root)
-    result = run_capture(command, cwd=cwd, env=env, artifact_dir=artifact_dir)
-    checks = assert_expected_files(scenario) + assert_scope_boundaries(scenario)
+    result = run_capture(command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class="installer")
+    checks = assert_expected_files(scenario) + assert_scope_boundaries(scenario) + assert_no_unexpected_graphify_files(scenario, phase="install")
     state = scenario_file_state(scenario)
-    write_file_manifest(artifact_dir / "after-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "after-install-files.json", ROOTS, scenario=scenario)
     return {
         "command": list(command),
         "exit_code": result.returncode,
@@ -1865,34 +1850,16 @@ def run_equivalence_check(scenario: Scenario, env: dict[str, str], artifact_dir:
     ]
 
 
-def risk_report(scenario: Scenario, passed: bool, target_tool_status: dict[str, object] | None = None) -> dict[str, object]:
-    runtime_status = RISK_RUNTIME_UNVERIFIED
-    runtime_verified = False
-    runtime_notes: list[str] = []
-    if target_tool_status is not None:
-        raw_status = target_tool_status.get("status")
-        if raw_status in {RISK_RUNTIME_VERIFIED, RISK_TOOL_UNAVAILABLE, RISK_RUNTIME_UNVERIFIED}:
-            runtime_status = str(raw_status)
-        runtime_verified = runtime_status == RISK_RUNTIME_VERIFIED
-        evidence_path = target_tool_status.get("evidence_path")
-        if isinstance(evidence_path, str):
-            runtime_notes.append(f"target_runtime_evidence={evidence_path}")
-        unavailable_reason = target_tool_status.get("unavailable_reason")
-        if isinstance(unavailable_reason, str) and unavailable_reason:
-            runtime_notes.append(unavailable_reason)
-    runtime_risk = RISK_RUNTIME_VERIFIED if runtime_verified else runtime_status
-    statuses = [RISK_GRAPHIFY_VERIFIED if passed else "graphify_install_failed", runtime_risk]
+def risk_report(scenario: Scenario, passed: bool) -> dict[str, object]:
+    statuses = [RISK_GRAPHIFY_VERIFIED if passed else RISK_GRAPHIFY_FAILED]
     return {
         "statuses": statuses,
-        "target_tool_runtime_verified": runtime_verified,
-        "tool_runtime_status": runtime_status,
-        "target_tool_runtime": target_tool_status,
-        "notes": list(scenario.risk_notes) + runtime_notes,
-        "known_status_values": known_runtime_status_values(),
+        "notes": list(scenario.risk_notes),
+        "known_status_values": known_status_values(),
     }
 
 
-def run_scenario(scenario: Scenario, env: dict[str, str], target_tool_statuses: dict[str, dict[str, object]]) -> dict[str, object]:
+def run_scenario(scenario: Scenario, env: dict[str, str]) -> dict[str, object]:
     scenario_started_at = utc_timestamp()
     scenario_start = time.monotonic()
     reset_sandbox_dirs()
@@ -1901,15 +1868,19 @@ def run_scenario(scenario: Scenario, env: dict[str, str], target_tool_statuses: 
         shutil.rmtree(artifact_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     seed_user_owned_content(scenario)
-    write_file_manifest(artifact_dir / "before-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "before-install-files.json", ROOTS, scenario=scenario)
 
     cwd = root_path(scenario.cwd_root)
-    install_1 = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir)
+    install_1 = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class="installer")
     state_after_install = scenario_file_state(scenario)
     install_checks = assert_expected_files(scenario)
     scope_checks = assert_scope_boundaries(scenario)
+    unexpected_install_checks = assert_no_unexpected_graphify_files(scenario, phase="install")
+    write_file_manifest(artifact_dir / "after-install-files.json", ROOTS, scenario=scenario)
+    copy_generated_files(scenario, artifact_dir)
     idempotency_checks: list[dict[str, object]] = []
     uninstall_checks: list[dict[str, object]] = []
+    unexpected_uninstall_checks: list[dict[str, object]] = []
     equivalence_checks: list[dict[str, object]] = []
     stale_sidecar_repair_seeded: list[dict[str, object]] = []
     stale_sidecar_repair_checks: list[dict[str, object]] = []
@@ -1919,21 +1890,25 @@ def run_scenario(scenario: Scenario, env: dict[str, str], target_tool_statuses: 
     state_after_repeat: dict[str, dict[str, object]] = {}
 
     if install_1.returncode == 0:
-        install_2 = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "repeat-install")
+        install_2 = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "repeat-install", command_class="installer")
         state_after_repeat = scenario_file_state(scenario)
         idempotency_checks = assert_idempotent_state(state_after_install, state_after_repeat)
+        idempotency_checks.extend(assert_no_unexpected_graphify_files(scenario, phase="repeat_install"))
+        write_file_manifest(artifact_dir / "after-repeat-install-files.json", ROOTS, scenario=scenario)
         if install_2.returncode == 0:
             stale_sidecar_repair_seeded = seed_stale_skill_sidecars(scenario)
             if stale_sidecar_repair_seeded:
-                stale_sidecar_repair_result = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "stale-sidecar-repair")
+                stale_sidecar_repair_result = run_capture(scenario.install_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "stale-sidecar-repair", command_class="installer")
                 if stale_sidecar_repair_result.returncode == 0:
                     stale_sidecar_repair_checks = assert_installed_skill_sidecars(scenario)
+                    stale_sidecar_repair_checks.extend(assert_no_unexpected_graphify_files(scenario, phase="stale_sidecar_repair"))
+                write_file_manifest(artifact_dir / "after-stale-sidecar-repair-files.json", ROOTS, scenario=scenario)
         if scenario.uninstall_command:
-            uninstall_result = run_capture(scenario.uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall")
+            uninstall_result = run_capture(scenario.uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall", command_class="installer")
             uninstall_checks = assert_uninstalled(scenario)
+            unexpected_uninstall_checks = assert_no_unexpected_graphify_files(scenario, phase="uninstall")
+            write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS, scenario=scenario)
         equivalence_checks = run_equivalence_check(scenario, env, artifact_dir)
-    write_file_manifest(artifact_dir / "after-files.json", ROOTS)
-    copy_generated_files(scenario, artifact_dir)
 
     command_ok = (
         install_1.returncode == 0
@@ -1942,9 +1917,8 @@ def run_scenario(scenario: Scenario, env: dict[str, str], target_tool_statuses: 
         and (stale_sidecar_repair_result is None or stale_sidecar_repair_result.returncode == 0)
         and (uninstall_result is None or uninstall_result.returncode == 0)
     )
-    checks = install_checks + scope_checks + idempotency_checks + stale_sidecar_repair_checks + uninstall_checks + equivalence_checks
+    checks = install_checks + scope_checks + unexpected_install_checks + idempotency_checks + stale_sidecar_repair_checks + uninstall_checks + unexpected_uninstall_checks + equivalence_checks
     passed = command_ok and all(check["ok"] for check in checks)
-    target_tool_status = target_tool_statuses.get(scenario.platform)
     assertions = {
         "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": scenario_id(scenario.platform, scenario.scope)},
         "passed": passed,
@@ -1954,13 +1928,12 @@ def run_scenario(scenario: Scenario, env: dict[str, str], target_tool_statuses: 
         "stale_sidecar_repair_seeded": stale_sidecar_repair_seeded,
         "stale_sidecar_repair_checks": stale_sidecar_repair_checks,
         "uninstall_exit_code": None if uninstall_result is None else uninstall_result.returncode,
-        "target_tool_runtime_status": target_tool_status,
         "state_after_install": state_after_install,
         "state_after_repeat_install": state_after_repeat,
         "generic_direct_equivalence": equivalence_status(scenario),
         "checks": checks,
     }
-    risks = risk_report(scenario, passed, target_tool_status)
+    risks = risk_report(scenario, passed)
     (artifact_dir / "assertions.json").write_text(json.dumps(assertions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (artifact_dir / "risk.json").write_text(json.dumps(risks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     duration_ms = int((time.monotonic() - scenario_start) * 1000)
@@ -1970,14 +1943,12 @@ def run_scenario(scenario: Scenario, env: dict[str, str], target_tool_statuses: 
         "scope": scenario.scope,
         "started_at": scenario_started_at,
         "duration_ms": duration_ms,
-        "reproduction_command": " ".join(scenario.install_command),
+        "reproduction_command": shlex.join(scenario.install_command),
         "command_artifact": command_artifact_summary(artifact_dir),
-        "overall_status": combined_status(passed, str(risks["tool_runtime_status"])),
+        "overall_status": combined_status(passed),
         "graphify_file_effects_passed": passed,
         "passed": passed,
         "risks": risks["statuses"],
-        "target_tool_runtime_status": risks["tool_runtime_status"],
-        "target_tool_runtime_verified": risks["target_tool_runtime_verified"],
     }
 
 
@@ -1993,12 +1964,12 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
 
     for scenario in scenarios:
         seed_user_owned_content(scenario)
-    write_file_manifest(artifact_dir / "before-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "before-install-files.json", ROOTS)
 
     install_results = []
     for scenario in scenarios:
         install_dir = artifact_dir / "installs" / scenario_id(scenario.platform, scenario.scope)
-        result = run_capture(scenario.install_command, cwd=root_path(scenario.cwd_root), env=env, artifact_dir=install_dir)
+        result = run_capture(scenario.install_command, cwd=root_path(scenario.cwd_root), env=env, artifact_dir=install_dir, command_class="installer")
         install_results.append({"scenario_id": scenario_id(scenario.platform, scenario.scope), "command": list(scenario.install_command), "exit_code": result.returncode})
 
     if scope == "project":
@@ -2007,9 +1978,9 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
     else:
         uninstall_command = ("graphify", "uninstall")
         cwd = USER_CWD
-    uninstall_result = run_capture(uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall")
+    uninstall_result = run_capture(uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall", command_class="installer")
     checks = [check for scenario in scenarios for check in assert_uninstalled(scenario)]
-    write_file_manifest(artifact_dir / "after-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS)
     passed = all(result["exit_code"] == 0 for result in install_results) and uninstall_result.returncode == 0 and all(check["ok"] for check in checks)
     assertions = {
         "scenario": {"id": scenario_name, "scope": scope, "platforms": [scenario.platform for scenario in scenarios]},
@@ -2020,11 +1991,9 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
         "checks": checks,
     }
     risks = {
-        "statuses": [RISK_GRAPHIFY_VERIFIED if passed else "graphify_install_failed", RISK_RUNTIME_UNVERIFIED],
-        "target_tool_runtime_verified": False,
-        "tool_runtime_status": RISK_RUNTIME_UNVERIFIED,
+        "statuses": [RISK_GRAPHIFY_VERIFIED if passed else RISK_GRAPHIFY_FAILED],
         "notes": ["universal uninstall covers Graphify-owned file effects after multiple installs"],
-        "known_status_values": known_runtime_status_values(),
+        "known_status_values": known_status_values(),
     }
     (artifact_dir / "assertions.json").write_text(json.dumps(assertions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (artifact_dir / "risk.json").write_text(json.dumps(risks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -2034,14 +2003,12 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
         "scope": scope,
         "started_at": scenario_started_at,
         "duration_ms": int((time.monotonic() - scenario_start) * 1000),
-        "reproduction_command": " ".join(uninstall_command),
+        "reproduction_command": shlex.join(uninstall_command),
         "command_artifact": command_artifact_summary(artifact_dir / "uninstall"),
         "graphify_file_effects_passed": passed,
-        "overall_status": combined_status(passed, RISK_RUNTIME_UNVERIFIED),
+        "overall_status": combined_status(passed),
         "passed": passed,
         "risks": risks["statuses"],
-        "target_tool_runtime_status": RISK_RUNTIME_UNVERIFIED,
-        "target_tool_runtime_verified": False,
     }
 
 
@@ -2057,11 +2024,11 @@ def run_purge_scenario(env: dict[str, str]) -> dict[str, object]:
     graphify_out = PROJECT / "graphify-out"
     graphify_out.mkdir(parents=True, exist_ok=True)
     (graphify_out / "graph.json").write_text('{"nodes": [], "edges": []}\n', encoding="utf-8")
-    write_file_manifest(artifact_dir / "before-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "before-install-files.json", ROOTS)
     command = ("graphify", "uninstall", "--purge")
-    result = run_capture(command, cwd=PROJECT, env=env, artifact_dir=artifact_dir / "uninstall-purge")
+    result = run_capture(command, cwd=PROJECT, env=env, artifact_dir=artifact_dir / "uninstall-purge", command_class="installer")
     purged = not graphify_out.exists()
-    write_file_manifest(artifact_dir / "after-files.json", ROOTS)
+    write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS)
     checks = [{"path": str(graphify_out), "ok": purged, "detail": "purged" if purged else "still_exists"}]
     passed = result.returncode == 0 and purged
     assertions = {
@@ -2071,11 +2038,9 @@ def run_purge_scenario(env: dict[str, str]) -> dict[str, object]:
         "checks": checks,
     }
     risks = {
-        "statuses": [RISK_GRAPHIFY_VERIFIED if passed else "graphify_install_failed", RISK_RUNTIME_UNVERIFIED],
-        "target_tool_runtime_verified": False,
-        "tool_runtime_status": RISK_RUNTIME_UNVERIFIED,
+        "statuses": [RISK_GRAPHIFY_VERIFIED if passed else RISK_GRAPHIFY_FAILED],
         "notes": ["purge verified only against disposable sandbox graphify-out state"],
-        "known_status_values": known_runtime_status_values(),
+        "known_status_values": known_status_values(),
     }
     (artifact_dir / "assertions.json").write_text(json.dumps(assertions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (artifact_dir / "risk.json").write_text(json.dumps(risks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -2085,14 +2050,12 @@ def run_purge_scenario(env: dict[str, str]) -> dict[str, object]:
         "scope": "project",
         "started_at": scenario_started_at,
         "duration_ms": int((time.monotonic() - scenario_start) * 1000),
-        "reproduction_command": " ".join(command),
+        "reproduction_command": shlex.join(command),
         "command_artifact": command_artifact_summary(artifact_dir / "uninstall-purge"),
         "graphify_file_effects_passed": passed,
-        "overall_status": combined_status(passed, RISK_RUNTIME_UNVERIFIED),
+        "overall_status": combined_status(passed),
         "passed": passed,
         "risks": risks["statuses"],
-        "target_tool_runtime_status": RISK_RUNTIME_UNVERIFIED,
-        "target_tool_runtime_verified": False,
     }
 
 
@@ -2100,30 +2063,30 @@ def universal_uninstall_scenarios(platforms: list[str], scope: str) -> list[tupl
     requested = set(platforms)
     groups: list[tuple[str, list[Scenario]]] = []
     if scope in {"user", "both"}:
-        scenarios = [make_scenario(platform_name, "user") for platform_name in UNIVERSAL_USER_PLATFORMS if platform_name in requested]
+        scenarios = [make_scenario(platform_name, "user") for platform_name, spec in sandbox_platform_specs().items() if platform_name in requested and "user" in spec.universal_uninstall_scopes]
         runnable = [scenario for scenario in scenarios if scenario is not None]
         if len(runnable) >= 2:
             groups.append(("user", runnable))
     if scope in {"project", "both"}:
-        scenarios = [make_scenario(platform_name, "project") for platform_name in UNIVERSAL_PROJECT_PLATFORMS if platform_name in requested]
+        scenarios = [make_scenario(platform_name, "project") for platform_name, spec in sandbox_platform_specs().items() if platform_name in requested and "project" in spec.universal_uninstall_scopes]
         runnable = [scenario for scenario in scenarios if scenario is not None]
         if len(runnable) >= 2:
             groups.append(("project", runnable))
     return groups
 
 
-def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], target_tool_statuses: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], *, fail_fast_scenarios: bool = False) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     for scenario in [scenario for platform_name in platforms for scenario in platform_scenarios(platform_name, scope)]:
-        result = run_scenario(scenario, env, target_tool_statuses)
+        result = run_scenario(scenario, env)
         results.append(result)
-        if result.get("passed") is not True:
+        if fail_fast_scenarios and result.get("passed") is not True:
             return results
+    if any(result.get("passed") is not True for result in results):
+        return results
     for universal_scope, scenarios in universal_uninstall_scenarios(platforms, scope):
         result = run_universal_uninstall_scenario(universal_scope, scenarios, env)
         results.append(result)
-        if result.get("passed") is not True:
-            return results
     if scope in {"project", "both"}:
         result = run_purge_scenario(env)
         results.append(result)
@@ -2173,56 +2136,9 @@ def selected_scopes(scope: str) -> list[str]:
     return ["user", "project"] if scope == "both" else [scope]
 
 
-def target_tool_probe_record(platform_name: str, target_tool_statuses: dict[str, dict[str, object]] | None = None) -> dict[str, object]:
-    probe = target_tool_probe_for_platform(platform_name)
-    status = None if target_tool_statuses is None else target_tool_statuses.get(platform_name)
-    return {
-        "tool": probe.tool,
-        "command_kind": probe.command_kind,
-        "command": None if probe.command is None else list(probe.command),
-        "version_command": None if probe.version_command is None else list(probe.version_command),
-        "credentials_required": probe.credentials_required,
-        "docker_headless_expected": probe.docker_headless_expected,
-        "unavailable_reason": probe.unavailable_reason,
-        "docs_checked": list(probe.docs_checked),
-        "status": None if status is None else status.get("status"),
-        "evidence_path": None if status is None else status.get("evidence_path"),
-    }
-
-
-def scenario_runtime_status(result: dict[str, object], target_tool_statuses: dict[str, dict[str, object]]) -> tuple[str, bool]:
-    platform_name = result.get("platform")
-    if not isinstance(platform_name, str):
-        return RISK_RUNTIME_UNVERIFIED, False
-    target_tool_status = target_tool_statuses.get(platform_name)
-    if target_tool_status is None:
-        return RISK_RUNTIME_UNVERIFIED, False
-    raw_status = target_tool_status.get("status")
-    if raw_status not in {RISK_RUNTIME_VERIFIED, RISK_TOOL_UNAVAILABLE, RISK_RUNTIME_UNVERIFIED}:
-        return RISK_RUNTIME_UNVERIFIED, False
-    runtime_status = str(raw_status)
-    return runtime_status, runtime_status == RISK_RUNTIME_VERIFIED
-
-
-def attach_target_tool_statuses(results: list[dict[str, object]], target_tool_statuses: dict[str, dict[str, object]]) -> list[dict[str, object]]:
-    updated_results: list[dict[str, object]] = []
-    for result in results:
-        updated = dict(result)
-        runtime_status, runtime_verified = scenario_runtime_status(updated, target_tool_statuses)
-        graphify_passed = bool(updated.get("graphify_file_effects_passed", updated.get("passed") is True))
-        runtime_risk = RISK_RUNTIME_VERIFIED if runtime_verified else runtime_status
-        updated["risks"] = [RISK_GRAPHIFY_VERIFIED if graphify_passed else "graphify_install_failed", runtime_risk]
-        updated["target_tool_runtime_status"] = runtime_status
-        updated["target_tool_runtime_verified"] = runtime_verified
-        updated["overall_status"] = combined_status(graphify_passed, runtime_status)
-        updated_results.append(updated)
-    return updated_results
-
-
-def platform_coverage_records(platforms: list[str], scope: str, target_tool_statuses: dict[str, dict[str, object]] | None = None) -> list[dict[str, object]]:
+def platform_coverage_records(platforms: list[str], scope: str) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for platform_name in platforms:
-        target_probe = target_tool_probe_record(platform_name, target_tool_statuses)
         for one_scope in selected_scopes(scope):
             reason = unsupported_scope_reason(platform_name, one_scope)
             scenario = make_scenario(platform_name, one_scope) if reason is None else None
@@ -2237,7 +2153,6 @@ def platform_coverage_records(platforms: list[str], scope: str, target_tool_stat
                         "uninstall_command": None if scenario.uninstall_command is None else list(scenario.uninstall_command),
                         "generic_direct_equivalence": equivalence_status(scenario),
                         "risk_notes": list(scenario.risk_notes),
-                        "target_tool_runtime_probe": target_probe,
                     }
                 )
             else:
@@ -2247,7 +2162,6 @@ def platform_coverage_records(platforms: list[str], scope: str, target_tool_stat
                         "scope": one_scope,
                         "status": "unsupported",
                         "reason": reason or "no sandbox scenario is defined for this platform/scope",
-                        "target_tool_runtime_probe": target_probe,
                     }
                 )
     return records
@@ -2257,29 +2171,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     env = sandbox_env()
     preflight_data = preflight()
-    src_data = copy_source_tree()
+    src_data = copy_source_tree(args.copy_source)
     package_data = install_graphify(env)
     platforms = selected_platforms(args)
     scenarios = selected_scenarios(args)
 
-    results = run_matrix_scenarios(platforms, args.scope, env, {})
+    results = run_matrix_scenarios(platforms, args.scope, env, fail_fast_scenarios=args.fail_fast_scenarios)
     passed = sum(1 for result in results if result["passed"])
     failed = len(results) - passed
 
-    target_tool_statuses: dict[str, dict[str, object]] = {}
-    target_tool_runtime_skipped = failed > 0
-    target_tool_runtime_skip_reason = None
-    if target_tool_runtime_skipped:
-        target_tool_runtime_skip_reason = "Graphify install/file-effect scenario failed; target runtime probes skipped."
-    else:
-        target_tool_statuses = run_target_tool_probes(platforms, env)
-        results = attach_target_tool_statuses(results, target_tool_statuses)
-
-    coverage = platform_coverage_records(platforms, args.scope, target_tool_statuses)
-    target_results = [result for result in results if result.get("platform") in platforms]
-    runtime_verified = sum(1 for result in target_results if result.get("target_tool_runtime_verified") is True)
-    runtime_unavailable = sum(1 for result in target_results if result.get("target_tool_runtime_status") == RISK_TOOL_UNAVAILABLE)
-    runtime_unverified = sum(1 for result in target_results if result.get("target_tool_runtime_status") == RISK_RUNTIME_UNVERIFIED)
+    coverage = platform_coverage_records(platforms, args.scope)
     unsupported = sum(1 for record in coverage if record["status"] == "unsupported")
     manifest = {
         "harness_version": HARNESS_VERSION,
@@ -2290,11 +2191,9 @@ def main(argv: list[str] | None = None) -> int:
         "package_install": package_data,
         "source_snapshot": src_data,
         "preflight": preflight_data,
-        "target_tool_runtime": {
-            "statuses": target_tool_statuses,
-            "summary": runtime_status_summary(target_tool_statuses),
-            "skipped": target_tool_runtime_skipped,
-            "skip_reason": target_tool_runtime_skip_reason,
+        "target_runtime_verification": {
+            "performed": False,
+            "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
         },
         "platform_coverage": coverage,
         "platform_coverage_summary": {
@@ -2308,17 +2207,14 @@ def main(argv: list[str] | None = None) -> int:
         "scenario_count": len(results),
         "graphify_file_effect_pass_count": passed,
         "graphify_file_effect_fail_count": failed,
-        "target_tool_runtime_verified_scenario_count": runtime_verified,
-        "target_tool_runtime_unavailable_scenario_count": runtime_unavailable,
-        "target_tool_runtime_unverified_scenario_count": runtime_unverified,
         "pass_count": passed,
         "fail_count": failed,
         "results": results,
-        "risk_status_values": known_runtime_status_values(),
+        "risk_status_values": known_status_values(),
     }
     (OUTPUT / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_report_md(OUTPUT / "report.md", manifest)
-    print(json.dumps({"passed": passed, "failed": failed, "output": str(OUTPUT), "report": str(OUTPUT / "report.md"), "target_tool_runtime_skipped": target_tool_runtime_skipped}, indent=2), flush=True)
+    print(json.dumps({"passed": passed, "failed": failed, "output": str(OUTPUT), "report": str(OUTPUT / "report.md"), "target_runtime_verification_performed": False}, indent=2), flush=True)
     return 0 if failed == 0 else 1
 
 

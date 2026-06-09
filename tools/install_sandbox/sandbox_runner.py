@@ -717,7 +717,7 @@ def assert_installed_skill_sidecar(scenario: Scenario, entry: ExpectedPath) -> l
         )
     )
 
-    skill_text = skill_path.read_text(encoding="utf-8", errors="replace") if skill_path.exists() else ""
+    skill_text = skill_path.read_text(encoding="utf-8", errors="replace") if skill_path.is_file() else ""
     mentions_references = "references/" in skill_text
     pointers = skill_reference_pointers(skill_text)
     refs_dir = skill_dir / "references"
@@ -1559,31 +1559,61 @@ def seed_user_owned_content(scenario: Scenario) -> None:
             path.write_text(seeded_text(entry), encoding="utf-8")
 
 
+def expected_kind_status(path: Path, kind: str) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "missing"
+    if kind == "file":
+        return path.is_file(), "file" if path.is_file() else "expected_file_but_not_file"
+    if kind == "dir":
+        return path.is_dir(), "directory" if path.is_dir() else "expected_directory_but_not_directory"
+    return True, "exists"
+
+
+def json_value_contains_marker(value: object, marker: str) -> bool:
+    if isinstance(value, dict):
+        return any(marker in str(key) or json_value_contains_marker(item, marker) for key, item in value.items())
+    if isinstance(value, list):
+        return any(json_value_contains_marker(item, marker) for item in value)
+    if isinstance(value, str):
+        return marker in value
+    return False
+
+
+def json_marker_status(path: Path, marker: str) -> tuple[bool, str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return False, f"invalid_json={exc.msg}"
+    except OSError as exc:
+        return False, f"json_read_failed={exc}"
+    marker_present = json_value_contains_marker(data, marker)
+    return marker_present, f"valid_json=true; marker_present={marker_present}"
+
+
 def assert_expected_files(scenario: Scenario) -> list[dict[str, object]]:
     checks: list[dict[str, object]] = []
     for entry in scenario.expected:
         path = expected_path(entry)
-        exists = path.exists()
-        ok = exists
-        detail = "exists" if exists else "missing"
-        if exists and entry.marker:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            marker_count = text.count(entry.marker)
+        ok, detail = expected_kind_status(path, entry.kind)
+        if ok and entry.marker:
             if path.suffix == ".json":
-                ok = marker_count >= 1
-                detail = f"marker_present={marker_count >= 1}; marker_count={marker_count}"
+                marker_ok, marker_detail = json_marker_status(path, entry.marker)
+                ok = marker_ok
+                detail = marker_detail
             else:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                marker_count = text.count(entry.marker)
                 ok = marker_count == 1
                 detail = f"marker_count={marker_count}"
-            if USER_SENTINEL in text:
-                detail += "; user_content_preserved"
-            elif should_seed_user_content(entry):
-                ok = False
-                detail += "; user_content_missing"
-            if should_seed_stale_graphify_section(entry):
-                stale_replaced = STALE_GRAPHIFY_SENTINEL not in text
-                ok = ok and stale_replaced
-                detail += f"; stale_replaced={stale_replaced}"
+                if USER_SENTINEL in text:
+                    detail += "; user_content_preserved"
+                elif should_seed_user_content(entry):
+                    ok = False
+                    detail += "; user_content_missing"
+                if should_seed_stale_graphify_section(entry):
+                    stale_replaced = STALE_GRAPHIFY_SENTINEL not in text
+                    ok = ok and stale_replaced
+                    detail += f"; stale_replaced={stale_replaced}"
         checks.append({"path": str(path), "root": entry.root, "relative": entry.relative, "ok": ok, "detail": detail})
         checks.extend(assert_installed_skill_sidecar(scenario, entry))
     return checks
@@ -1595,7 +1625,17 @@ def assert_uninstalled(scenario: Scenario) -> list[dict[str, object]]:
         path = expected_path(entry)
         if not entry.remove_on_uninstall:
             continue
-        if entry.marker and path.exists():
+        if entry.marker and should_seed_user_content(entry):
+            if path.exists() and path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                graphify_removed = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
+                user_preserved = USER_SENTINEL in text
+                ok = graphify_removed and user_preserved
+                detail = f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}"
+            else:
+                ok = False
+                detail = "user_content_file_missing"
+        elif entry.marker and path.exists():
             text = path.read_text(encoding="utf-8", errors="replace")
             ok = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
             if USER_SENTINEL in text:
@@ -1638,8 +1678,13 @@ def expected_generated_relative_keys(scenario: Scenario) -> set[tuple[str, str]]
     return keys
 
 
-def assert_no_unexpected_graphify_files(scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
-    expected = expected_generated_relative_keys(scenario)
+def assert_no_unexpected_graphify_files(
+    scenario: Scenario,
+    *,
+    phase: str,
+    expected_keys: set[tuple[str, str]] | None = None,
+) -> list[dict[str, object]]:
+    expected = expected_generated_relative_keys(scenario) if expected_keys is None else expected_keys
     checks: list[dict[str, object]] = []
     for root_name, root in ROOTS.items():
         if not root.exists():
@@ -1967,10 +2012,21 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
     write_file_manifest(artifact_dir / "before-install-files.json", ROOTS)
 
     install_results = []
+    install_checks: list[dict[str, object]] = []
     for scenario in scenarios:
         install_dir = artifact_dir / "installs" / scenario_id(scenario.platform, scenario.scope)
         result = run_capture(scenario.install_command, cwd=root_path(scenario.cwd_root), env=env, artifact_dir=install_dir, command_class="installer")
-        install_results.append({"scenario_id": scenario_id(scenario.platform, scenario.scope), "command": list(scenario.install_command), "exit_code": result.returncode})
+        scenario_install_checks = assert_expected_files(scenario) + assert_scope_boundaries(scenario)
+        install_checks.extend(scenario_install_checks)
+        install_results.append(
+            {
+                "scenario_id": scenario_id(scenario.platform, scenario.scope),
+                "command": list(scenario.install_command),
+                "exit_code": result.returncode,
+                "checks": scenario_install_checks,
+            }
+        )
+    write_file_manifest(artifact_dir / "after-install-files.json", ROOTS, debug_full=True)
 
     if scope == "project":
         uninstall_command = ("graphify", "uninstall", "--project")
@@ -1979,8 +2035,18 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
         uninstall_command = ("graphify", "uninstall")
         cwd = USER_CWD
     uninstall_result = run_capture(uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall", command_class="installer")
-    checks = [check for scenario in scenarios for check in assert_uninstalled(scenario)]
-    write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS)
+    checks = install_checks + [check for scenario in scenarios for check in assert_uninstalled(scenario)]
+    expected_keys = set().union(*(expected_generated_relative_keys(scenario) for scenario in scenarios))
+    combined_scenario = Scenario(
+        platform="multiple",
+        scope=scope,
+        install_command=uninstall_command,
+        uninstall_command=None,
+        cwd_root="project" if scope == "project" else "user_cwd",
+        expected=tuple(entry for scenario in scenarios for entry in scenario.expected),
+    )
+    checks.extend(assert_no_unexpected_graphify_files(combined_scenario, phase="universal_uninstall", expected_keys=expected_keys))
+    write_file_manifest(artifact_dir / "after-uninstall-files.json", ROOTS, debug_full=True)
     passed = all(result["exit_code"] == 0 for result in install_results) and uninstall_result.returncode == 0 and all(check["ok"] for check in checks)
     assertions = {
         "scenario": {"id": scenario_name, "scope": scope, "platforms": [scenario.platform for scenario in scenarios]},

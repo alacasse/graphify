@@ -382,6 +382,91 @@ def test_seeded_stale_section_must_be_replaced() -> None:
             runner.ROOTS.update(old_roots)
 
 
+def test_uninstall_requires_seeded_user_file_to_survive() -> None:
+    with patched_roots() as roots:
+        scenario = runner.Scenario(
+            platform="unit",
+            scope="project",
+            install_command=("true",),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", "AGENTS.md", marker=runner.GRAPHIFY_MARKER),),
+        )
+        runner.seed_user_owned_content(scenario)
+        (roots["project"] / "AGENTS.md").unlink()
+        check = runner.assert_uninstalled(scenario)[0]
+        assert_true(check["ok"] is False, "uninstall validation should fail if user-owned shared file is deleted")
+        assert_true(check["detail"] == "user_content_file_missing", "deleted user file should have explicit detail")
+
+
+def test_uninstall_requires_seeded_user_content_to_survive() -> None:
+    with patched_roots() as roots:
+        scenario = runner.Scenario(
+            platform="unit",
+            scope="project",
+            install_command=("true",),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", "AGENTS.md", marker=runner.GRAPHIFY_MARKER),),
+        )
+        (roots["project"] / "AGENTS.md").write_text("# User Notes\n", encoding="utf-8")
+        check = runner.assert_uninstalled(scenario)[0]
+        assert_true(check["ok"] is False, "uninstall validation should fail if seeded user content is lost")
+        assert_true("user_content_preserved=False" in str(check["detail"]), "detail should identify missing user content")
+
+
+def test_json_marker_assertion_rejects_invalid_json() -> None:
+    with patched_roots() as roots:
+        scenario = runner.Scenario(
+            platform="unit",
+            scope="project",
+            install_command=("true",),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", ".codebuddy/settings.json", marker="graphify"),),
+        )
+        path = roots["project"] / ".codebuddy/settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_text('{"hooks": ["graphify",}', encoding="utf-8")
+        check = runner.assert_expected_files(scenario)[0]
+        assert_true(check["ok"] is False, "invalid JSON hook/config should fail validation")
+        assert_true("invalid_json" in str(check["detail"]), "invalid JSON detail should be explicit")
+
+
+def test_json_marker_assertion_recurses_into_valid_json() -> None:
+    with patched_roots() as roots:
+        scenario = runner.Scenario(
+            platform="unit",
+            scope="project",
+            install_command=("true",),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", ".codebuddy/settings.json", marker="graphify"),),
+        )
+        path = roots["project"] / ".codebuddy/settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [{"command": "graphify query"}]}}), encoding="utf-8")
+        check = runner.assert_expected_files(scenario)[0]
+        assert_true(check["ok"] is True, "valid JSON with nested graphify command should pass")
+        assert_true("valid_json=true" in str(check["detail"]), "valid JSON detail should be explicit")
+
+
+def test_expected_path_kind_is_enforced() -> None:
+    with patched_roots() as roots:
+        scenario = runner.Scenario(
+            platform="unit",
+            scope="project",
+            install_command=("true",),
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(runner.ExpectedPath("project", "AGENTS.md"),),
+        )
+        (roots["project"] / "AGENTS.md").mkdir()
+        check = runner.assert_expected_files(scenario)[0]
+        assert_true(check["ok"] is False, "directory should not satisfy file expectation")
+        assert_true(check["detail"] == "expected_file_but_not_file", "kind mismatch should be explicit")
+
+
 def test_idempotency_state_detects_content_change() -> None:
     before = {"project/AGENTS.md": {"exists": True, "sha256": "a"}}
     after = {"project/AGENTS.md": {"exists": True, "sha256": "b"}}
@@ -965,10 +1050,10 @@ def run_python_compile() -> None:
     )
 
 
-def run_docker_smoke() -> None:
+def run_docker_smoke(repo: Path | None = None) -> None:
     if os.environ.get("GRAPHIFY_RUN_DOCKER_TESTS") != "1":
         raise RuntimeError("Docker smoke is gated; set GRAPHIFY_RUN_DOCKER_TESTS=1")
-    repo = Path("/home/alacasse/projects/graphify")
+    repo = (repo or HARNESS_DIR.parent.parent).resolve()
     output = HARNESS_DIR / "out" / "selftest-codex"
     command = [
         sys.executable,
@@ -988,6 +1073,7 @@ def run_docker_smoke() -> None:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Self-test the private Graphify install sandbox harness.")
     parser.add_argument("--docker", action="store_true", help="Run the gated Docker smoke test.")
+    parser.add_argument("--repo", type=Path, default=None, help="Repository path for the gated Docker smoke test.")
     return parser.parse_args(argv)
 
 
@@ -1015,6 +1101,11 @@ def main(argv: list[str] | None = None) -> int:
         test_skill_assertion_rejects_monolith_sidecar,
         test_stale_sidecar_seed_only_targets_progressive_skills,
         test_seeded_stale_section_must_be_replaced,
+        test_uninstall_requires_seeded_user_file_to_survive,
+        test_uninstall_requires_seeded_user_content_to_survive,
+        test_json_marker_assertion_rejects_invalid_json,
+        test_json_marker_assertion_recurses_into_valid_json,
+        test_expected_path_kind_is_enforced,
         test_idempotency_state_detects_content_change,
         test_universal_scenario_selection_requires_multiple_platforms,
         test_report_serialization_includes_risks,
@@ -1040,7 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
         test()
         print(f"PASS {test.__name__}")
     if args.docker:
-        run_docker_smoke()
+        run_docker_smoke(args.repo)
         print("PASS run_docker_smoke")
     print("selftest passed")
     return 0

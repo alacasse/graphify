@@ -19,7 +19,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal, cast
 
 
 HOME = Path(os.environ.get("HOME", "/tmp/graphify-home"))
@@ -176,7 +176,7 @@ def _scenario(
     expected: tuple[ExpectedPath, ...],
     *,
     install_command: tuple[str, ...] | None = None,
-    uninstall_command: tuple[str, ...] | None | str = "generic",
+    uninstall_command: tuple[str, ...] | None | Literal["generic"] = "generic",
     cwd_root: str | None = None,
     risk_notes: tuple[str, ...] = (),
     equivalent_install_command: tuple[str, ...] | None = None,
@@ -1029,7 +1029,9 @@ def list_files(base: Path, *, scenario: Scenario | None = None, root_name: str |
     if not base.exists():
         return []
     files: list[dict[str, object]] = []
-    expected_relatives = expected_manifest_relatives(scenario, root_name) if scenario is not None and root_name is not None else None
+    relevant_scenario = scenario if scenario is not None and root_name is not None else None
+    relevant_root = root_name if relevant_scenario is not None else None
+    expected_relatives = expected_manifest_relatives(relevant_scenario, relevant_root) if relevant_scenario is not None and relevant_root is not None else None
     for path in pruned_file_walk(base):
         try:
             rel = path.relative_to(base).as_posix()
@@ -1037,7 +1039,13 @@ def list_files(base: Path, *, scenario: Scenario | None = None, root_name: str |
         except OSError:
             continue
         relative = Path(rel)
-        if expected_relatives is not None and relative not in expected_relatives and not is_relevant_generated_file(scenario, root_name or "", relative, path):
+        if (
+            expected_relatives is not None
+            and relevant_scenario is not None
+            and relevant_root is not None
+            and relative not in expected_relatives
+            and not is_relevant_generated_file(relevant_scenario, relevant_root, relative, path)
+        ):
             continue
         files.append({"path": rel, "size": stat.st_size})
     return files
@@ -1079,6 +1087,51 @@ def copy_source_ignore(directory: str, names: list[str]) -> set[str]:
         if should_exclude_source_path(relative):
             ignored.add(name)
     return ignored
+
+
+def repo_relative(path: Path) -> str:
+    try:
+        return path.relative_to(REPO_MOUNT).as_posix()
+    except ValueError:
+        return path.name
+
+
+def validate_source_symlink(src_path: Path) -> str:
+    target = os.readlink(src_path)
+    target_path = Path(target)
+    if target_path.is_absolute():
+        raise RuntimeError(f"unsafe source symlink: {repo_relative(src_path)} points to absolute target {target}")
+    resolved_repo = REPO_MOUNT.resolve()
+    resolved_target = (src_path.parent / target_path).resolve(strict=False)
+    try:
+        resolved_target.relative_to(resolved_repo)
+    except ValueError as exc:
+        raise RuntimeError(f"unsafe source symlink: {repo_relative(src_path)} points outside repository to {target}") from exc
+    if not resolved_target.exists():
+        raise RuntimeError(f"unsafe source symlink: {repo_relative(src_path)} points to missing target {target}")
+    return target
+
+
+def validate_source_symlinks_for_copytree() -> None:
+    for root, dirs, files in os.walk(REPO_MOUNT):
+        root_path = Path(root)
+        kept_dirs: list[str] = []
+        for name in sorted(dirs):
+            path = root_path / name
+            relative = repo_relative(path)
+            if should_exclude_source_path(relative):
+                continue
+            if path.is_symlink():
+                validate_source_symlink(path)
+                continue
+            kept_dirs.append(name)
+        dirs[:] = kept_dirs
+        for name in sorted(files):
+            path = root_path / name
+            if should_exclude_source_path(repo_relative(path)):
+                continue
+            if path.is_symlink():
+                validate_source_symlink(path)
 
 
 def source_manifest(src: Path) -> dict[str, object]:
@@ -1125,7 +1178,7 @@ def copy_tracked_source_tree() -> dict[str, object] | None:
         dst_path = SRC / rel
         if src_path.is_symlink():
             dst_path.parent.mkdir(parents=True, exist_ok=True)
-            dst_path.symlink_to(os.readlink(src_path))
+            dst_path.symlink_to(validate_source_symlink(src_path))
             copied += 1
         elif src_path.is_file():
             dst_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1145,6 +1198,7 @@ def copy_source_tree(copy_source: str = "always") -> dict[str, object]:
         tracked = copy_tracked_source_tree()
         if tracked is not None:
             return tracked
+    validate_source_symlinks_for_copytree()
     shutil.copytree(REPO_MOUNT, SRC, symlinks=True, ignore=copy_source_ignore)
     manifest = source_manifest(SRC)
     manifest["copy_source_mode"] = copy_source
@@ -1170,6 +1224,14 @@ def direct_url_source_path(direct_url: dict[str, object] | None) -> Path | None:
     return Path(urllib.parse.unquote(parsed.path)).resolve()
 
 
+def package_metadata_value(metadata: importlib.metadata.PackageMetadata, key: str) -> str | None:
+    try:
+        value = metadata[key]
+    except KeyError:
+        return None
+    return value or None
+
+
 def dist_to_metadata(dist: importlib.metadata.Distribution, source: Path) -> dict[str, object]:
     direct_url = None
     direct_text = dist.read_text("direct_url.json")
@@ -1177,7 +1239,7 @@ def dist_to_metadata(dist: importlib.metadata.Distribution, source: Path) -> dic
         direct_url = json.loads(direct_text)
     source_path = direct_url_source_path(direct_url)
     return {
-        "package_name": dist.metadata.get("Name") or PACKAGE_NAME,
+        "package_name": package_metadata_value(dist.metadata, "Name") or PACKAGE_NAME,
         "version": dist.version,
         "location": str(Path(str(dist.locate_file(""))).resolve()),
         "direct_url": direct_url,
@@ -1222,7 +1284,7 @@ def read_installed_package_metadata(package_name: str, source: Path, search_path
     paths = search_paths or package_search_paths()
     for search_path in paths:
         for dist in importlib.metadata.distributions(path=[str(search_path)]):
-            if (dist.metadata.get("Name") or "").lower() == package_name.lower():
+            if (package_metadata_value(dist.metadata, "Name") or "").lower() == package_name.lower():
                 return dist_to_metadata(dist, source)
 
     for search_path in paths:
@@ -1323,12 +1385,26 @@ def md_code(value: object) -> str:
     return "`" + text.replace("`", "'") + "`"
 
 
+def object_dict(value: object) -> dict[str, object]:
+    return cast(dict[str, object], value) if isinstance(value, dict) else {}
+
+
+def object_list(value: object) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
+
+def object_dicts(value: object) -> list[dict[str, object]]:
+    return [object_dict(item) for item in object_list(value) if isinstance(item, dict)]
+
+
 def render_report_md(manifest: dict[str, object]) -> str:
-    package = manifest.get("package_install") if isinstance(manifest.get("package_install"), dict) else {}
-    preflight_data = manifest.get("preflight") if isinstance(manifest.get("preflight"), dict) else {}
-    os_release = manifest.get("os_release") if isinstance(manifest.get("os_release"), dict) else {}
-    results = manifest.get("results") if isinstance(manifest.get("results"), list) else []
-    coverage = manifest.get("platform_coverage") if isinstance(manifest.get("platform_coverage"), list) else []
+    package = object_dict(manifest.get("package_install"))
+    preflight_data = object_dict(manifest.get("preflight"))
+    os_release = object_dict(manifest.get("os_release"))
+    source_snapshot = object_dict(manifest.get("source_snapshot"))
+    results = object_dicts(manifest.get("results"))
+    coverage = object_dicts(manifest.get("platform_coverage"))
+    risk_status_values = object_list(manifest.get("risk_status_values")) or list(known_status_values())
 
     lines: list[str] = ["# Graphify Install Sandbox Report", ""]
     lines.extend(
@@ -1352,21 +1428,19 @@ def render_report_md(manifest: dict[str, object]) -> str:
             f"| Package name | {md_cell(package.get('package_name'))} |",
             f"| Install location | {md_cell(package.get('location'))} |",
             f"| Installed from copied source | {md_cell(package.get('installed_from_copied_source'))} |",
-            f"| Source root | {md_cell((manifest.get('source_snapshot') or {}).get('root') if isinstance(manifest.get('source_snapshot'), dict) else '')} |",
+            f"| Source root | {md_cell(source_snapshot.get('root'))} |",
             f"| Sandbox project | {md_cell(preflight_data.get('project'))} |",
             "",
             "## Status Vocabulary",
             "",
         ]
     )
-    for status in manifest.get("risk_status_values", known_status_values()):
+    for status in risk_status_values:
         lines.append(f"- {md_code(status)}")
     lines.extend(["", "## Scenario Status", "", "| Platform | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |", "|---|---|---|---|---|---:|---|"])
     for item in results:
-        if not isinstance(item, dict):
-            continue
         graphify_status = RISK_GRAPHIFY_VERIFIED if item.get("graphify_file_effects_passed", item.get("passed")) else "graphify_install_failed"
-        command_artifact = item.get("command_artifact") if isinstance(item.get("command_artifact"), dict) else {}
+        command_artifact = object_dict(item.get("command_artifact"))
         duration = item.get("duration_ms") or command_artifact.get("duration_ms")
         transcript = command_artifact.get("transcript_path") or item.get("transcript_path") or ""
         lines.append(
@@ -1387,8 +1461,6 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
     lines.extend(["", "## Platform Coverage", "", "| Platform | Scope | Coverage | Graphify Installer Command |", "|---|---|---|---|"])
     for record in coverage:
-        if not isinstance(record, dict):
-            continue
         command = record.get("install_command")
         command_text = shlex.join([str(part) for part in command]) if isinstance(command, list) else record.get("reason", "")
         lines.append(
@@ -1406,7 +1478,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 
-    windows_validation = manifest.get("windows_validation") if isinstance(manifest.get("windows_validation"), dict) else default_windows_validation_status()
+    windows_validation = object_dict(manifest.get("windows_validation")) or default_windows_validation_status()
     lines.extend(
         [
             "",
@@ -1417,18 +1489,18 @@ def render_report_md(manifest: dict[str, object]) -> str:
             f"- Strategy: {md_cell(windows_validation.get('strategy'))}",
         ]
     )
-    notes = windows_validation.get("notes") if isinstance(windows_validation.get("notes"), list) else []
-    targets = windows_validation.get("targets") if isinstance(windows_validation.get("targets"), list) else []
+    notes = object_list(windows_validation.get("notes"))
+    targets = object_list(windows_validation.get("targets"))
     for note in notes:
         lines.append(f"- {md_cell(note)}")
     if targets:
         lines.append(f"- Targets: {md_cell(', '.join(str(target) for target in targets))}")
 
-    failures = [item for item in results if isinstance(item, dict) and item.get("passed") is not True]
+    failures = [item for item in results if item.get("passed") is not True]
     lines.extend(["", "## Failures", ""])
     if failures:
         for item in failures:
-            command_artifact = item.get("command_artifact") if isinstance(item.get("command_artifact"), dict) else {}
+            command_artifact = object_dict(item.get("command_artifact"))
             lines.append(f"### {item.get('id')}")
             lines.append("")
             lines.append(f"- Reproduce: {md_code(item.get('reproduction_command') or command_artifact.get('command'))}")
@@ -1443,9 +1515,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
     lines.extend(["", "## Command Transcripts", "", "| Scenario | Command | Started | Duration | Exit | Transcript |", "|---|---|---|---:|---:|---|"])
     for item in results:
-        if not isinstance(item, dict):
-            continue
-        command_artifact = item.get("command_artifact") if isinstance(item.get("command_artifact"), dict) else {}
+        command_artifact = object_dict(item.get("command_artifact"))
         if not command_artifact:
             continue
         lines.append(
@@ -1508,6 +1578,14 @@ def install_graphify(env: dict[str, str]) -> dict[str, object]:
     metadata["install_mode"] = INSTALL_MODE
     metadata["install_command"] = list(install_command)
     metadata["command_probe"] = probe
+    if metadata.get("installed_from_copied_source") is not True:
+        raise RuntimeError(
+            "installed package provenance check failed; "
+            f"package_name={metadata.get('package_name')}; "
+            f"location={metadata.get('location')}; "
+            f"direct_url={metadata.get('direct_url')}; "
+            f"expected_source={SRC.resolve()}"
+        )
     return metadata
 
 
@@ -1579,15 +1657,87 @@ def json_value_contains_marker(value: object, marker: str) -> bool:
     return False
 
 
-def json_marker_status(path: Path, marker: str) -> tuple[bool, str]:
+def graphify_command_hook_present(entry: object, *, matcher: str | None = None, required_fragments: tuple[str, ...] = ("graphify",)) -> bool:
+    entry_data = object_dict(entry)
+    if matcher is not None and entry_data.get("matcher") != matcher:
+        return False
+    for hook in object_dicts(entry_data.get("hooks")):
+        if hook.get("type") != "command":
+            continue
+        command = hook.get("command")
+        if isinstance(command, str) and all(fragment in command for fragment in required_fragments):
+            return True
+    return False
+
+
+def hooks_by_event(data: object, event_name: str) -> list[object]:
+    hooks = object_dict(object_dict(data).get("hooks"))
+    return object_list(hooks.get(event_name))
+
+
+def claude_like_settings_status(data: object, schema_name: str) -> tuple[bool, str]:
+    pre_tool = hooks_by_event(data, "PreToolUse")
+    bash_hook_present = any(graphify_command_hook_present(entry, matcher="Bash") for entry in pre_tool)
+    read_glob_hook_present = any(graphify_command_hook_present(entry, matcher="Read|Glob") for entry in pre_tool)
+    ok = bash_hook_present and read_glob_hook_present
+    return ok, f"valid_json=true; schema={schema_name}; bash_hook_present={bash_hook_present}; read_glob_hook_present={read_glob_hook_present}"
+
+
+def codex_hooks_status(data: object) -> tuple[bool, str]:
+    pre_tool = hooks_by_event(data, "PreToolUse")
+    graphify_hook_present = any(graphify_command_hook_present(entry, matcher="Bash", required_fragments=("graphify", "hook-check")) for entry in pre_tool)
+    return graphify_hook_present, f"valid_json=true; schema=codex_hooks; graphify_hook_present={graphify_hook_present}"
+
+
+def gemini_settings_status(data: object) -> tuple[bool, str]:
+    before_tool = hooks_by_event(data, "BeforeTool")
+    graphify_hook_present = any(graphify_command_hook_present(entry, matcher="read_file|list_directory") for entry in before_tool)
+    return graphify_hook_present, f"valid_json=true; schema=gemini_settings; graphify_hook_present={graphify_hook_present}"
+
+
+def plugin_config_status(data: object, *, schema_name: str, expected_entry: str, allow_file_uri: bool = False) -> tuple[bool, str]:
+    plugins = object_list(object_dict(data).get("plugin"))
+    plugin_present = False
+    for plugin in plugins:
+        if not isinstance(plugin, str):
+            continue
+        if plugin == expected_entry:
+            plugin_present = True
+            break
+        if allow_file_uri and plugin.startswith("file://") and plugin.endswith(expected_entry):
+            plugin_present = True
+            break
+    return plugin_present, f"valid_json=true; schema={schema_name}; plugin_present={plugin_present}"
+
+
+def platform_json_status(entry: ExpectedPath, data: object) -> tuple[bool, str] | None:
+    if entry.relative in (".claude/settings.json", ".codebuddy/settings.json"):
+        schema_name = "claude_settings" if entry.relative == ".claude/settings.json" else "codebuddy_settings"
+        return claude_like_settings_status(data, schema_name)
+    if entry.relative == ".codex/hooks.json":
+        return codex_hooks_status(data)
+    if entry.relative == ".gemini/settings.json":
+        return gemini_settings_status(data)
+    if entry.relative == ".kilo/kilo.json":
+        return plugin_config_status(data, schema_name="kilo_config", expected_entry=".kilo/plugins/graphify.js", allow_file_uri=True)
+    if entry.relative == ".opencode/opencode.json":
+        return plugin_config_status(data, schema_name="opencode_config", expected_entry=".opencode/plugins/graphify.js")
+    return None
+
+
+def json_marker_status(path: Path, entry: ExpectedPath) -> tuple[bool, str]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return False, f"invalid_json={exc.msg}"
     except OSError as exc:
         return False, f"json_read_failed={exc}"
-    marker_present = json_value_contains_marker(data, marker)
-    return marker_present, f"valid_json=true; marker_present={marker_present}"
+    platform_status = platform_json_status(entry, data)
+    if platform_status is not None:
+        return platform_status
+    marker = entry.marker or ""
+    marker_present = bool(marker) and json_value_contains_marker(data, marker)
+    return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"
 
 
 def assert_expected_files(scenario: Scenario) -> list[dict[str, object]]:
@@ -1597,7 +1747,7 @@ def assert_expected_files(scenario: Scenario) -> list[dict[str, object]]:
         ok, detail = expected_kind_status(path, entry.kind)
         if ok and entry.marker:
             if path.suffix == ".json":
-                marker_ok, marker_detail = json_marker_status(path, entry.marker)
+                marker_ok, marker_detail = json_marker_status(path, entry)
                 ok = marker_ok
                 detail = marker_detail
             else:

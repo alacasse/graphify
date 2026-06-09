@@ -43,6 +43,8 @@ def test_install_default_claude(tmp_path):
 def test_install_codebuddy(tmp_path):
     _install(tmp_path, "codebuddy")
     assert (tmp_path / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()
+    assert (tmp_path / ".codebuddy" / "CODEBUDDY.md").exists()
+    assert (tmp_path / ".codebuddy" / "settings.json").exists()
 
 
 def test_install_codex(tmp_path):
@@ -97,6 +99,49 @@ def test_install_project_codex_writes_skill_and_agents(tmp_path, monkeypatch):
     assert (project / "AGENTS.md").exists()
     assert (project / ".codex" / "hooks.json").exists()
     assert not (home / ".codex" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_project_codebuddy_writes_project_scope(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(sys, "argv", ["graphify", "install", "--project", "--platform", "codebuddy"])
+    with patch("graphify.__main__.Path.home", return_value=home):
+        main()
+    assert (project / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()
+    assert (project / "CODEBUDDY.md").exists()
+    assert (project / ".codebuddy" / "settings.json").exists()
+    assert not (home / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_codebuddy_subcommand_project_install_and_uninstall_are_project_scoped(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    user_skill = home / ".codebuddy" / "skills" / "graphify" / "SKILL.md"
+    user_skill.parent.mkdir(parents=True)
+    user_skill.write_text("user skill")
+    monkeypatch.chdir(project)
+    with patch("graphify.__main__.Path.home", return_value=home):
+        monkeypatch.setattr(sys, "argv", ["graphify", "codebuddy", "install"])
+        main()
+        assert (project / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()
+        assert (project / "CODEBUDDY.md").exists()
+        assert (project / ".codebuddy" / "settings.json").exists()
+        assert user_skill.exists()
+
+        monkeypatch.setattr(sys, "argv", ["graphify", "codebuddy", "uninstall"])
+        main()
+
+    assert user_skill.exists()
+    assert not (project / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (project / "CODEBUDDY.md").exists()
+    settings_path = project / ".codebuddy" / "settings.json"
+    if settings_path.exists():
+        assert "graphify" not in settings_path.read_text()
 
 
 def test_claude_subcommand_project_install_and_uninstall_are_project_scoped(tmp_path, monkeypatch):

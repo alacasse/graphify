@@ -75,8 +75,11 @@ scenarios/<scenario-id>/stdout.txt
 scenarios/<scenario-id>/stderr.txt
 scenarios/<scenario-id>/transcript.txt
 scenarios/<scenario-id>/exit-code.txt
-scenarios/<scenario-id>/before-files.json
-scenarios/<scenario-id>/after-files.json
+scenarios/<scenario-id>/before-install-files.json
+scenarios/<scenario-id>/after-install-files.json
+scenarios/<scenario-id>/after-repeat-install-files.json
+scenarios/<scenario-id>/after-stale-sidecar-repair-files.json
+scenarios/<scenario-id>/after-uninstall-files.json
 scenarios/<scenario-id>/generated-files/
 scenarios/<scenario-id>/assertions.json
 scenarios/<scenario-id>/risk.json
@@ -89,7 +92,9 @@ Skill installs assert the installed `SKILL.md`, `.graphify_version`, `references
 ## Statuses
 
 - `graphify_install_verified`: Graphify-owned file effects passed for the scenario. This is the sandbox's intended success condition.
-- Runtime-related statuses, where still emitted by the current implementation, are legacy/out-of-scope for this sandbox and should not be interpreted as full target-tool verification.
+- `graphify_install_failed`: one or more Graphify-owned file-effect checks failed.
+
+Target runtime statuses are intentionally not emitted by this harness. Reports state that target runtime verification was not performed rather than recording a probe-like status.
 
 ## Self-Tests
 

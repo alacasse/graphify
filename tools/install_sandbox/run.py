@@ -16,10 +16,12 @@ CONTAINER_OUTPUT = "/sandbox-out"
 CONTAINER_HOME = "/tmp/graphify-home"
 CONTAINER_XDG = "/tmp/graphify-home/.config"
 CONTAINER_PROJECT = "/tmp/graphify-project"
+BUILD_TIMEOUT_SECONDS = 600
+RUN_TIMEOUT_SECONDS = 3600
 
 
 def shell_join(command: list[str]) -> str:
-    return " ".join(shlex.quote(part) for part in command)
+    return shlex.join(command)
 
 
 def build_image_command(runtime: str, image: str) -> list[str]:
@@ -79,9 +81,13 @@ def build_container_command(
     return command
 
 
-def run_command(command: list[str]) -> None:
+def run_command(command: list[str], *, timeout_seconds: int, command_class: str) -> None:
     print(f"$ {shell_join(command)}", flush=True)
-    subprocess.run(command, check=True)
+    try:
+        subprocess.run(command, check=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        print(f"error: {command_class} command timed out after {timeout_seconds} seconds: {shell_join(command)}", file=sys.stderr)
+        raise SystemExit(124) from exc
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -137,8 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if not args.no_build:
-        run_command(build_image_command(args.runtime, args.image))
-    run_command(host_command)
+        run_command(build_image_command(args.runtime, args.image), timeout_seconds=BUILD_TIMEOUT_SECONDS, command_class="docker_build")
+    run_command(host_command, timeout_seconds=RUN_TIMEOUT_SECONDS, command_class="docker_run")
     return 0
 
 

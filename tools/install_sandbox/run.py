@@ -2,92 +2,43 @@
 from __future__ import annotations
 
 import argparse
-import os
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
-
-HARNESS_DIR = Path(__file__).resolve().parent
-DEFAULT_IMAGE = "graphify-install-sandbox:local"
-CONTAINER_REPO = "/mnt/graphify-repo"
-CONTAINER_OUTPUT = "/sandbox-out"
-CONTAINER_HOME = "/tmp/graphify-home"
-CONTAINER_XDG = "/tmp/graphify-home/.config"
-CONTAINER_PROJECT = "/tmp/graphify-project"
-BUILD_TIMEOUT_SECONDS = 600
-RUN_TIMEOUT_SECONDS = 3600
-
-
-def shell_join(command: list[str]) -> str:
-    return shlex.join(command)
-
-
-def build_image_command(runtime: str, image: str) -> list[str]:
-    return [runtime, "build", "-t", image, str(HARNESS_DIR)]
-
-
-def build_container_command(
-    *,
-    runtime: str,
-    image: str,
-    repo: Path,
-    output: Path,
-    platform: str | None,
-    all_platforms: bool,
-    scope: str,
-    copy_source: str,
-    keep_container: bool,
-) -> list[str]:
-    command = [runtime, "run"]
-    if not keep_container:
-        command.append("--rm")
-    if hasattr(os, "getuid") and hasattr(os, "getgid"):
-        command.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
-    command.extend(
-        [
-            "--env",
-            f"HOME={CONTAINER_HOME}",
-            "--env",
-            f"XDG_CONFIG_HOME={CONTAINER_XDG}",
-            "--env",
-            f"GRAPHIFY_PROJECT={CONTAINER_PROJECT}",
-            "--env",
-            f"GRAPHIFY_REPO_MOUNT={CONTAINER_REPO}",
-            "--env",
-            "GRAPHIFY_SRC=/tmp/graphify-src",
-            "--env",
-            f"GRAPHIFY_OUTPUT={CONTAINER_OUTPUT}",
-            "--volume",
-            f"{repo}:{CONTAINER_REPO}:ro",
-            "--volume",
-            f"{output}:{CONTAINER_OUTPUT}:rw",
-            "--workdir",
-            CONTAINER_PROJECT,
-            image,
-            "--scope",
-            scope,
-            "--copy-source",
-            copy_source,
-        ]
+try:
+    from tools.install_sandbox.container_runtime import (
+        BUILD_TIMEOUT_SECONDS,
+        CONTAINER_HOME,
+        CONTAINER_OUTPUT,
+        CONTAINER_PROJECT,
+        CONTAINER_REPO,
+        CONTAINER_XDG,
+        DEFAULT_IMAGE,
+        HARNESS_DIR,
+        RUN_TIMEOUT_SECONDS,
+        ContainerRuntimeAdapter,
+        build_container_command,
+        build_image_command,
+        run_command,
+        shell_join,
     )
-    if all_platforms:
-        command.append("--all")
-    elif platform:
-        command.extend(["--platform", platform])
-    else:
-        raise ValueError("either platform or all_platforms is required")
-    return command
-
-
-def run_command(command: list[str], *, timeout_seconds: int, command_class: str) -> None:
-    print(f"$ {shell_join(command)}", flush=True)
-    try:
-        subprocess.run(command, check=True, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        print(f"error: {command_class} command timed out after {timeout_seconds} seconds: {shell_join(command)}", file=sys.stderr)
-        raise SystemExit(124) from exc
+except ModuleNotFoundError:  # pragma: no cover - supports running this file directly from any cwd.
+    from container_runtime import (  # type: ignore[no-redef]
+        BUILD_TIMEOUT_SECONDS,
+        CONTAINER_HOME,
+        CONTAINER_OUTPUT,
+        CONTAINER_PROJECT,
+        CONTAINER_REPO,
+        CONTAINER_XDG,
+        DEFAULT_IMAGE,
+        HARNESS_DIR,
+        RUN_TIMEOUT_SECONDS,
+        ContainerRuntimeAdapter,
+        build_container_command,
+        build_image_command,
+        run_command,
+        shell_join,
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -116,10 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
 
     host_command = build_container_command(
-        runtime=args.runtime,
-        image=args.image,
         repo=repo,
         output=output,
+        runtime=args.runtime,
+        image=args.image,
         platform=args.platform,
         all_platforms=args.all,
         scope=args.scope,
@@ -143,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if not args.no_build:
-        run_command(build_image_command(args.runtime, args.image), timeout_seconds=BUILD_TIMEOUT_SECONDS, command_class="docker_build")
+        run_command(build_image_command(runtime=args.runtime, image=args.image), timeout_seconds=BUILD_TIMEOUT_SECONDS, command_class="docker_build")
     run_command(host_command, timeout_seconds=RUN_TIMEOUT_SECONDS, command_class="docker_run")
     return 0
 

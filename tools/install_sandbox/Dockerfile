@@ -32,6 +32,11 @@ RUN mkdir -p /runner /tmp/graphify-home/.config /tmp/graphify-project /sandbox-o
 WORKDIR /runner
 
 COPY sandbox_runner.py /runner/sandbox_runner.py
+COPY command_runner.py /runner/command_runner.py
+COPY file_effects.py /runner/file_effects.py
 COPY platform_specs.py /runner/platform_specs.py
+COPY reports.py /runner/reports.py
+COPY scenario_lifecycle.py /runner/scenario_lifecycle.py
+COPY source_snapshot.py /runner/source_snapshot.py
 
 ENTRYPOINT ["python", "/runner/sandbox_runner.py"]

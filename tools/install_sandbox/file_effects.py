@@ -11,8 +11,10 @@ from typing import Callable, Iterable, cast
 
 try:
     from .platform_specs import ExpectedPath, Scenario
+    from .reference_resolution import PackagedReferenceResolution
 except ImportError:
     from platform_specs import ExpectedPath, Scenario
+    from reference_resolution import PackagedReferenceResolution
 
 
 USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"
@@ -146,7 +148,7 @@ def platform_json_status(entry: ExpectedPath, data: object) -> tuple[bool, str] 
 @dataclass(frozen=True)
 class FileEffectOracle:
     roots: dict[str, Path]
-    packaged_reference_names: Callable[[str], list[str] | None]
+    packaged_reference_resolution: Callable[[str], PackagedReferenceResolution]
     expected_graphify_version: Callable[[], str]
     manifest_prune_dirs: set[str]
 
@@ -210,23 +212,28 @@ class FileEffectOracle:
         relative_dir = self.skill_relative_dir(entry)
         refs_dir = skill_dir / "references"
         refs_relative = relative_dir / "references"
-        expected_names = self.packaged_reference_names(scenario.platform)
+        resolution = self.packaged_reference_resolution(scenario.platform)
+        expected_names = list(resolution.expected_names)
 
-        if expected_names is None:
+        if resolution.status in {"intentionally_absent", "no_eligible_bundle"}:
             refs_ok = not refs_dir.exists()
-            refs_detail = "no_packaged_references; references_absent" if refs_ok else "no_packaged_references; references_present"
+            refs_state = "references_absent" if refs_ok else "references_present"
+            refs_detail = f"{resolution.status}; {refs_state}; {resolution.detail}"
+        elif resolution.status in {"missing", "not_directory"}:
+            refs_ok = False
+            refs_detail = f"{resolution.status}; {resolution.detail}"
         elif not refs_dir.exists():
             refs_ok = False
-            refs_detail = f"references_missing; expected_names={expected_names}"
+            refs_detail = f"references_missing; status={resolution.status}; expected_names={expected_names}; {resolution.detail}"
         elif not refs_dir.is_dir():
             refs_ok = False
-            refs_detail = f"references_not_directory; expected_names={expected_names}"
+            refs_detail = f"references_not_directory; status={resolution.status}; expected_names={expected_names}; {resolution.detail}"
         else:
             actual_names = self.installed_reference_names(refs_dir)
             missing = sorted(set(expected_names) - set(actual_names))
             extra = sorted(set(actual_names) - set(expected_names))
             refs_ok = not missing and not extra
-            refs_detail = f"actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
+            refs_detail = f"status={resolution.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
     def check_skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> dict[str, object]:
@@ -266,8 +273,9 @@ class FileEffectOracle:
 
     def progressive_skill_entries(self, scenario: Scenario) -> list[ExpectedPath]:
         entries: list[ExpectedPath] = []
+        resolution = self.packaged_reference_resolution(scenario.platform)
         for entry in scenario.expected:
-            if self.is_skill_expected(entry) and self.packaged_reference_names(scenario.platform) is not None:
+            if self.is_skill_expected(entry) and resolution.expects_references:
                 entries.append(entry)
         return entries
 
@@ -300,8 +308,10 @@ class FileEffectOracle:
                 skill_dir = relative.parent
                 relatives.add(skill_dir / ".graphify_version")
                 relatives.add(skill_dir / "references.tmp")
-                expected_names = self.packaged_reference_names(scenario.platform) or []
-                for name in expected_names:
+                resolution = self.packaged_reference_resolution(scenario.platform)
+                if resolution.expects_references:
+                    relatives.add(skill_dir / "references")
+                for name in resolution.expected_names:
                     relatives.add(skill_dir / "references" / name)
         return relatives
 
@@ -430,9 +440,11 @@ class FileEffectOracle:
             if self.is_skill_expected(entry):
                 relative_dir = self.skill_relative_dir(entry)
                 keys.add((entry.root, (relative_dir / ".graphify_version").as_posix()))
-                keys.add((entry.root, (relative_dir / "references").as_posix()))
                 keys.add((entry.root, (relative_dir / "references.tmp").as_posix()))
-                for name in self.packaged_reference_names(scenario.platform) or []:
+                resolution = self.packaged_reference_resolution(scenario.platform)
+                if resolution.expects_references:
+                    keys.add((entry.root, (relative_dir / "references").as_posix()))
+                for name in resolution.expected_names:
                     keys.add((entry.root, (relative_dir / "references" / name).as_posix()))
         return keys
 
@@ -515,15 +527,15 @@ class FileEffectOracle:
             relative_dir = self.skill_relative_dir(entry)
             sidecar_relatives: set[Path] = {
                 relative_dir / ".graphify_version",
-                relative_dir / "references",
                 relative_dir / "references.tmp",
             }
+            resolution = self.packaged_reference_resolution(scenario.platform)
+            if resolution.expects_references:
+                sidecar_relatives.add(relative_dir / "references")
             refs_dir = skill_dir / "references"
             if refs_dir.is_dir():
                 sidecar_relatives.update(relative_dir / "references" / path.name for path in refs_dir.glob("*.md") if path.is_file())
-            expected_names = self.packaged_reference_names(scenario.platform)
-            if expected_names:
-                sidecar_relatives.update(relative_dir / "references" / name for name in expected_names)
+            sidecar_relatives.update(relative_dir / "references" / name for name in resolution.expected_names)
             for relative in sorted(sidecar_relatives, key=lambda item: item.as_posix()):
                 state[f"{entry.root}/{relative.as_posix()}"] = self.file_fingerprint(self.root_path(entry.root) / relative)
         return state

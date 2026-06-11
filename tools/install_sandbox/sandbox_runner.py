@@ -17,6 +17,7 @@ from pathlib import Path
 try:
     from . import command_runner
     from . import file_effects
+    from . import reference_resolution
     from . import reports
     from . import scenario_lifecycle
     from . import source_snapshot
@@ -27,6 +28,7 @@ try:
 except ImportError:
     import command_runner
     import file_effects
+    import reference_resolution
     import reports
     import scenario_lifecycle
     import source_snapshot
@@ -91,31 +93,15 @@ def expected_graphify_version() -> str:
     return str(graphify_main_module().__version__)
 
 
-def packaged_references_dir(platform_name: str) -> Path | None:
+@functools.lru_cache(maxsize=None)
+def packaged_reference_resolution(platform_name: str) -> reference_resolution.PackagedReferenceResolution:
     graphify_main = graphify_main_module()
     spec = SCENARIO_REGISTRY.platform_spec(platform_name)
-    if spec.reference_bundles:
-        package_dir = Path(graphify_main.__file__).parent
-        for bundle in spec.reference_bundles:
-            if bundle == "vscode" and not (package_dir / "skill-vscode.md").exists():
-                continue
-            bundle_dir = package_dir / "skills" / bundle
-            if bundle_dir.is_dir():
-                return bundle_dir / "references"
-        return None
-    if spec.uses_packaged_references:
-        return graphify_main._packaged_skill_refs_dir(spec.name)
-    return None
-
-
-@functools.lru_cache(maxsize=None)
-def packaged_reference_names(platform_name: str) -> list[str] | None:
-    refs_dir = packaged_references_dir(platform_name)
-    if refs_dir is None:
-        return None
-    if not refs_dir.is_dir():
-        return []
-    return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
+    return reference_resolution.resolve_packaged_references(
+        platform_name,
+        graphify_main=graphify_main,
+        platform_spec=spec,
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -278,7 +264,7 @@ def reset_sandbox_dirs() -> None:
 def file_effect_oracle() -> file_effects.FileEffectOracle:
     return file_effects.FileEffectOracle(
         roots=ROOTS,
-        packaged_reference_names=packaged_reference_names,
+        packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=expected_graphify_version,
         manifest_prune_dirs=MANIFEST_PRUNE_DIRS,
     )

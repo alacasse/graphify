@@ -198,3 +198,4 @@ def test_runner_status_helpers_are_file_effect_only() -> None:
     assert sandbox_runner.combined_status(False) == sandbox_runner.RISK_GRAPHIFY_FAILED
     assert report["statuses"] == [sandbox_runner.RISK_GRAPHIFY_VERIFIED]
     assert "target_tool_runtime_verified" not in report
+

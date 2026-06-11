@@ -7,6 +7,7 @@ import pytest
 
 from tools.install_sandbox import file_effects
 from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
+from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
 
 @pytest.fixture
@@ -17,16 +18,28 @@ def roots(tmp_path) -> dict[str, Path]:
     return paths
 
 
+def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test detail") -> PackagedReferenceResolution:
+    return PackagedReferenceResolution(status, expected_names=names, detail=detail)
+
+
 @pytest.fixture
 def oracle(roots) -> file_effects.FileEffectOracle:
-    def packaged_reference_names(platform: str) -> list[str] | None:
+    def packaged_reference_resolution(platform: str) -> PackagedReferenceResolution:
         if platform == "claude":
-            return ["query.md", "update.md"]
-        return None
+            return resolution("available", ("query.md", "update.md"), "claude refs")
+        if platform == "empty":
+            return resolution("empty", detail="empty refs")
+        if platform == "no_eligible":
+            return resolution("no_eligible_bundle", detail="no eligible refs")
+        if platform == "missing":
+            return resolution("missing", detail="missing /package/refs")
+        if platform == "not_directory":
+            return resolution("not_directory", detail="not_directory /package/refs")
+        return resolution("intentionally_absent", detail="absent refs")
 
     return file_effects.FileEffectOracle(
         roots=roots,
-        packaged_reference_names=packaged_reference_names,
+        packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=lambda: "9.9.9",
         manifest_prune_dirs=set(file_effects.GENERATED_COPY_EXCLUDES),
     )
@@ -144,7 +157,86 @@ def test_skill_assertion_rejects_monolith_sidecar(oracle, roots) -> None:
 
     refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), ".aider/graphify/references")
     assert refs_check["ok"] is False
-    assert "no_packaged_references" in str(refs_check["detail"])
+    assert "intentionally_absent" in str(refs_check["detail"])
+
+
+def test_absent_packaged_reference_statuses_pass_when_references_absent(oracle, roots) -> None:
+    for platform in ("aider", "no_eligible"):
+        test_scenario = scenario(platform, ExpectedPath("project", f".{platform}/graphify/SKILL.md"))
+        write_skill(roots["project"], f".{platform}/graphify/SKILL.md", version="9.9.9")
+
+        refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), f".{platform}/graphify/references")
+
+        expected_status = "intentionally_absent" if platform == "aider" else "no_eligible_bundle"
+        assert refs_check["ok"] is True
+        assert expected_status in str(refs_check["detail"])
+
+
+def test_no_eligible_bundle_fails_when_references_present(oracle, roots) -> None:
+    test_scenario = scenario("no_eligible", ExpectedPath("project", ".no_eligible/graphify/SKILL.md"))
+    skill = write_skill(roots["project"], ".no_eligible/graphify/SKILL.md", version="9.9.9")
+    refs = skill.parent / "references"
+    refs.mkdir()
+    (refs / "leftover.md").write_text("leftover\n", encoding="utf-8")
+
+    refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), ".no_eligible/graphify/references")
+
+    assert refs_check["ok"] is False
+    assert "no_eligible_bundle" in str(refs_check["detail"])
+
+
+def test_empty_packaged_references_requires_empty_installed_directory(oracle, roots) -> None:
+    test_scenario = scenario("empty", ExpectedPath("project", ".empty/graphify/SKILL.md"))
+    skill = write_skill(roots["project"], ".empty/graphify/SKILL.md", version="9.9.9")
+    refs = skill.parent / "references"
+    refs.mkdir()
+
+    refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), ".empty/graphify/references")
+    assert refs_check["ok"] is True
+    assert "status=empty" in str(refs_check["detail"])
+
+    (refs / "unexpected.md").write_text("unexpected\n", encoding="utf-8")
+    refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), ".empty/graphify/references")
+    assert refs_check["ok"] is False
+    assert "extra=['unexpected.md']" in str(refs_check["detail"])
+
+
+def test_malformed_packaged_reference_statuses_fail_with_resolver_detail(oracle, roots) -> None:
+    for platform in ("missing", "not_directory"):
+        test_scenario = scenario(platform, ExpectedPath("project", f".{platform}/graphify/SKILL.md"))
+        write_skill(roots["project"], f".{platform}/graphify/SKILL.md", version="9.9.9")
+
+        refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), f".{platform}/graphify/references")
+
+        assert refs_check["ok"] is False
+        assert platform in str(refs_check["detail"])
+        assert "/package/refs" in str(refs_check["detail"])
+
+
+def test_reference_resolution_status_controls_manifest_generated_keys_and_state(oracle, roots) -> None:
+    skill_entry = ExpectedPath("project", ".claude/skills/graphify/SKILL.md")
+    available = scenario("claude", skill_entry)
+    empty = scenario("empty", ExpectedPath("project", ".empty/graphify/SKILL.md"))
+    absent = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+
+    available_manifest = oracle.expected_manifest_relatives(available, "project")
+    assert Path(".claude/skills/graphify/references") in available_manifest
+    assert Path(".claude/skills/graphify/references/query.md") in available_manifest
+    assert ("project", ".claude/skills/graphify/references/update.md") in oracle.expected_generated_relative_keys(available)
+    assert "project/.claude/skills/graphify/references/query.md" in oracle.scenario_file_state(available)
+
+    empty_manifest = oracle.expected_manifest_relatives(empty, "project")
+    assert Path(".empty/graphify/references") in empty_manifest
+    assert not any(path.name.endswith(".md") and "references" in path.parts for path in empty_manifest)
+    assert ("project", ".empty/graphify/references") in oracle.expected_generated_relative_keys(empty)
+    assert "project/.empty/graphify/references" in oracle.scenario_file_state(empty)
+
+    absent_manifest = oracle.expected_manifest_relatives(absent, "project")
+    absent_generated_keys = oracle.expected_generated_relative_keys(absent)
+    assert Path(".aider/graphify/references") not in absent_manifest
+    assert ("project", ".aider/graphify/references") not in absent_generated_keys
+    assert not any(key[1].startswith(".aider/graphify/references/") for key in absent_generated_keys)
+    assert "project/.aider/graphify/references" not in oracle.scenario_file_state(absent)
 
 
 def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> None:

@@ -22,41 +22,6 @@ def shell_join(command: list[str]) -> str:
     return shlex.join(command)
 
 
-class ContainerRuntimeAdapter:
-    def __init__(self, *, runtime: str, image: str) -> None:
-        self.runtime = runtime
-        self.image = image
-
-    def build_image_command(self) -> list[str]:
-        return build_image_command(self.runtime, self.image)
-
-    def build_container_command(
-        self,
-        *,
-        repo: Path,
-        output: Path,
-        platform: str | None,
-        all_platforms: bool,
-        scope: str,
-        copy_source: str,
-        keep_container: bool,
-    ) -> list[str]:
-        return build_container_command(
-            runtime=self.runtime,
-            image=self.image,
-            repo=repo,
-            output=output,
-            platform=platform,
-            all_platforms=all_platforms,
-            scope=scope,
-            copy_source=copy_source,
-            keep_container=keep_container,
-        )
-
-    def run_command(self, command: list[str], *, timeout_seconds: int, command_class: str) -> None:
-        run_command(command, timeout_seconds=timeout_seconds, command_class=command_class)
-
-
 def build_image_command(runtime: str, image: str) -> list[str]:
     return [runtime, "build", "-t", image, str(HARNESS_DIR)]
 

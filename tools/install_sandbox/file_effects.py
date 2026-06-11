@@ -33,16 +33,16 @@ GENERATED_COPY_EXCLUDES = (
 )
 
 
-def object_dict(value: object) -> dict[str, object]:
+def _object_dict(value: object) -> dict[str, object]:
     return cast(dict[str, object], value) if isinstance(value, dict) else {}
 
 
-def object_list(value: object) -> list[object]:
+def _object_list(value: object) -> list[object]:
     return cast(list[object], value) if isinstance(value, list) else []
 
 
-def object_dicts(value: object) -> list[dict[str, object]]:
-    return [object_dict(item) for item in object_list(value) if isinstance(item, dict)]
+def _object_dicts(value: object) -> list[dict[str, object]]:
+    return [_object_dict(item) for item in _object_list(value) if isinstance(item, dict)]
 
 
 def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = None, relative: str | Path | None = None, **extra: object) -> dict[str, object]:
@@ -76,10 +76,10 @@ def json_value_contains_marker(value: object, marker: str) -> bool:
 
 
 def graphify_command_hook_present(entry: object, *, matcher: str | None = None, required_fragments: tuple[str, ...] = ("graphify",)) -> bool:
-    entry_data = object_dict(entry)
+    entry_data = _object_dict(entry)
     if matcher is not None and entry_data.get("matcher") != matcher:
         return False
-    for hook in object_dicts(entry_data.get("hooks")):
+    for hook in _object_dicts(entry_data.get("hooks")):
         if hook.get("type") != "command":
             continue
         command = hook.get("command")
@@ -89,8 +89,8 @@ def graphify_command_hook_present(entry: object, *, matcher: str | None = None, 
 
 
 def hooks_by_event(data: object, event_name: str) -> list[object]:
-    hooks = object_dict(object_dict(data).get("hooks"))
-    return object_list(hooks.get(event_name))
+    hooks = _object_dict(_object_dict(data).get("hooks"))
+    return _object_list(hooks.get(event_name))
 
 
 def claude_like_settings_status(data: object, schema_name: str) -> tuple[bool, str]:
@@ -114,7 +114,7 @@ def gemini_settings_status(data: object) -> tuple[bool, str]:
 
 
 def plugin_config_status(data: object, *, schema_name: str, expected_entry: str, allow_file_uri: bool = False) -> tuple[bool, str]:
-    plugins = object_list(object_dict(data).get("plugin"))
+    plugins = _object_list(_object_dict(data).get("plugin"))
     plugin_present = False
     for plugin in plugins:
         if not isinstance(plugin, str):

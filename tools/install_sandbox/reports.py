@@ -102,26 +102,26 @@ def md_table(headers: Iterable[str], rows: Iterable[Iterable[object]], *, right_
     return lines
 
 
-def object_dict(value: object) -> dict[str, object]:
+def _object_dict(value: object) -> dict[str, object]:
     return cast(dict[str, object], value) if isinstance(value, dict) else {}
 
 
-def object_list(value: object) -> list[object]:
+def _object_list(value: object) -> list[object]:
     return cast(list[object], value) if isinstance(value, list) else []
 
 
-def object_dicts(value: object) -> list[dict[str, object]]:
-    return [object_dict(item) for item in object_list(value) if isinstance(item, dict)]
+def _object_dicts(value: object) -> list[dict[str, object]]:
+    return [_object_dict(item) for item in _object_list(value) if isinstance(item, dict)]
 
 
 def render_report_md(manifest: dict[str, object]) -> str:
-    package = object_dict(manifest.get("package_install"))
-    preflight_data = object_dict(manifest.get("preflight"))
-    os_release = object_dict(manifest.get("os_release"))
-    source_snapshot = object_dict(manifest.get("source_snapshot"))
-    results = object_dicts(manifest.get("results"))
-    coverage = object_dicts(manifest.get("platform_coverage"))
-    risk_status_values = object_list(manifest.get("risk_status_values")) or list(known_status_values())
+    package = _object_dict(manifest.get("package_install"))
+    preflight_data = _object_dict(manifest.get("preflight"))
+    os_release = _object_dict(manifest.get("os_release"))
+    source_snapshot = _object_dict(manifest.get("source_snapshot"))
+    results = _object_dicts(manifest.get("results"))
+    coverage = _object_dicts(manifest.get("platform_coverage"))
+    risk_status_values = _object_list(manifest.get("risk_status_values")) or list(known_status_values())
 
     lines: list[str] = ["# Graphify Install Sandbox Report", ""]
     lines.extend(
@@ -161,7 +161,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     scenario_rows = []
     for item in results:
         graphify_status = RISK_GRAPHIFY_VERIFIED if item.get("graphify_file_effects_passed", item.get("passed")) else "graphify_install_failed"
-        command_artifact = object_dict(item.get("command_artifact"))
+        command_artifact = _object_dict(item.get("command_artifact"))
         duration = item.get("duration_ms") or command_artifact.get("duration_ms")
         transcript = command_artifact.get("transcript_path") or item.get("transcript_path") or ""
         scenario_rows.append(
@@ -187,7 +187,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 
-    windows_validation = object_dict(manifest.get("windows_validation")) or default_windows_validation_status()
+    windows_validation = _object_dict(manifest.get("windows_validation")) or default_windows_validation_status()
     lines.extend(
         [
             "",
@@ -198,8 +198,8 @@ def render_report_md(manifest: dict[str, object]) -> str:
             f"- Strategy: {md_cell(windows_validation.get('strategy'))}",
         ]
     )
-    notes = object_list(windows_validation.get("notes"))
-    targets = object_list(windows_validation.get("targets"))
+    notes = _object_list(windows_validation.get("notes"))
+    targets = _object_list(windows_validation.get("targets"))
     for note in notes:
         lines.append(f"- {md_cell(note)}")
     if targets:
@@ -209,7 +209,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     lines.extend(["", "## Failures", ""])
     if failures:
         for item in failures:
-            command_artifact = object_dict(item.get("command_artifact"))
+            command_artifact = _object_dict(item.get("command_artifact"))
             lines.append(f"### {item.get('id')}")
             lines.append("")
             lines.append(f"- Reproduce: {md_code(item.get('reproduction_command') or command_artifact.get('command'))}")
@@ -225,7 +225,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     lines.extend(["", "## Command Transcripts", ""])
     transcript_rows = []
     for item in results:
-        command_artifact = object_dict(item.get("command_artifact"))
+        command_artifact = _object_dict(item.get("command_artifact"))
         if not command_artifact:
             continue
         transcript_rows.append(

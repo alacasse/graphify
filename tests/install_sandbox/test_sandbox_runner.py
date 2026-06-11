@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import command_runner, reports, sandbox_runner, scenario_lifecycle, source_snapshot
+from tools.install_sandbox import command_runner, reports, sandbox_runner, scenario_lifecycle, source_snapshot, status
 from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
 
 
@@ -18,6 +18,13 @@ def test_parse_args_requires_platform_or_all() -> None:
     assert args.scope == "project"
     assert args.copy_source == "auto"
     assert args.fail_fast_scenarios is True
+
+
+def test_dockerfile_copies_direct_runner_imports() -> None:
+    dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
+
+    for module in ("file_walk.py", "json_helpers.py", "status.py"):
+        assert f"COPY {module} /runner/{module}" in dockerfile
 
 
 def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_path) -> None:
@@ -196,6 +203,8 @@ def test_runner_status_helpers_are_file_effect_only() -> None:
 
     assert sandbox_runner.combined_status(True) == sandbox_runner.RISK_GRAPHIFY_VERIFIED
     assert sandbox_runner.combined_status(False) == sandbox_runner.RISK_GRAPHIFY_FAILED
+    assert sandbox_runner.RISK_GRAPHIFY_VERIFIED == status.RISK_GRAPHIFY_VERIFIED == "graphify_install_verified"
+    assert sandbox_runner.RISK_GRAPHIFY_FAILED == status.RISK_GRAPHIFY_FAILED == "graphify_install_failed"
+    assert sandbox_runner.known_status_values() == reports.known_status_values() == status.known_status_values()
     assert report["statuses"] == [sandbox_runner.RISK_GRAPHIFY_VERIFIED]
     assert "target_tool_runtime_verified" not in report
-

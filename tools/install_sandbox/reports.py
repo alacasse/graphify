@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
-from typing import Iterable, cast
+from typing import Iterable
 
+try:
+    from .json_helpers import object_dict, object_dicts, object_list
+    from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
+except ImportError:
+    from json_helpers import object_dict, object_dicts, object_list
+    from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 
-RISK_GRAPHIFY_VERIFIED = "graphify_install_verified"
-RISK_GRAPHIFY_FAILED = "graphify_install_failed"
 
 WINDOWS_VALIDATION_TARGETS = (
     "windows payload file-effect simulation",
@@ -15,11 +19,6 @@ WINDOWS_VALIDATION_TARGETS = (
     "Windows-specific skill payload and references generation",
     "payload consistency for explicit Windows platform selection",
 )
-
-
-def known_status_values() -> list[str]:
-    return [RISK_GRAPHIFY_VERIFIED, RISK_GRAPHIFY_FAILED]
-
 
 def artifact_relpath(path: Path, root: Path) -> str:
     try:
@@ -73,7 +72,7 @@ def status_label(result: dict[str, object]) -> str:
         return str(result["overall_status"])
     if result.get("passed") is True:
         return RISK_GRAPHIFY_VERIFIED
-    return "graphify_install_failed"
+    return RISK_GRAPHIFY_FAILED
 
 
 def md_cell(value: object) -> str:
@@ -102,26 +101,14 @@ def md_table(headers: Iterable[str], rows: Iterable[Iterable[object]], *, right_
     return lines
 
 
-def _object_dict(value: object) -> dict[str, object]:
-    return cast(dict[str, object], value) if isinstance(value, dict) else {}
-
-
-def _object_list(value: object) -> list[object]:
-    return cast(list[object], value) if isinstance(value, list) else []
-
-
-def _object_dicts(value: object) -> list[dict[str, object]]:
-    return [_object_dict(item) for item in _object_list(value) if isinstance(item, dict)]
-
-
 def render_report_md(manifest: dict[str, object]) -> str:
-    package = _object_dict(manifest.get("package_install"))
-    preflight_data = _object_dict(manifest.get("preflight"))
-    os_release = _object_dict(manifest.get("os_release"))
-    source_snapshot = _object_dict(manifest.get("source_snapshot"))
-    results = _object_dicts(manifest.get("results"))
-    coverage = _object_dicts(manifest.get("platform_coverage"))
-    risk_status_values = _object_list(manifest.get("risk_status_values")) or list(known_status_values())
+    package = object_dict(manifest.get("package_install"))
+    preflight_data = object_dict(manifest.get("preflight"))
+    os_release = object_dict(manifest.get("os_release"))
+    source_snapshot = object_dict(manifest.get("source_snapshot"))
+    results = object_dicts(manifest.get("results"))
+    coverage = object_dicts(manifest.get("platform_coverage"))
+    risk_status_values = object_list(manifest.get("risk_status_values")) or list(known_status_values())
 
     lines: list[str] = ["# Graphify Install Sandbox Report", ""]
     lines.extend(
@@ -160,8 +147,8 @@ def render_report_md(manifest: dict[str, object]) -> str:
     lines.extend(["", "## Scenario Status", ""])
     scenario_rows = []
     for item in results:
-        graphify_status = RISK_GRAPHIFY_VERIFIED if item.get("graphify_file_effects_passed", item.get("passed")) else "graphify_install_failed"
-        command_artifact = _object_dict(item.get("command_artifact"))
+        graphify_status = RISK_GRAPHIFY_VERIFIED if item.get("graphify_file_effects_passed", item.get("passed")) else RISK_GRAPHIFY_FAILED
+        command_artifact = object_dict(item.get("command_artifact"))
         duration = item.get("duration_ms") or command_artifact.get("duration_ms")
         transcript = command_artifact.get("transcript_path") or item.get("transcript_path") or ""
         scenario_rows.append(
@@ -187,7 +174,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 
-    windows_validation = _object_dict(manifest.get("windows_validation")) or default_windows_validation_status()
+    windows_validation = object_dict(manifest.get("windows_validation")) or default_windows_validation_status()
     lines.extend(
         [
             "",
@@ -198,8 +185,8 @@ def render_report_md(manifest: dict[str, object]) -> str:
             f"- Strategy: {md_cell(windows_validation.get('strategy'))}",
         ]
     )
-    notes = _object_list(windows_validation.get("notes"))
-    targets = _object_list(windows_validation.get("targets"))
+    notes = object_list(windows_validation.get("notes"))
+    targets = object_list(windows_validation.get("targets"))
     for note in notes:
         lines.append(f"- {md_cell(note)}")
     if targets:
@@ -209,7 +196,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     lines.extend(["", "## Failures", ""])
     if failures:
         for item in failures:
-            command_artifact = _object_dict(item.get("command_artifact"))
+            command_artifact = object_dict(item.get("command_artifact"))
             lines.append(f"### {item.get('id')}")
             lines.append("")
             lines.append(f"- Reproduce: {md_code(item.get('reproduction_command') or command_artifact.get('command'))}")
@@ -225,7 +212,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     lines.extend(["", "## Command Transcripts", ""])
     transcript_rows = []
     for item in results:
-        command_artifact = _object_dict(item.get("command_artifact"))
+        command_artifact = object_dict(item.get("command_artifact"))
         if not command_artifact:
             continue
         transcript_rows.append(

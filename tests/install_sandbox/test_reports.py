@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import reports
+from tools.install_sandbox import reports, status
 
 
 def test_known_status_values_are_serializable_file_effect_statuses() -> None:
@@ -11,6 +11,12 @@ def test_known_status_values_are_serializable_file_effect_statuses() -> None:
     assert reports.RISK_GRAPHIFY_VERIFIED in encoded
     assert reports.RISK_GRAPHIFY_FAILED in encoded
     assert "target_tool_runtime" not in encoded
+
+
+def test_reports_reexport_shared_status_values() -> None:
+    assert reports.RISK_GRAPHIFY_VERIFIED == status.RISK_GRAPHIFY_VERIFIED == "graphify_install_verified"
+    assert reports.RISK_GRAPHIFY_FAILED == status.RISK_GRAPHIFY_FAILED == "graphify_install_failed"
+    assert reports.known_status_values() == status.known_status_values()
 
 
 def test_markdown_helpers_escape_table_and_code_cells() -> None:

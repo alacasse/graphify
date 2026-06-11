@@ -276,12 +276,28 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
     absent = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
 
     available_manifest = oracle.expected_manifest_relatives(available, "project")
+    assert oracle.skill_version_relative(skill_entry) == Path(".claude/skills/graphify/.graphify_version")
+    assert oracle.skill_references_relative(skill_entry) == Path(".claude/skills/graphify/references")
+    assert oracle.skill_references_tmp_relative(skill_entry) == Path(".claude/skills/graphify/references.tmp")
+    assert oracle.expected_skill_sidecar_relatives(available, skill_entry) == {
+        Path(".claude/skills/graphify/.graphify_version"),
+        Path(".claude/skills/graphify/references.tmp"),
+        Path(".claude/skills/graphify/references"),
+        Path(".claude/skills/graphify/references/query.md"),
+        Path(".claude/skills/graphify/references/update.md"),
+    }
     assert Path(".claude/skills/graphify/references") in available_manifest
     assert Path(".claude/skills/graphify/references/query.md") in available_manifest
     assert ("project", ".claude/skills/graphify/references/update.md") in oracle.expected_generated_relative_keys(available)
     assert "project/.claude/skills/graphify/references/query.md" in oracle.scenario_file_state(available)
 
     empty_manifest = oracle.expected_manifest_relatives(empty, "project")
+    empty_entry = empty.expected[0]
+    assert oracle.expected_skill_sidecar_relatives(empty, empty_entry) == {
+        Path(".empty/graphify/.graphify_version"),
+        Path(".empty/graphify/references.tmp"),
+        Path(".empty/graphify/references"),
+    }
     assert Path(".empty/graphify/references") in empty_manifest
     assert not any(path.name.endswith(".md") and "references" in path.parts for path in empty_manifest)
     assert ("project", ".empty/graphify/references") in oracle.expected_generated_relative_keys(empty)
@@ -289,10 +305,27 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
 
     absent_manifest = oracle.expected_manifest_relatives(absent, "project")
     absent_generated_keys = oracle.expected_generated_relative_keys(absent)
+    absent_entry = absent.expected[0]
+    assert oracle.expected_skill_sidecar_relatives(absent, absent_entry) == {
+        Path(".aider/graphify/.graphify_version"),
+        Path(".aider/graphify/references.tmp"),
+    }
     assert Path(".aider/graphify/references") not in absent_manifest
     assert ("project", ".aider/graphify/references") not in absent_generated_keys
     assert not any(key[1].startswith(".aider/graphify/references/") for key in absent_generated_keys)
     assert "project/.aider/graphify/references" not in oracle.scenario_file_state(absent)
+
+
+def test_is_skill_sidecar_relative_matches_version_and_nested_reference_paths(oracle) -> None:
+    test_scenario = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+
+    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/.graphify_version")) is True
+    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references/query.md")) is True
+    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references/nested/query.md")) is True
+    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references.tmp/partial.md")) is True
+    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references.tmp/nested/partial.md")) is True
+    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/notes.md")) is False
+    assert oracle.is_skill_sidecar_relative(test_scenario, "home", Path(".aider/graphify/.graphify_version")) is False
 
 
 def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> None:

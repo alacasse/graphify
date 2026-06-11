@@ -7,7 +7,7 @@ This directory is repository-owned developer tooling. Keep generated run artifac
 ## Quick Start
 
 ```bash
-python tools/install_sandbox/selftest.py
+uv run pytest tests/install_sandbox -q
 python tools/install_sandbox/run.py --repo /home/alacasse/projects/graphify --platform codex --scope both --output tools/install_sandbox/out/codex-smoke
 ```
 
@@ -96,14 +96,13 @@ Skill installs assert the installed `SKILL.md`, `.graphify_version`, `references
 
 Target runtime statuses are intentionally not emitted by this harness. Reports state that target runtime verification was not performed rather than recording a probe-like status.
 
-## Self-Tests
+## Tests
 
 ```bash
-python tools/install_sandbox/selftest.py
 uv run pytest tests/install_sandbox -q
-GRAPHIFY_RUN_DOCKER_TESTS=1 python tools/install_sandbox/selftest.py --docker
+python tools/install_sandbox/run.py --repo /home/alacasse/projects/graphify --platform codex --scope both --output tools/install_sandbox/out/codex-smoke
 ```
 
-The normal install sandbox unit suite lives under `tests/install_sandbox/` and runs through pytest. The default `selftest.py` launcher stays lightweight: it compiles the sandbox modules without requiring pytest or Docker. Docker execution is gated behind `--docker` and `GRAPHIFY_RUN_DOCKER_TESTS=1`.
+The normal install sandbox unit suite lives under `tests/install_sandbox/` and runs through pytest. Docker-backed validation runs through `tools/install_sandbox/run.py` so it exercises the same harness used by the required installer validation sequence.
 
 For installer-related changes, use `.kilo/instructions/installer-sandbox.md` as the source of truth for the required final validation sequence and failure-handling policy.

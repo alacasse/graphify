@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Literal, cast
+from typing import Callable, Iterable, Literal
 
 try:
+    from .file_walk import pruned_file_walk
+    from .json_helpers import object_dict, object_dicts, object_list
     from .platform_specs import ExpectedPath, Scenario
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
+    from file_walk import pruned_file_walk
+    from json_helpers import object_dict, object_dicts, object_list
     from platform_specs import ExpectedPath, Scenario
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 
@@ -33,19 +36,6 @@ GENERATED_COPY_EXCLUDES = (
     "__pycache__",
     ".pytest_cache",
 )
-
-
-def _object_dict(value: object) -> dict[str, object]:
-    return cast(dict[str, object], value) if isinstance(value, dict) else {}
-
-
-def _object_list(value: object) -> list[object]:
-    return cast(list[object], value) if isinstance(value, list) else []
-
-
-def _object_dicts(value: object) -> list[dict[str, object]]:
-    return [_object_dict(item) for item in _object_list(value) if isinstance(item, dict)]
-
 
 def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = None, relative: str | Path | None = None, **extra: object) -> dict[str, object]:
     record: dict[str, object] = {"path": str(path), "ok": ok, "detail": detail}
@@ -136,10 +126,10 @@ def json_value_contains_marker(value: object, marker: str) -> bool:
 
 
 def graphify_command_hook_present(entry: object, *, matcher: str | None = None, required_fragments: tuple[str, ...] = ("graphify",)) -> bool:
-    entry_data = _object_dict(entry)
+    entry_data = object_dict(entry)
     if matcher is not None and entry_data.get("matcher") != matcher:
         return False
-    for hook in _object_dicts(entry_data.get("hooks")):
+    for hook in object_dicts(entry_data.get("hooks")):
         if hook.get("type") != "command":
             continue
         command = hook.get("command")
@@ -149,8 +139,8 @@ def graphify_command_hook_present(entry: object, *, matcher: str | None = None, 
 
 
 def hooks_by_event(data: object, event_name: str) -> list[object]:
-    hooks = _object_dict(_object_dict(data).get("hooks"))
-    return _object_list(hooks.get(event_name))
+    hooks = object_dict(object_dict(data).get("hooks"))
+    return object_list(hooks.get(event_name))
 
 
 def claude_like_settings_status(data: object, schema_name: str) -> tuple[bool, str]:
@@ -174,7 +164,7 @@ def gemini_settings_status(data: object) -> tuple[bool, str]:
 
 
 def plugin_config_status(data: object, *, schema_name: str, expected_entry: str, allow_file_uri: bool = False) -> tuple[bool, str]:
-    plugins = _object_list(_object_dict(data).get("plugin"))
+    plugins = object_list(object_dict(data).get("plugin"))
     plugin_present = False
     for plugin in plugins:
         if not isinstance(plugin, str):
@@ -210,6 +200,7 @@ class FileEffectOracle:
     expected_graphify_version: Callable[[], str]
     manifest_prune_dirs: set[str]
 
+    # Path helpers
     def root_path(self, root: str) -> Path:
         try:
             return self.roots[root]
@@ -231,6 +222,33 @@ class FileEffectOracle:
     def skill_assertion_record(self, entry: ExpectedPath, relative: Path, ok: bool, detail: str) -> dict[str, object]:
         return check_record(self.root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
 
+    def skill_version_relative(self, entry: ExpectedPath) -> Path:
+        return self.skill_relative_dir(entry) / ".graphify_version"
+
+    def skill_references_relative(self, entry: ExpectedPath) -> Path:
+        return self.skill_relative_dir(entry) / "references"
+
+    def skill_references_tmp_relative(self, entry: ExpectedPath) -> Path:
+        return self.skill_relative_dir(entry) / "references.tmp"
+
+    def expected_skill_sidecar_relatives(self, scenario: Scenario, entry: ExpectedPath) -> set[Path]:
+        relatives = {
+            self.skill_version_relative(entry),
+            self.skill_references_tmp_relative(entry),
+        }
+        relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(self.skill_relative_dir(entry)))
+        return relatives
+
+    def installed_skill_reference_relatives(self, entry: ExpectedPath) -> set[Path]:
+        refs_dir = self.skill_dir_for_entry(entry) / "references"
+        refs_relative = self.skill_references_relative(entry)
+        if not refs_dir.is_dir():
+            return set()
+        return {refs_relative / path.name for path in refs_dir.glob("*.md") if path.is_file()}
+
+    def tracked_skill_sidecar_relatives(self, scenario: Scenario, entry: ExpectedPath) -> set[Path]:
+        return self.expected_skill_sidecar_relatives(scenario, entry) | self.installed_skill_reference_relatives(entry)
+
     def reference_sidecar_expectation(self, scenario: Scenario) -> ReferenceSidecarExpectation:
         return ReferenceSidecarExpectation.from_resolution(self.packaged_reference_resolution(scenario.platform))
 
@@ -242,11 +260,11 @@ class FileEffectOracle:
     def skill_reference_pointers(self, skill_text: str) -> list[str]:
         return sorted(set(re.findall(r"references/([A-Za-z0-9_.-]+\.md)\b", skill_text)))
 
+    # Skill sidecar checks
     def check_skill_version(self, entry: ExpectedPath) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
-        relative_dir = self.skill_relative_dir(entry)
         version_path = skill_dir / ".graphify_version"
-        version_relative = relative_dir / ".graphify_version"
+        version_relative = self.skill_version_relative(entry)
         expected_version = self.expected_graphify_version()
         if version_path.exists():
             actual_version = version_path.read_text(encoding="utf-8", errors="replace").strip()
@@ -259,20 +277,18 @@ class FileEffectOracle:
 
     def check_references_tmp_absent(self, entry: ExpectedPath) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
-        relative_dir = self.skill_relative_dir(entry)
         refs_tmp = skill_dir / "references.tmp"
         return self.skill_assertion_record(
             entry,
-            relative_dir / "references.tmp",
+            self.skill_references_tmp_relative(entry),
             not refs_tmp.exists(),
             "absent" if not refs_tmp.exists() else "present",
         )
 
     def check_packaged_references(self, scenario: Scenario, entry: ExpectedPath) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
-        relative_dir = self.skill_relative_dir(entry)
         refs_dir = skill_dir / "references"
-        refs_relative = relative_dir / "references"
+        refs_relative = self.skill_references_relative(entry)
         expectation = self.reference_sidecar_expectation(scenario)
         refs_ok, refs_detail = expectation.check_installed(refs_dir, self.installed_reference_names)
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
@@ -324,18 +340,17 @@ class FileEffectOracle:
         seeded: list[dict[str, object]] = []
         for entry in self.progressive_skill_entries(scenario):
             skill_dir = self.skill_dir_for_entry(entry)
-            relative_dir = self.skill_relative_dir(entry)
             refs_dir = skill_dir / "references"
             refs_dir.mkdir(parents=True, exist_ok=True)
             stale_ref = refs_dir / "stale-sandbox-fragment.md"
             stale_ref.write_text("stale sandbox reference fragment\n", encoding="utf-8")
-            seeded.append(self.skill_assertion_record(entry, relative_dir / "references" / stale_ref.name, True, "seeded_stale_reference_fragment"))
+            seeded.append(self.skill_assertion_record(entry, self.skill_references_relative(entry) / stale_ref.name, True, "seeded_stale_reference_fragment"))
 
             refs_tmp = skill_dir / "references.tmp"
             refs_tmp.mkdir(parents=True, exist_ok=True)
             partial = refs_tmp / "partial.md"
             partial.write_text("partial staged reference fragment\n", encoding="utf-8")
-            seeded.append(self.skill_assertion_record(entry, relative_dir / "references.tmp" / partial.name, True, "seeded_staged_reference_fragment"))
+            seeded.append(self.skill_assertion_record(entry, self.skill_references_tmp_relative(entry) / partial.name, True, "seeded_staged_reference_fragment"))
         return seeded
 
     def expected_manifest_relatives(self, scenario: Scenario, root_name: str) -> set[Path]:
@@ -346,12 +361,10 @@ class FileEffectOracle:
             relative = Path(entry.relative)
             relatives.add(relative)
             if self.is_skill_expected(entry):
-                skill_dir = relative.parent
-                relatives.add(skill_dir / ".graphify_version")
-                relatives.add(skill_dir / "references.tmp")
-                relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(skill_dir))
+                relatives.update(self.expected_skill_sidecar_relatives(scenario, entry))
         return relatives
 
+    # User content seeding
     def should_seed_user_content(self, entry: ExpectedPath) -> bool:
         return bool(entry.marker and entry.relative in USER_CONTENT_PRESERVING_RELATIVES)
 
@@ -374,6 +387,7 @@ class FileEffectOracle:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(self.seeded_text(entry), encoding="utf-8")
 
+    # JSON/text marker validation
     def json_marker_status(self, path: Path, entry: ExpectedPath) -> tuple[bool, str]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -413,6 +427,7 @@ class FileEffectOracle:
             return self.json_marker_status(path, entry)
         return self.text_marker_status(path, entry)
 
+    # Install/uninstall assertions
     def assert_expected_files(self, scenario: Scenario) -> list[dict[str, object]]:
         checks: list[dict[str, object]] = []
         for entry in scenario.expected:
@@ -442,11 +457,9 @@ class FileEffectOracle:
     def uninstalled_skill_sidecar_checks(self, entry: ExpectedPath) -> list[dict[str, object]]:
         if not self.is_skill_expected(entry):
             return []
-        skill_dir = self.skill_dir_for_entry(entry)
-        relative_dir = self.skill_relative_dir(entry)
         checks: list[dict[str, object]] = []
-        for sidecar in (".graphify_version", "references", "references.tmp"):
-            sidecar_path = skill_dir / sidecar
+        for relative in (self.skill_version_relative(entry), self.skill_references_relative(entry), self.skill_references_tmp_relative(entry)):
+            sidecar_path = self.root_path(entry.root) / relative
             sidecar_ok = not sidecar_path.exists()
             checks.append(
                 check_record(
@@ -454,7 +467,7 @@ class FileEffectOracle:
                     sidecar_ok,
                     "removed" if sidecar_ok else "sidecar_still_exists",
                     root=entry.root,
-                    relative=relative_dir / sidecar,
+                    relative=relative,
                 )
             )
         return checks
@@ -475,21 +488,13 @@ class FileEffectOracle:
         for entry in scenario.expected:
             keys.add((entry.root, entry.relative))
             if self.is_skill_expected(entry):
-                relative_dir = self.skill_relative_dir(entry)
-                keys.add((entry.root, (relative_dir / ".graphify_version").as_posix()))
-                keys.add((entry.root, (relative_dir / "references.tmp").as_posix()))
-                for relative in self.reference_sidecar_expectation(scenario).expected_relatives(relative_dir):
+                for relative in self.expected_skill_sidecar_relatives(scenario, entry):
                     keys.add((entry.root, relative.as_posix()))
         return keys
 
+    # Generated-file discovery/copying
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
-        if not base.exists():
-            return
-        for root, dirs, files in os.walk(base):
-            root_path_obj = Path(root)
-            dirs[:] = sorted(d for d in dirs if d not in self.manifest_prune_dirs)
-            for name in sorted(files):
-                yield root_path_obj / name
+        yield from pruned_file_walk(base, self.manifest_prune_dirs)
 
     def assert_no_unexpected_graphify_files(
         self,
@@ -550,6 +555,7 @@ class FileEffectOracle:
             item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
         return item
 
+    # Idempotency state
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:
         state: dict[str, dict[str, object]] = {}
         for entry in scenario.expected:
@@ -557,18 +563,7 @@ class FileEffectOracle:
             state[key] = self.file_fingerprint(self.expected_path(entry), entry.marker)
             if not self.is_skill_expected(entry):
                 continue
-            skill_dir = self.skill_dir_for_entry(entry)
-            relative_dir = self.skill_relative_dir(entry)
-            sidecar_relatives: set[Path] = {
-                relative_dir / ".graphify_version",
-                relative_dir / "references.tmp",
-            }
-            expectation = self.reference_sidecar_expectation(scenario)
-            sidecar_relatives.update(expectation.expected_relatives(relative_dir))
-            refs_dir = skill_dir / "references"
-            if refs_dir.is_dir():
-                sidecar_relatives.update(relative_dir / "references" / path.name for path in refs_dir.glob("*.md") if path.is_file())
-            for relative in sorted(sidecar_relatives, key=lambda item: item.as_posix()):
+            for relative in sorted(self.tracked_skill_sidecar_relatives(scenario, entry), key=lambda item: item.as_posix()):
                 state[f"{entry.root}/{relative.as_posix()}"] = self.file_fingerprint(self.root_path(entry.root) / relative)
         return state
 
@@ -583,12 +578,11 @@ class FileEffectOracle:
         for entry in scenario.expected:
             if root_name != entry.root or not self.is_skill_expected(entry):
                 continue
-            skill_rel_dir = self.skill_relative_dir(entry)
-            if relative == skill_rel_dir / ".graphify_version":
+            if relative == self.skill_version_relative(entry):
                 return True
-            for sidecar_dir in ("references", "references.tmp"):
+            for sidecar_dir in (self.skill_references_relative(entry), self.skill_references_tmp_relative(entry)):
                 try:
-                    relative.relative_to(skill_rel_dir / sidecar_dir)
+                    relative.relative_to(sidecar_dir)
                     return True
                 except ValueError:
                     pass

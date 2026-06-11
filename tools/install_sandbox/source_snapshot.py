@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from .file_walk import pruned_file_walk as _shared_pruned_file_walk
+except ImportError:
+    from file_walk import pruned_file_walk as _shared_pruned_file_walk
+
 
 PACKAGE_NAME = "graphifyy"
 
@@ -123,14 +128,7 @@ def validate_source_symlinks_for_copytree(config: SourceSnapshotConfig) -> None:
 
 
 def pruned_file_walk(base: Path, prune_dirs: Iterable[str] = MANIFEST_PRUNE_DIRS) -> Iterable[Path]:
-    if not base.exists():
-        return
-    prune = set(prune_dirs)
-    for root, dirs, files in os.walk(base):
-        root_path_obj = Path(root)
-        dirs[:] = sorted(d for d in dirs if d not in prune)
-        for name in sorted(files):
-            yield root_path_obj / name
+    yield from _shared_pruned_file_walk(base, prune_dirs)
 
 
 def source_manifest(src: Path, config: SourceSnapshotConfig) -> dict[str, object]:

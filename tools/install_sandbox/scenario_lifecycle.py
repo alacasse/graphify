@@ -11,8 +11,10 @@ from typing import Callable, Iterable
 
 try:
     from .platform_specs import DEFAULT_SCENARIO_REGISTRY, Scenario, ScenarioRegistry
+    from .status import combined_status
 except ImportError:
     from platform_specs import DEFAULT_SCENARIO_REGISTRY, Scenario, ScenarioRegistry
+    from status import combined_status
 
 
 @dataclass(frozen=True)
@@ -319,7 +321,7 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
         "checks": checks,
     }
     risks = {
-        "statuses": ["graphify_install_verified" if passed else "graphify_install_failed"],
+        "statuses": [combined_status(passed)],
         "notes": ["universal uninstall covers Graphify-owned file effects after multiple installs"],
         "known_status_values": hooks.known_status_values(),
     }
@@ -366,7 +368,7 @@ def run_purge_scenario(env: dict[str, str], *, hooks: ScenarioLifecycleHooks) ->
         "checks": checks,
     }
     risks = {
-        "statuses": ["graphify_install_verified" if passed else "graphify_install_failed"],
+        "statuses": [combined_status(passed)],
         "notes": ["purge verified only against disposable sandbox graphify-out state"],
         "known_status_values": hooks.known_status_values(),
     }

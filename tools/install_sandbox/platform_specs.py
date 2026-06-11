@@ -97,6 +97,18 @@ def _json_marker(root: str, relative: str) -> ExpectedPath:
     return ExpectedPath(root, relative, marker="graphify")
 
 
+def _plugin(root: str, relative: str) -> ExpectedPath:
+    return ExpectedPath(root, relative)
+
+
+def _project_plugin_config(plugin_relative: str, config_relative: str) -> tuple[ExpectedPath, ExpectedPath]:
+    return (_plugin("project", plugin_relative), _json_marker("project", config_relative))
+
+
+def _cwd_plugin_config(plugin_relative: str, config_relative: str) -> tuple[ExpectedPath, ExpectedPath]:
+    return (_plugin("user_cwd", plugin_relative), _json_marker("user_cwd", config_relative))
+
+
 def _scenario(
     platform_name: str,
     scope: str,
@@ -390,8 +402,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 "user",
                 (
                     _skill("home", ".config/opencode/skills/graphify/SKILL.md"),
-                    ExpectedPath("user_cwd", ".opencode/plugins/graphify.js"),
-                    _json_marker("user_cwd", ".opencode/opencode.json"),
+                    *_cwd_plugin_config(".opencode/plugins/graphify.js", ".opencode/opencode.json"),
                 ),
                 uninstall_command=None,
                 risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE, PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE),
@@ -399,7 +410,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "project": _agents_project_scope(
                 "opencode",
                 ".opencode/skills/graphify/SKILL.md",
-                extra_expected=(ExpectedPath("project", ".opencode/plugins/graphify.js"), _json_marker("project", ".opencode/opencode.json")),
+                extra_expected=_project_plugin_config(".opencode/plugins/graphify.js", ".opencode/opencode.json"),
             ),
         },
     ),
@@ -421,8 +432,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                     _skill("home", ".config/kilo/skills/graphify/SKILL.md"),
                     ExpectedPath("home", ".config/kilo/command/graphify.md"),
                     _section("project", "AGENTS.md"),
-                    ExpectedPath("project", ".kilo/plugins/graphify.js"),
-                    _json_marker("project", ".kilo/kilo.json"),
+                    *_project_plugin_config(".kilo/plugins/graphify.js", ".kilo/kilo.json"),
                 ),
                 install_command=("graphify", "kilo", "install"),
                 uninstall_command=("graphify", "kilo", "uninstall"),

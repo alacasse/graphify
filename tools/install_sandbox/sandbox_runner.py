@@ -21,6 +21,7 @@ try:
     from . import reports
     from . import scenario_lifecycle
     from . import source_snapshot
+    from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
         Scenario,
@@ -32,6 +33,7 @@ except ImportError:
     import reports
     import scenario_lifecycle
     import source_snapshot
+    from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
         Scenario,
@@ -52,8 +54,6 @@ INSTALL_MODE = "normal"
 USER_SENTINEL = file_effects.USER_SENTINEL
 STALE_GRAPHIFY_SENTINEL = file_effects.STALE_GRAPHIFY_SENTINEL
 GRAPHIFY_MARKER = file_effects.GRAPHIFY_MARKER
-RISK_GRAPHIFY_VERIFIED = "graphify_install_verified"
-RISK_GRAPHIFY_FAILED = "graphify_install_failed"
 COPY_EXCLUDES = (
     *source_snapshot.COPY_EXCLUDES,
 )
@@ -193,14 +193,6 @@ def command_probe_summary(result: subprocess.CompletedProcess[str], command: tup
         "stderr": result.stderr,
         "timed_out": bool(getattr(result, "timed_out", False)),
     }
-
-
-def known_status_values() -> list[str]:
-    return [RISK_GRAPHIFY_VERIFIED, RISK_GRAPHIFY_FAILED]
-
-
-def combined_status(graphify_passed: bool) -> str:
-    return RISK_GRAPHIFY_VERIFIED if graphify_passed else RISK_GRAPHIFY_FAILED
 
 
 def version_from_probe(probe: dict[str, object]) -> str | None:

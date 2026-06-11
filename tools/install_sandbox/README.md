@@ -100,9 +100,10 @@ Target runtime statuses are intentionally not emitted by this harness. Reports s
 
 ```bash
 python tools/install_sandbox/selftest.py
+uv run pytest tests/install_sandbox -q
 GRAPHIFY_RUN_DOCKER_TESTS=1 python tools/install_sandbox/selftest.py --docker
 ```
 
-The default self-test does not require Docker. Docker execution is gated behind `--docker` and `GRAPHIFY_RUN_DOCKER_TESTS=1`.
+The normal install sandbox unit suite lives under `tests/install_sandbox/` and runs through pytest. The default `selftest.py` launcher stays lightweight: it compiles the sandbox modules without requiring pytest or Docker. Docker execution is gated behind `--docker` and `GRAPHIFY_RUN_DOCKER_TESTS=1`.
 
 For installer-related changes, use `.kilo/instructions/installer-sandbox.md` as the source of truth for the required final validation sequence and failure-handling policy.

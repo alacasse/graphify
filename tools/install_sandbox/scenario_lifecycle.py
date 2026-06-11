@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import shutil
 import subprocess
@@ -81,13 +80,6 @@ class ScenarioLifecycleHooks:
     run_purge_scenario_func: Callable[[dict[str, str]], dict[str, object]] | None = None
 
 
-def scenario_id(platform: str, scope: str) -> str:
-    raw = f"{platform}-{scope}".lower()
-    safe = re.sub(r"[^a-z0-9_.-]+", "-", raw)
-    safe = re.sub(r"[-_.]{2,}", "-", safe).strip(".-_")
-    return safe or "scenario"
-
-
 def scenario_artifact_dir(scenario_name: str, *, hooks: ScenarioLifecycleHooks) -> Path:
     return hooks.output / "scenarios" / scenario_name
 
@@ -96,7 +88,7 @@ def prepare_scenario_run(scenario: Scenario, env: dict[str, str], *, hooks: Scen
     started_at = hooks.utc_timestamp()
     started_monotonic = time.monotonic()
     hooks.reset_sandbox_dirs()
-    artifact_dir = scenario_artifact_dir(scenario_name or scenario_id(scenario.platform, scenario.scope), hooks=hooks)
+    artifact_dir = scenario_artifact_dir(scenario_name or hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope), hooks=hooks)
     if artifact_dir.exists():
         shutil.rmtree(artifact_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -227,10 +219,11 @@ def standard_scenario_command_ok(stages: StandardScenarioStages) -> bool:
 
 def finalize_standard_scenario(context: ScenarioRunContext, stages: StandardScenarioStages, *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
     scenario = context.scenario
+    scenario_name = hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
     checks = standard_scenario_checks(stages)
     passed = standard_scenario_command_ok(stages) and all(check["ok"] for check in checks)
     assertions = {
-        "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": scenario_id(scenario.platform, scenario.scope)},
+        "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": scenario_name},
         "passed": passed,
         "install_exit_code": stages.install_1.returncode,
         "repeat_install_exit_code": None if stages.install_2 is None else stages.install_2.returncode,
@@ -248,7 +241,7 @@ def finalize_standard_scenario(context: ScenarioRunContext, stages: StandardScen
     return scenario_result_record(
         context,
         hooks=hooks,
-        scenario_name=scenario_id(scenario.platform, scenario.scope),
+        scenario_name=scenario_name,
         platform_name=scenario.platform,
         scope=scenario.scope,
         passed=passed,
@@ -271,7 +264,7 @@ def run_scenario(scenario: Scenario, env: dict[str, str], *, hooks: ScenarioLife
 
 
 def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    scenario_name = f"universal-uninstall-{scope}"
+    scenario_name = hooks.scenario_registry.universal_uninstall_scenario_id(scope)
     runner_scenario = Scenario(
         platform="multiple",
         scope=scope,
@@ -290,13 +283,14 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
     install_results = []
     install_checks: list[dict[str, object]] = []
     for scenario in scenarios:
-        install_dir = artifact_dir / "installs" / scenario_id(scenario.platform, scenario.scope)
+        install_scenario_id = hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
+        install_dir = artifact_dir / "installs" / install_scenario_id
         result = hooks.run_capture(scenario.install_command, cwd=hooks.root_path(scenario.cwd_root), env=env, artifact_dir=install_dir, command_class="installer")
         scenario_install_checks = hooks.assert_expected_files(scenario) + hooks.assert_scope_boundaries(scenario)
         install_checks.extend(scenario_install_checks)
         install_results.append(
             {
-                "scenario_id": scenario_id(scenario.platform, scenario.scope),
+                "scenario_id": install_scenario_id,
                 "command": list(scenario.install_command),
                 "exit_code": result.returncode,
                 "checks": scenario_install_checks,
@@ -344,7 +338,7 @@ def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env:
 
 
 def run_purge_scenario(env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    scenario_name = "purge-disposable-graphify-out"
+    scenario_name = hooks.scenario_registry.purge_disposable_graphify_out_scenario_id()
     command = ("graphify", "uninstall", "--purge")
     runner_scenario = Scenario(
         platform="purge",

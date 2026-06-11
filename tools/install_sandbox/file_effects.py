@@ -648,3 +648,67 @@ def assert_idempotent_state(before: dict[str, dict[str, object]], after: dict[st
         stable = before.get(key) == after.get(key)
         checks.append(check_record(key, stable, "unchanged_after_repeat_install" if stable else "changed_after_repeat_install"))
     return checks
+
+
+@dataclass(frozen=True)
+class ScenarioFileEffectsAdapter:
+    oracle: FileEffectOracle
+    write_file_manifest: Callable[..., None]
+    run_equivalence_check: Callable[[Scenario, dict[str, str], Path], list[dict[str, object]]]
+
+    def seed_scenario_inputs(self, scenario: Scenario) -> None:
+        self.oracle.seed_user_owned_content(scenario)
+
+    def write_manifest(self, path: Path, roots: dict[str, Path], **kwargs: object) -> None:
+        self.write_file_manifest(path, roots, **kwargs)
+
+    def capture_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:
+        return self.oracle.scenario_file_state(scenario)
+
+    def install_checks(self, scenario: Scenario) -> list[dict[str, object]]:
+        return self.oracle.assert_expected_files(scenario) + self.oracle.assert_scope_boundaries(scenario)
+
+    def unexpected_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
+        return self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+
+    def archive_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
+        self.oracle.copy_generated_files(scenario, artifact_dir)
+
+    def repeat_install_checks(
+        self,
+        scenario: Scenario,
+        before: dict[str, dict[str, object]],
+        after: dict[str, dict[str, object]],
+        *,
+        phase: str,
+    ) -> list[dict[str, object]]:
+        return assert_idempotent_state(before, after) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+
+    def seed_stale_sidecar_repair(self, scenario: Scenario) -> list[dict[str, object]]:
+        return self.oracle.seed_stale_skill_sidecars(scenario)
+
+    def stale_sidecar_repair_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
+        return self.oracle.assert_installed_skill_sidecars(scenario) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+
+    def uninstall_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
+        return self.oracle.assert_uninstalled(scenario) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+
+    def equivalence_checks(self, scenario: Scenario, env: dict[str, str], artifact_dir: Path) -> list[dict[str, object]]:
+        return self.run_equivalence_check(scenario, env, artifact_dir)
+
+    def universal_uninstall_checks(
+        self,
+        runner_scenario: Scenario,
+        installed_scenarios: Iterable[Scenario],
+        install_checks: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        scenarios = list(installed_scenarios)
+        expected_keys = set().union(*(self.oracle.expected_generated_relative_keys(scenario) for scenario in scenarios))
+        return (
+            install_checks
+            + [check for scenario in scenarios for check in self.oracle.assert_uninstalled(scenario)]
+            + self.oracle.assert_no_unexpected_graphify_files(runner_scenario, phase="universal_uninstall", expected_keys=expected_keys)
+        )
+
+    def purge_checks(self, graphify_out: Path, purged: bool) -> list[dict[str, object]]:
+        return [check_record(graphify_out, purged, "purged" if purged else "still_exists")]

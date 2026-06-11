@@ -7,14 +7,14 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, cast
+from typing import Callable, Iterable, Literal, cast
 
 try:
     from .platform_specs import ExpectedPath, Scenario
-    from .reference_resolution import PackagedReferenceResolution
+    from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
     from platform_specs import ExpectedPath, Scenario
-    from reference_resolution import PackagedReferenceResolution
+    from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 
 
 USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"
@@ -55,6 +55,64 @@ def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = 
         record["relative"] = relative.as_posix() if isinstance(relative, Path) else relative
     record.update(extra)
     return record
+
+
+ReferenceSidecarMode = Literal["absent", "source_error", "installed_directory"]
+
+
+@dataclass(frozen=True)
+class ReferenceSidecarExpectation:
+    status: ReferenceResolutionStatus
+    mode: ReferenceSidecarMode
+    expected_names: tuple[str, ...]
+    detail: str
+
+    @classmethod
+    def from_resolution(cls, resolution: PackagedReferenceResolution) -> ReferenceSidecarExpectation:
+        if resolution.status in {"intentionally_absent", "no_eligible_bundle"}:
+            mode: ReferenceSidecarMode = "absent"
+        elif resolution.status in {"missing", "not_directory"}:
+            mode = "source_error"
+        else:
+            mode = "installed_directory"
+        return cls(
+            status=resolution.status,
+            mode=mode,
+            expected_names=resolution.expected_names,
+            detail=resolution.detail,
+        )
+
+    @property
+    def includes_reference_dir(self) -> bool:
+        return self.mode in {"source_error", "installed_directory"}
+
+    def expected_relatives(self, skill_relative_dir: Path) -> set[Path]:
+        if not self.includes_reference_dir:
+            return set()
+        references = skill_relative_dir / "references"
+        relatives = {references}
+        relatives.update(references / name for name in self.expected_names)
+        return relatives
+
+    def check_installed(self, refs_dir: Path, installed_reference_names: Callable[[Path], list[str]]) -> tuple[bool, str]:
+        expected_names = list(self.expected_names)
+        if self.mode == "absent":
+            refs_ok = not refs_dir.exists()
+            refs_state = "references_absent" if refs_ok else "references_present"
+            return refs_ok, f"{self.status}; {refs_state}; {self.detail}"
+        if self.mode == "source_error":
+            return False, f"{self.status}; {self.detail}"
+        if not refs_dir.exists():
+            return False, f"references_missing; status={self.status}; expected_names={expected_names}; {self.detail}"
+        if not refs_dir.is_dir():
+            return False, f"references_not_directory; status={self.status}; expected_names={expected_names}; {self.detail}"
+
+        actual_names = installed_reference_names(refs_dir)
+        missing = sorted(set(expected_names) - set(actual_names))
+        extra = sorted(set(actual_names) - set(expected_names))
+        refs_ok = not missing and not extra
+        refs_detail = f"status={self.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
+        return refs_ok, refs_detail
 
 
 def expected_kind_status(path: Path, kind: str) -> tuple[bool, str]:
@@ -173,6 +231,9 @@ class FileEffectOracle:
     def skill_assertion_record(self, entry: ExpectedPath, relative: Path, ok: bool, detail: str) -> dict[str, object]:
         return check_record(self.root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
 
+    def reference_sidecar_expectation(self, scenario: Scenario) -> ReferenceSidecarExpectation:
+        return ReferenceSidecarExpectation.from_resolution(self.packaged_reference_resolution(scenario.platform))
+
     def installed_reference_names(self, refs_dir: Path) -> list[str]:
         if not refs_dir.is_dir():
             return []
@@ -212,28 +273,8 @@ class FileEffectOracle:
         relative_dir = self.skill_relative_dir(entry)
         refs_dir = skill_dir / "references"
         refs_relative = relative_dir / "references"
-        resolution = self.packaged_reference_resolution(scenario.platform)
-        expected_names = list(resolution.expected_names)
-
-        if resolution.status in {"intentionally_absent", "no_eligible_bundle"}:
-            refs_ok = not refs_dir.exists()
-            refs_state = "references_absent" if refs_ok else "references_present"
-            refs_detail = f"{resolution.status}; {refs_state}; {resolution.detail}"
-        elif resolution.status in {"missing", "not_directory"}:
-            refs_ok = False
-            refs_detail = f"{resolution.status}; {resolution.detail}"
-        elif not refs_dir.exists():
-            refs_ok = False
-            refs_detail = f"references_missing; status={resolution.status}; expected_names={expected_names}; {resolution.detail}"
-        elif not refs_dir.is_dir():
-            refs_ok = False
-            refs_detail = f"references_not_directory; status={resolution.status}; expected_names={expected_names}; {resolution.detail}"
-        else:
-            actual_names = self.installed_reference_names(refs_dir)
-            missing = sorted(set(expected_names) - set(actual_names))
-            extra = sorted(set(actual_names) - set(expected_names))
-            refs_ok = not missing and not extra
-            refs_detail = f"status={resolution.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
+        expectation = self.reference_sidecar_expectation(scenario)
+        refs_ok, refs_detail = expectation.check_installed(refs_dir, self.installed_reference_names)
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
     def check_skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> dict[str, object]:
@@ -273,9 +314,9 @@ class FileEffectOracle:
 
     def progressive_skill_entries(self, scenario: Scenario) -> list[ExpectedPath]:
         entries: list[ExpectedPath] = []
-        resolution = self.packaged_reference_resolution(scenario.platform)
+        expectation = self.reference_sidecar_expectation(scenario)
         for entry in scenario.expected:
-            if self.is_skill_expected(entry) and resolution.expects_references:
+            if self.is_skill_expected(entry) and expectation.includes_reference_dir:
                 entries.append(entry)
         return entries
 
@@ -308,11 +349,7 @@ class FileEffectOracle:
                 skill_dir = relative.parent
                 relatives.add(skill_dir / ".graphify_version")
                 relatives.add(skill_dir / "references.tmp")
-                resolution = self.packaged_reference_resolution(scenario.platform)
-                if resolution.expects_references:
-                    relatives.add(skill_dir / "references")
-                for name in resolution.expected_names:
-                    relatives.add(skill_dir / "references" / name)
+                relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(skill_dir))
         return relatives
 
     def should_seed_user_content(self, entry: ExpectedPath) -> bool:
@@ -441,11 +478,8 @@ class FileEffectOracle:
                 relative_dir = self.skill_relative_dir(entry)
                 keys.add((entry.root, (relative_dir / ".graphify_version").as_posix()))
                 keys.add((entry.root, (relative_dir / "references.tmp").as_posix()))
-                resolution = self.packaged_reference_resolution(scenario.platform)
-                if resolution.expects_references:
-                    keys.add((entry.root, (relative_dir / "references").as_posix()))
-                for name in resolution.expected_names:
-                    keys.add((entry.root, (relative_dir / "references" / name).as_posix()))
+                for relative in self.reference_sidecar_expectation(scenario).expected_relatives(relative_dir):
+                    keys.add((entry.root, relative.as_posix()))
         return keys
 
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
@@ -529,13 +563,11 @@ class FileEffectOracle:
                 relative_dir / ".graphify_version",
                 relative_dir / "references.tmp",
             }
-            resolution = self.packaged_reference_resolution(scenario.platform)
-            if resolution.expects_references:
-                sidecar_relatives.add(relative_dir / "references")
+            expectation = self.reference_sidecar_expectation(scenario)
+            sidecar_relatives.update(expectation.expected_relatives(relative_dir))
             refs_dir = skill_dir / "references"
             if refs_dir.is_dir():
                 sidecar_relatives.update(relative_dir / "references" / path.name for path in refs_dir.glob("*.md") if path.is_file())
-            sidecar_relatives.update(relative_dir / "references" / name for name in resolution.expected_names)
             for relative in sorted(sidecar_relatives, key=lambda item: item.as_posix()):
                 state[f"{entry.root}/{relative.as_posix()}"] = self.file_fingerprint(self.root_path(entry.root) / relative)
         return state

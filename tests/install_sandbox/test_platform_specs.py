@@ -60,6 +60,26 @@ def test_sandbox_registry_defines_all_platforms() -> None:
         assert bool(spec.scopes or spec.unsupported_scopes)
 
 
+def test_vscode_reference_bundle_guard_is_declarative() -> None:
+    spec = REGISTRY.platform_spec("vscode")
+
+    assert spec.reference_bundles == (
+        platform_specs.ReferenceBundle("vscode", required_package_relative="skill-vscode.md"),
+        platform_specs.ReferenceBundle("copilot"),
+    )
+
+
+def test_reference_bundle_eligibility_uses_required_package_file(tmp_path) -> None:
+    bundle = platform_specs.ReferenceBundle("not-vscode", required_package_relative="skill-not-vscode.md")
+
+    assert not bundle.is_eligible(tmp_path)
+
+    (tmp_path / "skill-not-vscode.md").write_text("skill")
+
+    assert bundle.is_eligible(tmp_path)
+    assert platform_specs.ReferenceBundle("not-vscode").is_eligible(tmp_path)
+
+
 def test_make_scenario_projects_registry_scope_specs() -> None:
     for platform_name in ("claude", "codex", "codebuddy", "kilo", "vscode", "antigravity", "windows"):
         spec = REGISTRY.platform_spec(platform_name)

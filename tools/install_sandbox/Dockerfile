@@ -35,6 +35,7 @@ COPY sandbox_runner.py /runner/sandbox_runner.py
 COPY command_runner.py /runner/command_runner.py
 COPY file_effects.py /runner/file_effects.py
 COPY platform_specs.py /runner/platform_specs.py
+COPY reference_resolution.py /runner/reference_resolution.py
 COPY reports.py /runner/reports.py
 COPY scenario_lifecycle.py /runner/scenario_lifecycle.py
 COPY source_snapshot.py /runner/source_snapshot.py

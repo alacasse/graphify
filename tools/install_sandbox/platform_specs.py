@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 
@@ -43,6 +44,15 @@ class ScopeSpec:
 
 
 @dataclass(frozen=True)
+class ReferenceBundle:
+    name: str
+    required_package_relative: str | None = None
+
+    def is_eligible(self, package_dir: Path) -> bool:
+        return self.required_package_relative is None or (package_dir / self.required_package_relative).exists()
+
+
+@dataclass(frozen=True)
 class PlatformSpec:
     name: str
     user_skill: str | None = None
@@ -50,7 +60,7 @@ class PlatformSpec:
     scopes: dict[str, ScopeSpec] = field(default_factory=dict)
     unsupported_scopes: dict[str, str] = field(default_factory=dict)
     uses_packaged_references: bool = True
-    reference_bundles: tuple[str, ...] = ()
+    reference_bundles: tuple[ReferenceBundle, ...] = ()
     simulated_linux_layout: bool = False
     universal_uninstall_scopes: tuple[str, ...] = ()
 
@@ -505,7 +515,10 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
         name="vscode",
         user_skill=".copilot/skills/graphify/SKILL.md",
         uses_packaged_references=False,
-        reference_bundles=("vscode", "copilot"),
+        reference_bundles=(
+            ReferenceBundle("vscode", required_package_relative="skill-vscode.md"),
+            ReferenceBundle("copilot"),
+        ),
         scopes={
             "user": _scenario(
                 "vscode",

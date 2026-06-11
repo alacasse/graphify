@@ -77,6 +77,62 @@ def json_shape_check(oracle: file_effects.FileEffectOracle, roots: dict[str, Pat
     return oracle.assert_expected_files(test_scenario)[0]
 
 
+@pytest.mark.parametrize(
+    ("status", "names", "expected_relatives"),
+    [
+        (
+            "available",
+            ("query.md", "update.md"),
+            {
+                ".unit/graphify/references",
+                ".unit/graphify/references/query.md",
+                ".unit/graphify/references/update.md",
+            },
+        ),
+        ("empty", (), {".unit/graphify/references"}),
+        ("missing", (), {".unit/graphify/references"}),
+        ("not_directory", (), {".unit/graphify/references"}),
+        ("intentionally_absent", (), set()),
+        ("no_eligible_bundle", (), set()),
+    ],
+)
+def test_reference_sidecar_expectation_owns_expected_relatives(status: str, names: tuple[str, ...], expected_relatives: set[str]) -> None:
+    expectation = file_effects.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
+
+    assert expectation.expected_relatives(Path(".unit/graphify")) == {Path(relative) for relative in expected_relatives}
+
+
+def test_reference_sidecar_expectation_validates_installed_status_matrix(tmp_path: Path) -> None:
+    def installed_reference_names(refs_dir: Path) -> list[str]:
+        return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
+
+    refs_dir = tmp_path / "references"
+    absent = file_effects.ReferenceSidecarExpectation.from_resolution(resolution("intentionally_absent", detail="absent refs"))
+    ok, detail = absent.check_installed(refs_dir, installed_reference_names)
+    assert ok is True
+    assert detail == "intentionally_absent; references_absent; absent refs"
+
+    refs_dir.mkdir()
+    ok, detail = absent.check_installed(refs_dir, installed_reference_names)
+    assert ok is False
+    assert detail == "intentionally_absent; references_present; absent refs"
+
+    source_error = file_effects.ReferenceSidecarExpectation.from_resolution(resolution("missing", detail="missing /package/refs"))
+    ok, detail = source_error.check_installed(refs_dir, installed_reference_names)
+    assert ok is False
+    assert detail == "missing; missing /package/refs"
+
+    expected = file_effects.ReferenceSidecarExpectation.from_resolution(resolution("available", ("query.md",), "available refs"))
+    ok, detail = expected.check_installed(refs_dir, installed_reference_names)
+    assert ok is False
+    assert "missing=['query.md']" in detail
+
+    (refs_dir / "query.md").write_text("query\n", encoding="utf-8")
+    ok, detail = expected.check_installed(refs_dir, installed_reference_names)
+    assert ok is True
+    assert "status=available" in detail
+
+
 def test_assertion_detects_missing_file(oracle) -> None:
     checks = oracle.assert_expected_files(scenario("unit", ExpectedPath("project", "missing.txt")))
 

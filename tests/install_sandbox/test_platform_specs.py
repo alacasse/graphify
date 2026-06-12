@@ -49,8 +49,65 @@ def test_json_expectations_are_declared_on_expected_paths() -> None:
         scenario = REGISTRY.make_scenario(platform_name, scope)
         assert scenario is not None
         entry = next(item for item in scenario.expected if item.relative == relative)
+        assert entry.content_kind == "json"
         assert entry.json_expectation is not None
         assert entry.json_expectation.schema_name == expectations[(platform_name, scope, relative)]
+
+
+def test_user_content_preservation_is_declared_on_registry_entries() -> None:
+    preserving_entries = {
+        (platform_name, scope, entry.root, entry.relative)
+        for platform_name in platform_specs.ALL_PLATFORMS
+        for scope in ("user", "project")
+        if (scenario := REGISTRY.make_scenario(platform_name, scope)) is not None
+        for entry in scenario.expected
+        if entry.text_expectation.preserve_user_content
+    }
+
+    assert preserving_entries == {
+        ("claude", "user", "home", ".claude/CLAUDE.md"),
+        ("claude", "project", "project", ".claude/CLAUDE.md"),
+        ("claude", "project", "project", "CLAUDE.md"),
+        ("codex", "project", "project", "AGENTS.md"),
+        ("opencode", "project", "project", "AGENTS.md"),
+        ("kilo", "project", "project", "AGENTS.md"),
+        ("gemini", "user", "user_cwd", "GEMINI.md"),
+        ("gemini", "project", "project", "GEMINI.md"),
+        ("aider", "project", "project", "AGENTS.md"),
+        ("vscode", "user", "user_cwd", ".github/copilot-instructions.md"),
+        ("vscode", "project", "project", ".github/copilot-instructions.md"),
+        ("claw", "project", "project", "AGENTS.md"),
+        ("droid", "project", "project", "AGENTS.md"),
+        ("trae", "project", "project", "AGENTS.md"),
+        ("trae-cn", "project", "project", "AGENTS.md"),
+        ("hermes", "project", "project", "AGENTS.md"),
+        ("windows", "user", "home", ".claude/CLAUDE.md"),
+        ("windows", "project", "project", ".claude/CLAUDE.md"),
+        ("windows", "project", "project", "CLAUDE.md"),
+        ("amp", "project", "project", "AGENTS.md"),
+    }
+
+
+def test_text_section_repair_is_declared_on_expected_paths() -> None:
+    for platform_name in platform_specs.ALL_PLATFORMS:
+        for scope in ("user", "project"):
+            scenario = REGISTRY.make_scenario(platform_name, scope)
+            if scenario is None:
+                continue
+            for entry in scenario.expected:
+                if entry.marker == platform_specs.GRAPHIFY_MARKER:
+                    assert entry.text_expectation.repair_stale_graphify_section, f"{platform_name}/{scope}/{entry.relative}"
+
+
+def test_skill_sidecar_policy_is_declared_on_skill_entries() -> None:
+    for platform_name in platform_specs.ALL_PLATFORMS:
+        for scope in ("user", "project"):
+            scenario = REGISTRY.make_scenario(platform_name, scope)
+            if scenario is None:
+                continue
+            for entry in scenario.expected:
+                if entry.relative.endswith("SKILL.md"):
+                    assert entry.skill_sidecar_expectation is not None, f"{platform_name}/{scope}/{entry.relative}"
 
 
 def test_registry_mirrors_install_surface() -> None:

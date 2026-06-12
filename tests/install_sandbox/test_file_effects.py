@@ -57,6 +57,23 @@ def scenario(platform: str, *expected: ExpectedPath, scope: str = "project") -> 
     )
 
 
+def expected_skill(root: str, relative: str) -> ExpectedPath:
+    return ExpectedPath(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+
+
+def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> ExpectedPath:
+    return ExpectedPath(
+        root,
+        relative,
+        marker=marker,
+        text_expectation=platform_specs.TextExpectation(
+            preserve_user_content=preserve_user_content,
+            repair_stale_graphify_section=True,
+            require_user_content_on_uninstall=preserve_user_content,
+        ),
+    )
+
+
 def write_skill(root: Path, relative: str, *, body: str = "# graphify skill\n", version: str | None = None) -> Path:
     skill = root / relative
     skill.parent.mkdir(parents=True, exist_ok=True)
@@ -71,7 +88,7 @@ def check_by_relative(checks: list[dict[str, object]], relative: str) -> dict[st
 
 
 def json_shape_check(oracle: file_effects.FileEffectOracle, roots: dict[str, Path], relative: str, data: object) -> dict[str, object]:
-    test_scenario = scenario("unit", ExpectedPath("project", relative, marker="graphify"))
+    test_scenario = scenario("unit", ExpectedPath("project", relative, content_kind="json", marker="graphify"))
     path = roots["project"] / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -111,7 +128,7 @@ def registered_json_shape_check(oracle: file_effects.FileEffectOracle, roots: di
 def test_reference_sidecar_expectation_owns_expected_relatives(status: str, names: tuple[str, ...], expected_relatives: set[str]) -> None:
     expectation = file_effects.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
 
-    assert expectation.expected_relatives(Path(".unit/graphify")) == {Path(relative) for relative in expected_relatives}
+    assert expectation.expected_relatives(Path(".unit/graphify"), platform_specs.SkillSidecarExpectation()) == {Path(relative) for relative in expected_relatives}
 
 
 def test_reference_sidecar_expectation_validates_installed_status_matrix(tmp_path: Path) -> None:
@@ -154,7 +171,7 @@ def test_assertion_detects_missing_file(oracle) -> None:
 
 
 def test_skill_assertion_detects_missing_and_wrong_version_stamp(oracle, roots) -> None:
-    missing_version = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    missing_version = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     write_skill(roots["project"], ".aider/graphify/SKILL.md")
 
     version = check_by_relative(oracle.assert_expected_files(missing_version), ".aider/graphify/.graphify_version")
@@ -169,7 +186,7 @@ def test_skill_assertion_detects_missing_and_wrong_version_stamp(oracle, roots) 
 
 
 def test_skill_assertion_detects_missing_references_sidecar_from_body_pointer(oracle, roots) -> None:
-    test_scenario = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     write_skill(
         roots["project"],
         ".aider/graphify/SKILL.md",
@@ -187,7 +204,7 @@ def test_skill_assertion_detects_missing_references_sidecar_from_body_pointer(or
 
 
 def test_skill_assertion_detects_references_tmp(oracle, roots) -> None:
-    test_scenario = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     skill = write_skill(roots["project"], ".aider/graphify/SKILL.md", version="9.9.9")
     (skill.parent / "references.tmp").mkdir()
 
@@ -197,7 +214,7 @@ def test_skill_assertion_detects_references_tmp(oracle, roots) -> None:
 
 
 def test_skill_assertion_detects_extra_and_missing_packaged_reference_fragments(oracle, roots) -> None:
-    test_scenario = scenario("claude", ExpectedPath("project", ".claude/skills/graphify/SKILL.md"))
+    test_scenario = scenario("claude", expected_skill("project", ".claude/skills/graphify/SKILL.md"))
     skill = write_skill(roots["project"], ".claude/skills/graphify/SKILL.md", version="9.9.9")
     refs = skill.parent / "references"
     refs.mkdir()
@@ -217,7 +234,7 @@ def test_skill_assertion_detects_extra_and_missing_packaged_reference_fragments(
 
 
 def test_skill_assertion_rejects_monolith_sidecar(oracle, roots) -> None:
-    test_scenario = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     skill = write_skill(roots["project"], ".aider/graphify/SKILL.md", version="9.9.9")
     refs = skill.parent / "references"
     refs.mkdir()
@@ -230,7 +247,7 @@ def test_skill_assertion_rejects_monolith_sidecar(oracle, roots) -> None:
 
 def test_absent_packaged_reference_statuses_pass_when_references_absent(oracle, roots) -> None:
     for platform in ("aider", "no_eligible"):
-        test_scenario = scenario(platform, ExpectedPath("project", f".{platform}/graphify/SKILL.md"))
+        test_scenario = scenario(platform, expected_skill("project", f".{platform}/graphify/SKILL.md"))
         write_skill(roots["project"], f".{platform}/graphify/SKILL.md", version="9.9.9")
 
         refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), f".{platform}/graphify/references")
@@ -241,7 +258,7 @@ def test_absent_packaged_reference_statuses_pass_when_references_absent(oracle, 
 
 
 def test_no_eligible_bundle_fails_when_references_present(oracle, roots) -> None:
-    test_scenario = scenario("no_eligible", ExpectedPath("project", ".no_eligible/graphify/SKILL.md"))
+    test_scenario = scenario("no_eligible", expected_skill("project", ".no_eligible/graphify/SKILL.md"))
     skill = write_skill(roots["project"], ".no_eligible/graphify/SKILL.md", version="9.9.9")
     refs = skill.parent / "references"
     refs.mkdir()
@@ -254,7 +271,7 @@ def test_no_eligible_bundle_fails_when_references_present(oracle, roots) -> None
 
 
 def test_empty_packaged_references_requires_empty_installed_directory(oracle, roots) -> None:
-    test_scenario = scenario("empty", ExpectedPath("project", ".empty/graphify/SKILL.md"))
+    test_scenario = scenario("empty", expected_skill("project", ".empty/graphify/SKILL.md"))
     skill = write_skill(roots["project"], ".empty/graphify/SKILL.md", version="9.9.9")
     refs = skill.parent / "references"
     refs.mkdir()
@@ -271,7 +288,7 @@ def test_empty_packaged_references_requires_empty_installed_directory(oracle, ro
 
 def test_malformed_packaged_reference_statuses_fail_with_resolver_detail(oracle, roots) -> None:
     for platform in ("missing", "not_directory"):
-        test_scenario = scenario(platform, ExpectedPath("project", f".{platform}/graphify/SKILL.md"))
+        test_scenario = scenario(platform, expected_skill("project", f".{platform}/graphify/SKILL.md"))
         write_skill(roots["project"], f".{platform}/graphify/SKILL.md", version="9.9.9")
 
         refs_check = check_by_relative(oracle.assert_expected_files(test_scenario), f".{platform}/graphify/references")
@@ -282,10 +299,10 @@ def test_malformed_packaged_reference_statuses_fail_with_resolver_detail(oracle,
 
 
 def test_reference_resolution_status_controls_manifest_generated_keys_and_state(oracle, roots) -> None:
-    skill_entry = ExpectedPath("project", ".claude/skills/graphify/SKILL.md")
+    skill_entry = expected_skill("project", ".claude/skills/graphify/SKILL.md")
     available = scenario("claude", skill_entry)
-    empty = scenario("empty", ExpectedPath("project", ".empty/graphify/SKILL.md"))
-    absent = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    empty = scenario("empty", expected_skill("project", ".empty/graphify/SKILL.md"))
+    absent = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
 
     available_manifest = oracle.expected_manifest_relatives(available, "project")
     assert oracle.skill_version_relative(skill_entry) == Path(".claude/skills/graphify/.graphify_version")
@@ -329,7 +346,7 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
 
 
 def test_is_skill_sidecar_relative_matches_version_and_nested_reference_paths(oracle) -> None:
-    test_scenario = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
 
     assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/.graphify_version")) is True
     assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references/query.md")) is True
@@ -341,8 +358,8 @@ def test_is_skill_sidecar_relative_matches_version_and_nested_reference_paths(or
 
 
 def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> None:
-    progressive = scenario("claude", ExpectedPath("project", ".claude/skills/graphify/SKILL.md"))
-    monolith = scenario("aider", ExpectedPath("project", ".aider/graphify/SKILL.md"))
+    progressive = scenario("claude", expected_skill("project", ".claude/skills/graphify/SKILL.md"))
+    monolith = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
 
     progressive_seeded = oracle.seed_stale_skill_sidecars(progressive)
     monolith_seeded = oracle.seed_stale_skill_sidecars(monolith)
@@ -355,35 +372,61 @@ def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> No
 
 
 def test_seeded_stale_section_must_be_replaced(oracle, roots) -> None:
-    test_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md", marker=file_effects.GRAPHIFY_MARKER))
+    test_scenario = scenario("unit", section("project", "random-notes.txt", preserve_user_content=True))
 
     oracle.seed_user_owned_content(test_scenario)
-    seeded = roots["project"] / "AGENTS.md"
+    seeded = roots["project"] / "random-notes.txt"
     assert file_effects.USER_SENTINEL in seeded.read_text(encoding="utf-8")
     assert file_effects.STALE_GRAPHIFY_SENTINEL in seeded.read_text(encoding="utf-8")
     assert oracle.assert_expected_files(test_scenario)[0]["ok"] is False
 
-    seeded.write_text(f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n{file_effects.GRAPHIFY_MARKER}\nnew section\n", encoding="utf-8")
+    seeded.write_text(f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n", encoding="utf-8")
     assert oracle.assert_expected_files(test_scenario)[0]["ok"] is True
 
 
-def test_uninstall_requires_seeded_user_content_to_survive(oracle, roots) -> None:
-    test_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md", marker=file_effects.GRAPHIFY_MARKER))
+def test_text_policy_is_declared_not_inferred_from_known_file_names(oracle, roots) -> None:
+    known_without_policy = ExpectedPath("project", "AGENTS.md", marker=platform_specs.GRAPHIFY_MARKER)
+    declared_random_path = section("project", "not-a-platform-file.txt", preserve_user_content=True)
+    test_scenario = scenario("unit", known_without_policy, declared_random_path)
+
     oracle.seed_user_owned_content(test_scenario)
-    (roots["project"] / "AGENTS.md").unlink()
+
+    assert not (roots["project"] / "AGENTS.md").exists()
+    assert (roots["project"] / "not-a-platform-file.txt").exists()
+
+    (roots["project"] / "AGENTS.md").write_text(
+        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+    (roots["project"] / "not-a-platform-file.txt").write_text(
+        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+
+    known_check, declared_check = oracle.assert_expected_files(test_scenario)
+    assert known_check["ok"] is True
+    assert "stale_replaced" not in str(known_check["detail"])
+    assert declared_check["ok"] is False
+    assert "stale_replaced=False" in str(declared_check["detail"])
+
+
+def test_uninstall_requires_seeded_user_content_to_survive(oracle, roots) -> None:
+    test_scenario = scenario("unit", section("project", "random-notes.txt", preserve_user_content=True))
+    oracle.seed_user_owned_content(test_scenario)
+    (roots["project"] / "random-notes.txt").unlink()
 
     check = oracle.assert_uninstalled(test_scenario)[0]
     assert check["ok"] is False
     assert check["detail"] == "user_content_file_missing"
 
-    (roots["project"] / "AGENTS.md").write_text("# User Notes\n", encoding="utf-8")
+    (roots["project"] / "random-notes.txt").write_text("# User Notes\n", encoding="utf-8")
     check = oracle.assert_uninstalled(test_scenario)[0]
     assert check["ok"] is False
     assert "user_content_preserved=False" in str(check["detail"])
 
 
 def test_json_marker_assertion_rejects_invalid_json(oracle, roots) -> None:
-    test_scenario = scenario("unit", ExpectedPath("project", ".codebuddy/settings.json", marker="graphify"))
+    test_scenario = scenario("unit", ExpectedPath("project", ".codebuddy/settings.json", content_kind="json", marker="graphify"))
     path = roots["project"] / ".codebuddy/settings.json"
     path.parent.mkdir(parents=True)
     path.write_text('{"hooks": ["graphify",}', encoding="utf-8")
@@ -462,7 +505,7 @@ def test_generated_files_filtering(oracle, roots, tmp_path) -> None:
         install_command=("true",),
         uninstall_command=None,
         cwd_root="user_cwd",
-        expected=(ExpectedPath("home", ".codex/skills/graphify/SKILL.md"),),
+        expected=(expected_skill("home", ".codex/skills/graphify/SKILL.md"),),
     )
 
     artifact_dir = tmp_path / "artifact"

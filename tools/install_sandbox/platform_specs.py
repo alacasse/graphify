@@ -36,13 +36,41 @@ class JsonExpectation:
 
 
 @dataclass(frozen=True)
+class TextExpectation:
+    preserve_user_content: bool = False
+    repair_stale_graphify_section: bool = False
+    remove_graphify_section_on_uninstall: bool = True
+    require_user_content_on_uninstall: bool = False
+
+
+@dataclass(frozen=True)
+class SkillSidecarExpectation:
+    version_name: str = ".graphify_version"
+    references_dir: str = "references"
+    references_tmp_dir: str = "references.tmp"
+    reference_pointer_pattern: str = r"references/([A-Za-z0-9_.-]+\.md)\b"
+
+
+@dataclass(frozen=True)
+class GeneratedFileExpectation:
+    relative_substrings: tuple[str, ...] = ("graphify",)
+    text_suffixes: tuple[str, ...] = (".json", ".js", ".md", ".mdc", ".txt", "")
+    content_markers: tuple[str, ...] = ("graphify",)
+    include_user_content_sentinel: bool = True
+    max_text_bytes: int = 1024 * 1024
+
+
+@dataclass(frozen=True)
 class ExpectedPath:
     root: str
     relative: str
     kind: str = "file"
+    content_kind: Literal["text", "json"] = "text"
     marker: str | None = None
     remove_on_uninstall: bool = True
     json_expectation: JsonExpectation | None = None
+    text_expectation: TextExpectation = field(default_factory=TextExpectation)
+    skill_sidecar_expectation: SkillSidecarExpectation | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +82,8 @@ class Scenario:
     cwd_root: str
     expected: tuple[ExpectedPath, ...]
     risk_notes: tuple[str, ...] = field(default_factory=tuple)
+    allowed_roots: tuple[str, ...] = ()
+    generated_file_expectation: GeneratedFileExpectation = field(default_factory=GeneratedFileExpectation)
 
 
 @dataclass(frozen=True)
@@ -64,6 +94,8 @@ class ScopeSpec:
     expected: tuple[ExpectedPath, ...]
     risk_notes: tuple[str, ...] = field(default_factory=tuple)
     equivalent_install_command: tuple[str, ...] | None = None
+    allowed_roots: tuple[str, ...] = ()
+    generated_file_expectation: GeneratedFileExpectation = field(default_factory=GeneratedFileExpectation)
 
 
 @dataclass(frozen=True)
@@ -109,15 +141,33 @@ def _direct_project_install(platform_name: str) -> tuple[str, ...]:
 
 
 def _skill(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(root, relative)
+    return ExpectedPath(root, relative, skill_sidecar_expectation=SkillSidecarExpectation())
 
 
-def _section(root: str, relative: str, marker: str = GRAPHIFY_MARKER, *, remove_on_uninstall: bool = True) -> ExpectedPath:
-    return ExpectedPath(root, relative, marker=marker, remove_on_uninstall=remove_on_uninstall)
+def _section(
+    root: str,
+    relative: str,
+    marker: str = GRAPHIFY_MARKER,
+    *,
+    preserve_user_content: bool = False,
+    repair_stale_graphify_section: bool = True,
+    remove_on_uninstall: bool = True,
+) -> ExpectedPath:
+    return ExpectedPath(
+        root,
+        relative,
+        marker=marker,
+        remove_on_uninstall=remove_on_uninstall,
+        text_expectation=TextExpectation(
+            preserve_user_content=preserve_user_content,
+            repair_stale_graphify_section=repair_stale_graphify_section,
+            require_user_content_on_uninstall=preserve_user_content,
+        ),
+    )
 
 
 def _json_marker(root: str, relative: str, *, expectation: JsonExpectation | None = None) -> ExpectedPath:
-    return ExpectedPath(root, relative, marker="graphify", json_expectation=expectation)
+    return ExpectedPath(root, relative, content_kind="json", marker="graphify", json_expectation=expectation)
 
 
 def _json_hooks(root: str, relative: str, schema_name: str, hooks: tuple[JsonHookExpectation, ...]) -> ExpectedPath:
@@ -162,6 +212,14 @@ def _scenario(
         uninstall = _generic_uninstall_command(platform_name, scope)
     else:
         uninstall = uninstall_command
+    if scope == "project":
+        allowed_roots = ("project",)
+        if MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE in risk_notes:
+            allowed_roots = ("home", "project", "user_cwd")
+    else:
+        allowed_roots = ("home",)
+        if MIXED_SCOPE_PROJECT_WIRING_NOTE in risk_notes:
+            allowed_roots = ("home", "project", "user_cwd")
     return ScopeSpec(
         install_command=install_command or _generic_install_command(platform_name, scope),
         uninstall_command=uninstall,
@@ -169,6 +227,7 @@ def _scenario(
         expected=expected,
         risk_notes=risk_notes,
         equivalent_install_command=equivalent_install_command,
+        allowed_roots=allowed_roots,
     )
 
 
@@ -186,7 +245,7 @@ def _agents_project_scope(platform_name: str, skill_relative: str, *, extra_expe
     return _scenario(
         platform_name,
         "project",
-        (_skill("project", skill_relative), _section("project", "AGENTS.md"), *extra_expected),
+        (_skill("project", skill_relative), _section("project", "AGENTS.md", preserve_user_content=True), *extra_expected),
         equivalent_install_command=_direct_project_install(platform_name) if equivalent else None,
     )
 
@@ -229,13 +288,13 @@ class ScenarioRegistry:
         skill = self.platform_spec(platform_name).user_skill
         if skill is None:
             raise RuntimeError(f"sandbox platform has no user skill path: {platform_name}")
-        return ExpectedPath("home", skill)
+        return _skill("home", skill)
 
     def project_skill(self, platform_name: str) -> ExpectedPath:
         skill = self.platform_spec(platform_name).project_skill
         if skill is None:
             raise RuntimeError(f"sandbox platform has no project skill path: {platform_name}")
-        return ExpectedPath("project", skill)
+        return _skill("project", skill)
 
     def unsupported_scope_reason(self, platform_name: str, scope: str) -> str | None:
         return self.platform_spec(platform_name).unsupported_scopes.get(scope)
@@ -274,6 +333,8 @@ class ScenarioRegistry:
             cwd_root=scope_spec.cwd_root,
             expected=scope_spec.expected,
             risk_notes=scope_spec.risk_notes,
+            allowed_roots=scope_spec.allowed_roots,
+            generated_file_expectation=scope_spec.generated_file_expectation,
         )
 
     def platform_scenarios(self, platform_name: str, scope: str) -> list[Scenario]:
@@ -375,7 +436,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "user": _generic_user_scope(
                 "claude",
                 ".claude/skills/graphify/SKILL.md",
-                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", remove_on_uninstall=False),),
+                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", preserve_user_content=True, repair_stale_graphify_section=False, remove_on_uninstall=False),),
                 notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,),
             ),
             "project": _scenario(
@@ -383,8 +444,8 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 "project",
                 (
                     _skill("project", ".claude/skills/graphify/SKILL.md"),
-                    _section("project", ".claude/CLAUDE.md", "# graphify"),
-                    _section("project", "CLAUDE.md"),
+                    _section("project", ".claude/CLAUDE.md", "# graphify", preserve_user_content=True, repair_stale_graphify_section=False),
+                    _section("project", "CLAUDE.md", preserve_user_content=True),
                     _json_hooks(
                         "project",
                         ".claude/settings.json",
@@ -504,7 +565,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 (
                     _skill("home", ".config/kilo/skills/graphify/SKILL.md"),
                     ExpectedPath("home", ".config/kilo/command/graphify.md"),
-                    _section("project", "AGENTS.md"),
+                    _section("project", "AGENTS.md", preserve_user_content=True),
                     *_project_plugin_config(".kilo/plugins/graphify.js", ".kilo/kilo.json", "kilo_config", allow_file_uri=True),
                 ),
                 install_command=("graphify", "kilo", "install"),
@@ -523,7 +584,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 "user",
                 (
                     _skill("home", ".gemini/skills/graphify/SKILL.md"),
-                    _section("user_cwd", "GEMINI.md"),
+                    _section("user_cwd", "GEMINI.md", preserve_user_content=True),
                     _json_hooks(
                         "user_cwd",
                         ".gemini/settings.json",
@@ -540,7 +601,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 "project",
                 (
                     _skill("project", ".gemini/skills/graphify/SKILL.md"),
-                    _section("project", "GEMINI.md"),
+                    _section("project", "GEMINI.md", preserve_user_content=True),
                     _json_hooks(
                         "project",
                         ".gemini/settings.json",
@@ -620,7 +681,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "user": _scenario(
                 "vscode",
                 "user",
-                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("user_cwd", ".github/copilot-instructions.md")),
+                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("user_cwd", ".github/copilot-instructions.md", preserve_user_content=True)),
                 install_command=("graphify", "vscode", "install"),
                 uninstall_command=("graphify", "vscode", "uninstall"),
                 risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
@@ -628,7 +689,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "project": _scenario(
                 "vscode",
                 "project",
-                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("project", ".github/copilot-instructions.md")),
+                (_skill("home", ".copilot/skills/graphify/SKILL.md"), _section("project", ".github/copilot-instructions.md", preserve_user_content=True)),
                 install_command=("graphify", "vscode", "install"),
                 uninstall_command=("graphify", "vscode", "uninstall"),
                 risk_notes=(MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
@@ -690,7 +751,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "project": _scenario(
                 "kiro",
                 "project",
-                (_skill("project", ".kiro/skills/graphify/SKILL.md"), _section("project", ".kiro/steering/graphify.md", "graphify:")),
+                (_skill("project", ".kiro/skills/graphify/SKILL.md"), _section("project", ".kiro/steering/graphify.md", "graphify:", repair_stale_graphify_section=False)),
                 install_command=("graphify", "kiro", "install"),
                 uninstall_command=("graphify", "kiro", "uninstall"),
                 equivalent_install_command=_generic_install_command("kiro", "project"),
@@ -746,7 +807,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "user": _generic_user_scope(
                 "windows",
                 ".claude/skills/graphify/SKILL.md",
-                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", remove_on_uninstall=False),),
+                extra_expected=(_section("home", ".claude/CLAUDE.md", "# graphify", preserve_user_content=True, repair_stale_graphify_section=False, remove_on_uninstall=False),),
                 notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, SIMULATED_LINUX_LAYOUT_NOTE),
             ),
             "project": _scenario(
@@ -754,8 +815,8 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 "project",
                 (
                     _skill("project", ".claude/skills/graphify/SKILL.md"),
-                    _section("project", ".claude/CLAUDE.md", "# graphify"),
-                    _section("project", "CLAUDE.md"),
+                    _section("project", ".claude/CLAUDE.md", "# graphify", preserve_user_content=True, repair_stale_graphify_section=False),
+                    _section("project", "CLAUDE.md", preserve_user_content=True),
                     _json_hooks(
                         "project",
                         ".claude/settings.json",

@@ -69,7 +69,7 @@ class StandardScenarioOutcome:
     scenario_name: str
     stages: StandardScenarioStages
     checks: list[dict[str, object]]
-    generic_direct_equivalence: str
+    generic_direct_equivalence: dict[str, object]
 
     @property
     def passed(self) -> bool:
@@ -359,7 +359,7 @@ class ScenarioArtifacts:
         scenario_name: str,
         stages: StandardScenarioStages,
         checks: list[dict[str, object]],
-        generic_direct_equivalence: str,
+        generic_direct_equivalence: dict[str, object],
     ) -> dict[str, object]:
         return self.recorded_result(context, StandardScenarioOutcome(scenario_name, stages, checks, generic_direct_equivalence))
 

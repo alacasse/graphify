@@ -54,7 +54,11 @@ class HookFactory:
         self.calls: list[str] = []
         self.command_results: list[int] = [0]
         self.command_artifact_dirs: list[Path] = []
+        self.captured_artifact_dirs: list[Path] = []
+        self.command_records: list[dict[str, object]] = []
+        self.manifest_records: list[dict[str, object]] = []
         self.seeded_sidecars: list[dict[str, object]] = []
+        self.universal_check_ok = True
 
     def completed(self, command, returncode: int) -> subprocess.CompletedProcess[str]:
         result = subprocess.CompletedProcess(list(command), returncode, "", "")
@@ -67,12 +71,23 @@ class HookFactory:
         self.calls.append("command:" + " ".join(command_tuple))
         if artifact_dir is not None:
             artifact_dir.mkdir(parents=True, exist_ok=True)
+            self.captured_artifact_dirs.append(Path(artifact_dir))
+        self.command_records.append(
+            {
+                "command": command_tuple,
+                "cwd": Path(cwd),
+                "artifact_dir": None if artifact_dir is None else Path(artifact_dir),
+                "command_class": command_class,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
         returncode = self.command_results.pop(0) if self.command_results else 0
         return self.completed(command_tuple, returncode)
 
     def hooks(self, **overrides) -> scenario_lifecycle.ScenarioLifecycleHooks:
         def write_file_manifest(path, roots, **kwargs):
             self.calls.append(f"manifest:{Path(path).name}")
+            self.manifest_records.append({"filename": Path(path).name, "path": Path(path), "kwargs": dict(kwargs)})
             Path(path).write_text("{}\n", encoding="utf-8")
 
         def scenario_file_state(scenario):
@@ -160,9 +175,12 @@ class HookFactory:
                 checks = list(install_checks)
                 for scenario in installed_scenarios:
                     checks.extend(uninstall_checks(scenario, phase="universal_uninstall"))
+                if not self.universal_check_ok:
+                    checks.append({"ok": False, "detail": "universal_uninstall_failed"})
                 return checks
 
             def purge_checks(_, graphify_out, purged):
+                self.calls.append("purge-check:graphify-out")
                 return [{"path": str(graphify_out), "ok": purged, "detail": "purged" if purged else "still_exists"}]
 
         paths = overrides.pop(
@@ -346,20 +364,84 @@ def test_universal_uninstall_scenario_writes_assertions_and_risk_artifacts(tmp_p
     assert [item["scenario_id"] for item in assertions["install_results"]] == ["first-project", "second-project"]
     assert risks["statuses"] == ["graphify_install_verified"]
     assert "target_runtime_verification" not in result
+    assert {"before-install-files.json", "after-install-files.json", "after-uninstall-files.json", "assertions.json", "risk.json"} <= artifact_names(artifact_dir)
+    assert [record["filename"] for record in factory.manifest_records] == [
+        "before-install-files.json",
+        "after-install-files.json",
+        "after-uninstall-files.json",
+    ]
+    assert factory.manifest_records[0]["kwargs"] == {}
+    assert factory.manifest_records[1]["kwargs"] == {"debug_full": True}
+    assert factory.manifest_records[2]["kwargs"] == {"debug_full": True}
+    assert factory.captured_artifact_dirs == [
+        artifact_dir / "installs" / "first-project",
+        artifact_dir / "installs" / "second-project",
+        artifact_dir / "uninstall",
+    ]
+    assert factory.command_records[-1]["cwd"] == factory.project
+    assert factory.calls == [
+        "reset",
+        "seed:first",
+        "seed:second",
+        "manifest:before-install-files.json",
+        "command:graphify install --platform first",
+        "expected:first",
+        "scope:first",
+        "command:graphify install --platform second",
+        "expected:second",
+        "scope:second",
+        "manifest:after-install-files.json",
+        "command:graphify uninstall --project",
+        "uninstalled:first",
+        "unexpected:universal_uninstall",
+        "uninstalled:second",
+        "unexpected:universal_uninstall",
+        "manifest:after-uninstall-files.json",
+    ]
+
+
+def test_universal_uninstall_scenario_derives_failure_from_installs_uninstall_and_checks(tmp_path) -> None:
+    scenarios = [make_scenario("first", "project"), make_scenario("second", "project")]
+
+    factory = HookFactory(tmp_path / "install-fails")
+    factory.command_results = [1, 0, 0]
+    result = scenario_lifecycle.run_universal_uninstall_scenario("project", scenarios, {}, hooks=factory.hooks())
+    assertions = json.loads((factory.output / "scenarios" / "universal-uninstall-project" / "assertions.json").read_text(encoding="utf-8"))
+    assert result["passed"] is False
+    assert assertions["passed"] is False
+    assert [item["exit_code"] for item in assertions["install_results"]] == [1, 0]
+
+    factory = HookFactory(tmp_path / "uninstall-fails")
+    factory.command_results = [0, 0, 1]
+    result = scenario_lifecycle.run_universal_uninstall_scenario("project", scenarios, {}, hooks=factory.hooks())
+    assertions = json.loads((factory.output / "scenarios" / "universal-uninstall-project" / "assertions.json").read_text(encoding="utf-8"))
+    assert result["passed"] is False
+    assert assertions["passed"] is False
+    assert assertions["uninstall_exit_code"] == 1
+
+    factory = HookFactory(tmp_path / "checks-fail")
+    factory.command_results = [0, 0, 0]
+    factory.universal_check_ok = False
+    result = scenario_lifecycle.run_universal_uninstall_scenario("project", scenarios, {}, hooks=factory.hooks())
+    assertions = json.loads((factory.output / "scenarios" / "universal-uninstall-project" / "assertions.json").read_text(encoding="utf-8"))
+    assert result["passed"] is False
+    assert assertions["passed"] is False
+    assert {check["detail"] for check in assertions["checks"]} >= {"universal_uninstall_failed"}
 
 
 def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp_path) -> None:
     factory = HookFactory(tmp_path)
 
     def purge_run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
-        if artifact_dir is not None:
-            artifact_dir.mkdir(parents=True, exist_ok=True)
+        result = factory.run_capture(command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class=command_class, timeout_seconds=timeout_seconds)
         graphify_out = factory.project / "graphify-out"
+        assert (graphify_out / "graph.json").exists()
+        factory.calls.append("graphify-out:present-before-purge")
         if graphify_out.exists():
             for child in graphify_out.iterdir():
                 child.unlink()
             graphify_out.rmdir()
-        return factory.completed(command, 0)
+        return result
 
     result = scenario_lifecycle.run_purge_scenario({}, hooks=factory.hooks(run_capture=purge_run_capture))
     purge_scenario_id = DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id()
@@ -378,6 +460,57 @@ def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp
     assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": True, "detail": "purged"}]
     assert risks["statuses"] == ["graphify_install_verified"]
     assert not (factory.project / "graphify-out").exists()
+    assert {"before-install-files.json", "after-uninstall-files.json", "assertions.json", "risk.json"} <= artifact_names(artifact_dir)
+    assert [record["filename"] for record in factory.manifest_records] == ["before-install-files.json", "after-uninstall-files.json"]
+    assert factory.manifest_records[0]["kwargs"] == {}
+    assert factory.manifest_records[1]["kwargs"] == {}
+    assert factory.captured_artifact_dirs == [artifact_dir / "uninstall-purge"]
+    assert factory.command_records == [
+        {
+            "command": ("graphify", "uninstall", "--purge"),
+            "cwd": factory.project,
+            "artifact_dir": artifact_dir / "uninstall-purge",
+            "command_class": "installer",
+            "timeout_seconds": None,
+        }
+    ]
+    assert factory.calls == [
+        "reset",
+        "manifest:before-install-files.json",
+        "command:graphify uninstall --purge",
+        "graphify-out:present-before-purge",
+        "manifest:after-uninstall-files.json",
+        "purge-check:graphify-out",
+    ]
+
+
+def test_purge_scenario_derives_failure_from_command_exit_and_removal(tmp_path) -> None:
+    factory = HookFactory(tmp_path / "command-fails")
+    factory.command_results = [1]
+
+    def failing_purge_removes_graph(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
+        result = factory.run_capture(command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class=command_class, timeout_seconds=timeout_seconds)
+        graphify_out = factory.project / "graphify-out"
+        for child in graphify_out.iterdir():
+            child.unlink()
+        graphify_out.rmdir()
+        return result
+
+    result = scenario_lifecycle.run_purge_scenario({}, hooks=factory.hooks(run_capture=failing_purge_removes_graph))
+    assertions = json.loads((factory.output / "scenarios" / DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id() / "assertions.json").read_text(encoding="utf-8"))
+    assert result["passed"] is False
+    assert assertions["passed"] is False
+    assert assertions["uninstall_exit_code"] == 1
+    assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": True, "detail": "purged"}]
+
+    factory = HookFactory(tmp_path / "graph-remains")
+    factory.command_results = [0]
+    result = scenario_lifecycle.run_purge_scenario({}, hooks=factory.hooks())
+    assertions = json.loads((factory.output / "scenarios" / DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id() / "assertions.json").read_text(encoding="utf-8"))
+    assert result["passed"] is False
+    assert assertions["passed"] is False
+    assert assertions["uninstall_exit_code"] == 0
+    assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": False, "detail": "still_exists"}]
 
 
 def test_matrix_collects_graphify_failures(tmp_path) -> None:

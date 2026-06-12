@@ -44,6 +44,154 @@ class StandardScenarioStages:
     state_after_repeat: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
+class ScenarioResultOutcome(Protocol):
+    @property
+    def scenario_name(self) -> str: ...
+
+    @property
+    def passed(self) -> bool: ...
+
+    def platform_name(self, context: ScenarioRunContext) -> str: ...
+
+    def scope(self, context: ScenarioRunContext) -> str: ...
+
+    def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]: ...
+
+    def command_artifact_dir(self, context: ScenarioRunContext) -> Path: ...
+
+    def assertions(self, context: ScenarioRunContext) -> dict[str, object]: ...
+
+    def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]: ...
+
+
+@dataclass(frozen=True)
+class StandardScenarioOutcome:
+    scenario_name: str
+    stages: StandardScenarioStages
+    checks: list[dict[str, object]]
+    generic_direct_equivalence: str
+
+    @property
+    def passed(self) -> bool:
+        return standard_scenario_command_ok(self.stages) and all(check["ok"] for check in self.checks)
+
+    def platform_name(self, context: ScenarioRunContext) -> str:
+        return context.scenario.platform
+
+    def scope(self, context: ScenarioRunContext) -> str:
+        return context.scenario.scope
+
+    def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
+        return context.scenario.install_command
+
+    def command_artifact_dir(self, context: ScenarioRunContext) -> Path:
+        return context.artifact_dir
+
+    def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
+        scenario = context.scenario
+        return {
+            "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": self.scenario_name},
+            "passed": self.passed,
+            "install_exit_code": self.stages.install_1.returncode,
+            "repeat_install_exit_code": None if self.stages.install_2 is None else self.stages.install_2.returncode,
+            "stale_sidecar_repair_exit_code": None if self.stages.stale_sidecar_repair_result is None else self.stages.stale_sidecar_repair_result.returncode,
+            "stale_sidecar_repair_seeded": self.stages.stale_sidecar_repair_seeded,
+            "stale_sidecar_repair_checks": self.stages.stale_sidecar_repair_checks,
+            "uninstall_exit_code": None if self.stages.uninstall_result is None else self.stages.uninstall_result.returncode,
+            "state_after_install": self.stages.state_after_install,
+            "state_after_repeat_install": self.stages.state_after_repeat,
+            "generic_direct_equivalence": self.generic_direct_equivalence,
+            "checks": self.checks,
+        }
+
+    def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]:
+        return artifacts.risk_report(context.scenario, self.passed)
+
+
+@dataclass(frozen=True)
+class UniversalUninstallOutcome:
+    scenario_name: str
+    scope_name: str
+    scenarios: list[Scenario]
+    install_results: list[dict[str, object]]
+    uninstall_command: tuple[str, ...]
+    uninstall_result: subprocess.CompletedProcess[str]
+    checks: list[dict[str, object]]
+    uninstall_artifact_dir: Path
+
+    @property
+    def passed(self) -> bool:
+        return all(result["exit_code"] == 0 for result in self.install_results) and self.uninstall_result.returncode == 0 and all(check["ok"] for check in self.checks)
+
+    def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
+        return self.uninstall_command
+
+    def platform_name(self, context: ScenarioRunContext) -> str:
+        return "multiple"
+
+    def scope(self, context: ScenarioRunContext) -> str:
+        return self.scope_name
+
+    def command_artifact_dir(self, context: ScenarioRunContext) -> Path:
+        return self.uninstall_artifact_dir
+
+    def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
+        return {
+            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "platforms": [scenario.platform for scenario in self.scenarios]},
+            "passed": self.passed,
+            "install_results": self.install_results,
+            "uninstall_command": list(self.uninstall_command),
+            "uninstall_exit_code": self.uninstall_result.returncode,
+            "checks": self.checks,
+        }
+
+    def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]:
+        return artifacts.synthetic_risk_payload(
+            self.passed,
+            note="universal uninstall covers Graphify-owned file effects after multiple installs",
+        )
+
+
+@dataclass(frozen=True)
+class PurgeOutcome:
+    scenario_name: str
+    command: tuple[str, ...]
+    result: subprocess.CompletedProcess[str]
+    checks: list[dict[str, object]]
+    purged: bool
+    purge_artifact_dir: Path
+
+    @property
+    def passed(self) -> bool:
+        return self.result.returncode == 0 and self.purged
+
+    def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
+        return self.command
+
+    def platform_name(self, context: ScenarioRunContext) -> str:
+        return "purge"
+
+    def scope(self, context: ScenarioRunContext) -> str:
+        return "project"
+
+    def command_artifact_dir(self, context: ScenarioRunContext) -> Path:
+        return self.purge_artifact_dir
+
+    def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
+        return {
+            "scenario": {"id": self.scenario_name, "scope": "project", "platform": "purge"},
+            "passed": self.passed,
+            "uninstall_exit_code": self.result.returncode,
+            "checks": self.checks,
+        }
+
+    def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]:
+        return artifacts.synthetic_risk_payload(
+            self.passed,
+            note="purge verified only against disposable sandbox graphify-out state",
+        )
+
+
 @dataclass(frozen=True)
 class StandardLifecyclePhase:
     check_phase: str
@@ -166,56 +314,43 @@ class ScenarioArtifacts:
         self.write_json_artifact(artifact_dir, "assertions.json", assertions)
         self.write_json_artifact(artifact_dir, "risk.json", risks)
 
+    def synthetic_risk_payload(self, passed: bool, *, note: str) -> dict[str, object]:
+        return {
+            "statuses": [self.combined_status(passed)],
+            "notes": [note],
+            "known_status_values": self.known_status_values(),
+        }
+
     def result_record(
         self,
         context: ScenarioRunContext,
-        *,
-        scenario_name: str,
-        platform_name: str,
-        scope: str,
-        passed: bool,
-        risks: dict[str, object],
-        reproduction_command: tuple[str, ...],
-        command_artifact_dir: Path,
+        outcome: ScenarioResultOutcome,
+        risks: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        risk_payload = outcome.risks(context, self) if risks is None else risks
         return {
-            "id": scenario_name,
-            "platform": platform_name,
-            "scope": scope,
+            "id": outcome.scenario_name,
+            "platform": outcome.platform_name(context),
+            "scope": outcome.scope(context),
             "started_at": context.started_at,
             "duration_ms": scenario_duration_ms(context),
-            "reproduction_command": shlex.join(reproduction_command),
-            "command_artifact": self.command_artifact_summary(command_artifact_dir),
-            "overall_status": self.combined_status(passed),
-            "graphify_file_effects_passed": passed,
-            "passed": passed,
-            "risks": risks["statuses"],
+            "reproduction_command": shlex.join(outcome.reproduction_command(context)),
+            "command_artifact": self.command_artifact_summary(outcome.command_artifact_dir(context)),
+            "overall_status": self.combined_status(outcome.passed),
+            "graphify_file_effects_passed": outcome.passed,
+            "passed": outcome.passed,
+            "risks": risk_payload["statuses"],
         }
 
     def recorded_result(
         self,
         context: ScenarioRunContext,
-        *,
-        scenario_name: str,
-        platform_name: str,
-        scope: str,
-        passed: bool,
-        assertions: dict[str, object],
-        risks: dict[str, object],
-        reproduction_command: tuple[str, ...],
-        command_artifact_dir: Path,
+        outcome: ScenarioResultOutcome,
     ) -> dict[str, object]:
+        assertions = outcome.assertions(context)
+        risks = outcome.risks(context, self)
         self.write_scenario_artifacts(context.artifact_dir, assertions, risks)
-        return self.result_record(
-            context,
-            scenario_name=scenario_name,
-            platform_name=platform_name,
-            scope=scope,
-            passed=passed,
-            risks=risks,
-            reproduction_command=reproduction_command,
-            command_artifact_dir=command_artifact_dir,
-        )
+        return self.result_record(context, outcome, risks)
 
     def standard_result(
         self,
@@ -224,109 +359,23 @@ class ScenarioArtifacts:
         scenario_name: str,
         stages: StandardScenarioStages,
         checks: list[dict[str, object]],
-        passed: bool,
         generic_direct_equivalence: str,
     ) -> dict[str, object]:
-        scenario = context.scenario
-        assertions = {
-            "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": scenario_name},
-            "passed": passed,
-            "install_exit_code": stages.install_1.returncode,
-            "repeat_install_exit_code": None if stages.install_2 is None else stages.install_2.returncode,
-            "stale_sidecar_repair_exit_code": None if stages.stale_sidecar_repair_result is None else stages.stale_sidecar_repair_result.returncode,
-            "stale_sidecar_repair_seeded": stages.stale_sidecar_repair_seeded,
-            "stale_sidecar_repair_checks": stages.stale_sidecar_repair_checks,
-            "uninstall_exit_code": None if stages.uninstall_result is None else stages.uninstall_result.returncode,
-            "state_after_install": stages.state_after_install,
-            "state_after_repeat_install": stages.state_after_repeat,
-            "generic_direct_equivalence": generic_direct_equivalence,
-            "checks": checks,
-        }
-        risks = self.risk_report(scenario, passed)
-        return self.recorded_result(
-            context,
-            scenario_name=scenario_name,
-            platform_name=scenario.platform,
-            scope=scenario.scope,
-            passed=passed,
-            assertions=assertions,
-            risks=risks,
-            reproduction_command=scenario.install_command,
-            command_artifact_dir=context.artifact_dir,
-        )
+        return self.recorded_result(context, StandardScenarioOutcome(scenario_name, stages, checks, generic_direct_equivalence))
 
     def universal_uninstall_result(
         self,
         context: ScenarioRunContext,
-        *,
-        scenario_name: str,
-        scope: str,
-        platforms: list[str],
-        install_results: list[dict[str, object]],
-        uninstall_command: tuple[str, ...],
-        uninstall_exit_code: int,
-        checks: list[dict[str, object]],
-        passed: bool,
-        command_artifact_dir: Path,
+        outcome: UniversalUninstallOutcome,
     ) -> dict[str, object]:
-        assertions = {
-            "scenario": {"id": scenario_name, "scope": scope, "platforms": platforms},
-            "passed": passed,
-            "install_results": install_results,
-            "uninstall_command": list(uninstall_command),
-            "uninstall_exit_code": uninstall_exit_code,
-            "checks": checks,
-        }
-        risks = {
-            "statuses": [self.combined_status(passed)],
-            "notes": ["universal uninstall covers Graphify-owned file effects after multiple installs"],
-            "known_status_values": self.known_status_values(),
-        }
-        return self.recorded_result(
-            context,
-            scenario_name=scenario_name,
-            platform_name="multiple",
-            scope=scope,
-            passed=passed,
-            assertions=assertions,
-            risks=risks,
-            reproduction_command=uninstall_command,
-            command_artifact_dir=command_artifact_dir,
-        )
+        return self.recorded_result(context, outcome)
 
     def purge_result(
         self,
         context: ScenarioRunContext,
-        *,
-        scenario_name: str,
-        command: tuple[str, ...],
-        uninstall_exit_code: int,
-        checks: list[dict[str, object]],
-        passed: bool,
-        command_artifact_dir: Path,
+        outcome: PurgeOutcome,
     ) -> dict[str, object]:
-        assertions = {
-            "scenario": {"id": scenario_name, "scope": "project", "platform": "purge"},
-            "passed": passed,
-            "uninstall_exit_code": uninstall_exit_code,
-            "checks": checks,
-        }
-        risks = {
-            "statuses": [self.combined_status(passed)],
-            "notes": ["purge verified only against disposable sandbox graphify-out state"],
-            "known_status_values": self.known_status_values(),
-        }
-        return self.recorded_result(
-            context,
-            scenario_name=scenario_name,
-            platform_name="purge",
-            scope="project",
-            passed=passed,
-            assertions=assertions,
-            risks=risks,
-            reproduction_command=command,
-            command_artifact_dir=command_artifact_dir,
-        )
+        return self.recorded_result(context, outcome)
 
 
 @dataclass(frozen=True)
@@ -498,13 +547,11 @@ def finalize_standard_scenario(context: ScenarioRunContext, stages: StandardScen
     scenario = context.scenario
     scenario_name = hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
     checks = standard_scenario_checks(stages)
-    passed = standard_scenario_command_ok(stages) and all(check["ok"] for check in checks)
     return hooks.artifacts.standard_result(
         context,
         scenario_name=scenario_name,
         stages=stages,
         checks=checks,
-        passed=passed,
         generic_direct_equivalence=hooks.scenario_registry.equivalence_status(scenario),
     )
 
@@ -521,96 +568,209 @@ def run_scenario(scenario: Scenario, env: dict[str, str], *, hooks: ScenarioLife
     return finalize_standard_scenario(context, stages, hooks=hooks)
 
 
-def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    scenario_name = hooks.scenario_registry.universal_uninstall_scenario_id(scope)
-    runner_scenario = Scenario(
-        platform="multiple",
-        scope=scope,
-        install_command=("graphify", "uninstall", "--project") if scope == "project" else ("graphify", "uninstall"),
-        uninstall_command=None,
-        cwd_root="project" if scope == "project" else "user_cwd",
-        expected=tuple(entry for scenario in scenarios for entry in scenario.expected),
-    )
-    context = prepare_scenario_run(runner_scenario, env, hooks=hooks, scenario_name=scenario_name)
-    artifact_dir = context.artifact_dir
+@dataclass(frozen=True)
+class UniversalUninstallLifecycle:
+    scope: str
+    scenarios: list[Scenario]
+    env: dict[str, str]
+    hooks: ScenarioLifecycleHooks
 
-    for scenario in scenarios:
-        hooks.file_effects.seed_scenario_inputs(scenario)
-    hooks.file_effects.write_manifest(artifact_dir / "before-install-files.json", hooks.paths.roots)
+    @property
+    def scenario_name(self) -> str:
+        return self.hooks.scenario_registry.universal_uninstall_scenario_id(self.scope)
 
-    install_results = []
-    install_checks: list[dict[str, object]] = []
-    for scenario in scenarios:
-        install_scenario_id = hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
-        install_dir = artifact_dir / "installs" / install_scenario_id
-        result = hooks.commands.capture(scenario.install_command, cwd=hooks.paths.root_path(scenario.cwd_root), env=env, artifact_dir=install_dir, command_class="installer")
-        scenario_install_checks = hooks.file_effects.install_checks(scenario)
-        install_checks.extend(scenario_install_checks)
-        install_results.append(
-            {
-                "scenario_id": install_scenario_id,
-                "command": list(scenario.install_command),
-                "exit_code": result.returncode,
-                "checks": scenario_install_checks,
-            }
+    @property
+    def uninstall_command(self) -> tuple[str, ...]:
+        if self.scope == "project":
+            return ("graphify", "uninstall", "--project")
+        return ("graphify", "uninstall")
+
+    @property
+    def uninstall_cwd(self) -> Path:
+        if self.scope == "project":
+            return self.hooks.paths.project
+        return self.hooks.paths.user_cwd
+
+    def runner_scenario(self) -> Scenario:
+        return Scenario(
+            platform="multiple",
+            scope=self.scope,
+            install_command=self.uninstall_command,
+            uninstall_command=None,
+            cwd_root="project" if self.scope == "project" else "user_cwd",
+            expected=tuple(entry for scenario in self.scenarios for entry in scenario.expected),
         )
-    hooks.file_effects.write_manifest(artifact_dir / "after-install-files.json", hooks.paths.roots, debug_full=True)
 
-    if scope == "project":
-        uninstall_command = ("graphify", "uninstall", "--project")
-        cwd = hooks.paths.project
-    else:
-        uninstall_command = ("graphify", "uninstall")
-        cwd = hooks.paths.user_cwd
-    uninstall_result = hooks.commands.capture(uninstall_command, cwd=cwd, env=env, artifact_dir=artifact_dir / "uninstall", command_class="installer")
-    checks = hooks.file_effects.universal_uninstall_checks(runner_scenario, scenarios, install_checks)
-    hooks.file_effects.write_manifest(artifact_dir / "after-uninstall-files.json", hooks.paths.roots, debug_full=True)
-    passed = all(result["exit_code"] == 0 for result in install_results) and uninstall_result.returncode == 0 and all(check["ok"] for check in checks)
-    return hooks.artifacts.universal_uninstall_result(
-        context,
-        scenario_name=scenario_name,
-        scope=scope,
-        platforms=[scenario.platform for scenario in scenarios],
-        install_results=install_results,
-        uninstall_command=uninstall_command,
-        uninstall_exit_code=uninstall_result.returncode,
-        checks=checks,
-        passed=passed,
-        command_artifact_dir=artifact_dir / "uninstall",
-    )
+    def prepare_context(self, runner_scenario: Scenario) -> ScenarioRunContext:
+        return prepare_scenario_run(runner_scenario, self.env, hooks=self.hooks, scenario_name=self.scenario_name)
+
+    def seed_installed_scenarios(self) -> None:
+        for scenario in self.scenarios:
+            self.hooks.file_effects.seed_scenario_inputs(scenario)
+
+    def write_before_install_manifest(self, context: ScenarioRunContext) -> None:
+        self.hooks.file_effects.write_manifest(context.artifact_dir / "before-install-files.json", self.hooks.paths.roots)
+
+    def write_after_install_manifest(self, context: ScenarioRunContext) -> None:
+        self.hooks.file_effects.write_manifest(context.artifact_dir / "after-install-files.json", self.hooks.paths.roots, debug_full=True)
+
+    def write_after_uninstall_manifest(self, context: ScenarioRunContext) -> None:
+        self.hooks.file_effects.write_manifest(context.artifact_dir / "after-uninstall-files.json", self.hooks.paths.roots, debug_full=True)
+
+    def install_artifact_dir(self, context: ScenarioRunContext, scenario: Scenario) -> Path:
+        install_scenario_id = self.hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
+        return context.artifact_dir / "installs" / install_scenario_id
+
+    def run_installs(self, context: ScenarioRunContext) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        install_results: list[dict[str, object]] = []
+        install_checks: list[dict[str, object]] = []
+        for scenario in self.scenarios:
+            install_scenario_id = self.hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
+            result = self.hooks.commands.capture(
+                scenario.install_command,
+                cwd=self.hooks.paths.root_path(scenario.cwd_root),
+                env=self.env,
+                artifact_dir=self.install_artifact_dir(context, scenario),
+                command_class="installer",
+            )
+            scenario_install_checks = self.hooks.file_effects.install_checks(scenario)
+            install_checks.extend(scenario_install_checks)
+            install_results.append(
+                {
+                    "scenario_id": install_scenario_id,
+                    "command": list(scenario.install_command),
+                    "exit_code": result.returncode,
+                    "checks": scenario_install_checks,
+                }
+            )
+        return install_results, install_checks
+
+    def run_uninstall(self, context: ScenarioRunContext) -> subprocess.CompletedProcess[str]:
+        return self.hooks.commands.capture(
+            self.uninstall_command,
+            cwd=self.uninstall_cwd,
+            env=self.env,
+            artifact_dir=context.artifact_dir / "uninstall",
+            command_class="installer",
+        )
+
+    def universal_checks(
+        self,
+        runner_scenario: Scenario,
+        install_checks: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        return self.hooks.file_effects.universal_uninstall_checks(runner_scenario, self.scenarios, install_checks)
+
+    def outcome(self, context: ScenarioRunContext, runner_scenario: Scenario) -> UniversalUninstallOutcome:
+        self.seed_installed_scenarios()
+        self.write_before_install_manifest(context)
+        install_results, install_checks = self.run_installs(context)
+        self.write_after_install_manifest(context)
+        uninstall_result = self.run_uninstall(context)
+        checks = self.universal_checks(runner_scenario, install_checks)
+        self.write_after_uninstall_manifest(context)
+        return UniversalUninstallOutcome(
+            scenario_name=self.scenario_name,
+            scope_name=self.scope,
+            scenarios=self.scenarios,
+            install_results=install_results,
+            uninstall_command=self.uninstall_command,
+            uninstall_result=uninstall_result,
+            checks=checks,
+            uninstall_artifact_dir=context.artifact_dir / "uninstall",
+        )
+
+    def run(self) -> dict[str, object]:
+        runner_scenario = self.runner_scenario()
+        context = self.prepare_context(runner_scenario)
+        return self.hooks.artifacts.universal_uninstall_result(context, self.outcome(context, runner_scenario))
+
+
+def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
+    return UniversalUninstallLifecycle(scope, scenarios, env, hooks).run()
+
+
+@dataclass(frozen=True)
+class PurgeLifecycle:
+    env: dict[str, str]
+    hooks: ScenarioLifecycleHooks
+
+    @property
+    def scenario_name(self) -> str:
+        return self.hooks.scenario_registry.purge_disposable_graphify_out_scenario_id()
+
+    @property
+    def command(self) -> tuple[str, ...]:
+        return ("graphify", "uninstall", "--purge")
+
+    @property
+    def graphify_out(self) -> Path:
+        return self.hooks.paths.project / "graphify-out"
+
+    def runner_scenario(self) -> Scenario:
+        return Scenario(
+            platform="purge",
+            scope="project",
+            install_command=self.command,
+            uninstall_command=None,
+            cwd_root="project",
+            expected=(),
+        )
+
+    def prepare_context(self, runner_scenario: Scenario) -> ScenarioRunContext:
+        return prepare_scenario_run(runner_scenario, self.env, hooks=self.hooks, scenario_name=self.scenario_name)
+
+    def seed_disposable_graph(self) -> None:
+        self.graphify_out.mkdir(parents=True, exist_ok=True)
+        (self.graphify_out / "graph.json").write_text('{"nodes": [], "edges": []}\n', encoding="utf-8")
+
+    def write_before_install_manifest(self, context: ScenarioRunContext) -> None:
+        self.hooks.file_effects.write_manifest(context.artifact_dir / "before-install-files.json", self.hooks.paths.roots)
+
+    def write_after_uninstall_manifest(self, context: ScenarioRunContext) -> None:
+        self.hooks.file_effects.write_manifest(context.artifact_dir / "after-uninstall-files.json", self.hooks.paths.roots)
+
+    def purge_artifact_dir(self, context: ScenarioRunContext) -> Path:
+        return context.artifact_dir / "uninstall-purge"
+
+    def run_purge_command(self, context: ScenarioRunContext) -> subprocess.CompletedProcess[str]:
+        return self.hooks.commands.capture(
+            self.command,
+            cwd=self.hooks.paths.project,
+            env=self.env,
+            artifact_dir=self.purge_artifact_dir(context),
+            command_class="installer",
+        )
+
+    def purged(self) -> bool:
+        return not self.graphify_out.exists()
+
+    def checks(self, purged: bool) -> list[dict[str, object]]:
+        return self.hooks.file_effects.purge_checks(self.graphify_out, purged)
+
+    def outcome(self, context: ScenarioRunContext) -> PurgeOutcome:
+        self.seed_disposable_graph()
+        self.write_before_install_manifest(context)
+        result = self.run_purge_command(context)
+        purged = self.purged()
+        self.write_after_uninstall_manifest(context)
+        return PurgeOutcome(
+            scenario_name=self.scenario_name,
+            command=self.command,
+            result=result,
+            checks=self.checks(purged),
+            purged=purged,
+            purge_artifact_dir=self.purge_artifact_dir(context),
+        )
+
+    def run(self) -> dict[str, object]:
+        runner_scenario = self.runner_scenario()
+        context = self.prepare_context(runner_scenario)
+        return self.hooks.artifacts.purge_result(context, self.outcome(context))
 
 
 def run_purge_scenario(env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    scenario_name = hooks.scenario_registry.purge_disposable_graphify_out_scenario_id()
-    command = ("graphify", "uninstall", "--purge")
-    runner_scenario = Scenario(
-        platform="purge",
-        scope="project",
-        install_command=command,
-        uninstall_command=None,
-        cwd_root="project",
-        expected=(),
-    )
-    context = prepare_scenario_run(runner_scenario, env, hooks=hooks, scenario_name=scenario_name)
-    artifact_dir = context.artifact_dir
-    graphify_out = hooks.paths.project / "graphify-out"
-    graphify_out.mkdir(parents=True, exist_ok=True)
-    (graphify_out / "graph.json").write_text('{"nodes": [], "edges": []}\n', encoding="utf-8")
-    hooks.file_effects.write_manifest(artifact_dir / "before-install-files.json", hooks.paths.roots)
-    result = hooks.commands.capture(command, cwd=hooks.paths.project, env=env, artifact_dir=artifact_dir / "uninstall-purge", command_class="installer")
-    purged = not graphify_out.exists()
-    hooks.file_effects.write_manifest(artifact_dir / "after-uninstall-files.json", hooks.paths.roots)
-    checks = hooks.file_effects.purge_checks(graphify_out, purged)
-    passed = result.returncode == 0 and purged
-    return hooks.artifacts.purge_result(
-        context,
-        scenario_name=scenario_name,
-        command=command,
-        uninstall_exit_code=result.returncode,
-        checks=checks,
-        passed=passed,
-        command_artifact_dir=artifact_dir / "uninstall-purge",
-    )
+    return PurgeLifecycle(env, hooks).run()
 
 
 def universal_uninstall_scenarios(platforms: list[str], scope: str, *, hooks: ScenarioLifecycleHooks) -> list[tuple[str, list[Scenario]]]:

@@ -11,25 +11,17 @@ from typing import Callable, Iterable, Literal
 try:
     from .file_walk import pruned_file_walk
     from .json_helpers import object_dict, object_dicts, object_list
-    from .platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario
+    from .platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
     from file_walk import pruned_file_walk
     from json_helpers import object_dict, object_dicts, object_list
-    from platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario
+    from platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 
 
 USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"
 STALE_GRAPHIFY_SENTINEL = "STALE_GRAPHIFY_OWNED_CONTENT_SHOULD_BE_REPLACED"
-GRAPHIFY_MARKER = "## graphify"
-USER_CONTENT_PRESERVING_RELATIVES = {
-    "AGENTS.md",
-    "CLAUDE.md",
-    "GEMINI.md",
-    ".claude/CLAUDE.md",
-    ".github/copilot-instructions.md",
-}
 GENERATED_COPY_EXCLUDES = (
     ".local",
     ".cache",
@@ -76,10 +68,10 @@ class ReferenceSidecarExpectation:
     def includes_reference_dir(self) -> bool:
         return self.mode in {"source_error", "installed_directory"}
 
-    def expected_relatives(self, skill_relative_dir: Path) -> set[Path]:
+    def expected_relatives(self, skill_relative_dir: Path, sidecar: SkillSidecarExpectation) -> set[Path]:
         if not self.includes_reference_dir:
             return set()
-        references = skill_relative_dir / "references"
+        references = skill_relative_dir / sidecar.references_dir
         relatives = {references}
         relatives.update(references / name for name in self.expected_names)
         return relatives
@@ -187,7 +179,12 @@ class FileEffectOracle:
         return self.root_path(entry.root) / entry.relative
 
     def is_skill_expected(self, entry: ExpectedPath) -> bool:
-        return Path(entry.relative).name == "SKILL.md"
+        return entry.skill_sidecar_expectation is not None
+
+    def skill_sidecar_expectation(self, entry: ExpectedPath) -> SkillSidecarExpectation:
+        if entry.skill_sidecar_expectation is None:
+            raise AssertionError(f"expected path has no skill sidecar expectation: {entry.root}/{entry.relative}")
+        return entry.skill_sidecar_expectation
 
     def skill_dir_for_entry(self, entry: ExpectedPath) -> Path:
         return self.expected_path(entry).parent
@@ -199,24 +196,25 @@ class FileEffectOracle:
         return check_record(self.root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
 
     def skill_version_relative(self, entry: ExpectedPath) -> Path:
-        return self.skill_relative_dir(entry) / ".graphify_version"
+        return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).version_name
 
     def skill_references_relative(self, entry: ExpectedPath) -> Path:
-        return self.skill_relative_dir(entry) / "references"
+        return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).references_dir
 
     def skill_references_tmp_relative(self, entry: ExpectedPath) -> Path:
-        return self.skill_relative_dir(entry) / "references.tmp"
+        return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).references_tmp_dir
 
     def expected_skill_sidecar_relatives(self, scenario: Scenario, entry: ExpectedPath) -> set[Path]:
+        sidecar = self.skill_sidecar_expectation(entry)
         relatives = {
             self.skill_version_relative(entry),
             self.skill_references_tmp_relative(entry),
         }
-        relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(self.skill_relative_dir(entry)))
+        relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(self.skill_relative_dir(entry), sidecar))
         return relatives
 
     def installed_skill_reference_relatives(self, entry: ExpectedPath) -> set[Path]:
-        refs_dir = self.skill_dir_for_entry(entry) / "references"
+        refs_dir = self.skill_dir_for_entry(entry) / self.skill_sidecar_expectation(entry).references_dir
         refs_relative = self.skill_references_relative(entry)
         if not refs_dir.is_dir():
             return set()
@@ -233,13 +231,13 @@ class FileEffectOracle:
             return []
         return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
 
-    def skill_reference_pointers(self, skill_text: str) -> list[str]:
-        return sorted(set(re.findall(r"references/([A-Za-z0-9_.-]+\.md)\b", skill_text)))
+    def skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> list[str]:
+        return sorted(set(re.findall(self.skill_sidecar_expectation(entry).reference_pointer_pattern, skill_text)))
 
     # Skill sidecar checks
     def check_skill_version(self, entry: ExpectedPath) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
-        version_path = skill_dir / ".graphify_version"
+        version_path = skill_dir / self.skill_sidecar_expectation(entry).version_name
         version_relative = self.skill_version_relative(entry)
         expected_version = self.expected_graphify_version()
         if version_path.exists():
@@ -253,7 +251,7 @@ class FileEffectOracle:
 
     def check_references_tmp_absent(self, entry: ExpectedPath) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
-        refs_tmp = skill_dir / "references.tmp"
+        refs_tmp = skill_dir / self.skill_sidecar_expectation(entry).references_tmp_dir
         return self.skill_assertion_record(
             entry,
             self.skill_references_tmp_relative(entry),
@@ -263,7 +261,7 @@ class FileEffectOracle:
 
     def check_packaged_references(self, scenario: Scenario, entry: ExpectedPath) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
-        refs_dir = skill_dir / "references"
+        refs_dir = skill_dir / self.skill_sidecar_expectation(entry).references_dir
         refs_relative = self.skill_references_relative(entry)
         expectation = self.reference_sidecar_expectation(scenario)
         refs_ok, refs_detail = expectation.check_installed(refs_dir, self.installed_reference_names)
@@ -271,8 +269,8 @@ class FileEffectOracle:
 
     def check_skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> dict[str, object]:
         mentions_references = "references/" in skill_text
-        pointers = self.skill_reference_pointers(skill_text)
-        refs_dir = self.skill_dir_for_entry(entry) / "references"
+        pointers = self.skill_reference_pointers(entry, skill_text)
+        refs_dir = self.skill_dir_for_entry(entry) / self.skill_sidecar_expectation(entry).references_dir
         if mentions_references and not refs_dir.is_dir():
             pointer_ok = False
             pointer_detail = f"references_missing; skill_mentions_references=true; pointers={pointers}"
@@ -316,13 +314,13 @@ class FileEffectOracle:
         seeded: list[dict[str, object]] = []
         for entry in self.progressive_skill_entries(scenario):
             skill_dir = self.skill_dir_for_entry(entry)
-            refs_dir = skill_dir / "references"
+            refs_dir = skill_dir / self.skill_sidecar_expectation(entry).references_dir
             refs_dir.mkdir(parents=True, exist_ok=True)
             stale_ref = refs_dir / "stale-sandbox-fragment.md"
             stale_ref.write_text("stale sandbox reference fragment\n", encoding="utf-8")
             seeded.append(self.skill_assertion_record(entry, self.skill_references_relative(entry) / stale_ref.name, True, "seeded_stale_reference_fragment"))
 
-            refs_tmp = skill_dir / "references.tmp"
+            refs_tmp = skill_dir / self.skill_sidecar_expectation(entry).references_tmp_dir
             refs_tmp.mkdir(parents=True, exist_ok=True)
             partial = refs_tmp / "partial.md"
             partial.write_text("partial staged reference fragment\n", encoding="utf-8")
@@ -342,13 +340,13 @@ class FileEffectOracle:
 
     # User content seeding
     def should_seed_user_content(self, entry: ExpectedPath) -> bool:
-        return bool(entry.marker and entry.relative in USER_CONTENT_PRESERVING_RELATIVES)
+        return entry.text_expectation.preserve_user_content
 
     def should_seed_stale_graphify_section(self, entry: ExpectedPath) -> bool:
-        return bool(entry.marker == GRAPHIFY_MARKER and entry.relative.endswith((".md", ".mdc")))
+        return entry.text_expectation.repair_stale_graphify_section
 
     def seeded_text(self, entry: ExpectedPath) -> str:
-        if self.should_seed_stale_graphify_section(entry):
+        if self.should_seed_stale_graphify_section(entry) and entry.marker:
             return (
                 f"# User Notes\n\n{USER_SENTINEL}\n\n"
                 f"{entry.marker}\n{STALE_GRAPHIFY_SENTINEL}\n\n"
@@ -398,7 +396,7 @@ class FileEffectOracle:
         ok, detail = expected_kind_status(path, entry.kind)
         if not ok or not entry.marker:
             return ok, detail
-        if path.suffix == ".json":
+        if entry.content_kind == "json":
             return self.json_marker_status(path, entry)
         return self.text_marker_status(path, entry)
 
@@ -414,20 +412,26 @@ class FileEffectOracle:
 
     def uninstalled_entry_status(self, entry: ExpectedPath) -> tuple[bool, str]:
         path = self.expected_path(entry)
-        if entry.marker and self.should_seed_user_content(entry):
+        text_expectation = entry.text_expectation
+        if entry.marker and text_expectation.require_user_content_on_uninstall:
             if path.exists() and path.is_file():
                 text = path.read_text(encoding="utf-8", errors="replace")
-                graphify_removed = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
+                graphify_removed = self.graphify_section_removed(text, entry)
                 user_preserved = USER_SENTINEL in text
                 return graphify_removed and user_preserved, f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}"
             return False, "user_content_file_missing"
-        if entry.marker and path.exists():
+        if entry.marker and text_expectation.remove_graphify_section_on_uninstall and path.exists():
             text = path.read_text(encoding="utf-8", errors="replace")
-            ok = entry.marker not in text and STALE_GRAPHIFY_SENTINEL not in text
+            ok = self.graphify_section_removed(text, entry)
             detail = "graphify_removed; user_content_preserved" if USER_SENTINEL in text else "graphify_removed"
             return ok, detail
         ok = not path.exists()
         return ok, "removed" if ok else "still_exists"
+
+    def graphify_section_removed(self, text: str, entry: ExpectedPath) -> bool:
+        marker_removed = not entry.marker or entry.marker not in text
+        stale_removed = not entry.text_expectation.repair_stale_graphify_section or STALE_GRAPHIFY_SENTINEL not in text
+        return marker_removed and stale_removed
 
     def uninstalled_skill_sidecar_checks(self, entry: ExpectedPath) -> list[dict[str, object]]:
         if not self.is_skill_expected(entry):
@@ -508,15 +512,11 @@ class FileEffectOracle:
     def assert_scope_boundaries(self, scenario: Scenario) -> list[dict[str, object]]:
         checks: list[dict[str, object]] = []
         for entry in scenario.expected:
-            allowed = True
-            if scenario.scope == "user" and entry.root not in ("home",):
-                allowed = "mixed_scope_project_wiring" in scenario.risk_notes
-            if scenario.scope == "project" and entry.root not in ("project",):
-                allowed = "mixed_scope_global_skill_plus_project_wiring" in scenario.risk_notes
+            allowed = not scenario.allowed_roots or entry.root in scenario.allowed_roots
             checks.append(check_record(self.expected_path(entry), allowed, "allowed_root" if allowed else "unexpected_root"))
         return checks
 
-    def file_fingerprint(self, path: Path, marker: str | None = None) -> dict[str, object]:
+    def file_fingerprint(self, path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
         if not path.exists():
             return {"exists": False}
         if path.is_dir():
@@ -526,8 +526,11 @@ class FileEffectOracle:
         if marker:
             text = data.decode("utf-8", errors="replace")
             item["marker_count"] = text.count(marker)
-            item["user_content_preserved"] = USER_SENTINEL in text
-            item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
+            expectation = text_expectation or TextExpectation()
+            if expectation.preserve_user_content:
+                item["user_content_preserved"] = USER_SENTINEL in text
+            if expectation.repair_stale_graphify_section:
+                item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
         return item
 
     # Idempotency state
@@ -535,7 +538,7 @@ class FileEffectOracle:
         state: dict[str, dict[str, object]] = {}
         for entry in scenario.expected:
             key = f"{entry.root}/{entry.relative}"
-            state[key] = self.file_fingerprint(self.expected_path(entry), entry.marker)
+            state[key] = self.file_fingerprint(self.expected_path(entry), entry.marker, entry.text_expectation)
             if not self.is_skill_expected(entry):
                 continue
             for relative in sorted(self.tracked_skill_sidecar_relatives(scenario, entry), key=lambda item: item.as_posix()):
@@ -563,28 +566,26 @@ class FileEffectOracle:
                     pass
         return False
 
-    def is_adjacent_graphify_version(self, scenario: Scenario, root_name: str, relative: Path) -> bool:
-        return relative.name == ".graphify_version" and any(
-            root_name == entry.root and relative.parent.as_posix() == Path(entry.relative).parent.as_posix()
-            for entry in scenario.expected
-        )
-
-    def is_small_text_candidate(self, path: Path) -> bool:
+    def is_small_text_candidate(self, scenario: Scenario, path: Path) -> bool:
         try:
             size = path.stat().st_size
         except OSError:
             return False
-        if size > 1024 * 1024:
+        expectation = scenario.generated_file_expectation
+        if size > expectation.max_text_bytes:
             return False
-        text_suffixes = {".json", ".js", ".md", ".mdc", ".txt", ""}
-        return path.suffix in text_suffixes
+        return path.suffix in expectation.text_suffixes
 
-    def file_mentions_graphify_or_sentinel(self, path: Path) -> bool:
+    def file_mentions_expected_generated_marker(self, scenario: Scenario, path: Path) -> bool:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return False
-        return "graphify" in text.lower() or USER_SENTINEL in text
+        lowered = text.lower()
+        expectation = scenario.generated_file_expectation
+        if any(marker.lower() in lowered for marker in expectation.content_markers):
+            return True
+        return expectation.include_user_content_sentinel and USER_SENTINEL in text
 
     def is_relevant_generated_file(self, scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
         rel = relative.as_posix()
@@ -592,13 +593,11 @@ class FileEffectOracle:
             return True
         if self.is_skill_sidecar_relative(scenario, root_name, relative):
             return True
-        if self.is_adjacent_graphify_version(scenario, root_name, relative):
+        if any(fragment.lower() in rel.lower() for fragment in scenario.generated_file_expectation.relative_substrings):
             return True
-        if "graphify" in rel.lower():
-            return True
-        if not self.is_small_text_candidate(path):
+        if not self.is_small_text_candidate(scenario, path):
             return False
-        return self.file_mentions_graphify_or_sentinel(path)
+        return self.file_mentions_expected_generated_marker(scenario, path)
 
     def copy_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
         out = artifact_dir / "generated-files"

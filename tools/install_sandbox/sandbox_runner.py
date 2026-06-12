@@ -24,6 +24,7 @@ try:
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
+        GRAPHIFY_MARKER,
         Scenario,
     )
 except ImportError:
@@ -36,6 +37,7 @@ except ImportError:
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
+        GRAPHIFY_MARKER,
         Scenario,
     )
 
@@ -53,7 +55,6 @@ PACKAGE_NAME = "graphifyy"
 INSTALL_MODE = "normal"
 USER_SENTINEL = file_effects.USER_SENTINEL
 STALE_GRAPHIFY_SENTINEL = file_effects.STALE_GRAPHIFY_SENTINEL
-GRAPHIFY_MARKER = file_effects.GRAPHIFY_MARKER
 COPY_EXCLUDES = (
     *source_snapshot.COPY_EXCLUDES,
 )

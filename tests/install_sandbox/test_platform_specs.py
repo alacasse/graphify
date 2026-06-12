@@ -34,6 +34,25 @@ def test_expected_path_manifest_logic() -> None:
     assert [scenario.scope for scenario in both] == ["project"]
 
 
+def test_json_expectations_are_declared_on_expected_paths() -> None:
+    expectations = {
+        ("claude", "project", ".claude/settings.json"): "claude_settings",
+        ("codex", "project", ".codex/hooks.json"): "codex_hooks",
+        ("codebuddy", "user", ".codebuddy/settings.json"): "codebuddy_settings",
+        ("codebuddy", "project", ".codebuddy/settings.json"): "codebuddy_settings",
+        ("gemini", "project", ".gemini/settings.json"): "gemini_settings",
+        ("kilo", "project", ".kilo/kilo.json"): "kilo_config",
+        ("opencode", "project", ".opencode/opencode.json"): "opencode_config",
+    }
+
+    for platform_name, scope, relative in expectations:
+        scenario = REGISTRY.make_scenario(platform_name, scope)
+        assert scenario is not None
+        entry = next(item for item in scenario.expected if item.relative == relative)
+        assert entry.json_expectation is not None
+        assert entry.json_expectation.schema_name == expectations[(platform_name, scope, relative)]
+
+
 def test_registry_mirrors_install_surface() -> None:
     cli_platforms = set(graphify_main._PLATFORM_CONFIG) | {"gemini", "cursor", "vscode"}
 

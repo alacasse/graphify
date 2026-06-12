@@ -11,12 +11,12 @@ from typing import Callable, Iterable, Literal
 try:
     from .file_walk import pruned_file_walk
     from .json_helpers import object_dict, object_dicts, object_list
-    from .platform_specs import ExpectedPath, Scenario
+    from .platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
     from file_walk import pruned_file_walk
     from json_helpers import object_dict, object_dicts, object_list
-    from platform_specs import ExpectedPath, Scenario
+    from platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 
 
@@ -125,15 +125,15 @@ def json_value_contains_marker(value: object, marker: str) -> bool:
     return False
 
 
-def graphify_command_hook_present(entry: object, *, matcher: str | None = None, required_fragments: tuple[str, ...] = ("graphify",)) -> bool:
+def command_hook_present(entry: object, expectation: JsonHookExpectation) -> bool:
     entry_data = object_dict(entry)
-    if matcher is not None and entry_data.get("matcher") != matcher:
+    if entry_data.get("matcher") != expectation.matcher:
         return False
     for hook in object_dicts(entry_data.get("hooks")):
         if hook.get("type") != "command":
             continue
         command = hook.get("command")
-        if isinstance(command, str) and all(fragment in command for fragment in required_fragments):
+        if isinstance(command, str) and all(fragment in command for fragment in expectation.required_fragments):
             return True
     return False
 
@@ -143,54 +143,30 @@ def hooks_by_event(data: object, event_name: str) -> list[object]:
     return object_list(hooks.get(event_name))
 
 
-def claude_like_settings_status(data: object, schema_name: str) -> tuple[bool, str]:
-    pre_tool = hooks_by_event(data, "PreToolUse")
-    bash_hook_present = any(graphify_command_hook_present(entry, matcher="Bash") for entry in pre_tool)
-    read_glob_hook_present = any(graphify_command_hook_present(entry, matcher="Read|Glob") for entry in pre_tool)
-    ok = bash_hook_present and read_glob_hook_present
-    return ok, f"valid_json=true; schema={schema_name}; bash_hook_present={bash_hook_present}; read_glob_hook_present={read_glob_hook_present}"
-
-
-def codex_hooks_status(data: object) -> tuple[bool, str]:
-    pre_tool = hooks_by_event(data, "PreToolUse")
-    graphify_hook_present = any(graphify_command_hook_present(entry, matcher="Bash", required_fragments=("graphify", "hook-check")) for entry in pre_tool)
-    return graphify_hook_present, f"valid_json=true; schema=codex_hooks; graphify_hook_present={graphify_hook_present}"
-
-
-def gemini_settings_status(data: object) -> tuple[bool, str]:
-    before_tool = hooks_by_event(data, "BeforeTool")
-    graphify_hook_present = any(graphify_command_hook_present(entry, matcher="read_file|list_directory") for entry in before_tool)
-    return graphify_hook_present, f"valid_json=true; schema=gemini_settings; graphify_hook_present={graphify_hook_present}"
-
-
-def plugin_config_status(data: object, *, schema_name: str, expected_entry: str, allow_file_uri: bool = False) -> tuple[bool, str]:
+def plugin_config_present(data: object, expectation: JsonPluginExpectation) -> bool:
     plugins = object_list(object_dict(data).get("plugin"))
-    plugin_present = False
     for plugin in plugins:
         if not isinstance(plugin, str):
             continue
-        if plugin == expected_entry:
-            plugin_present = True
-            break
-        if allow_file_uri and plugin.startswith("file://") and plugin.endswith(expected_entry):
-            plugin_present = True
-            break
-    return plugin_present, f"valid_json=true; schema={schema_name}; plugin_present={plugin_present}"
+        if plugin == expectation.expected_entry:
+            return True
+        if expectation.allow_file_uri and plugin.startswith("file://") and plugin.endswith(expectation.expected_entry):
+            return True
+    return False
 
 
-def platform_json_status(entry: ExpectedPath, data: object) -> tuple[bool, str] | None:
-    if entry.relative in (".claude/settings.json", ".codebuddy/settings.json"):
-        schema_name = "claude_settings" if entry.relative == ".claude/settings.json" else "codebuddy_settings"
-        return claude_like_settings_status(data, schema_name)
-    if entry.relative == ".codex/hooks.json":
-        return codex_hooks_status(data)
-    if entry.relative == ".gemini/settings.json":
-        return gemini_settings_status(data)
-    if entry.relative == ".kilo/kilo.json":
-        return plugin_config_status(data, schema_name="kilo_config", expected_entry=".kilo/plugins/graphify.js", allow_file_uri=True)
-    if entry.relative == ".opencode/opencode.json":
-        return plugin_config_status(data, schema_name="opencode_config", expected_entry=".opencode/plugins/graphify.js")
-    return None
+def json_expectation_status(data: object, expectation: JsonExpectation) -> tuple[bool, str]:
+    states: list[tuple[str, bool]] = []
+    for hook in expectation.hooks:
+        entries = hooks_by_event(data, hook.event)
+        states.append((hook.detail_name, any(command_hook_present(entry, hook) for entry in entries)))
+    if expectation.plugin is not None:
+        states.append((expectation.plugin.detail_name, plugin_config_present(data, expectation.plugin)))
+    ok = all(present for _, present in states)
+    detail = f"valid_json=true; schema={expectation.schema_name}"
+    for name, present in states:
+        detail += f"; {name}={present}"
+    return ok, detail
 
 
 @dataclass(frozen=True)
@@ -395,9 +371,8 @@ class FileEffectOracle:
             return False, f"invalid_json={exc.msg}"
         except OSError as exc:
             return False, f"json_read_failed={exc}"
-        platform_status = platform_json_status(entry, data)
-        if platform_status is not None:
-            return platform_status
+        if entry.json_expectation is not None:
+            return json_expectation_status(data, entry.json_expectation)
         marker = entry.marker or ""
         marker_present = bool(marker) and json_value_contains_marker(data, marker)
         return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"

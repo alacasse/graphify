@@ -14,12 +14,35 @@ SIMULATED_LINUX_LAYOUT_NOTE = "simulated_linux_file_layout_only"
 
 
 @dataclass(frozen=True)
+class JsonHookExpectation:
+    event: str
+    matcher: str
+    detail_name: str
+    required_fragments: tuple[str, ...] = ("graphify",)
+
+
+@dataclass(frozen=True)
+class JsonPluginExpectation:
+    expected_entry: str
+    allow_file_uri: bool = False
+    detail_name: str = "plugin_present"
+
+
+@dataclass(frozen=True)
+class JsonExpectation:
+    schema_name: str
+    hooks: tuple[JsonHookExpectation, ...] = ()
+    plugin: JsonPluginExpectation | None = None
+
+
+@dataclass(frozen=True)
 class ExpectedPath:
     root: str
     relative: str
     kind: str = "file"
     marker: str | None = None
     remove_on_uninstall: bool = True
+    json_expectation: JsonExpectation | None = None
 
 
 @dataclass(frozen=True)
@@ -93,20 +116,35 @@ def _section(root: str, relative: str, marker: str = GRAPHIFY_MARKER, *, remove_
     return ExpectedPath(root, relative, marker=marker, remove_on_uninstall=remove_on_uninstall)
 
 
-def _json_marker(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(root, relative, marker="graphify")
+def _json_marker(root: str, relative: str, *, expectation: JsonExpectation | None = None) -> ExpectedPath:
+    return ExpectedPath(root, relative, marker="graphify", json_expectation=expectation)
+
+
+def _json_hooks(root: str, relative: str, schema_name: str, hooks: tuple[JsonHookExpectation, ...]) -> ExpectedPath:
+    return _json_marker(root, relative, expectation=JsonExpectation(schema_name=schema_name, hooks=hooks))
+
+
+def _json_plugin(root: str, relative: str, schema_name: str, plugin_relative: str, *, allow_file_uri: bool = False) -> ExpectedPath:
+    return _json_marker(
+        root,
+        relative,
+        expectation=JsonExpectation(
+            schema_name=schema_name,
+            plugin=JsonPluginExpectation(expected_entry=plugin_relative, allow_file_uri=allow_file_uri),
+        ),
+    )
 
 
 def _plugin(root: str, relative: str) -> ExpectedPath:
     return ExpectedPath(root, relative)
 
 
-def _project_plugin_config(plugin_relative: str, config_relative: str) -> tuple[ExpectedPath, ExpectedPath]:
-    return (_plugin("project", plugin_relative), _json_marker("project", config_relative))
+def _project_plugin_config(plugin_relative: str, config_relative: str, schema_name: str, *, allow_file_uri: bool = False) -> tuple[ExpectedPath, ExpectedPath]:
+    return (_plugin("project", plugin_relative), _json_plugin("project", config_relative, schema_name, plugin_relative, allow_file_uri=allow_file_uri))
 
 
-def _cwd_plugin_config(plugin_relative: str, config_relative: str) -> tuple[ExpectedPath, ExpectedPath]:
-    return (_plugin("user_cwd", plugin_relative), _json_marker("user_cwd", config_relative))
+def _cwd_plugin_config(plugin_relative: str, config_relative: str, schema_name: str, *, allow_file_uri: bool = False) -> tuple[ExpectedPath, ExpectedPath]:
+    return (_plugin("user_cwd", plugin_relative), _json_plugin("user_cwd", config_relative, schema_name, plugin_relative, allow_file_uri=allow_file_uri))
 
 
 def _scenario(
@@ -347,7 +385,15 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                     _skill("project", ".claude/skills/graphify/SKILL.md"),
                     _section("project", ".claude/CLAUDE.md", "# graphify"),
                     _section("project", "CLAUDE.md"),
-                    _json_marker("project", ".claude/settings.json"),
+                    _json_hooks(
+                        "project",
+                        ".claude/settings.json",
+                        "claude_settings",
+                        (
+                            JsonHookExpectation(event="PreToolUse", matcher="Bash", detail_name="bash_hook_present"),
+                            JsonHookExpectation(event="PreToolUse", matcher="Read|Glob", detail_name="read_glob_hook_present"),
+                        ),
+                    ),
                 ),
                 equivalent_install_command=_direct_project_install("claude"),
             ),
@@ -360,7 +406,18 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
         project_skill=".codex/skills/graphify/SKILL.md",
         scopes={
             "user": _generic_user_scope("codex", ".codex/skills/graphify/SKILL.md", notes=(PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,)),
-            "project": _agents_project_scope("codex", ".codex/skills/graphify/SKILL.md", extra_expected=(_json_marker("project", ".codex/hooks.json"),)),
+            "project": _agents_project_scope(
+                "codex",
+                ".codex/skills/graphify/SKILL.md",
+                extra_expected=(
+                    _json_hooks(
+                        "project",
+                        ".codex/hooks.json",
+                        "codex_hooks",
+                        (JsonHookExpectation(event="PreToolUse", matcher="Bash", detail_name="graphify_hook_present", required_fragments=("graphify", "hook-check")),),
+                    ),
+                ),
+            ),
         },
         universal_uninstall_scopes=("project",),
     ),
@@ -375,7 +432,15 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 (
                     _skill("home", ".codebuddy/skills/graphify/SKILL.md"),
                     _section("home", ".codebuddy/CODEBUDDY.md"),
-                    _json_marker("home", ".codebuddy/settings.json"),
+                    _json_hooks(
+                        "home",
+                        ".codebuddy/settings.json",
+                        "codebuddy_settings",
+                        (
+                            JsonHookExpectation(event="PreToolUse", matcher="Bash", detail_name="bash_hook_present"),
+                            JsonHookExpectation(event="PreToolUse", matcher="Read|Glob", detail_name="read_glob_hook_present"),
+                        ),
+                    ),
                 ),
                 uninstall_command=("graphify", "uninstall"),
             ),
@@ -385,7 +450,15 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 (
                     _skill("project", ".codebuddy/skills/graphify/SKILL.md"),
                     _section("project", "CODEBUDDY.md"),
-                    _json_marker("project", ".codebuddy/settings.json"),
+                    _json_hooks(
+                        "project",
+                        ".codebuddy/settings.json",
+                        "codebuddy_settings",
+                        (
+                            JsonHookExpectation(event="PreToolUse", matcher="Bash", detail_name="bash_hook_present"),
+                            JsonHookExpectation(event="PreToolUse", matcher="Read|Glob", detail_name="read_glob_hook_present"),
+                        ),
+                    ),
                 ),
                 equivalent_install_command=("graphify", "codebuddy", "install"),
             ),
@@ -402,7 +475,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 "user",
                 (
                     _skill("home", ".config/opencode/skills/graphify/SKILL.md"),
-                    *_cwd_plugin_config(".opencode/plugins/graphify.js", ".opencode/opencode.json"),
+                    *_cwd_plugin_config(".opencode/plugins/graphify.js", ".opencode/opencode.json", "opencode_config"),
                 ),
                 uninstall_command=None,
                 risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE, PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE),
@@ -410,7 +483,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "project": _agents_project_scope(
                 "opencode",
                 ".opencode/skills/graphify/SKILL.md",
-                extra_expected=_project_plugin_config(".opencode/plugins/graphify.js", ".opencode/opencode.json"),
+                extra_expected=_project_plugin_config(".opencode/plugins/graphify.js", ".opencode/opencode.json", "opencode_config"),
             ),
         },
     ),
@@ -432,7 +505,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                     _skill("home", ".config/kilo/skills/graphify/SKILL.md"),
                     ExpectedPath("home", ".config/kilo/command/graphify.md"),
                     _section("project", "AGENTS.md"),
-                    *_project_plugin_config(".kilo/plugins/graphify.js", ".kilo/kilo.json"),
+                    *_project_plugin_config(".kilo/plugins/graphify.js", ".kilo/kilo.json", "kilo_config", allow_file_uri=True),
                 ),
                 install_command=("graphify", "kilo", "install"),
                 uninstall_command=("graphify", "kilo", "uninstall"),
@@ -451,7 +524,12 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                 (
                     _skill("home", ".gemini/skills/graphify/SKILL.md"),
                     _section("user_cwd", "GEMINI.md"),
-                    _json_marker("user_cwd", ".gemini/settings.json"),
+                    _json_hooks(
+                        "user_cwd",
+                        ".gemini/settings.json",
+                        "gemini_settings",
+                        (JsonHookExpectation(event="BeforeTool", matcher="read_file|list_directory", detail_name="graphify_hook_present"),),
+                    ),
                 ),
                 uninstall_command=("graphify", "gemini", "uninstall"),
                 risk_notes=(MIXED_SCOPE_PROJECT_WIRING_NOTE,),
@@ -460,7 +538,16 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "project": _scenario(
                 "gemini",
                 "project",
-                (_skill("project", ".gemini/skills/graphify/SKILL.md"), _section("project", "GEMINI.md"), _json_marker("project", ".gemini/settings.json")),
+                (
+                    _skill("project", ".gemini/skills/graphify/SKILL.md"),
+                    _section("project", "GEMINI.md"),
+                    _json_hooks(
+                        "project",
+                        ".gemini/settings.json",
+                        "gemini_settings",
+                        (JsonHookExpectation(event="BeforeTool", matcher="read_file|list_directory", detail_name="graphify_hook_present"),),
+                    ),
+                ),
                 equivalent_install_command=_direct_project_install("gemini"),
             ),
         },
@@ -669,7 +756,15 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
                     _skill("project", ".claude/skills/graphify/SKILL.md"),
                     _section("project", ".claude/CLAUDE.md", "# graphify"),
                     _section("project", "CLAUDE.md"),
-                    _json_marker("project", ".claude/settings.json"),
+                    _json_hooks(
+                        "project",
+                        ".claude/settings.json",
+                        "claude_settings",
+                        (
+                            JsonHookExpectation(event="PreToolUse", matcher="Bash", detail_name="bash_hook_present"),
+                            JsonHookExpectation(event="PreToolUse", matcher="Read|Glob", detail_name="read_glob_hook_present"),
+                        ),
+                    ),
                 ),
                 risk_notes=(SIMULATED_LINUX_LAYOUT_NOTE,),
             ),

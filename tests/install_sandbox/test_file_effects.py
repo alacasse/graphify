@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import file_effects
+from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
@@ -75,6 +76,17 @@ def json_shape_check(oracle: file_effects.FileEffectOracle, roots: dict[str, Pat
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
     return oracle.assert_expected_files(test_scenario)[0]
+
+
+def registered_json_shape_check(oracle: file_effects.FileEffectOracle, roots: dict[str, Path], platform: str, scope: str, relative: str, data: object) -> dict[str, object]:
+    test_scenario = platform_specs.DEFAULT_SCENARIO_REGISTRY.make_scenario(platform, scope)
+    assert test_scenario is not None
+    entry = next(item for item in test_scenario.expected if item.relative == relative)
+    root = roots[entry.root]
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return oracle.assert_expected_files(scenario(platform, entry, scope=scope))[0]
 
 
 @pytest.mark.parametrize(
@@ -397,21 +409,21 @@ def test_platform_specific_json_shape_validation(oracle, roots) -> None:
             ]
         }
     }
-    assert json_shape_check(oracle, roots, ".claude/settings.json", claude_valid)["ok"] is True
-    assert json_shape_check(oracle, roots, ".codebuddy/settings.json", {"note": "graphify in wrong location"})["ok"] is False
+    assert registered_json_shape_check(oracle, roots, "claude", "project", ".claude/settings.json", claude_valid)["ok"] is True
+    assert registered_json_shape_check(oracle, roots, "codebuddy", "project", ".codebuddy/settings.json", {"note": "graphify in wrong location"})["ok"] is False
 
     codex_valid = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/tmp/bin/graphify hook-check"}]}]}}
-    assert json_shape_check(oracle, roots, ".codex/hooks.json", codex_valid)["ok"] is True
-    assert json_shape_check(oracle, roots, ".codex/hooks.json", {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "graphify query"}]}]}})["ok"] is False
+    assert registered_json_shape_check(oracle, roots, "codex", "project", ".codex/hooks.json", codex_valid)["ok"] is True
+    assert registered_json_shape_check(oracle, roots, "codex", "project", ".codex/hooks.json", {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "graphify query"}]}]}})["ok"] is False
 
     gemini_valid = {"hooks": {"BeforeTool": [{"matcher": "read_file|list_directory", "hooks": [{"type": "command", "command": "python -c 'print(\"graphify\")'"}]}]}}
-    assert json_shape_check(oracle, roots, ".gemini/settings.json", gemini_valid)["ok"] is True
-    assert json_shape_check(oracle, roots, ".gemini/settings.json", {"hooks": {"PreToolUse": [{"matcher": "read_file|list_directory", "hooks": [{"type": "command", "command": "graphify"}]}]}})["ok"] is False
+    assert registered_json_shape_check(oracle, roots, "gemini", "project", ".gemini/settings.json", gemini_valid)["ok"] is True
+    assert registered_json_shape_check(oracle, roots, "gemini", "project", ".gemini/settings.json", {"hooks": {"PreToolUse": [{"matcher": "read_file|list_directory", "hooks": [{"type": "command", "command": "graphify"}]}]}})["ok"] is False
 
-    assert json_shape_check(oracle, roots, ".kilo/kilo.json", {"plugin": ["file:///tmp/project/.kilo/plugins/graphify.js"]})["ok"] is True
-    assert json_shape_check(oracle, roots, ".kilo/kilo.json", {"plugin": ["graphify"]})["ok"] is False
-    assert json_shape_check(oracle, roots, ".opencode/opencode.json", {"plugin": [".opencode/plugins/graphify.js"]})["ok"] is True
-    assert json_shape_check(oracle, roots, ".opencode/opencode.json", {"plugin": ["file:///tmp/project/.opencode/plugins/graphify.js"]})["ok"] is False
+    assert registered_json_shape_check(oracle, roots, "kilo", "project", ".kilo/kilo.json", {"plugin": ["file:///tmp/project/.kilo/plugins/graphify.js"]})["ok"] is True
+    assert registered_json_shape_check(oracle, roots, "kilo", "project", ".kilo/kilo.json", {"plugin": ["graphify"]})["ok"] is False
+    assert registered_json_shape_check(oracle, roots, "opencode", "project", ".opencode/opencode.json", {"plugin": [".opencode/plugins/graphify.js"]})["ok"] is True
+    assert registered_json_shape_check(oracle, roots, "opencode", "project", ".opencode/opencode.json", {"plugin": ["file:///tmp/project/.opencode/plugins/graphify.js"]})["ok"] is False
 
 
 def test_expected_path_kind_is_enforced(oracle, roots) -> None:

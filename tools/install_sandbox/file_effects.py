@@ -268,12 +268,13 @@ class FileEffectOracle:
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
     def check_skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> dict[str, object]:
-        mentions_references = "references/" in skill_text
+        sidecar = self.skill_sidecar_expectation(entry)
+        mentions_references = bool(re.search(sidecar.reference_pointer_pattern, skill_text)) or f"{sidecar.references_dir}/" in skill_text
         pointers = self.skill_reference_pointers(entry, skill_text)
-        refs_dir = self.skill_dir_for_entry(entry) / self.skill_sidecar_expectation(entry).references_dir
+        refs_dir = self.skill_dir_for_entry(entry) / sidecar.references_dir
         if mentions_references and not refs_dir.is_dir():
             pointer_ok = False
-            pointer_detail = f"references_missing; skill_mentions_references=true; pointers={pointers}"
+            pointer_detail = f"{sidecar.references_dir}_missing; skill_mentions_references=true; pointers={pointers}"
         elif pointers:
             missing_pointers = [name for name in pointers if not (refs_dir / name).is_file()]
             pointer_ok = not missing_pointers
@@ -684,5 +685,12 @@ class ScenarioFileEffectsAdapter:
             + self.oracle.assert_no_unexpected_graphify_files(runner_scenario, phase="universal_uninstall", expected_keys=expected_keys)
         )
 
+    def disposable_artifact_checks(self, disposable_path: Path, removed: bool) -> list[dict[str, object]]:
+        return [check_record(disposable_path, removed, "removed" if removed else "still_exists")]
+
     def purge_checks(self, graphify_out: Path, purged: bool) -> list[dict[str, object]]:
-        return [check_record(graphify_out, purged, "purged" if purged else "still_exists")]
+        checks = self.disposable_artifact_checks(graphify_out, purged)
+        for check in checks:
+            if check["detail"] == "removed":
+                check["detail"] = "purged"
+        return checks

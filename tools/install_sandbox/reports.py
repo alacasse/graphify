@@ -13,13 +13,6 @@ except ImportError:
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 
 
-WINDOWS_VALIDATION_TARGETS = (
-    "windows payload file-effect simulation",
-    "antigravity remapping to antigravity-windows",
-    "Windows-specific skill payload and references generation",
-    "payload consistency for explicit Windows platform selection",
-)
-
 def artifact_relpath(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
@@ -108,6 +101,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     source_snapshot = object_dict(manifest.get("source_snapshot"))
     results = object_dicts(manifest.get("results"))
     coverage = object_dicts(manifest.get("platform_coverage"))
+    validation_sections = object_dicts(manifest.get("target_runtime_validation_sections"))
     risk_status_values = object_list(manifest.get("risk_status_values")) or list(known_status_values())
 
     lines: list[str] = ["# Graphify Install Sandbox Report", ""]
@@ -174,23 +168,24 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 
-    windows_validation = object_dict(manifest.get("windows_validation")) or default_windows_validation_status()
-    lines.extend(
-        [
-            "",
-            "## Windows Validation",
-            "",
-            f"- Status: {md_code(windows_validation.get('status'))}",
-            f"- Evidence: {md_code(windows_validation.get('evidence_path'))}",
-            f"- Strategy: {md_cell(windows_validation.get('strategy'))}",
-        ]
-    )
-    notes = object_list(windows_validation.get("notes"))
-    targets = object_list(windows_validation.get("targets"))
-    for note in notes:
-        lines.append(f"- {md_cell(note)}")
-    if targets:
-        lines.append(f"- Targets: {md_cell(', '.join(str(target) for target in targets))}")
+    for validation in validation_sections:
+        section_title = str(validation.get("section_title") or "Target Runtime Validation")
+        lines.extend(
+            [
+                "",
+                f"## {md_cell(section_title)}",
+                "",
+                f"- Status: {md_code(validation.get('status'))}",
+                f"- Evidence: {md_code(validation.get('evidence_path'))}",
+                f"- Strategy: {md_cell(validation.get('strategy'))}",
+            ]
+        )
+        notes = object_list(validation.get("notes"))
+        targets = object_list(validation.get("targets"))
+        for note in notes:
+            lines.append(f"- {md_cell(note)}")
+        if targets:
+            lines.append(f"- Targets: {md_cell(', '.join(str(target) for target in targets))}")
 
     failures = [item for item in results if item.get("passed") is not True]
     lines.extend(["", "## Failures", ""])
@@ -232,19 +227,6 @@ def render_report_md(manifest: dict[str, object]) -> str:
 
 def write_report_md(path: Path, manifest: dict[str, object]) -> None:
     path.write_text(render_report_md(manifest), encoding="utf-8")
-
-
-def default_windows_validation_status() -> dict[str, object]:
-    return {
-        "status": "payload_consistency_only",
-        "evidence_path": None,
-        "strategy": "Linux Docker validates Windows-named payload consistency only; real Windows runtime/path semantics require separate Windows validation",
-        "targets": list(WINDOWS_VALIDATION_TARGETS),
-        "notes": [
-            "Linux sandbox results for windows and antigravity-windows check packaged payloads, references, and generated file consistency only.",
-            "This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, permissions, or target-app discovery.",
-        ],
-    }
 
 
 def write_manifest_json(path: Path, manifest: dict[str, object]) -> None:

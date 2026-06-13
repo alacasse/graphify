@@ -3,9 +3,20 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 from tools.install_sandbox import scenario_lifecycle
-from tools.install_sandbox.platform_specs import DEFAULT_SCENARIO_REGISTRY, ExpectedPath, Scenario
+from tools.install_sandbox.platform_specs import (
+    DEFAULT_SCENARIO_REGISTRY,
+    DisposableArtifactScenarioSpec,
+    DisposableSeedFile,
+    ExpectedPath,
+    PlatformSpec,
+    Scenario,
+    ScenarioRegistry,
+    ScopeSpec,
+    UniversalUninstallScenarioSpec,
+)
 
 
 PRESERVED_RESULT_FIELDS = {
@@ -59,6 +70,7 @@ class HookFactory:
         self.manifest_records: list[dict[str, object]] = []
         self.seeded_sidecars: list[dict[str, object]] = []
         self.universal_check_ok = True
+        self.disposable_check_records: list[dict[str, object]] = []
 
     def completed(self, command, returncode: int) -> subprocess.CompletedProcess[str]:
         result = subprocess.CompletedProcess(list(command), returncode, "", "")
@@ -179,9 +191,12 @@ class HookFactory:
                     checks.append({"ok": False, "detail": "universal_uninstall_failed"})
                 return checks
 
-            def purge_checks(_, graphify_out, purged):
-                self.calls.append("purge-check:graphify-out")
-                return [{"path": str(graphify_out), "ok": purged, "detail": "purged" if purged else "still_exists"}]
+            def disposable_artifact_checks(_, disposable_path, removed):
+                path = Path(disposable_path)
+                self.calls.append(f"disposable-check:{path.name}")
+                check = {"path": str(path), "ok": removed, "detail": "purged" if removed else "still_exists"}
+                self.disposable_check_records.append(check)
+                return [check]
 
         paths = overrides.pop(
             "paths",
@@ -217,6 +232,8 @@ class HookFactory:
                 universal_uninstall_scenarios=overrides.pop("universal_uninstall_scenarios_func", None),
                 run_universal_uninstall_scenario=overrides.pop("run_universal_uninstall_scenario_func", None),
                 run_purge_scenario=overrides.pop("run_purge_scenario_func", None),
+                disposable_artifact_scenarios=overrides.pop("disposable_artifact_scenarios_func", None),
+                run_disposable_artifact_scenario=overrides.pop("run_disposable_artifact_scenario_func", None),
             ),
         )
         values = dict(paths=paths, file_effects=file_effects, commands=commands, artifacts=artifacts, matrix_overrides=matrix_overrides)
@@ -233,6 +250,10 @@ def assert_preserved_result_shape(result: dict[str, object]) -> None:
 
 def artifact_names(path: Path) -> set[str]:
     return {item.name for item in path.iterdir() if item.is_file()}
+
+
+def command_artifact_dir(result: dict[str, object]) -> str:
+    return str(cast(dict[str, object], result["command_artifact"])["artifact_dir"])
 
 
 def test_file_effects_interface_omits_oracle_leaf_helpers() -> None:
@@ -289,7 +310,7 @@ def test_run_scenario_preserves_stage_order_and_records_followups(tmp_path) -> N
     assert result["passed"] is True
     assert result["graphify_file_effects_passed"] is True
     assert result["overall_status"] == "graphify_install_verified"
-    assert result["command_artifact"]["artifact_dir"] == str(factory.output / "scenarios" / "codex-project")
+    assert command_artifact_dir(result) == str(factory.output / "scenarios" / "codex-project")
     assert factory.command_artifact_dirs == [factory.output / "scenarios" / "codex-project"]
     assert "target_runtime_verification" not in result
     assert assertions["install_exit_code"] == 0
@@ -356,7 +377,7 @@ def test_universal_uninstall_scenario_writes_assertions_and_risk_artifacts(tmp_p
     assert result["id"] == "universal-uninstall-project"
     assert result["graphify_file_effects_passed"] is True
     assert result["overall_status"] == "graphify_install_verified"
-    assert result["command_artifact"]["artifact_dir"] == str(artifact_dir / "uninstall")
+    assert command_artifact_dir(result) == str(artifact_dir / "uninstall")
     assert factory.command_artifact_dirs == [artifact_dir / "uninstall"]
     assert "target_runtime_verification" not in result
     assert assertions["uninstall_command"] == ["graphify", "uninstall", "--project"]
@@ -429,6 +450,46 @@ def test_universal_uninstall_scenario_derives_failure_from_installs_uninstall_an
     assert {check["detail"] for check in assertions["checks"]} >= {"universal_uninstall_failed"}
 
 
+def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_risk(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    factory.command_results = [0, 0, 0]
+    registry = ScenarioRegistry(
+        specs={},
+        universal_uninstall_specs=(
+            UniversalUninstallScenarioSpec(
+                scenario_id="sweep-custom-workspace",
+                platform_label="synthetic-cleaner",
+                scope="workspace",
+                command=("custom-tool", "remove", "workspace"),
+                cwd_root="user_cwd",
+                eligible_platform_scope="unused-scope",
+                artifact_subdir="declared-artifacts",
+                risk_note="declared lifecycle risk",
+            ),
+        ),
+    )
+    scenarios = [make_scenario("alpha", "project"), make_scenario("beta", "project")]
+
+    result = scenario_lifecycle.run_universal_uninstall_scenario(
+        "workspace",
+        scenarios,
+        {},
+        hooks=factory.hooks(scenario_registry=registry),
+    )
+    artifact_dir = factory.output / "scenarios" / "sweep-custom-workspace"
+    assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
+    risks = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
+
+    assert result["id"] == "sweep-custom-workspace"
+    assert result["platform"] == "synthetic-cleaner"
+    assert result["scope"] == "workspace"
+    assert command_artifact_dir(result) == str(artifact_dir / "declared-artifacts")
+    assert assertions["uninstall_command"] == ["custom-tool", "remove", "workspace"]
+    assert factory.command_records[-1]["command"] == ("custom-tool", "remove", "workspace")
+    assert factory.command_records[-1]["cwd"] == factory.user_cwd
+    assert risks["notes"] == ["declared lifecycle risk"]
+
+
 def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp_path) -> None:
     factory = HookFactory(tmp_path)
 
@@ -453,7 +514,7 @@ def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp
     assert result["id"] == purge_scenario_id
     assert result["graphify_file_effects_passed"] is True
     assert result["overall_status"] == "graphify_install_verified"
-    assert result["command_artifact"]["artifact_dir"] == str(artifact_dir / "uninstall-purge")
+    assert command_artifact_dir(result) == str(artifact_dir / "uninstall-purge")
     assert factory.command_artifact_dirs == [artifact_dir / "uninstall-purge"]
     assert "target_runtime_verification" not in result
     assert assertions["uninstall_exit_code"] == 0
@@ -480,7 +541,7 @@ def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp
         "command:graphify uninstall --purge",
         "graphify-out:present-before-purge",
         "manifest:after-uninstall-files.json",
-        "purge-check:graphify-out",
+        "disposable-check:graphify-out",
     ]
 
 
@@ -511,6 +572,60 @@ def test_purge_scenario_derives_failure_from_command_exit_and_removal(tmp_path) 
     assert assertions["passed"] is False
     assert assertions["uninstall_exit_code"] == 0
     assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": False, "detail": "still_exists"}]
+
+
+def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_artifact(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    undeclared_path = factory.project / "graphify-out"
+    undeclared_path.mkdir()
+    (undeclared_path / "graph.json").write_text("{}\n", encoding="utf-8")
+    spec = DisposableArtifactScenarioSpec(
+        scenario_id="discard-weird-cache",
+        platform_label="janitor",
+        scope="workspace",
+        command=("janitor", "discard", "cache"),
+        cwd_root="home",
+        artifact_subdir="declared-discard",
+        disposable_path_root="user_cwd",
+        disposable_path_relative="nested/cache-dir",
+        seed_files=(DisposableSeedFile("token.txt", "seeded\n"),),
+        scope_eligibility=("user",),
+        risk_note="declared disposable path risk",
+    )
+
+    def discard_run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
+        disposable_path = factory.user_cwd / "nested/cache-dir"
+        assert (disposable_path / "token.txt").read_text(encoding="utf-8") == "seeded\n"
+        result = factory.run_capture(command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class=command_class, timeout_seconds=timeout_seconds)
+        (disposable_path / "token.txt").unlink()
+        disposable_path.rmdir()
+        return result
+
+    result = scenario_lifecycle.run_disposable_artifact_scenario(
+        spec,
+        {},
+        hooks=factory.hooks(run_capture=discard_run_capture),
+    )
+    artifact_dir = factory.output / "scenarios" / "discard-weird-cache"
+    assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
+    risks = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
+
+    assert result["id"] == "discard-weird-cache"
+    assert result["platform"] == "janitor"
+    assert result["scope"] == "workspace"
+    assert command_artifact_dir(result) == str(artifact_dir / "declared-discard")
+    assert factory.command_records == [
+        {
+            "command": ("janitor", "discard", "cache"),
+            "cwd": factory.home,
+            "artifact_dir": artifact_dir / "declared-discard",
+            "command_class": "installer",
+            "timeout_seconds": None,
+        }
+    ]
+    assert assertions["checks"] == [{"path": str(factory.user_cwd / "nested/cache-dir"), "ok": True, "detail": "purged"}]
+    assert risks["notes"] == ["declared disposable path risk"]
+    assert undeclared_path.exists()
 
 
 def test_matrix_collects_graphify_failures(tmp_path) -> None:
@@ -650,6 +765,48 @@ def test_matrix_collects_universal_failures_and_runs_purge(tmp_path) -> None:
     ]
 
 
+def test_matrix_preserves_selected_universal_uninstall_spec(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    factory.command_results = [0]
+    scenario = make_scenario("arbitrary", "project", uninstall=False)
+    universal_spec = UniversalUninstallScenarioSpec(
+        scenario_id="selected-sweep",
+        platform_label="selected-cleaner",
+        scope="selected-scope",
+        command=("selected", "remove"),
+        cwd_root="user_cwd",
+        eligible_platform_scope="project",
+        artifact_subdir="selected-artifacts",
+        risk_note="selected risk note",
+    )
+
+    def run_scenario(item, env):
+        return {"id": "arbitrary-project", "platform": item.platform, "scope": item.scope, "passed": True, "graphify_file_effects_passed": True}
+
+    def universal_groups(platforms, scope):
+        return [scenario_lifecycle.SelectedUniversalUninstallScenario(universal_spec, (scenario,))]
+
+    results = scenario_lifecycle.run_matrix_scenarios(
+        ["arbitrary"],
+        "project",
+        {},
+        hooks=factory.hooks(
+            platform_scenarios=lambda platform_name, scope: [scenario],
+            run_scenario_func=run_scenario,
+            universal_uninstall_scenarios_func=universal_groups,
+            disposable_artifact_scenarios_func=lambda scope: [],
+        ),
+    )
+
+    artifact_dir = factory.output / "scenarios" / "selected-sweep"
+    assert results[-1]["id"] == "selected-sweep"
+    assert results[-1]["platform"] == "selected-cleaner"
+    assert results[-1]["scope"] == "selected-scope"
+    assert command_artifact_dir(results[-1]) == str(artifact_dir / "selected-artifacts")
+    assert factory.command_records[-1]["command"] == ("selected", "remove")
+    assert factory.command_records[-1]["cwd"] == factory.user_cwd
+
+
 def test_matrix_runs_purge_for_project_scope_after_standard_scenarios_pass(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
@@ -683,3 +840,59 @@ def test_matrix_runs_purge_for_project_scope_after_standard_scenarios_pass(tmp_p
 
     assert calls == ["scenario:first", "scenario:second", "universal-groups:project", "purge"]
     assert results[-1]["id"] == DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id()
+
+
+def test_matrix_runs_registry_disposable_scenarios_without_scope_branching(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    calls: list[str] = []
+    disposable_spec = DisposableArtifactScenarioSpec(
+        scenario_id="user-disposable-cleanup",
+        platform_label="cleanup",
+        scope="user",
+        command=("cleanup", "now"),
+        cwd_root="home",
+        artifact_subdir="cleanup-artifacts",
+        disposable_path_root="home",
+        disposable_path_relative="tmp/cache",
+        seed_files=(DisposableSeedFile("item.txt", "x"),),
+        scope_eligibility=("user",),
+        risk_note="user-scope disposable cleanup",
+    )
+    registry = ScenarioRegistry(
+        specs={
+            "arbitrary": PlatformSpec(
+                name="arbitrary",
+                scopes={
+                    "user": ScopeSpec(
+                        install_command=("install", "arbitrary"),
+                        uninstall_command=None,
+                        cwd_root="home",
+                        expected=(),
+                    )
+                },
+            )
+        },
+        disposable_artifact_specs=(disposable_spec,),
+    )
+
+    def run_scenario(item, env):
+        calls.append(f"scenario:{item.platform}:{item.scope}")
+        return {"id": registry.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
+
+    def run_disposable(spec, env):
+        calls.append(f"disposable:{spec.scenario_id}")
+        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+
+    results = scenario_lifecycle.run_matrix_scenarios(
+        ["arbitrary"],
+        "user",
+        {},
+        hooks=factory.hooks(
+            scenario_registry=registry,
+            run_scenario_func=run_scenario,
+            run_disposable_artifact_scenario_func=run_disposable,
+        ),
+    )
+
+    assert calls == ["scenario:arbitrary:user", "disposable:user-disposable-cleanup"]
+    assert [result["id"] for result in results] == ["arbitrary-user", "user-disposable-cleanup"]

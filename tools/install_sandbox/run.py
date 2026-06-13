@@ -43,7 +43,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Graphify install scenarios in an isolated Docker sandbox.")
     parser.add_argument("--repo", required=True, type=Path, help="Path to the live Graphify working tree to mount read-only.")
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--platform", help="Platform to test, for example codex.")
+    target.add_argument("--platform", help="Platform to test from the harness scenario registry.")
     target.add_argument("--all", action="store_true", help="Run the harness scenario registry.")
     parser.add_argument("--scope", choices=("user", "project", "both"), default="both")
     parser.add_argument("--output", type=Path, default=Path("sandbox-out"), help="Artifact output directory.")

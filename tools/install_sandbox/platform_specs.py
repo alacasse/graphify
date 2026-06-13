@@ -61,6 +61,72 @@ class GeneratedFileExpectation:
 
 
 @dataclass(frozen=True)
+class InstallCommandVariant:
+    label: str
+    command: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TargetRuntimeValidationSpec:
+    section_title: str
+    status: str
+    strategy: str
+    targets: tuple[str, ...]
+    notes: tuple[str, ...]
+    evidence_path: str | None = None
+
+    def to_manifest(self) -> dict[str, object]:
+        return {
+            "section_title": self.section_title,
+            "status": self.status,
+            "evidence_path": self.evidence_path,
+            "strategy": self.strategy,
+            "targets": list(self.targets),
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class UniversalUninstallScenarioSpec:
+    scenario_id: str
+    platform_label: str
+    scope: str
+    command: tuple[str, ...]
+    cwd_root: str
+    eligible_platform_scope: str
+    minimum_installed_scenarios: int = 2
+    artifact_subdir: str = "uninstall"
+    risk_note: str = "universal uninstall covers Graphify-owned file effects after multiple installs"
+
+
+@dataclass(frozen=True)
+class SelectedUniversalUninstallScenario:
+    spec: UniversalUninstallScenarioSpec
+    installed_scenarios: tuple[Scenario, ...]
+
+
+@dataclass(frozen=True)
+class DisposableSeedFile:
+    relative: str
+    content: str
+
+
+@dataclass(frozen=True)
+class DisposableArtifactScenarioSpec:
+    scenario_id: str
+    platform_label: str
+    scope: str
+    command: tuple[str, ...]
+    cwd_root: str
+    artifact_subdir: str
+    disposable_path_root: str
+    disposable_path_relative: str
+    seed_files: tuple[DisposableSeedFile, ...]
+    scope_eligibility: tuple[str, ...]
+    risk_note: str
+
+
+@dataclass(frozen=True)
 class ExpectedPath:
     root: str
     relative: str
@@ -94,6 +160,7 @@ class ScopeSpec:
     expected: tuple[ExpectedPath, ...]
     risk_notes: tuple[str, ...] = field(default_factory=tuple)
     equivalent_install_command: tuple[str, ...] | None = None
+    install_variants: tuple[InstallCommandVariant, ...] = ()
     allowed_roots: tuple[str, ...] = ()
     generated_file_expectation: GeneratedFileExpectation = field(default_factory=GeneratedFileExpectation)
 
@@ -118,6 +185,7 @@ class PlatformSpec:
     reference_bundles: tuple[ReferenceBundle, ...] = ()
     simulated_linux_layout: bool = False
     universal_uninstall_scopes: tuple[str, ...] = ()
+    target_runtime_validation: tuple[TargetRuntimeValidationSpec, ...] = ()
 
 
 def _dedupe_notes(*notes: str) -> tuple[str, ...]:
@@ -138,6 +206,28 @@ def _generic_uninstall_command(platform_name: str, scope: str) -> tuple[str, ...
 
 def _direct_project_install(platform_name: str) -> tuple[str, ...]:
     return ("graphify", platform_name, "install", "--project")
+
+
+def _declared_install_variants(
+    platform_name: str,
+    scope: str,
+    install_command: tuple[str, ...],
+    equivalent_install_command: tuple[str, ...] | None,
+) -> tuple[InstallCommandVariant, ...]:
+    generic = _generic_install_command(platform_name, scope)
+    direct = _direct_project_install(platform_name) if scope == "project" else ("graphify", platform_name, "install")
+
+    def label(command: tuple[str, ...], fallback: str) -> str:
+        if command == generic:
+            return "generic"
+        if command == direct:
+            return "direct"
+        return fallback
+
+    variants = [InstallCommandVariant(label(install_command, "primary"), install_command)]
+    if equivalent_install_command is not None:
+        variants.append(InstallCommandVariant(label(equivalent_install_command, "alternate"), equivalent_install_command))
+    return tuple(variants)
 
 
 def _skill(root: str, relative: str) -> ExpectedPath:
@@ -220,13 +310,15 @@ def _scenario(
         allowed_roots = ("home",)
         if MIXED_SCOPE_PROJECT_WIRING_NOTE in risk_notes:
             allowed_roots = ("home", "project", "user_cwd")
+    declared_install = install_command or _generic_install_command(platform_name, scope)
     return ScopeSpec(
-        install_command=install_command or _generic_install_command(platform_name, scope),
+        install_command=declared_install,
         uninstall_command=uninstall,
         cwd_root=cwd_root or ("project" if scope == "project" else "user_cwd"),
         expected=expected,
         risk_notes=risk_notes,
         equivalent_install_command=equivalent_install_command,
+        install_variants=_declared_install_variants(platform_name, scope, declared_install, equivalent_install_command),
         allowed_roots=allowed_roots,
     )
 
@@ -263,6 +355,8 @@ def _skill_only_project_scope(platform_name: str, skill_relative: str, *, notes:
 @dataclass(frozen=True)
 class ScenarioRegistry:
     specs: dict[str, PlatformSpec]
+    universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...] = ()
+    disposable_artifact_specs: tuple[DisposableArtifactScenarioSpec, ...] = ()
 
     @property
     def platform_names(self) -> list[str]:
@@ -310,13 +404,24 @@ class ScenarioRegistry:
         scope_spec = self.platform_spec(platform_name).scopes.get(scope)
         if scope_spec is None:
             return None
-        generic = self.generic_install_command(platform_name, scope)
-        alternate = scope_spec.equivalent_install_command
-        if scope_spec.install_command != generic:
-            return scope_spec.install_command
-        if alternate is not None and alternate != generic:
-            return alternate
+        for variant in self.install_variants_for_scope(platform_name, scope):
+            if variant.label == "direct":
+                return variant.command
         return None
+
+    def install_variants_for_scope(self, platform_name: str, scope: str) -> tuple[InstallCommandVariant, ...]:
+        scope_spec = self.platform_spec(platform_name).scopes.get(scope)
+        if scope_spec is None:
+            return ()
+        if scope_spec.install_variants:
+            return scope_spec.install_variants
+        variants = [InstallCommandVariant("primary", scope_spec.install_command)]
+        if scope_spec.equivalent_install_command is not None:
+            variants.append(InstallCommandVariant("alternate", scope_spec.equivalent_install_command))
+        return tuple(variants)
+
+    def install_variants(self, scenario: Scenario) -> tuple[InstallCommandVariant, ...]:
+        return self.install_variants_for_scope(scenario.platform, scenario.scope)
 
     def make_scenario(self, platform_name: str, scope: str) -> Scenario | None:
         spec = self.platform_spec(platform_name)
@@ -341,14 +446,23 @@ class ScenarioRegistry:
         return [scenario for one_scope in self.selected_scopes(scope) if (scenario := self.make_scenario(platform_name, one_scope)) is not None]
 
     def equivalent_install_command(self, scenario: Scenario) -> tuple[str, ...] | None:
-        scope_spec = self.platform_spec(scenario.platform).scopes.get(scenario.scope)
-        if scope_spec is None or scope_spec.equivalent_install_command is None:
+        variants = self.install_variants(scenario)
+        if len(variants) < 2:
             return None
-        if scenario.install_command == scope_spec.install_command:
-            return scope_spec.equivalent_install_command
-        if scenario.install_command == scope_spec.equivalent_install_command:
-            return scope_spec.install_command
+        for variant in variants:
+            if scenario.install_command == variant.command:
+                return next((candidate.command for candidate in variants if candidate.command != variant.command), None)
         return None
+
+    def equivalent_install_variants(self, scenario: Scenario) -> tuple[InstallCommandVariant, InstallCommandVariant] | None:
+        variants = self.install_variants(scenario)
+        if len(variants) < 2:
+            return None
+        primary = next((variant for variant in variants if variant.command == scenario.install_command), variants[0])
+        alternate = next((variant for variant in variants if variant.command != primary.command), None)
+        if alternate is None:
+            return None
+        return primary, alternate
 
     def equivalence_status(self, scenario: Scenario) -> dict[str, object]:
         equivalent = self.equivalent_install_command(scenario)
@@ -366,9 +480,13 @@ class ScenarioRegistry:
         return safe or "scenario"
 
     def universal_uninstall_scenario_id(self, scope: str) -> str:
-        return f"universal-uninstall-{scope}"
+        spec = self.universal_uninstall_spec_for_scope(scope)
+        return spec.scenario_id if spec is not None else f"universal-uninstall-{scope}"
 
     def purge_disposable_graphify_out_scenario_id(self) -> str:
+        for spec in self.disposable_artifact_specs:
+            if spec.disposable_path_relative == "graphify-out":
+                return spec.scenario_id
         return "purge-disposable-graphify-out"
 
     def coverage_records(self, platforms: list[str], scope: str) -> list[dict[str, object]]:
@@ -401,20 +519,59 @@ class ScenarioRegistry:
                     )
         return records
 
-    def universal_uninstall_groups(self, platforms: list[str], scope: str) -> list[tuple[str, list[Scenario]]]:
+    def universal_uninstall_spec_for_scope(self, scope: str) -> UniversalUninstallScenarioSpec | None:
+        return next((spec for spec in self.universal_uninstall_specs if spec.scope == scope), None)
+
+    def universal_uninstall_scenarios(self, platforms: list[str], scope: str) -> list[SelectedUniversalUninstallScenario]:
         requested = set(platforms)
-        groups: list[tuple[str, list[Scenario]]] = []
-        if scope in {"user", "both"}:
-            scenarios = [self.make_scenario(platform_name, "user") for platform_name, spec in self.specs.items() if platform_name in requested and "user" in spec.universal_uninstall_scopes]
-            runnable = [scenario for scenario in scenarios if scenario is not None]
-            if len(runnable) >= 2:
-                groups.append(("user", runnable))
-        if scope in {"project", "both"}:
-            scenarios = [self.make_scenario(platform_name, "project") for platform_name, spec in self.specs.items() if platform_name in requested and "project" in spec.universal_uninstall_scopes]
-            runnable = [scenario for scenario in scenarios if scenario is not None]
-            if len(runnable) >= 2:
-                groups.append(("project", runnable))
-        return groups
+        selected_scopes = set(self.selected_scopes(scope))
+        selected: list[SelectedUniversalUninstallScenario] = []
+        for universal_spec in self.universal_uninstall_specs:
+            if universal_spec.scope not in selected_scopes:
+                continue
+            scenarios = [
+                self.make_scenario(platform_name, universal_spec.eligible_platform_scope)
+                for platform_name, spec in self.specs.items()
+                if platform_name in requested and universal_spec.eligible_platform_scope in spec.universal_uninstall_scopes
+            ]
+            runnable = tuple(scenario for scenario in scenarios if scenario is not None)
+            if len(runnable) >= universal_spec.minimum_installed_scenarios:
+                selected.append(SelectedUniversalUninstallScenario(universal_spec, runnable))
+        return selected
+
+    def universal_uninstall_groups(self, platforms: list[str], scope: str) -> list[tuple[str, list[Scenario]]]:
+        return [(selected.spec.scope, list(selected.installed_scenarios)) for selected in self.universal_uninstall_scenarios(platforms, scope)]
+
+    def disposable_artifact_scenarios(self, scope: str) -> list[DisposableArtifactScenarioSpec]:
+        return [spec for spec in self.disposable_artifact_specs if scope in spec.scope_eligibility]
+
+    def target_runtime_validation_sections(self) -> list[dict[str, object]]:
+        sections: list[dict[str, object]] = []
+        seen: set[tuple[str, str]] = set()
+        for platform in self.specs.values():
+            for validation in platform.target_runtime_validation:
+                key = (validation.section_title, validation.status)
+                if key in seen:
+                    continue
+                seen.add(key)
+                sections.append(validation.to_manifest())
+        return sections
+
+    def validate_roots(self, declared_roots: set[str]) -> None:
+        unknown: set[str] = set()
+        for platform in self.specs.values():
+            for scope in platform.scopes.values():
+                if scope.cwd_root not in declared_roots:
+                    unknown.add(scope.cwd_root)
+                unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)
+        unknown.update(spec.cwd_root for spec in self.universal_uninstall_specs if spec.cwd_root not in declared_roots)
+        for spec in self.disposable_artifact_specs:
+            if spec.cwd_root not in declared_roots:
+                unknown.add(spec.cwd_root)
+            if spec.disposable_path_root not in declared_roots:
+                unknown.add(spec.disposable_path_root)
+        if unknown:
+            raise RuntimeError(f"unknown sandbox root declaration(s): {', '.join(sorted(unknown))}")
 
     def risk_notes(self, *notes: str, platform_name: str | None = None) -> tuple[str, ...]:
         ordered = list(notes)
@@ -427,6 +584,24 @@ class ScenarioRegistry:
 # Temporary sandbox-owned source of platform file effects. The app installer
 # refactor should eventually expose an app-owned install plan that this adapter
 # can consume instead of maintaining sandbox-local tool specifics.
+WINDOWS_TARGET_RUNTIME_VALIDATION = TargetRuntimeValidationSpec(
+    section_title="Windows Validation",
+    status="payload_consistency_only",
+    evidence_path=None,
+    strategy="Linux Docker validates Windows-named payload consistency only; real Windows runtime/path semantics require separate Windows validation",
+    targets=(
+        "windows payload file-effect simulation",
+        "antigravity remapping to antigravity-windows",
+        "Windows-specific skill payload and references generation",
+        "payload consistency for explicit Windows platform selection",
+    ),
+    notes=(
+        "Linux sandbox results for windows and antigravity-windows check packaged payloads, references, and generated file consistency only.",
+        "This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, permissions, or target-app discovery.",
+    ),
+)
+
+
 SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
     "claude": PlatformSpec(
         name="claude",
@@ -798,6 +973,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             "project": _skill_only_project_scope("antigravity-windows", ".agents/skills/graphify/SKILL.md", notes=(SIMULATED_LINUX_LAYOUT_NOTE,)),
         },
         simulated_linux_layout=True,
+        target_runtime_validation=(WINDOWS_TARGET_RUNTIME_VALIDATION,),
     ),
     "windows": PlatformSpec(
         name="windows",
@@ -831,6 +1007,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
             ),
         },
         simulated_linux_layout=True,
+        target_runtime_validation=(WINDOWS_TARGET_RUNTIME_VALIDATION,),
     ),
     "kimi": PlatformSpec(
         name="kimi",
@@ -854,8 +1031,47 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
 
 ALL_PLATFORMS = list(SANDBOX_PLATFORM_SPECS)
 
+DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS = (
+    UniversalUninstallScenarioSpec(
+        scenario_id="universal-uninstall-user",
+        platform_label="multiple",
+        scope="user",
+        command=("graphify", "uninstall"),
+        cwd_root="user_cwd",
+        eligible_platform_scope="user",
+    ),
+    UniversalUninstallScenarioSpec(
+        scenario_id="universal-uninstall-project",
+        platform_label="multiple",
+        scope="project",
+        command=("graphify", "uninstall", "--project"),
+        cwd_root="project",
+        eligible_platform_scope="project",
+    ),
+)
 
-DEFAULT_SCENARIO_REGISTRY = ScenarioRegistry(SANDBOX_PLATFORM_SPECS)
+DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS = (
+    DisposableArtifactScenarioSpec(
+        scenario_id="purge-disposable-graphify-out",
+        platform_label="purge",
+        scope="project",
+        command=("graphify", "uninstall", "--purge"),
+        cwd_root="project",
+        artifact_subdir="uninstall-purge",
+        disposable_path_root="project",
+        disposable_path_relative="graphify-out",
+        seed_files=(DisposableSeedFile("graph.json", '{"nodes": [], "edges": []}\n'),),
+        scope_eligibility=("project", "both"),
+        risk_note="purge verified only against disposable sandbox graphify-out state",
+    ),
+)
+
+
+DEFAULT_SCENARIO_REGISTRY = ScenarioRegistry(
+    SANDBOX_PLATFORM_SPECS,
+    universal_uninstall_specs=DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS,
+    disposable_artifact_specs=DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS,
+)
 
 
 def sandbox_platform_specs() -> dict[str, PlatformSpec]:
@@ -894,6 +1110,10 @@ def equivalent_install_command(scenario: Scenario) -> tuple[str, ...] | None:
     return DEFAULT_SCENARIO_REGISTRY.equivalent_install_command(scenario)
 
 
+def equivalent_install_variants(scenario: Scenario) -> tuple[InstallCommandVariant, InstallCommandVariant] | None:
+    return DEFAULT_SCENARIO_REGISTRY.equivalent_install_variants(scenario)
+
+
 def equivalence_status(scenario: Scenario) -> dict[str, object]:
     return DEFAULT_SCENARIO_REGISTRY.equivalence_status(scenario)
 
@@ -904,6 +1124,22 @@ def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
 
 def make_scenario(platform_name: str, scope: str) -> Scenario | None:
     return DEFAULT_SCENARIO_REGISTRY.make_scenario(platform_name, scope)
+
+
+def target_runtime_validation_sections() -> list[dict[str, object]]:
+    return DEFAULT_SCENARIO_REGISTRY.target_runtime_validation_sections()
+
+
+def universal_uninstall_scenarios(platforms: list[str], scope: str) -> list[SelectedUniversalUninstallScenario]:
+    return DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenarios(platforms, scope)
+
+
+def disposable_artifact_scenarios(scope: str) -> list[DisposableArtifactScenarioSpec]:
+    return DEFAULT_SCENARIO_REGISTRY.disposable_artifact_scenarios(scope)
+
+
+def validate_roots(declared_roots: set[str]) -> None:
+    DEFAULT_SCENARIO_REGISTRY.validate_roots(declared_roots)
 
 
 def risk_notes(*notes: str, platform_name: str | None = None) -> tuple[str, ...]:

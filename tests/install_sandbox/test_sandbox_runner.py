@@ -23,7 +23,7 @@ def test_parse_args_requires_platform_or_all() -> None:
 def test_dockerfile_copies_direct_runner_imports() -> None:
     dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
 
-    for module in ("file_walk.py", "json_helpers.py", "status.py"):
+    for module in ("file_walk.py", "harness_specs.py", "json_helpers.py", "status.py"):
         assert f"COPY {module} /runner/{module}" in dockerfile
 
 
@@ -102,6 +102,9 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         def coverage_records(self, platforms: list[str], scope: str):
             return []
 
+        def target_runtime_validation_sections(self):
+            return [{"section_title": "Synthetic Runtime", "status": "declared"}]
+
     monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
     monkeypatch.setattr(
         scenario_lifecycle,
@@ -130,6 +133,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         "performed": False,
         "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
     }
+    assert manifest["target_runtime_validation_sections"] == [{"section_title": "Synthetic Runtime", "status": "declared"}]
     assert "target_tool_runtime" not in manifest
     assert manifest["graphify_file_effect_fail_count"] == 1
     assert manifest["platform_coverage_summary"]["runnable_scope_count"] == 1

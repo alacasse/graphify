@@ -6,14 +6,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+except ImportError:
+    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+
 
 HARNESS_DIR = Path(__file__).resolve().parent
 DEFAULT_IMAGE = "graphify-install-sandbox:local"
-CONTAINER_REPO = "/mnt/graphify-repo"
-CONTAINER_OUTPUT = "/sandbox-out"
-CONTAINER_HOME = "/tmp/graphify-home"
-CONTAINER_XDG = "/tmp/graphify-home/.config"
-CONTAINER_PROJECT = "/tmp/graphify-project"
+ROOT_REGISTRY = DEFAULT_SANDBOX_ROOT_REGISTRY
+CONTAINER_REPO = ROOT_REGISTRY.container_path("repo_mount")
+CONTAINER_OUTPUT = ROOT_REGISTRY.container_path("output")
+CONTAINER_HOME = ROOT_REGISTRY.container_path("home")
+CONTAINER_XDG = ROOT_REGISTRY.container_path("xdg_config_home")
+CONTAINER_PROJECT = ROOT_REGISTRY.container_path("project")
+CONTAINER_SRC = ROOT_REGISTRY.container_path("src")
 BUILD_TIMEOUT_SECONDS = 600
 RUN_TIMEOUT_SECONDS = 3600
 
@@ -43,24 +50,14 @@ def build_container_command(
         command.append("--rm")
     if hasattr(os, "getuid") and hasattr(os, "getgid"):
         command.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+    for key, value in ROOT_REGISTRY.env_entries().items():
+        command.extend(["--env", f"{key}={value}"])
+    host_paths = {"repo_mount": repo, "output": output}
+    for root in ROOT_REGISTRY.volume_roots():
+        host_path = host_paths[root.name]
+        command.extend(["--volume", f"{host_path}:{root.container_path}:{root.mount_mode}"])
     command.extend(
         [
-            "--env",
-            f"HOME={CONTAINER_HOME}",
-            "--env",
-            f"XDG_CONFIG_HOME={CONTAINER_XDG}",
-            "--env",
-            f"GRAPHIFY_PROJECT={CONTAINER_PROJECT}",
-            "--env",
-            f"GRAPHIFY_REPO_MOUNT={CONTAINER_REPO}",
-            "--env",
-            "GRAPHIFY_SRC=/tmp/graphify-src",
-            "--env",
-            f"GRAPHIFY_OUTPUT={CONTAINER_OUTPUT}",
-            "--volume",
-            f"{repo}:{CONTAINER_REPO}:ro",
-            "--volume",
-            f"{output}:{CONTAINER_OUTPUT}:rw",
             "--workdir",
             CONTAINER_PROJECT,
             image,

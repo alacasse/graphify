@@ -61,6 +61,18 @@ def expected_skill(root: str, relative: str) -> ExpectedPath:
     return ExpectedPath(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
 
 
+def expected_skill_with_docs_sidecar(root: str, relative: str) -> ExpectedPath:
+    return ExpectedPath(
+        root,
+        relative,
+        skill_sidecar_expectation=platform_specs.SkillSidecarExpectation(
+            references_dir="docs",
+            references_tmp_dir="docs.tmp",
+            reference_pointer_pattern=r"docs/([A-Za-z0-9_.-]+\.md)\b",
+        ),
+    )
+
+
 def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> ExpectedPath:
     return ExpectedPath(
         root,
@@ -201,6 +213,43 @@ def test_skill_assertion_detects_missing_references_sidecar_from_body_pointer(or
     )
     assert pointer_check["ok"] is False
     assert "references_missing" in str(pointer_check["detail"])
+
+
+def test_skill_reference_pointer_detection_uses_declared_sidecar_pattern(oracle, roots) -> None:
+    test_scenario = scenario("aider", expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md"))
+    write_skill(
+        roots["project"],
+        ".custom/graphify/SKILL.md",
+        body="See docs/query.md for details. references/query.md is unrelated legacy text.\n",
+        version="9.9.9",
+    )
+
+    pointer_check = next(
+        check
+        for check in oracle.assert_expected_files(test_scenario)
+        if check.get("relative") == ".custom/graphify/SKILL.md" and "docs_missing" in str(check.get("detail"))
+    )
+    assert pointer_check["ok"] is False
+    assert "pointers=['query.md']" in str(pointer_check["detail"])
+
+
+def test_skill_reference_pointer_detection_ignores_undeclared_references_directory(oracle, roots) -> None:
+    test_scenario = scenario("aider", expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md"))
+    write_skill(
+        roots["project"],
+        ".custom/graphify/SKILL.md",
+        body="See references/query.md for details.\n",
+        version="9.9.9",
+    )
+
+    pointer_check = next(
+        check
+        for check in oracle.assert_expected_files(test_scenario)
+        if check.get("relative") == ".custom/graphify/SKILL.md" and check.get("detail") == "no_reference_pointers"
+    )
+
+    assert pointer_check["ok"] is True
+    assert pointer_check["detail"] == "no_reference_pointers"
 
 
 def test_skill_assertion_detects_references_tmp(oracle, roots) -> None:

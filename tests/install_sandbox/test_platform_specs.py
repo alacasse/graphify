@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from graphify import __main__ as graphify_main
 
 from tools.install_sandbox import platform_specs
@@ -176,6 +178,206 @@ def test_direct_equivalence_uses_registry_scope_specs() -> None:
             scenario = REGISTRY.make_scenario(platform_name, scope)
             assert scenario is not None
             assert REGISTRY.equivalent_install_command(scenario) == scope_spec.equivalent_install_command
+
+
+def test_install_variants_are_declared_and_preserve_arbitrary_labels() -> None:
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "strange-tool": platform_specs.PlatformSpec(
+                name="strange-tool",
+                scopes={
+                    "project": platform_specs.ScopeSpec(
+                        install_command=("tool", "apply", "alpha"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(platform_specs.ExpectedPath("project", "tool.txt"),),
+                        equivalent_install_command=("tool", "apply", "beta"),
+                        install_variants=(
+                            platform_specs.InstallCommandVariant("first declared", ("tool", "apply", "alpha")),
+                            platform_specs.InstallCommandVariant("second declared", ("tool", "apply", "beta")),
+                        ),
+                    )
+                },
+            )
+        }
+    )
+    scenario = registry.make_scenario("strange-tool", "project")
+
+    assert scenario is not None
+    assert registry.install_variants(scenario) == (
+        platform_specs.InstallCommandVariant("first declared", ("tool", "apply", "alpha")),
+        platform_specs.InstallCommandVariant("second declared", ("tool", "apply", "beta")),
+    )
+    assert registry.equivalent_install_variants(scenario) == (
+        platform_specs.InstallCommandVariant("first declared", ("tool", "apply", "alpha")),
+        platform_specs.InstallCommandVariant("second declared", ("tool", "apply", "beta")),
+    )
+
+
+def test_install_variant_fallback_uses_neutral_labels_for_unrecognized_commands() -> None:
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "neutral": platform_specs.PlatformSpec(
+                name="neutral",
+                scopes={
+                    "project": platform_specs.ScopeSpec(
+                        install_command=("tool", "primary"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(platform_specs.ExpectedPath("project", "neutral.txt"),),
+                        equivalent_install_command=("tool", "alternate"),
+                    )
+                },
+            )
+        }
+    )
+
+    assert registry.install_variants_for_scope("neutral", "project") == (
+        platform_specs.InstallCommandVariant("primary", ("tool", "primary")),
+        platform_specs.InstallCommandVariant("alternate", ("tool", "alternate")),
+    )
+
+
+def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
+    validation = platform_specs.TargetRuntimeValidationSpec(
+        section_title="Synthetic Runtime Validation",
+        status="declared-only",
+        strategy="inspect generated payloads",
+        targets=("runtime-a", "runtime-b"),
+        notes=("separate runtime smoke tests required",),
+        evidence_path="evidence/synthetic.md",
+    )
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "runtime-one": platform_specs.PlatformSpec(name="runtime-one", target_runtime_validation=(validation,)),
+            "runtime-two": platform_specs.PlatformSpec(name="runtime-two", target_runtime_validation=(validation,)),
+        }
+    )
+
+    assert registry.target_runtime_validation_sections() == [
+        {
+            "section_title": "Synthetic Runtime Validation",
+            "status": "declared-only",
+            "evidence_path": "evidence/synthetic.md",
+            "strategy": "inspect generated payloads",
+            "targets": ["runtime-a", "runtime-b"],
+            "notes": ["separate runtime smoke tests required"],
+        }
+    ]
+    assert platform_specs.ScenarioRegistry({"plain": platform_specs.PlatformSpec(name="plain")}).target_runtime_validation_sections() == []
+    assert platform_specs.target_runtime_validation_sections()
+
+
+def test_disposable_artifact_scenarios_are_declared_by_scope() -> None:
+    spec = platform_specs.DisposableArtifactScenarioSpec(
+        scenario_id="discard-cache",
+        platform_label="cache-cleaner",
+        scope="project",
+        command=("tool", "discard"),
+        cwd_root="project",
+        artifact_subdir="discard-artifacts",
+        disposable_path_root="project",
+        disposable_path_relative="tmp-cache",
+        seed_files=(platform_specs.DisposableSeedFile("seed.txt", "seed\n"),),
+        scope_eligibility=("project",),
+        risk_note="synthetic disposable artifact policy",
+    )
+    registry = platform_specs.ScenarioRegistry({}, disposable_artifact_specs=(spec,))
+
+    assert registry.disposable_artifact_scenarios("project") == [spec]
+    assert registry.disposable_artifact_scenarios("user") == []
+    assert platform_specs.disposable_artifact_scenarios("project") == list(
+        REGISTRY.disposable_artifact_scenarios("project")
+    )
+    assert REGISTRY.purge_disposable_graphify_out_scenario_id() == REGISTRY.disposable_artifact_scenarios("project")[0].scenario_id
+
+
+def test_universal_uninstall_scenarios_return_declared_policy() -> None:
+    installable_scope = platform_specs.ScopeSpec(
+        install_command=("tool", "install"),
+        uninstall_command=None,
+        cwd_root="project",
+        expected=(platform_specs.ExpectedPath("project", "installed.txt"),),
+    )
+    universal = platform_specs.UniversalUninstallScenarioSpec(
+        scenario_id="uninstall-everything",
+        platform_label="declared-combo",
+        scope="workspace",
+        command=("tool", "remove", "all"),
+        cwd_root="user_cwd",
+        eligible_platform_scope="project",
+        minimum_installed_scenarios=1,
+        artifact_subdir="declared-uninstall",
+        risk_note="synthetic universal uninstall policy",
+    )
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "alpha": platform_specs.PlatformSpec(
+                name="alpha",
+                scopes={"project": installable_scope},
+                universal_uninstall_scopes=("project",),
+            ),
+            "beta": platform_specs.PlatformSpec(name="beta", scopes={"project": installable_scope}),
+        },
+        universal_uninstall_specs=(universal,),
+    )
+
+    selected = registry.universal_uninstall_scenarios(["alpha", "beta"], "workspace")
+
+    assert len(selected) == 1
+    assert selected[0].spec is universal
+    assert selected[0].spec.command == ("tool", "remove", "all")
+    assert selected[0].spec.cwd_root == "user_cwd"
+    assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha"]
+    assert platform_specs.universal_uninstall_scenarios(["codex", "claude", "gemini"], "project")
+
+
+def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "rooted": platform_specs.PlatformSpec(
+                name="rooted",
+                scopes={
+                    "project": platform_specs.ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="declared-cwd",
+                        expected=(platform_specs.ExpectedPath("declared-output", "artifact.txt"),),
+                    )
+                },
+            )
+        },
+        universal_uninstall_specs=(
+            platform_specs.UniversalUninstallScenarioSpec(
+                scenario_id="universal",
+                platform_label="combo",
+                scope="project",
+                command=("tool", "uninstall"),
+                cwd_root="declared-cwd",
+                eligible_platform_scope="project",
+            ),
+        ),
+        disposable_artifact_specs=(
+            platform_specs.DisposableArtifactScenarioSpec(
+                scenario_id="disposable",
+                platform_label="cleanup",
+                scope="project",
+                command=("tool", "purge"),
+                cwd_root="declared-cwd",
+                artifact_subdir="purge",
+                disposable_path_root="declared-output",
+                disposable_path_relative="cache",
+                seed_files=(),
+                scope_eligibility=("project",),
+                risk_note="synthetic disposable policy",
+            ),
+        ),
+    )
+
+    registry.validate_roots({"declared-cwd", "declared-output"})
+    platform_specs.validate_roots({"home", "project", "user_cwd"})
+    with pytest.raises(RuntimeError, match="declared-output"):
+        registry.validate_roots({"declared-cwd"})
 
 
 def test_platform_coverage_records_unsupported_scopes() -> None:

@@ -35,6 +35,7 @@ COPY sandbox_runner.py /runner/sandbox_runner.py
 COPY command_runner.py /runner/command_runner.py
 COPY file_effects.py /runner/file_effects.py
 COPY file_walk.py /runner/file_walk.py
+COPY harness_specs.py /runner/harness_specs.py
 COPY json_helpers.py /runner/json_helpers.py
 COPY platform_specs.py /runner/platform_specs.py
 COPY reference_resolution.py /runner/reference_resolution.py

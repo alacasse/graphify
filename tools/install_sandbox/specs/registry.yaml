@@ -1,0 +1,729 @@
+schema_version: 1
+
+platform_order:
+  - claude
+  - codex
+  - codebuddy
+  - opencode
+  - kilo
+  - gemini
+  - cursor
+  - devin
+  - aider
+  - copilot
+  - vscode
+  - claw
+  - droid
+  - trae
+  - trae-cn
+  - hermes
+  - kiro
+  - pi
+  - antigravity
+  - antigravity-windows
+  - windows
+  - kimi
+  - amp
+
+platforms:
+  claude:
+    name: claude
+    user_skill: .claude/skills/graphify/SKILL.md
+    project_skill: .claude/skills/graphify/SKILL.md
+    universal_uninstall_scopes: [project]
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .claude/skills/graphify/SKILL.md
+          - kind: text_section
+            root: home
+            relative: .claude/CLAUDE.md
+            marker: "# graphify"
+            preserve_user_content: true
+            repair_stale_graphify_section: false
+            remove_on_uninstall: false
+      project:
+        equivalent_install_command: [graphify, claude, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .claude/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: .claude/CLAUDE.md
+            marker: "# graphify"
+            preserve_user_content: true
+            repair_stale_graphify_section: false
+          - kind: text_section
+            root: project
+            relative: CLAUDE.md
+            preserve_user_content: true
+          - kind: json_hooks
+            root: project
+            relative: .claude/settings.json
+            schema_name: claude_settings
+            hooks:
+              - event: PreToolUse
+                matcher: Bash
+                detail_name: bash_hook_present
+              - event: PreToolUse
+                matcher: Read|Glob
+                detail_name: read_glob_hook_present
+  codex:
+    name: codex
+    user_skill: .codex/skills/graphify/SKILL.md
+    project_skill: .codex/skills/graphify/SKILL.md
+    universal_uninstall_scopes: [project]
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .codex/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, codex, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .codex/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+          - kind: json_hooks
+            root: project
+            relative: .codex/hooks.json
+            schema_name: codex_hooks
+            hooks:
+              - event: PreToolUse
+                matcher: Bash
+                detail_name: graphify_hook_present
+                required_fragments: [graphify, hook-check]
+  codebuddy:
+    name: codebuddy
+    user_skill: .codebuddy/skills/graphify/SKILL.md
+    project_skill: .codebuddy/skills/graphify/SKILL.md
+    universal_uninstall_scopes: [user, project]
+    scopes:
+      user:
+        uninstall_command: [graphify, uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .codebuddy/skills/graphify/SKILL.md
+          - kind: text_section
+            root: home
+            relative: .codebuddy/CODEBUDDY.md
+          - kind: json_hooks
+            root: home
+            relative: .codebuddy/settings.json
+            schema_name: codebuddy_settings
+            hooks:
+              - event: PreToolUse
+                matcher: Bash
+                detail_name: bash_hook_present
+              - event: PreToolUse
+                matcher: Read|Glob
+                detail_name: read_glob_hook_present
+      project:
+        equivalent_install_command: [graphify, codebuddy, install]
+        expected:
+          - kind: skill
+            root: project
+            relative: .codebuddy/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: CODEBUDDY.md
+          - kind: json_hooks
+            root: project
+            relative: .codebuddy/settings.json
+            schema_name: codebuddy_settings
+            hooks:
+              - event: PreToolUse
+                matcher: Bash
+                detail_name: bash_hook_present
+              - event: PreToolUse
+                matcher: Read|Glob
+                detail_name: read_glob_hook_present
+  opencode:
+    name: opencode
+    user_skill: .config/opencode/skills/graphify/SKILL.md
+    project_skill: .opencode/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [mixed_scope_project_wiring, public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .config/opencode/skills/graphify/SKILL.md
+          - kind: plugin_file
+            root: user_cwd
+            relative: .opencode/plugins/graphify.js
+          - kind: json_plugin
+            root: user_cwd
+            relative: .opencode/opencode.json
+            schema_name: opencode_config
+            plugin_relative: .opencode/plugins/graphify.js
+      project:
+        equivalent_install_command: [graphify, opencode, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .opencode/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+          - kind: plugin_file
+            root: project
+            relative: .opencode/plugins/graphify.js
+          - kind: json_plugin
+            root: project
+            relative: .opencode/opencode.json
+            schema_name: opencode_config
+            plugin_relative: .opencode/plugins/graphify.js
+  kilo:
+    name: kilo
+    user_skill: .config/kilo/skills/graphify/SKILL.md
+    project_skill: .config/kilo/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: [graphify, kilo, uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .config/kilo/skills/graphify/SKILL.md
+          - kind: file
+            root: home
+            relative: .config/kilo/command/graphify.md
+      project:
+        install_command: [graphify, kilo, install]
+        uninstall_command: [graphify, kilo, uninstall]
+        risk_notes: [mixed_scope_global_skill_plus_project_wiring]
+        expected:
+          - kind: skill
+            root: home
+            relative: .config/kilo/skills/graphify/SKILL.md
+          - kind: file
+            root: home
+            relative: .config/kilo/command/graphify.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+          - kind: plugin_file
+            root: project
+            relative: .kilo/plugins/graphify.js
+          - kind: json_plugin
+            root: project
+            relative: .kilo/kilo.json
+            schema_name: kilo_config
+            plugin_relative: .kilo/plugins/graphify.js
+            allow_file_uri: true
+  gemini:
+    name: gemini
+    user_skill: .gemini/skills/graphify/SKILL.md
+    project_skill: .gemini/skills/graphify/SKILL.md
+    universal_uninstall_scopes: [user, project]
+    scopes:
+      user:
+        uninstall_command: [graphify, gemini, uninstall]
+        risk_notes: [mixed_scope_project_wiring]
+        equivalent_install_command: [graphify, gemini, install]
+        expected:
+          - kind: skill
+            root: home
+            relative: .gemini/skills/graphify/SKILL.md
+          - kind: text_section
+            root: user_cwd
+            relative: GEMINI.md
+            preserve_user_content: true
+          - kind: json_hooks
+            root: user_cwd
+            relative: .gemini/settings.json
+            schema_name: gemini_settings
+            hooks:
+              - event: BeforeTool
+                matcher: read_file|list_directory
+                detail_name: graphify_hook_present
+      project:
+        equivalent_install_command: [graphify, gemini, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .gemini/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: GEMINI.md
+            preserve_user_content: true
+          - kind: json_hooks
+            root: project
+            relative: .gemini/settings.json
+            schema_name: gemini_settings
+            hooks:
+              - event: BeforeTool
+                matcher: read_file|list_directory
+                detail_name: graphify_hook_present
+  cursor:
+    name: cursor
+    uses_packaged_references: false
+    universal_uninstall_scopes: [project]
+    unsupported_scopes:
+      user: cursor install writes a project-local .cursor rule in the current working directory; sandbox covers that file effect as project scope
+    scopes:
+      project:
+        install_command: [graphify, cursor, install]
+        uninstall_command: [graphify, cursor, uninstall]
+        equivalent_install_command: [graphify, install, --project, --platform, cursor]
+        expected:
+          - kind: file
+            root: project
+            relative: .cursor/rules/graphify.mdc
+  devin:
+    name: devin
+    user_skill: .config/devin/skills/graphify/SKILL.md
+    project_skill: .devin/skills/graphify/SKILL.md
+    universal_uninstall_scopes: [project]
+    scopes:
+      user:
+        uninstall_command: [graphify, devin, uninstall]
+        equivalent_install_command: [graphify, devin, install]
+        expected:
+          - kind: skill
+            root: home
+            relative: .config/devin/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, devin, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .devin/skills/graphify/SKILL.md
+          - kind: file
+            root: project
+            relative: .windsurf/rules/graphify.md
+  aider:
+    name: aider
+    user_skill: .aider/graphify/SKILL.md
+    project_skill: .aider/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .aider/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, aider, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .aider/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+  copilot:
+    name: copilot
+    user_skill: .copilot/skills/graphify/SKILL.md
+    project_skill: .copilot/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: [graphify, copilot, uninstall]
+        equivalent_install_command: [graphify, copilot, install]
+        expected:
+          - kind: skill
+            root: home
+            relative: .copilot/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, copilot, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .copilot/skills/graphify/SKILL.md
+  vscode:
+    name: vscode
+    user_skill: .copilot/skills/graphify/SKILL.md
+    uses_packaged_references: false
+    reference_bundles:
+      - name: vscode
+        required_package_relative: skill-vscode.md
+      - name: copilot
+    universal_uninstall_scopes: [user]
+    scopes:
+      user:
+        install_command: [graphify, vscode, install]
+        uninstall_command: [graphify, vscode, uninstall]
+        risk_notes: [mixed_scope_project_wiring]
+        expected:
+          - kind: skill
+            root: home
+            relative: .copilot/skills/graphify/SKILL.md
+          - kind: text_section
+            root: user_cwd
+            relative: .github/copilot-instructions.md
+            preserve_user_content: true
+      project:
+        install_command: [graphify, vscode, install]
+        uninstall_command: [graphify, vscode, uninstall]
+        risk_notes: [mixed_scope_global_skill_plus_project_wiring]
+        expected:
+          - kind: skill
+            root: home
+            relative: .copilot/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: .github/copilot-instructions.md
+            preserve_user_content: true
+  claw:
+    name: claw
+    user_skill: .openclaw/skills/graphify/SKILL.md
+    project_skill: .openclaw/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .openclaw/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, claw, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .openclaw/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+  droid:
+    name: droid
+    user_skill: .factory/skills/graphify/SKILL.md
+    project_skill: .factory/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .factory/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, droid, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .factory/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+  trae:
+    name: trae
+    user_skill: .trae/skills/graphify/SKILL.md
+    project_skill: .trae/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .trae/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, trae, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .trae/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+  trae-cn:
+    name: trae-cn
+    user_skill: .trae-cn/skills/graphify/SKILL.md
+    project_skill: .trae-cn/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .trae-cn/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, trae-cn, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .trae-cn/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+  hermes:
+    name: hermes
+    user_skill: .hermes/skills/graphify/SKILL.md
+    project_skill: .hermes/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .hermes/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, hermes, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .hermes/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+  kiro:
+    name: kiro
+    user_skill: .kiro/skills/graphify/SKILL.md
+    project_skill: .kiro/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .kiro/skills/graphify/SKILL.md
+      project:
+        install_command: [graphify, kiro, install]
+        uninstall_command: [graphify, kiro, uninstall]
+        equivalent_install_command: [graphify, install, --project, --platform, kiro]
+        expected:
+          - kind: skill
+            root: project
+            relative: .kiro/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: .kiro/steering/graphify.md
+            marker: "graphify:"
+            repair_stale_graphify_section: false
+  pi:
+    name: pi
+    user_skill: .pi/agent/skills/graphify/SKILL.md
+    project_skill: .pi/agent/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: [graphify, pi, uninstall]
+        equivalent_install_command: [graphify, pi, install]
+        expected:
+          - kind: skill
+            root: home
+            relative: .pi/agent/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, pi, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .pi/agent/skills/graphify/SKILL.md
+  antigravity:
+    name: antigravity
+    user_skill: .gemini/config/skills/graphify/SKILL.md
+    project_skill: .agents/skills/graphify/SKILL.md
+    universal_uninstall_scopes: [user]
+    scopes:
+      user:
+        install_command: [graphify, antigravity, install]
+        uninstall_command: [graphify, antigravity, uninstall]
+        risk_notes: [mixed_scope_project_wiring]
+        expected:
+          - kind: skill
+            root: home
+            relative: .gemini/config/skills/graphify/SKILL.md
+          - kind: text_section
+            root: user_cwd
+            relative: .agents/rules/graphify.md
+          - kind: file
+            root: user_cwd
+            relative: .agents/workflows/graphify.md
+      project:
+        equivalent_install_command: [graphify, antigravity, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .agents/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: .agents/rules/graphify.md
+          - kind: file
+            root: project
+            relative: .agents/workflows/graphify.md
+  antigravity-windows:
+    name: antigravity-windows
+    user_skill: .gemini/config/skills/graphify/SKILL.md
+    project_skill: .agents/skills/graphify/SKILL.md
+    simulated_linux_layout: true
+    target_runtime_validation:
+      - section_title: Windows Validation
+        status: payload_consistency_only
+        evidence_path: null
+        strategy: Linux Docker validates Windows-named payload consistency only; real Windows runtime/path semantics require separate Windows validation
+        targets:
+          - windows payload file-effect simulation
+          - antigravity remapping to antigravity-windows
+          - Windows-specific skill payload and references generation
+          - payload consistency for explicit Windows platform selection
+        notes:
+          - Linux sandbox results for windows and antigravity-windows check packaged payloads, references, and generated file consistency only.
+          - This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, permissions, or target-app discovery.
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall, simulated_linux_file_layout_only]
+        expected:
+          - kind: skill
+            root: home
+            relative: .gemini/config/skills/graphify/SKILL.md
+      project:
+        risk_notes: [simulated_linux_file_layout_only]
+        expected:
+          - kind: skill
+            root: project
+            relative: .agents/skills/graphify/SKILL.md
+  windows:
+    name: windows
+    user_skill: .claude/skills/graphify/SKILL.md
+    project_skill: .claude/skills/graphify/SKILL.md
+    simulated_linux_layout: true
+    target_runtime_validation:
+      - section_title: Windows Validation
+        status: payload_consistency_only
+        evidence_path: null
+        strategy: Linux Docker validates Windows-named payload consistency only; real Windows runtime/path semantics require separate Windows validation
+        targets:
+          - windows payload file-effect simulation
+          - antigravity remapping to antigravity-windows
+          - Windows-specific skill payload and references generation
+          - payload consistency for explicit Windows platform selection
+        notes:
+          - Linux sandbox results for windows and antigravity-windows check packaged payloads, references, and generated file consistency only.
+          - This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, permissions, or target-app discovery.
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall, simulated_linux_file_layout_only]
+        expected:
+          - kind: skill
+            root: home
+            relative: .claude/skills/graphify/SKILL.md
+          - kind: text_section
+            root: home
+            relative: .claude/CLAUDE.md
+            marker: "# graphify"
+            preserve_user_content: true
+            repair_stale_graphify_section: false
+            remove_on_uninstall: false
+      project:
+        risk_notes: [simulated_linux_file_layout_only]
+        expected:
+          - kind: skill
+            root: project
+            relative: .claude/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: .claude/CLAUDE.md
+            marker: "# graphify"
+            preserve_user_content: true
+            repair_stale_graphify_section: false
+          - kind: text_section
+            root: project
+            relative: CLAUDE.md
+            preserve_user_content: true
+          - kind: json_hooks
+            root: project
+            relative: .claude/settings.json
+            schema_name: claude_settings
+            hooks:
+              - event: PreToolUse
+                matcher: Bash
+                detail_name: bash_hook_present
+              - event: PreToolUse
+                matcher: Read|Glob
+                detail_name: read_glob_hook_present
+  kimi:
+    name: kimi
+    user_skill: .kimi/skills/graphify/SKILL.md
+    project_skill: .kimi/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .kimi/skills/graphify/SKILL.md
+      project:
+        expected:
+          - kind: skill
+            root: project
+            relative: .kimi/skills/graphify/SKILL.md
+  amp:
+    name: amp
+    user_skill: .config/agents/skills/graphify/SKILL.md
+    project_skill: .agents/skills/graphify/SKILL.md
+    scopes:
+      user:
+        uninstall_command: null
+        risk_notes: [public_cli_lacks_user_skill_uninstall]
+        expected:
+          - kind: skill
+            root: home
+            relative: .config/agents/skills/graphify/SKILL.md
+      project:
+        equivalent_install_command: [graphify, amp, install, --project]
+        expected:
+          - kind: skill
+            root: project
+            relative: .agents/skills/graphify/SKILL.md
+          - kind: text_section
+            root: project
+            relative: AGENTS.md
+            preserve_user_content: true
+
+universal_uninstall_specs:
+  - scenario_id: universal-uninstall-user
+    platform_label: multiple
+    scope: user
+    command: [graphify, uninstall]
+    cwd_root: user_cwd
+    eligible_platform_scope: user
+  - scenario_id: universal-uninstall-project
+    platform_label: multiple
+    scope: project
+    command: [graphify, uninstall, --project]
+    cwd_root: project
+    eligible_platform_scope: project
+
+disposable_artifact_specs:
+  - scenario_id: purge-disposable-graphify-out
+    platform_label: purge
+    scope: project
+    command: [graphify, uninstall, --purge]
+    cwd_root: project
+    artifact_subdir: uninstall-purge
+    disposable_path_root: project
+    disposable_path_relative: graphify-out
+    seed_files:
+      - relative: graph.json
+        content: "{\"nodes\": [], \"edges\": []}\n"
+    scope_eligibility: [project, both]
+    risk_note: purge verified only against disposable sandbox graphify-out state

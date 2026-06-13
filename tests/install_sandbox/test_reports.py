@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import reports, status
+from tools.install_sandbox import platform_specs, reports, status
 
 
 def test_known_status_values_are_serializable_file_effect_statuses() -> None:
@@ -65,13 +65,16 @@ def test_report_markdown_generation() -> None:
                 "install_command": ["graphify", "install", "--project", "--platform", "codex"],
             }
         ],
-        "windows_validation": {
-            "status": "payload_consistency_only",
-            "evidence_path": None,
-            "strategy": "payload consistency only",
-            "targets": ["windows", "antigravity mapping"],
-            "notes": ["Linux sandbox does not prove Windows-specific behavior."],
-        },
+        "target_runtime_validation_sections": [
+            {
+                "section_title": "Synthetic Runtime Validation",
+                "status": "payload_consistency_only",
+                "evidence_path": None,
+                "strategy": "payload consistency only",
+                "targets": ["synthetic runtime", "synthetic mapping"],
+                "notes": ["Linux sandbox does not prove synthetic target runtime behavior."],
+            }
+        ],
         "results": [
             {
                 "id": "codex-project",
@@ -124,19 +127,58 @@ def test_report_markdown_generation() -> None:
         "boom",
         "scenarios/codex-project/transcript.txt",
         "2026-06-02T00:00:00Z",
-        "## Windows Validation",
+        "## Synthetic Runtime Validation",
         "payload consistency only",
-        "Linux sandbox does not prove Windows-specific behavior.",
+        "Linux sandbox does not prove synthetic target runtime behavior.",
     ):
         assert expected in markdown
 
 
-def test_default_windows_validation_status_marks_linux_as_risk() -> None:
-    status = reports.default_windows_validation_status()
+def test_report_markdown_omits_target_runtime_validation_sections_when_metadata_absent() -> None:
+    markdown = reports.render_report_md(
+        {
+            "results": [],
+            "platform_coverage": [],
+            "windows_validation": {
+                "status": "legacy_payload_consistency_only",
+                "strategy": "legacy field must not render",
+                "notes": ["legacy Windows metadata"],
+            },
+        }
+    )
 
-    assert status["status"] == "payload_consistency_only"
-    assert "payload" in " ".join(status["targets"])
-    assert "does not validate" in " ".join(status["notes"])
+    assert "## Target Runtime Verification" in markdown
+    assert "## Windows Validation" not in markdown
+    assert "legacy field must not render" not in markdown
+    assert "legacy Windows metadata" not in markdown
+
+
+def test_target_runtime_validation_sections_are_registry_declared_manifest_data() -> None:
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "arbitrary-target": platform_specs.PlatformSpec(
+                name="arbitrary-target",
+                target_runtime_validation=(
+                    platform_specs.TargetRuntimeValidationSpec(
+                        section_title="Arbitrary Target Runtime",
+                        status="payload_only",
+                        evidence_path="runtime/evidence.json",
+                        strategy="declared synthetic strategy",
+                        targets=("non-windows target",),
+                        notes=("declared note",),
+                    ),
+                ),
+            )
+        }
+    )
+    sections = registry.target_runtime_validation_sections()
+
+    markdown = reports.render_report_md({"results": [], "platform_coverage": [], "target_runtime_validation_sections": sections})
+
+    assert "## Arbitrary Target Runtime" in markdown
+    assert "declared synthetic strategy" in markdown
+    assert "non-windows target" in markdown
+    assert "runtime/evidence.json" in markdown
 
 
 def test_write_report_markdown(tmp_path) -> None:

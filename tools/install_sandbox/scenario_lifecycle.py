@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
 try:
-    from .platform_specs import DEFAULT_SCENARIO_REGISTRY, Scenario, ScenarioRegistry
+    from .platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec
 except ImportError:
-    from platform_specs import DEFAULT_SCENARIO_REGISTRY, Scenario, ScenarioRegistry
+    from platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec
 
 
 @dataclass(frozen=True)
@@ -111,6 +111,7 @@ class StandardScenarioOutcome:
 @dataclass(frozen=True)
 class UniversalUninstallOutcome:
     scenario_name: str
+    platform_label: str
     scope_name: str
     scenarios: list[Scenario]
     install_results: list[dict[str, object]]
@@ -118,6 +119,7 @@ class UniversalUninstallOutcome:
     uninstall_result: subprocess.CompletedProcess[str]
     checks: list[dict[str, object]]
     uninstall_artifact_dir: Path
+    risk_note: str
 
     @property
     def passed(self) -> bool:
@@ -127,7 +129,7 @@ class UniversalUninstallOutcome:
         return self.uninstall_command
 
     def platform_name(self, context: ScenarioRunContext) -> str:
-        return "multiple"
+        return self.platform_label
 
     def scope(self, context: ScenarioRunContext) -> str:
         return self.scope_name
@@ -148,38 +150,41 @@ class UniversalUninstallOutcome:
     def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]:
         return artifacts.synthetic_risk_payload(
             self.passed,
-            note="universal uninstall covers Graphify-owned file effects after multiple installs",
+            note=self.risk_note,
         )
 
 
 @dataclass(frozen=True)
-class PurgeOutcome:
+class DisposableArtifactOutcome:
     scenario_name: str
+    platform_label: str
+    scope_name: str
     command: tuple[str, ...]
     result: subprocess.CompletedProcess[str]
     checks: list[dict[str, object]]
-    purged: bool
-    purge_artifact_dir: Path
+    removed: bool
+    command_artifact_dir_path: Path
+    risk_note: str
 
     @property
     def passed(self) -> bool:
-        return self.result.returncode == 0 and self.purged
+        return self.result.returncode == 0 and self.removed
 
     def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
         return self.command
 
     def platform_name(self, context: ScenarioRunContext) -> str:
-        return "purge"
+        return self.platform_label
 
     def scope(self, context: ScenarioRunContext) -> str:
-        return "project"
+        return self.scope_name
 
     def command_artifact_dir(self, context: ScenarioRunContext) -> Path:
-        return self.purge_artifact_dir
+        return self.command_artifact_dir_path
 
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         return {
-            "scenario": {"id": self.scenario_name, "scope": "project", "platform": "purge"},
+            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "platform": self.platform_label},
             "passed": self.passed,
             "uninstall_exit_code": self.result.returncode,
             "checks": self.checks,
@@ -188,7 +193,7 @@ class PurgeOutcome:
     def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]:
         return artifacts.synthetic_risk_payload(
             self.passed,
-            note="purge verified only against disposable sandbox graphify-out state",
+            note=self.risk_note,
         )
 
 
@@ -277,7 +282,7 @@ class ScenarioFileEffects(Protocol):
         install_checks: list[dict[str, object]],
     ) -> list[dict[str, object]]: ...
 
-    def purge_checks(self, graphify_out: Path, purged: bool) -> list[dict[str, object]]: ...
+    def disposable_artifact_checks(self, disposable_path: Path, removed: bool) -> list[dict[str, object]]: ...
 
 
 @dataclass(frozen=True)
@@ -373,7 +378,7 @@ class ScenarioArtifacts:
     def purge_result(
         self,
         context: ScenarioRunContext,
-        outcome: PurgeOutcome,
+        outcome: DisposableArtifactOutcome,
     ) -> dict[str, object]:
         return self.recorded_result(context, outcome)
 
@@ -382,9 +387,11 @@ class ScenarioArtifacts:
 class MatrixRunnerOverrides:
     platform_scenarios: Callable[[str, str], Iterable[Scenario]] | None = None
     run_scenario: Callable[[Scenario, dict[str, str]], dict[str, object]] | None = None
-    universal_uninstall_scenarios: Callable[[list[str], str], list[tuple[str, list[Scenario]]]] | None = None
-    run_universal_uninstall_scenario: Callable[[str, list[Scenario], dict[str, str]], dict[str, object]] | None = None
+    universal_uninstall_scenarios: Callable[[list[str], str], list[SelectedUniversalUninstallScenario | tuple[str, list[Scenario]]]] | None = None
+    run_universal_uninstall_scenario: Callable[..., dict[str, object]] | None = None
     run_purge_scenario: Callable[[dict[str, str]], dict[str, object]] | None = None
+    disposable_artifact_scenarios: Callable[[str], list[DisposableArtifactScenarioSpec]] | None = None
+    run_disposable_artifact_scenario: Callable[[DisposableArtifactScenarioSpec, dict[str, str]], dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)
@@ -570,34 +577,30 @@ def run_scenario(scenario: Scenario, env: dict[str, str], *, hooks: ScenarioLife
 
 @dataclass(frozen=True)
 class UniversalUninstallLifecycle:
-    scope: str
+    spec: UniversalUninstallScenarioSpec
     scenarios: list[Scenario]
     env: dict[str, str]
     hooks: ScenarioLifecycleHooks
 
     @property
     def scenario_name(self) -> str:
-        return self.hooks.scenario_registry.universal_uninstall_scenario_id(self.scope)
+        return self.spec.scenario_id
 
     @property
     def uninstall_command(self) -> tuple[str, ...]:
-        if self.scope == "project":
-            return ("graphify", "uninstall", "--project")
-        return ("graphify", "uninstall")
+        return self.spec.command
 
     @property
     def uninstall_cwd(self) -> Path:
-        if self.scope == "project":
-            return self.hooks.paths.project
-        return self.hooks.paths.user_cwd
+        return self.hooks.paths.root_path(self.spec.cwd_root)
 
     def runner_scenario(self) -> Scenario:
         return Scenario(
-            platform="multiple",
-            scope=self.scope,
+            platform=self.spec.platform_label,
+            scope=self.spec.scope,
             install_command=self.uninstall_command,
             uninstall_command=None,
-            cwd_root="project" if self.scope == "project" else "user_cwd",
+            cwd_root=self.spec.cwd_root,
             expected=tuple(entry for scenario in self.scenarios for entry in scenario.expected),
         )
 
@@ -650,7 +653,7 @@ class UniversalUninstallLifecycle:
             self.uninstall_command,
             cwd=self.uninstall_cwd,
             env=self.env,
-            artifact_dir=context.artifact_dir / "uninstall",
+            artifact_dir=context.artifact_dir / self.spec.artifact_subdir,
             command_class="installer",
         )
 
@@ -671,13 +674,15 @@ class UniversalUninstallLifecycle:
         self.write_after_uninstall_manifest(context)
         return UniversalUninstallOutcome(
             scenario_name=self.scenario_name,
-            scope_name=self.scope,
+            platform_label=self.spec.platform_label,
+            scope_name=self.spec.scope,
             scenarios=self.scenarios,
             install_results=install_results,
             uninstall_command=self.uninstall_command,
             uninstall_result=uninstall_result,
             checks=checks,
-            uninstall_artifact_dir=context.artifact_dir / "uninstall",
+            uninstall_artifact_dir=context.artifact_dir / self.spec.artifact_subdir,
+            risk_note=self.spec.risk_note,
         )
 
     def run(self) -> dict[str, object]:
@@ -686,43 +691,69 @@ class UniversalUninstallLifecycle:
         return self.hooks.artifacts.universal_uninstall_result(context, self.outcome(context, runner_scenario))
 
 
-def run_universal_uninstall_scenario(scope: str, scenarios: list[Scenario], env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    return UniversalUninstallLifecycle(scope, scenarios, env, hooks).run()
+def universal_uninstall_spec_for_scope(scope: str, *, hooks: ScenarioLifecycleHooks) -> UniversalUninstallScenarioSpec:
+    spec = hooks.scenario_registry.universal_uninstall_spec_for_scope(scope)
+    if spec is None:
+        raise RuntimeError(f"no universal uninstall scenario declaration for scope: {scope}")
+    return spec
+
+
+def selected_universal_uninstall(selected: SelectedUniversalUninstallScenario | tuple[str, list[Scenario]], *, hooks: ScenarioLifecycleHooks) -> SelectedUniversalUninstallScenario:
+    if isinstance(selected, SelectedUniversalUninstallScenario):
+        return selected
+    scope, scenarios = selected
+    return SelectedUniversalUninstallScenario(universal_uninstall_spec_for_scope(scope, hooks=hooks), tuple(scenarios))
+
+
+def run_universal_uninstall_scenario(selected_or_scope: SelectedUniversalUninstallScenario | str, scenarios: list[Scenario] | None = None, env: dict[str, str] | None = None, *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
+    if isinstance(selected_or_scope, SelectedUniversalUninstallScenario):
+        selected = selected_or_scope
+        scenario_env = env or {}
+    else:
+        if scenarios is None:
+            raise TypeError("scenarios are required when running a universal uninstall by scope")
+        selected = SelectedUniversalUninstallScenario(universal_uninstall_spec_for_scope(selected_or_scope, hooks=hooks), tuple(scenarios))
+        scenario_env = env or {}
+    return UniversalUninstallLifecycle(selected.spec, list(selected.installed_scenarios), scenario_env, hooks).run()
 
 
 @dataclass(frozen=True)
-class PurgeLifecycle:
+class DisposableArtifactLifecycle:
+    spec: DisposableArtifactScenarioSpec
     env: dict[str, str]
     hooks: ScenarioLifecycleHooks
 
     @property
     def scenario_name(self) -> str:
-        return self.hooks.scenario_registry.purge_disposable_graphify_out_scenario_id()
+        return self.spec.scenario_id
 
     @property
     def command(self) -> tuple[str, ...]:
-        return ("graphify", "uninstall", "--purge")
+        return self.spec.command
 
     @property
-    def graphify_out(self) -> Path:
-        return self.hooks.paths.project / "graphify-out"
+    def disposable_path(self) -> Path:
+        return self.hooks.paths.root_path(self.spec.disposable_path_root) / self.spec.disposable_path_relative
 
     def runner_scenario(self) -> Scenario:
         return Scenario(
-            platform="purge",
-            scope="project",
+            platform=self.spec.platform_label,
+            scope=self.spec.scope,
             install_command=self.command,
             uninstall_command=None,
-            cwd_root="project",
+            cwd_root=self.spec.cwd_root,
             expected=(),
         )
 
     def prepare_context(self, runner_scenario: Scenario) -> ScenarioRunContext:
         return prepare_scenario_run(runner_scenario, self.env, hooks=self.hooks, scenario_name=self.scenario_name)
 
-    def seed_disposable_graph(self) -> None:
-        self.graphify_out.mkdir(parents=True, exist_ok=True)
-        (self.graphify_out / "graph.json").write_text('{"nodes": [], "edges": []}\n', encoding="utf-8")
+    def seed_disposable_artifact(self) -> None:
+        self.disposable_path.mkdir(parents=True, exist_ok=True)
+        for seed in self.spec.seed_files:
+            path = self.disposable_path / seed.relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(seed.content, encoding="utf-8")
 
     def write_before_install_manifest(self, context: ScenarioRunContext) -> None:
         self.hooks.file_effects.write_manifest(context.artifact_dir / "before-install-files.json", self.hooks.paths.roots)
@@ -730,37 +761,40 @@ class PurgeLifecycle:
     def write_after_uninstall_manifest(self, context: ScenarioRunContext) -> None:
         self.hooks.file_effects.write_manifest(context.artifact_dir / "after-uninstall-files.json", self.hooks.paths.roots)
 
-    def purge_artifact_dir(self, context: ScenarioRunContext) -> Path:
-        return context.artifact_dir / "uninstall-purge"
+    def command_artifact_dir(self, context: ScenarioRunContext) -> Path:
+        return context.artifact_dir / self.spec.artifact_subdir
 
-    def run_purge_command(self, context: ScenarioRunContext) -> subprocess.CompletedProcess[str]:
+    def run_disposable_command(self, context: ScenarioRunContext) -> subprocess.CompletedProcess[str]:
         return self.hooks.commands.capture(
             self.command,
-            cwd=self.hooks.paths.project,
+            cwd=self.hooks.paths.root_path(self.spec.cwd_root),
             env=self.env,
-            artifact_dir=self.purge_artifact_dir(context),
+            artifact_dir=self.command_artifact_dir(context),
             command_class="installer",
         )
 
-    def purged(self) -> bool:
-        return not self.graphify_out.exists()
+    def removed(self) -> bool:
+        return not self.disposable_path.exists()
 
-    def checks(self, purged: bool) -> list[dict[str, object]]:
-        return self.hooks.file_effects.purge_checks(self.graphify_out, purged)
+    def checks(self, removed: bool) -> list[dict[str, object]]:
+        return self.hooks.file_effects.disposable_artifact_checks(self.disposable_path, removed)
 
-    def outcome(self, context: ScenarioRunContext) -> PurgeOutcome:
-        self.seed_disposable_graph()
+    def outcome(self, context: ScenarioRunContext) -> DisposableArtifactOutcome:
+        self.seed_disposable_artifact()
         self.write_before_install_manifest(context)
-        result = self.run_purge_command(context)
-        purged = self.purged()
+        result = self.run_disposable_command(context)
+        removed = self.removed()
         self.write_after_uninstall_manifest(context)
-        return PurgeOutcome(
+        return DisposableArtifactOutcome(
             scenario_name=self.scenario_name,
+            platform_label=self.spec.platform_label,
+            scope_name=self.spec.scope,
             command=self.command,
             result=result,
-            checks=self.checks(purged),
-            purged=purged,
-            purge_artifact_dir=self.purge_artifact_dir(context),
+            checks=self.checks(removed),
+            removed=removed,
+            command_artifact_dir_path=self.command_artifact_dir(context),
+            risk_note=self.spec.risk_note,
         )
 
     def run(self) -> dict[str, object]:
@@ -770,11 +804,22 @@ class PurgeLifecycle:
 
 
 def run_purge_scenario(env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    return PurgeLifecycle(env, hooks).run()
+    scenarios = hooks.scenario_registry.disposable_artifact_scenarios("project")
+    if not scenarios:
+        raise RuntimeError("no disposable artifact scenario declaration for project scope")
+    return DisposableArtifactLifecycle(scenarios[0], env, hooks).run()
 
 
-def universal_uninstall_scenarios(platforms: list[str], scope: str, *, hooks: ScenarioLifecycleHooks) -> list[tuple[str, list[Scenario]]]:
-    return hooks.scenario_registry.universal_uninstall_groups(platforms, scope)
+def run_disposable_artifact_scenario(spec: DisposableArtifactScenarioSpec, env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
+    return DisposableArtifactLifecycle(spec, env, hooks).run()
+
+
+def disposable_artifact_scenarios(scope: str, *, hooks: ScenarioLifecycleHooks) -> list[DisposableArtifactScenarioSpec]:
+    return hooks.scenario_registry.disposable_artifact_scenarios(scope)
+
+
+def universal_uninstall_scenarios(platforms: list[str], scope: str, *, hooks: ScenarioLifecycleHooks) -> list[SelectedUniversalUninstallScenario]:
+    return hooks.scenario_registry.universal_uninstall_scenarios(platforms, scope)
 
 
 def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], *, hooks: ScenarioLifecycleHooks, fail_fast_scenarios: bool = False) -> list[dict[str, object]]:
@@ -782,8 +827,10 @@ def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], 
     overrides = hooks.matrix_overrides
     run_one = overrides.run_scenario or (lambda scenario, scenario_env: run_scenario(scenario, scenario_env, hooks=hooks))
     universal_groups = overrides.universal_uninstall_scenarios or (lambda selected_platforms, selected_scope: universal_uninstall_scenarios(selected_platforms, selected_scope, hooks=hooks))
-    run_universal = overrides.run_universal_uninstall_scenario or (lambda universal_scope, scenarios, scenario_env: run_universal_uninstall_scenario(universal_scope, scenarios, scenario_env, hooks=hooks))
-    run_purge = overrides.run_purge_scenario or (lambda scenario_env: run_purge_scenario(scenario_env, hooks=hooks))
+    run_universal_override = overrides.run_universal_uninstall_scenario
+    disposable_specs = overrides.disposable_artifact_scenarios or (lambda selected_scope: disposable_artifact_scenarios(selected_scope, hooks=hooks))
+    run_disposable = overrides.run_disposable_artifact_scenario or (lambda spec, scenario_env: run_disposable_artifact_scenario(spec, scenario_env, hooks=hooks))
+    run_purge = overrides.run_purge_scenario
     platform_scenarios = overrides.platform_scenarios or hooks.scenario_registry.platform_scenarios
     for scenario in [scenario for platform_name in platforms for scenario in platform_scenarios(platform_name, scope)]:
         result = run_one(scenario, env)
@@ -792,10 +839,14 @@ def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], 
             return results
     if any(result.get("passed") is not True for result in results):
         return results
-    for universal_scope, scenarios in universal_groups(platforms, scope):
-        result = run_universal(universal_scope, scenarios, env)
+    for universal_group in universal_groups(platforms, scope):
+        selected = selected_universal_uninstall(universal_group, hooks=hooks)
+        if run_universal_override is None:
+            result = run_universal_uninstall_scenario(selected, env=env, hooks=hooks)
+        else:
+            result = run_universal_override(selected.spec.scope, list(selected.installed_scenarios), env)
         results.append(result)
-    if scope in {"project", "both"}:
-        result = run_purge(env)
+    for disposable_spec in disposable_specs(scope):
+        result = run_purge(env) if run_purge is not None else run_disposable(disposable_spec, env)
         results.append(result)
     return results

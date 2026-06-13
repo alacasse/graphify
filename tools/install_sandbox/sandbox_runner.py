@@ -21,6 +21,7 @@ try:
     from . import reports
     from . import scenario_lifecycle
     from . import source_snapshot
+    from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
@@ -34,6 +35,7 @@ except ImportError:
     import reports
     import scenario_lifecycle
     import source_snapshot
+    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
@@ -42,13 +44,15 @@ except ImportError:
     )
 
 
-HOME = Path(os.environ.get("HOME", "/tmp/graphify-home"))
-XDG_CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
-PROJECT = Path(os.environ.get("GRAPHIFY_PROJECT", "/tmp/graphify-project"))
-USER_CWD = Path("/tmp/graphify-user-cwd")
-REPO_MOUNT = Path(os.environ.get("GRAPHIFY_REPO_MOUNT", "/mnt/graphify-repo"))
-SRC = Path(os.environ.get("GRAPHIFY_SRC", "/tmp/graphify-src"))
-OUTPUT = Path(os.environ.get("GRAPHIFY_OUTPUT", "/sandbox-out"))
+ROOT_REGISTRY = DEFAULT_SANDBOX_ROOT_REGISTRY
+RUNTIME_ROOTS = ROOT_REGISTRY.runtime_paths()
+HOME = RUNTIME_ROOTS["home"]
+XDG_CONFIG_HOME = RUNTIME_ROOTS["xdg_config_home"]
+PROJECT = RUNTIME_ROOTS["project"]
+USER_CWD = RUNTIME_ROOTS["user_cwd"]
+REPO_MOUNT = RUNTIME_ROOTS["repo_mount"]
+SRC = RUNTIME_ROOTS["src"]
+OUTPUT = RUNTIME_ROOTS["output"]
 
 HARNESS_VERSION = "2026-06-01.1"
 PACKAGE_NAME = "graphifyy"
@@ -66,11 +70,7 @@ ScenarioRunContext = scenario_lifecycle.ScenarioRunContext
 StandardScenarioStages = scenario_lifecycle.StandardScenarioStages
 
 
-ROOTS = {
-    "home": HOME,
-    "project": PROJECT,
-    "user_cwd": USER_CWD,
-}
+ROOTS = ROOT_REGISTRY.scenario_roots(RUNTIME_ROOTS)
 
 SCENARIO_REGISTRY = DEFAULT_SCENARIO_REGISTRY
 
@@ -234,18 +234,27 @@ def install_graphify(env: dict[str, str]) -> dict[str, object]:
 
 def sandbox_env() -> dict[str, str]:
     env = os.environ.copy()
-    env["HOME"] = str(HOME)
-    env["XDG_CONFIG_HOME"] = str(XDG_CONFIG_HOME)
-    env["GRAPHIFY_PROJECT"] = str(PROJECT)
+    current_roots = {
+        "home": HOME,
+        "xdg_config_home": XDG_CONFIG_HOME,
+        "project": PROJECT,
+        "repo_mount": REPO_MOUNT,
+        "src": SRC,
+        "output": OUTPUT,
+    }
+    for root in ROOT_REGISTRY.roots:
+        if root.env_var is not None:
+            env[root.env_var] = str(current_roots[root.name])
     env["PATH"] = f"{HOME / '.local' / 'bin'}:{env.get('PATH', '')}"
     return env
 
 
 def reset_sandbox_dirs() -> None:
-    for path in (HOME, PROJECT, USER_CWD):
+    for root in ROOT_REGISTRY.reset_roots():
+        path = RUNTIME_ROOTS[root.name]
         path.mkdir(parents=True, exist_ok=True)
         for child in path.iterdir():
-            if path == HOME and child.name == ".local":
+            if child.name in root.preserve_children:
                 continue
             if child.is_dir() and not child.is_symlink():
                 shutil.rmtree(child)
@@ -263,12 +272,15 @@ def file_effect_oracle() -> file_effects.FileEffectOracle:
     )
 
 
-def command_style(command: tuple[str, ...], platform_name: str) -> str:
-    if len(command) >= 2 and command[1] == "install":
-        return "generic"
-    if len(command) >= 3 and command[1] == platform_name and command[2] == "install":
-        return "direct"
-    return "command"
+def install_variant_artifact_label(label: str, used: set[str]) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "-", label).strip(".-_").lower() or "variant"
+    candidate = safe
+    index = 2
+    while candidate in used:
+        candidate = f"{safe}-{index}"
+        index += 1
+    used.add(candidate)
+    return candidate
 
 
 def run_install_variant(scenario: Scenario, command: tuple[str, ...], env: dict[str, str], artifact_dir: Path) -> dict[str, object]:
@@ -292,22 +304,26 @@ def run_install_variant(scenario: Scenario, command: tuple[str, ...], env: dict[
 
 
 def run_equivalence_check(scenario: Scenario, env: dict[str, str], artifact_dir: Path) -> list[dict[str, object]]:
-    alternate = SCENARIO_REGISTRY.equivalent_install_command(scenario)
+    variants = SCENARIO_REGISTRY.equivalent_install_variants(scenario)
     equivalence_dir = artifact_dir / "generic-direct-equivalence"
-    if alternate is None:
+    if variants is None:
         (equivalence_dir / "status.json").parent.mkdir(parents=True, exist_ok=True)
         (equivalence_dir / "status.json").write_text(json.dumps(SCENARIO_REGISTRY.equivalence_status(scenario), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return []
 
-    primary_style = command_style(scenario.install_command, scenario.platform)
-    alternate_style = command_style(alternate, scenario.platform)
-    primary = run_install_variant(scenario, scenario.install_command, env, equivalence_dir / primary_style)
-    alternate_result = run_install_variant(scenario, alternate, env, equivalence_dir / alternate_style)
+    primary_variant, alternate_variant = variants
+    used_labels: set[str] = set()
+    primary_label = install_variant_artifact_label(primary_variant.label, used_labels)
+    alternate_label = install_variant_artifact_label(alternate_variant.label, used_labels)
+    primary = run_install_variant(scenario, primary_variant.command, env, equivalence_dir / primary_label)
+    alternate_result = run_install_variant(scenario, alternate_variant.command, env, equivalence_dir / alternate_label)
     same_effects = primary["state"] == alternate_result["state"]
     passed = bool(primary["passed"] and alternate_result["passed"] and same_effects)
     report = {
         "status": "runnable",
         "passed": passed,
+        "primary_label": primary_variant.label,
+        "alternate_label": alternate_variant.label,
         "primary": primary,
         "alternate": alternate_result,
         "same_file_effects": same_effects,
@@ -373,24 +389,27 @@ def scenario_lifecycle_hooks(
 
 
 def preflight() -> dict[str, object]:
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    PROJECT.mkdir(parents=True, exist_ok=True)
-    HOME.mkdir(parents=True, exist_ok=True)
-    USER_CWD.mkdir(parents=True, exist_ok=True)
-    checks = {
-        "home": str(HOME),
-        "xdg_config_home": str(XDG_CONFIG_HOME),
-        "project": str(PROJECT),
-        "repo_mount": str(REPO_MOUNT),
-        "output": str(OUTPUT),
-        "home_is_sandbox": str(HOME) == "/tmp/graphify-home",
-        "xdg_is_sandbox": str(XDG_CONFIG_HOME) == "/tmp/graphify-home/.config",
-        "project_is_sandbox": str(PROJECT) == "/tmp/graphify-project",
-        "repo_mount_exists": REPO_MOUNT.is_dir(),
-        "repo_mount_read_only": probe_read_only(REPO_MOUNT) if REPO_MOUNT.exists() else False,
-    }
+    SCENARIO_REGISTRY.validate_roots(ROOT_REGISTRY.declared_expected_root_names())
+    for root in ROOT_REGISTRY.roots:
+        path = RUNTIME_ROOTS[root.name]
+        if root.reset or root.mount_mode == "rw" or root.name == "xdg_config_home":
+            path.mkdir(parents=True, exist_ok=True)
+    checks: dict[str, object] = {root.name: str(RUNTIME_ROOTS[root.name]) for root in ROOT_REGISTRY.roots}
+    required_keys: list[str] = []
+    for root in ROOT_REGISTRY.preflight_roots():
+        path = RUNTIME_ROOTS[root.name]
+        if root.sandbox_path_required is not None:
+            key = "xdg_is_sandbox" if root.name == "xdg_config_home" else f"{root.name}_is_sandbox"
+            checks[key] = str(path) == root.sandbox_path_required
+            required_keys.append(key)
+        if root.mount_mode == "ro":
+            exists_key = f"{root.name}_exists"
+            read_only_key = f"{root.name}_read_only"
+            checks[exists_key] = path.is_dir()
+            checks[read_only_key] = probe_read_only(path) if path.exists() else False
+            required_keys.extend([exists_key, read_only_key])
     (OUTPUT / "preflight.json").write_text(json.dumps(checks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if not all(bool(checks[key]) for key in ("home_is_sandbox", "xdg_is_sandbox", "project_is_sandbox", "repo_mount_exists", "repo_mount_read_only")):
+    if not all(bool(checks[key]) for key in required_keys):
         raise RuntimeError(f"sandbox invariant failed: {checks}")
     return checks
 
@@ -435,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             "performed": False,
             "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
         },
+        "target_runtime_validation_sections": SCENARIO_REGISTRY.target_runtime_validation_sections(),
         "platform_coverage": coverage,
         "platform_coverage_summary": {
             "registered_platform_count": len(platforms),
@@ -443,7 +463,6 @@ def main(argv: list[str] | None = None) -> int:
             "universal_scenario_count": max(0, len(results) - len(scenarios)),
             "unsupported_scope_count": unsupported,
         },
-        "windows_validation": reports.default_windows_validation_status(),
         "scenario_count": len(results),
         "graphify_file_effect_pass_count": passed,
         "graphify_file_effect_fail_count": failed,

@@ -30,3 +30,4 @@ def test_run_cli_help_supports_direct_script_execution() -> None:
     assert "Run Graphify install scenarios in an isolated Docker sandbox." in result.stdout
     assert "--repo" in result.stdout
     assert "--platform" in result.stdout
+    assert "for example codex" not in result.stdout

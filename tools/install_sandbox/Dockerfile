@@ -26,6 +26,8 @@ RUN apt-get update \
         python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python -m pip install "PyYAML>=6.0.3"
+
 RUN mkdir -p /runner /tmp/graphify-home/.config /tmp/graphify-project /sandbox-out \
     && chmod -R 0777 /tmp/graphify-home /tmp/graphify-project /sandbox-out
 
@@ -38,6 +40,8 @@ COPY file_walk.py /runner/file_walk.py
 COPY harness_specs.py /runner/harness_specs.py
 COPY json_helpers.py /runner/json_helpers.py
 COPY platform_specs.py /runner/platform_specs.py
+COPY spec_loader.py /runner/spec_loader.py
+COPY specs /runner/specs
 COPY reference_resolution.py /runner/reference_resolution.py
 COPY reports.py /runner/reports.py
 COPY scenario_lifecycle.py /runner/scenario_lifecycle.py

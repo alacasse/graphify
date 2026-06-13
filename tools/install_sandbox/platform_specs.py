@@ -1029,7 +1029,7 @@ SANDBOX_PLATFORM_SPECS: dict[str, PlatformSpec] = {
     ),
 }
 
-ALL_PLATFORMS = list(SANDBOX_PLATFORM_SPECS)
+_PYTHON_SANDBOX_PLATFORM_SPECS = SANDBOX_PLATFORM_SPECS
 
 DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS = (
     UniversalUninstallScenarioSpec(
@@ -1067,11 +1067,29 @@ DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS = (
 )
 
 
-DEFAULT_SCENARIO_REGISTRY = ScenarioRegistry(
-    SANDBOX_PLATFORM_SPECS,
-    universal_uninstall_specs=DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS,
-    disposable_artifact_specs=DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS,
-)
+_PYTHON_DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS = DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS
+_PYTHON_DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS = DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS
+
+
+def _python_default_scenario_registry() -> ScenarioRegistry:
+    return ScenarioRegistry(
+        _PYTHON_SANDBOX_PLATFORM_SPECS,
+        universal_uninstall_specs=_PYTHON_DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS,
+        disposable_artifact_specs=_PYTHON_DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS,
+    )
+
+
+try:
+    from .spec_loader import load_default_registry
+except ImportError:  # pragma: no cover - direct script import fallback
+    from spec_loader import load_default_registry  # type: ignore[no-redef]
+
+
+DEFAULT_SCENARIO_REGISTRY = load_default_registry()
+SANDBOX_PLATFORM_SPECS = DEFAULT_SCENARIO_REGISTRY.specs
+DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS = DEFAULT_SCENARIO_REGISTRY.universal_uninstall_specs
+DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS = DEFAULT_SCENARIO_REGISTRY.disposable_artifact_specs
+ALL_PLATFORMS = list(SANDBOX_PLATFORM_SPECS)
 
 
 def sandbox_platform_specs() -> dict[str, PlatformSpec]:

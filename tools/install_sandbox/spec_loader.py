@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -24,7 +25,17 @@ SCHEMA_VERSION = 1
 DEFAULT_REGISTRY_PATH = Path(__file__).with_name("specs") / "registry.yaml"
 
 _SCOPE_NAMES = {"user", "project"}
-_EFFECT_KINDS = {"file", "plugin_file", "skill", "text_section", "json_hooks", "json_plugin"}
+_EFFECT_KINDS = {"file", "skill", "text_section", "json_hooks", "json_plugin"}
+_WIDENED_SCOPE_ROOTS = ("home", "project", "user_cwd")
+_USER_OWNED_TEXT_SECTION_RELATIVES = {
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude/CLAUDE.md",
+    "GEMINI.md",
+    ".github/copilot-instructions.md",
+}
+_CLAUDE_HOME_INSTRUCTION_RELATIVE = ".claude/CLAUDE.md"
+_RUNTIME_VALIDATION_POLICY_NAMES = {"simulated_linux_layout"}
 _KNOWN_SCOPE_RISK_NOTES = {
     model.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
     model.MIXED_SCOPE_PROJECT_WIRING_NOTE,
@@ -129,6 +140,28 @@ def _effect_common(effect: Mapping[str, Any], context: str) -> tuple[str, str, b
     return root, relative, _bool(remove_on_uninstall, f"{context}.remove_on_uninstall")
 
 
+def _effect_kind(effect: Mapping[str, Any], relative: str, context: str) -> str:
+    if "kind" in effect:
+        kind = _string(effect.get("kind"), f"{context}.kind")
+    else:
+        kind = "skill" if relative.endswith("SKILL.md") else "file"
+    if kind not in _EFFECT_KINDS:
+        _fail(f"{context}.kind", f"unknown effect kind: {kind}")
+    if relative.endswith("SKILL.md") and kind != "skill":
+        _fail(context, "SKILL.md effects must use kind: skill or omit kind for derived skill sidecar policy")
+    return kind
+
+
+def _hook_detail_name(hook: Mapping[str, Any], hook_count: int, context: str) -> str:
+    if "detail_name" in hook:
+        return _string(hook.get("detail_name"), f"{context}.detail_name")
+    if hook_count == 1:
+        return "graphify_hook_present"
+    matcher = _string(hook.get("matcher"), f"{context}.matcher")
+    stem = re.sub(r"[^a-z0-9]+", "_", matcher.lower()).strip("_") or "graphify"
+    return f"{stem}_hook_present"
+
+
 def _json_hooks(effect: Mapping[str, Any], context: str) -> tuple[model.JsonHookExpectation, ...]:
     hooks = _sequence(effect.get("hooks"), f"{context}.hooks")
     parsed: list[model.JsonHookExpectation] = []
@@ -139,32 +172,75 @@ def _json_hooks(effect: Mapping[str, Any], context: str) -> tuple[model.JsonHook
             model.JsonHookExpectation(
                 event=_string(hook.get("event"), f"{context}.hooks[{index}].event"),
                 matcher=_string(hook.get("matcher"), f"{context}.hooks[{index}].matcher"),
-                detail_name=_string(hook.get("detail_name"), f"{context}.hooks[{index}].detail_name"),
+                detail_name=_hook_detail_name(hook, len(hooks), f"{context}.hooks[{index}]"),
                 required_fragments=_string_list(fragments, f"{context}.hooks[{index}].required_fragments", allow_empty=False),
             )
         )
     return tuple(parsed)
 
 
-def _expected_path(effect_value: object, context: str) -> model.ExpectedPath:
+def _is_plugin_payload(effect: Mapping[str, Any], context: str) -> bool:
+    root, relative, _ = _effect_common(effect, context)
+    kind = _effect_kind(effect, relative, context)
+    path = PurePosixPath(relative)
+    return kind == "file" and root and path.suffix == ".js" and "plugins" in path.parts
+
+
+def _paired_plugin_relative(effect: Mapping[str, Any], expected_values: list[Any], context: str) -> str:
+    if "plugin_relative" in effect:
+        return _string(effect.get("plugin_relative"), f"{context}.plugin_relative")
+    root = _string(effect.get("root"), f"{context}.root")
+    candidates: list[str] = []
+    for index, candidate_value in enumerate(expected_values):
+        candidate_context = f"{context.rsplit('.expected[', 1)[0]}.expected[{index}]"
+        candidate = _mapping(candidate_value, candidate_context)
+        candidate_root = _string(candidate.get("root"), f"{candidate_context}.root")
+        if candidate_root != root:
+            continue
+        if _is_plugin_payload(candidate, candidate_context):
+            candidates.append(_string(candidate.get("relative"), f"{candidate_context}.relative"))
+    if not candidates:
+        _fail(context, "json_plugin effect must declare plugin_relative or have one paired JavaScript plugin payload in the same scope/root")
+    if len(candidates) > 1:
+        _fail(context, "json_plugin effect has ambiguous paired JavaScript plugin payloads")
+    return candidates[0]
+
+
+def _text_section_preserves_user_content(root: str, relative: str) -> bool:
+    return relative in _USER_OWNED_TEXT_SECTION_RELATIVES
+
+
+def _text_section_removes_on_uninstall(root: str, relative: str, declared_remove: bool | None) -> bool:
+    if declared_remove is not None:
+        return declared_remove
+    if root == "home" and relative == _CLAUDE_HOME_INSTRUCTION_RELATIVE:
+        return False
+    return True
+
+
+def _expected_path(effect_value: object, context: str, *, expected_values: list[Any] | None = None) -> model.ExpectedPath:
     effect = _mapping(effect_value, context)
-    kind = _string(effect.get("kind", "file"), f"{context}.kind")
-    if kind not in _EFFECT_KINDS:
-        _fail(f"{context}.kind", f"unknown effect kind: {kind}")
-    root, relative, remove_on_uninstall = _effect_common(effect, context)
+    root, relative, declared_remove_on_uninstall = _effect_common(effect, context)
+    kind = _effect_kind(effect, relative, context)
 
     if kind == "skill":
-        path = model.ExpectedPath(root, relative, remove_on_uninstall=remove_on_uninstall, skill_sidecar_expectation=model.SkillSidecarExpectation())
+        path = model.ExpectedPath(root, relative, remove_on_uninstall=declared_remove_on_uninstall, skill_sidecar_expectation=model.SkillSidecarExpectation())
     elif kind == "text_section":
-        preserve_user_content = _bool(effect.get("preserve_user_content", False), f"{context}.preserve_user_content")
+        marker = _string(effect.get("marker", model.GRAPHIFY_MARKER), f"{context}.marker")
+        preserve_user_content = _bool(effect.get("preserve_user_content", _text_section_preserves_user_content(root, relative)), f"{context}.preserve_user_content")
+        remove_on_uninstall = _text_section_removes_on_uninstall(
+            root,
+            relative,
+            _bool(effect.get("remove_on_uninstall"), f"{context}.remove_on_uninstall") if "remove_on_uninstall" in effect else None,
+        )
         path = model.ExpectedPath(
             root,
             relative,
-            marker=_string(effect.get("marker", model.GRAPHIFY_MARKER), f"{context}.marker"),
+            marker=marker,
             remove_on_uninstall=remove_on_uninstall,
             text_expectation=model.TextExpectation(
                 preserve_user_content=preserve_user_content,
-                repair_stale_graphify_section=_bool(effect.get("repair_stale_graphify_section", True), f"{context}.repair_stale_graphify_section"),
+                repair_stale_graphify_section=_bool(effect.get("repair_stale_graphify_section", marker == model.GRAPHIFY_MARKER), f"{context}.repair_stale_graphify_section"),
                 require_user_content_on_uninstall=preserve_user_content,
             ),
         )
@@ -174,32 +250,32 @@ def _expected_path(effect_value: object, context: str) -> model.ExpectedPath:
             relative,
             content_kind="json",
             marker="graphify",
-            remove_on_uninstall=remove_on_uninstall,
+            remove_on_uninstall=declared_remove_on_uninstall,
             json_expectation=model.JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
                 hooks=_json_hooks(effect, context),
             ),
         )
     elif kind == "json_plugin":
+        if expected_values is None:
+            _fail(context, "json_plugin derivation requires scope expected context")
         path = model.ExpectedPath(
             root,
             relative,
             content_kind="json",
             marker="graphify",
-            remove_on_uninstall=remove_on_uninstall,
+            remove_on_uninstall=declared_remove_on_uninstall,
             json_expectation=model.JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
                 plugin=model.JsonPluginExpectation(
-                    expected_entry=_string(effect.get("plugin_relative"), f"{context}.plugin_relative"),
+                    expected_entry=_paired_plugin_relative(effect, expected_values, context),
                     allow_file_uri=_bool(effect.get("allow_file_uri", False), f"{context}.allow_file_uri"),
                 ),
             ),
         )
     else:
-        path = model.ExpectedPath(root, relative, remove_on_uninstall=remove_on_uninstall)
+        path = model.ExpectedPath(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
 
-    if path.relative.endswith("SKILL.md") and path.skill_sidecar_expectation is None:
-        _fail(context, "SKILL.md effects must declare skill sidecar policy by using kind: skill")
     return path
 
 
@@ -228,18 +304,44 @@ def _generated_file_expectation(value: object, context: str) -> model.GeneratedF
     )
 
 
-def _scope_spec(platform_name: str, scope_name: str, value: object, context: str) -> model.ScopeSpec:
+def _dedupe(items: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(item for item in items if item))
+
+
+def _scope_locality(scope_name: str, expected: tuple[model.ExpectedPath, ...]) -> tuple[str | None, tuple[str, ...]]:
+    roots = {entry.root for entry in expected}
+    if scope_name == "project":
+        if roots <= {"project"}:
+            return None, ("project",)
+        return model.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
+    if roots <= {"home"}:
+        return None, ("home",)
+    return model.MIXED_SCOPE_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
+
+
+def _scope_risk_notes(explicit_notes: tuple[str, ...], locality_note: str | None, *, simulated_linux_layout: bool) -> tuple[str, ...]:
+    notes: tuple[str, ...] = explicit_notes
+    if locality_note is not None:
+        notes = (locality_note, *notes)
+    if simulated_linux_layout:
+        notes = (*notes, model.SIMULATED_LINUX_LAYOUT_NOTE)
+    return _dedupe(notes)
+
+
+def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> model.ScopeSpec:
     data = _mapping(value, context)
     if scope_name not in _SCOPE_NAMES:
         _fail(context, f"invalid platform scope: {scope_name}")
     expected_values = _sequence(data.get("expected"), f"{context}.expected")
     if not expected_values:
         _fail(f"{context}.expected", "runnable scope must declare at least one expected file effect")
-    expected = tuple(_expected_path(effect, f"{context}.expected[{index}]") for index, effect in enumerate(expected_values))
-    risk_notes = _string_list(data.get("risk_notes", []), f"{context}.risk_notes")
-    for note in risk_notes:
+    expected = tuple(_expected_path(effect, f"{context}.expected[{index}]", expected_values=expected_values) for index, effect in enumerate(expected_values))
+    explicit_risk_notes = _string_list(data.get("risk_notes", []), f"{context}.risk_notes")
+    for note in explicit_risk_notes:
         if note not in _KNOWN_SCOPE_RISK_NOTES:
             _fail(f"{context}.risk_notes", f"unknown structured risk note: {note}")
+    locality_note, derived_allowed_roots = _scope_locality(scope_name, expected)
+    risk_notes = _scope_risk_notes(explicit_risk_notes, locality_note, simulated_linux_layout=simulated_linux_layout)
 
     install_command = None
     if "install_command" in data:
@@ -267,6 +369,7 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
         risk_notes=risk_notes,
         equivalent_install_command=equivalent_install_command,
     )
+    scope = replace(scope, allowed_roots=derived_allowed_roots)
     if "install_variants" in data:
         scope = replace(scope, install_variants=_install_variants(data.get("install_variants"), f"{context}.install_variants"))
     if "allowed_roots" in data:
@@ -303,11 +406,43 @@ def _runtime_validation(value: object, context: str) -> model.TargetRuntimeValid
     )
 
 
-def _platform_spec(platform_key: str, value: object, context: str) -> model.PlatformSpec:
+def _runtime_validation_policies(value: object, context: str) -> dict[str, model.TargetRuntimeValidationSpec]:
+    policies = _mapping(value, context)
+    for name in policies:
+        if name not in _RUNTIME_VALIDATION_POLICY_NAMES:
+            _fail(f"{context}.{name}", f"unknown runtime validation policy: {name}")
+    return {name: _runtime_validation(policy, f"{context}.{name}") for name, policy in policies.items()}
+
+
+def _platform_runtime_validations(
+    data: Mapping[str, Any],
+    context: str,
+    *,
+    simulated_linux_layout: bool,
+    shared_runtime_validations: Mapping[str, model.TargetRuntimeValidationSpec],
+) -> tuple[model.TargetRuntimeValidationSpec, ...]:
+    validations = [
+        _runtime_validation(validation, f"{context}.target_runtime_validation[{index}]")
+        for index, validation in enumerate(_sequence(data.get("target_runtime_validation", []), f"{context}.target_runtime_validation"))
+    ]
+    if simulated_linux_layout and (validation := shared_runtime_validations.get("simulated_linux_layout")) is not None:
+        validations.append(validation)
+    return tuple(dict.fromkeys(validations))
+
+
+def _platform_spec(
+    platform_key: str,
+    value: object,
+    context: str,
+    *,
+    shared_runtime_validations: Mapping[str, model.TargetRuntimeValidationSpec],
+) -> model.PlatformSpec:
     data = _mapping(value, context)
-    name = _string(data.get("name"), f"{context}.name")
-    if name != platform_key:
-        _fail(f"{context}.name", f"platform key/name mismatch: {platform_key} != {name}")
+    name = platform_key
+    if "name" in data:
+        name = _string(data.get("name"), f"{context}.name")
+        if name != platform_key:
+            _fail(f"{context}.name", f"platform key/name mismatch: {platform_key} != {name}")
 
     scopes_value = _mapping(data.get("scopes", {}), f"{context}.scopes")
     unsupported_value = _mapping(data.get("unsupported_scopes", {}), f"{context}.unsupported_scopes")
@@ -320,8 +455,9 @@ def _platform_spec(platform_key: str, value: object, context: str) -> model.Plat
         if runnable == unsupported:
             _fail(f"{context}.{scope_name}", "expected exactly one runnable scope or unsupported reason")
 
+    simulated_linux_layout = _bool(data.get("simulated_linux_layout", False), f"{context}.simulated_linux_layout")
     scopes = {
-        scope_name: _scope_spec(platform_key, scope_name, scope_value, f"{context}.scopes.{scope_name}")
+        scope_name: _scope_spec(platform_key, scope_name, scope_value, f"{context}.scopes.{scope_name}", simulated_linux_layout=simulated_linux_layout)
         for scope_name, scope_value in scopes_value.items()
     }
     unsupported_scopes = {
@@ -340,18 +476,40 @@ def _platform_spec(platform_key: str, value: object, context: str) -> model.Plat
         project_skill=None if project_skill is None else _string(project_skill, f"{context}.project_skill"),
         scopes=scopes,
         unsupported_scopes=unsupported_scopes,
-        uses_packaged_references=_bool(data.get("uses_packaged_references", True), f"{context}.uses_packaged_references"),
+        uses_packaged_references=_bool(data.get("uses_packaged_references", False if reference_bundles else True), f"{context}.uses_packaged_references"),
         reference_bundles=reference_bundles,
-        simulated_linux_layout=_bool(data.get("simulated_linux_layout", False), f"{context}.simulated_linux_layout"),
+        simulated_linux_layout=simulated_linux_layout,
         universal_uninstall_scopes=_string_list(data.get("universal_uninstall_scopes", []), f"{context}.universal_uninstall_scopes"),
-        target_runtime_validation=tuple(
-            _runtime_validation(validation, f"{context}.target_runtime_validation[{index}]")
-            for index, validation in enumerate(_sequence(data.get("target_runtime_validation", []), f"{context}.target_runtime_validation"))
+        target_runtime_validation=_platform_runtime_validations(
+            data,
+            context,
+            simulated_linux_layout=simulated_linux_layout,
+            shared_runtime_validations=shared_runtime_validations,
         ),
     )
 
 
 def _universal_uninstall(value: object, context: str) -> model.UniversalUninstallScenarioSpec:
+    if isinstance(value, str):
+        if value == "user":
+            return model.UniversalUninstallScenarioSpec(
+                scenario_id="universal-uninstall-user",
+                platform_label="multiple",
+                scope="user",
+                command=("graphify", "uninstall"),
+                cwd_root="user_cwd",
+                eligible_platform_scope="user",
+            )
+        if value == "project":
+            return model.UniversalUninstallScenarioSpec(
+                scenario_id="universal-uninstall-project",
+                platform_label="multiple",
+                scope="project",
+                command=("graphify", "uninstall", "--project"),
+                cwd_root="project",
+                eligible_platform_scope="project",
+            )
+        _fail(context, f"unknown compact universal uninstall scope: {value}")
     data = _mapping(value, context)
     cwd_root = _string(data.get("cwd_root"), f"{context}.cwd_root")
     _validate_cwd_root(cwd_root, f"{context}.cwd_root")
@@ -411,9 +569,18 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> model.Sc
     loaded_names = tuple(platforms_value.keys())
     if set(platform_order) != set(loaded_names) or tuple(platform_order) != loaded_names:
         _fail(f"{source}.platform_order", "declared platform order must equal loaded platform names")
+    shared_runtime_validations = _runtime_validation_policies(
+        registry.get("target_runtime_validation_policies", {}),
+        f"{source}.target_runtime_validation_policies",
+    )
 
     specs = {
-        platform_name: _platform_spec(platform_name, platforms_value[platform_name], f"{source}.platforms.{platform_name}")
+        platform_name: _platform_spec(
+            platform_name,
+            platforms_value[platform_name],
+            f"{source}.platforms.{platform_name}",
+            shared_runtime_validations=shared_runtime_validations,
+        )
         for platform_name in platform_order
     }
     universal = tuple(

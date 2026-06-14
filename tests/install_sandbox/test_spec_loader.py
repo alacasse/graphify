@@ -4,10 +4,10 @@ from copy import deepcopy
 from typing import Any
 
 import pytest
+import yaml
 
-from tools.install_sandbox import platform_specs
+from tools.install_sandbox import platform_specs, spec_loader
 from tools.install_sandbox.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
-from tools.install_sandbox.spec_normalize import normalize_registry
 
 
 def _skill(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[str, object]:
@@ -83,10 +83,51 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-project"
 
 
-def test_default_yaml_registry_matches_python_baseline() -> None:
-    yaml_registry = load_default_registry()
+def _default_registry_yaml() -> dict[str, Any]:
+    with spec_loader.DEFAULT_REGISTRY_PATH.open(encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
 
-    assert normalize_registry(yaml_registry) == normalize_registry(platform_specs._python_default_scenario_registry())
+
+def test_default_registry_loads_and_returns_scenario_registry() -> None:
+    registry = load_default_registry()
+
+    assert isinstance(registry, platform_specs.ScenarioRegistry)
+    assert registry.specs
+    assert registry.universal_uninstall_specs
+    assert registry.disposable_artifact_specs
+
+
+def test_default_registry_declares_schema_version_one() -> None:
+    assert _default_registry_yaml()["schema_version"] == spec_loader.SCHEMA_VERSION == 1
+
+
+def test_default_registry_platform_order_matches_loaded_platform_keys() -> None:
+    registry = load_default_registry()
+
+    assert _default_registry_yaml()["platform_order"] == registry.platform_names
+
+
+def test_default_registry_every_scope_is_runnable_or_explained() -> None:
+    registry = load_default_registry()
+
+    for platform_name in registry.platform_names:
+        for scope in ("user", "project"):
+            runnable = registry.make_scenario(platform_name, scope) is not None
+            explained = registry.unsupported_scope_reason(platform_name, scope) is not None
+            assert runnable != explained, f"{platform_name}/{scope} must be runnable xor explained"
+
+
+def test_default_registry_skill_effects_declare_sidecar_expectation() -> None:
+    registry = load_default_registry()
+
+    for platform_name in registry.platform_names:
+        for scope in ("user", "project"):
+            scenario = registry.make_scenario(platform_name, scope)
+            if scenario is None:
+                continue
+            for entry in scenario.expected:
+                if entry.relative.endswith("SKILL.md"):
+                    assert entry.skill_sidecar_expectation is not None, f"{platform_name}/{scope}/{entry.relative}"
 
 
 def _expect_invalid(data: dict[str, Any], match: str) -> None:

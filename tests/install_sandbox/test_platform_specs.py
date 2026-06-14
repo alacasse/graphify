@@ -91,14 +91,64 @@ def test_user_content_preservation_is_declared_on_registry_entries() -> None:
 
 
 def test_text_section_repair_is_declared_on_expected_paths() -> None:
+    nonstandard_marker_entries: set[tuple[str, str, str, str]] = set()
     for platform_name in platform_specs.ALL_PLATFORMS:
         for scope in ("user", "project"):
             scenario = REGISTRY.make_scenario(platform_name, scope)
             if scenario is None:
                 continue
             for entry in scenario.expected:
+                if entry.content_kind != "text":
+                    continue
                 if entry.marker == platform_specs.GRAPHIFY_MARKER:
                     assert entry.text_expectation.repair_stale_graphify_section, f"{platform_name}/{scope}/{entry.relative}"
+                elif entry.marker is not None:
+                    assert not entry.text_expectation.repair_stale_graphify_section, f"{platform_name}/{scope}/{entry.relative}"
+                    nonstandard_marker_entries.add((platform_name, scope, entry.root, entry.relative))
+
+    assert nonstandard_marker_entries == {
+        ("claude", "user", "home", ".claude/CLAUDE.md"),
+        ("claude", "project", "project", ".claude/CLAUDE.md"),
+        ("kiro", "project", "project", ".kiro/steering/graphify.md"),
+        ("windows", "user", "home", ".claude/CLAUDE.md"),
+        ("windows", "project", "project", ".claude/CLAUDE.md"),
+    }
+
+
+def test_home_claude_instruction_docs_are_not_removed_on_uninstall() -> None:
+    non_removable_entries = {
+        (platform_name, scope, entry.root, entry.relative)
+        for platform_name in platform_specs.ALL_PLATFORMS
+        for scope in ("user", "project")
+        if (scenario := REGISTRY.make_scenario(platform_name, scope)) is not None
+        for entry in scenario.expected
+        if not entry.remove_on_uninstall
+    }
+
+    assert non_removable_entries == {
+        ("claude", "user", "home", ".claude/CLAUDE.md"),
+        ("windows", "user", "home", ".claude/CLAUDE.md"),
+    }
+
+
+def test_scope_risk_notes_are_derived_from_locality_and_simulation() -> None:
+    expected = {
+        ("opencode", "user"): (
+            platform_specs.MIXED_SCOPE_PROJECT_WIRING_NOTE,
+            platform_specs.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+        ),
+        ("kilo", "project"): (platform_specs.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
+        ("antigravity-windows", "user"): (
+            platform_specs.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+            platform_specs.SIMULATED_LINUX_LAYOUT_NOTE,
+        ),
+        ("windows", "project"): (platform_specs.SIMULATED_LINUX_LAYOUT_NOTE,),
+    }
+
+    for (platform_name, scope), risk_notes in expected.items():
+        scenario = REGISTRY.make_scenario(platform_name, scope)
+        assert scenario is not None
+        assert scenario.risk_notes == risk_notes
 
 
 def test_skill_sidecar_policy_is_declared_on_skill_entries() -> None:

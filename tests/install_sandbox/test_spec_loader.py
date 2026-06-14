@@ -11,7 +11,7 @@ from tools.install_sandbox.spec_normalize import normalize_registry
 
 
 def _skill(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[str, object]:
-    return {"kind": "skill", "root": "home", "relative": relative}
+    return {"root": "home", "relative": relative}
 
 
 def _valid_data() -> dict[str, Any]:
@@ -20,7 +20,6 @@ def _valid_data() -> dict[str, Any]:
         "platform_order": ["mini"],
         "platforms": {
             "mini": {
-                "name": "mini",
                 "user_skill": ".mini/skills/graphify/SKILL.md",
                 "project_skill": ".mini/skills/graphify/SKILL.md",
                 "scopes": {
@@ -31,8 +30,8 @@ def _valid_data() -> dict[str, Any]:
                     },
                     "project": {
                         "expected": [
-                            {"kind": "skill", "root": "project", "relative": ".mini/skills/graphify/SKILL.md"},
-                            {"kind": "text_section", "root": "project", "relative": "AGENTS.md", "preserve_user_content": True},
+                            {"root": "project", "relative": ".mini/skills/graphify/SKILL.md"},
+                            {"kind": "text_section", "root": "project", "relative": "AGENTS.md"},
                         ],
                         "equivalent_install_command": ["graphify", "mini", "install", "--project"],
                     },
@@ -41,16 +40,7 @@ def _valid_data() -> dict[str, Any]:
                 "universal_uninstall_scopes": ["project"],
             }
         },
-        "universal_uninstall_specs": [
-            {
-                "scenario_id": "universal-uninstall-project",
-                "platform_label": "multiple",
-                "scope": "project",
-                "command": ["graphify", "uninstall", "--project"],
-                "cwd_root": "project",
-                "eligible_platform_scope": "project",
-            }
-        ],
+        "universal_uninstall_specs": ["project"],
         "disposable_artifact_specs": [
             {
                 "scenario_id": "purge-disposable-graphify-out",
@@ -90,6 +80,7 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     agents = next(entry for entry in project.expected if entry.relative == "AGENTS.md")
     assert agents.text_expectation.preserve_user_content
     assert agents.text_expectation.require_user_content_on_uninstall
+    assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-project"
 
 
 def test_default_yaml_registry_matches_python_baseline() -> None:
@@ -164,11 +155,22 @@ def test_loader_rejects_invalid_scope_names() -> None:
     _expect_invalid(data, "invalid platform scope: both")
 
 
-def test_loader_rejects_skill_file_without_sidecar_kind() -> None:
+def test_loader_derives_skill_sidecar_kind_and_rejects_explicit_wrong_kind() -> None:
+    derived = load_registry_from_data(_valid_data()).make_scenario("mini", "user")
+    assert derived is not None
+    assert derived.expected[0].skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+
     data = _valid_data()
     data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["kind"] = "file"
 
-    _expect_invalid(data, "SKILL.md effects must declare skill sidecar policy")
+    _expect_invalid(data, "SKILL.md effects must use kind: skill or omit kind")
+
+
+def test_loader_rejects_removed_plugin_file_kind() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["user"]["expected"][0] = {"kind": "plugin_file", "root": "home", "relative": ".mini/plugins/graphify.js"}
+
+    _expect_invalid(data, "unknown effect kind")
 
 
 def test_loader_rejects_unknown_effect_kind() -> None:
@@ -178,18 +180,135 @@ def test_loader_rejects_unknown_effect_kind() -> None:
     _expect_invalid(data, "unknown effect kind")
 
 
-def test_loader_rejects_incomplete_json_expectations() -> None:
-    missing_hook = _valid_data()
-    missing_hook["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+def test_loader_derives_json_hook_detail_names() -> None:
+    single = _valid_data()
+    single["platforms"]["mini"]["scopes"]["user"]["expected"] = [
         {"kind": "json_hooks", "root": "home", "relative": ".mini/settings.json", "schema_name": "mini_settings", "hooks": [{"event": "PreToolUse", "matcher": "Bash"}]}
     ]
-    _expect_invalid(missing_hook, "detail_name")
+    single_scenario = load_registry_from_data(single).make_scenario("mini", "user")
+    assert single_scenario is not None
+    single_json = single_scenario.expected[0].json_expectation
+    assert single_json is not None
+    assert single_json.hooks[0].detail_name == "graphify_hook_present"
 
+    multiple = _valid_data()
+    multiple["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+        {
+            "kind": "json_hooks",
+            "root": "home",
+            "relative": ".mini/settings.json",
+            "schema_name": "mini_settings",
+            "hooks": [
+                {"event": "PreToolUse", "matcher": "Bash"},
+                {"event": "PreToolUse", "matcher": "Read|Glob"},
+            ],
+        }
+    ]
+    multiple_scenario = load_registry_from_data(multiple).make_scenario("mini", "user")
+    assert multiple_scenario is not None
+    multiple_json = multiple_scenario.expected[0].json_expectation
+    assert multiple_json is not None
+    assert [hook.detail_name for hook in multiple_json.hooks] == ["bash_hook_present", "read_glob_hook_present"]
+
+
+def test_loader_derives_json_plugin_relative_from_paired_payload() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+        _skill(),
+        {"root": "home", "relative": ".mini/plugins/graphify.js"},
+        {"kind": "json_plugin", "root": "home", "relative": ".mini/config.json", "schema_name": "mini_config"},
+    ]
+
+    scenario = load_registry_from_data(data).make_scenario("mini", "user")
+
+    assert scenario is not None
+    config = next(entry for entry in scenario.expected if entry.relative == ".mini/config.json")
+    assert config.json_expectation is not None
+    assert config.json_expectation.plugin is not None
+    assert config.json_expectation.plugin.expected_entry == ".mini/plugins/graphify.js"
+
+
+def test_loader_rejects_unpaired_or_ambiguous_json_plugin_payloads() -> None:
     missing_plugin = _valid_data()
     missing_plugin["platforms"]["mini"]["scopes"]["user"]["expected"] = [
-        {"kind": "json_plugin", "root": "home", "relative": ".mini/config.json", "schema_name": "mini_config"}
+        _skill(),
+        {"kind": "json_plugin", "root": "home", "relative": ".mini/config.json", "schema_name": "mini_config"},
     ]
-    _expect_invalid(missing_plugin, "plugin_relative")
+    _expect_invalid(missing_plugin, "one paired JavaScript plugin payload")
+
+    ambiguous_plugin = _valid_data()
+    ambiguous_plugin["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+        _skill(),
+        {"root": "home", "relative": ".mini/plugins/graphify.js"},
+        {"root": "home", "relative": ".mini/plugins/extra.js"},
+        {"kind": "json_plugin", "root": "home", "relative": ".mini/config.json", "schema_name": "mini_config"},
+    ]
+    _expect_invalid(ambiguous_plugin, "ambiguous paired JavaScript plugin payloads")
+
+
+def test_loader_derives_text_section_policies() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+        _skill(),
+        {"kind": "text_section", "root": "home", "relative": ".claude/CLAUDE.md", "marker": "# graphify"},
+    ]
+
+    user = load_registry_from_data(data).make_scenario("mini", "user")
+
+    assert user is not None
+    instruction = next(entry for entry in user.expected if entry.relative == ".claude/CLAUDE.md")
+    assert instruction.text_expectation.preserve_user_content
+    assert not instruction.text_expectation.repair_stale_graphify_section
+    assert not instruction.remove_on_uninstall
+
+
+def test_loader_derives_scope_locality_and_simulated_notes() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["simulated_linux_layout"] = True
+    data["platforms"]["mini"]["scopes"]["user"]["expected"].append({"root": "user_cwd", "relative": "GEMINI.md", "kind": "text_section"})
+
+    user = load_registry_from_data(data).make_scenario("mini", "user")
+
+    assert user is not None
+    assert user.allowed_roots == ("home", "project", "user_cwd")
+    assert user.risk_notes == (
+        platform_specs.MIXED_SCOPE_PROJECT_WIRING_NOTE,
+        platform_specs.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+        platform_specs.SIMULATED_LINUX_LAYOUT_NOTE,
+    )
+
+
+def test_loader_attaches_shared_runtime_validation_to_simulated_platforms() -> None:
+    data = _valid_data()
+    data["target_runtime_validation_policies"] = {
+        "simulated_linux_layout": {
+            "section_title": "Windows Validation",
+            "status": "payload_consistency_only",
+            "strategy": "payload check only",
+            "targets": ["windows payload"],
+            "notes": ["runtime validation is external"],
+        }
+    }
+    data["platforms"]["mini"]["simulated_linux_layout"] = True
+
+    spec = load_registry_from_data(data).platform_spec("mini")
+
+    assert spec.target_runtime_validation == (
+        platform_specs.TargetRuntimeValidationSpec(
+            section_title="Windows Validation",
+            status="payload_consistency_only",
+            strategy="payload check only",
+            targets=("windows payload",),
+            notes=("runtime validation is external",),
+        ),
+    )
+
+
+def test_loader_rejects_unknown_runtime_validation_policy() -> None:
+    data = _valid_data()
+    data["target_runtime_validation_policies"] = {"typo": {}}
+
+    _expect_invalid(data, "unknown runtime validation policy")
 
 
 def test_loader_rejects_unknown_structured_risk_note() -> None:

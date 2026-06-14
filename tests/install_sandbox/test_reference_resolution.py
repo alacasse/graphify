@@ -71,6 +71,26 @@ def test_non_vscode_guarded_wins_when_guard_present(tmp_path: Path) -> None:
     assert resolution.expected_names == ("guarded.md",)
 
 
+def test_reference_bundles_take_precedence_over_uses_packaged_references(tmp_path: Path) -> None:
+    package_dir = tmp_path / "graphify"
+    bundle_refs = package_dir / "skills" / "bundle" / "references"
+    legacy_refs = tmp_path / "legacy-refs"
+    bundle_refs.mkdir(parents=True)
+    legacy_refs.mkdir()
+    (bundle_refs / "bundle.md").write_text("bundle\n", encoding="utf-8")
+    (legacy_refs / "legacy.md").write_text("legacy\n", encoding="utf-8")
+
+    resolution = resolve_packaged_references(
+        "unit",
+        graphify_main=GraphifyMain(package_dir, legacy_refs),
+        platform_spec=PlatformSpec(name="unit", uses_packaged_references=True, reference_bundles=(ReferenceBundle("bundle"),)),
+    )
+
+    assert resolution.status == "available"
+    assert resolution.refs_dir == bundle_refs
+    assert resolution.expected_names == ("bundle.md",)
+
+
 def test_selected_bundle_with_no_markdown_refs_returns_empty(tmp_path: Path) -> None:
     package_dir = tmp_path / "graphify"
     refs_dir = package_dir / "skills" / "guarded" / "references"

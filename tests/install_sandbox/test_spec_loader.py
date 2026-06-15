@@ -20,7 +20,6 @@ def _skill(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[str, object
 def _valid_data() -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "platform_order": ["mini"],
         "platforms": {
             "mini": {
                 "user_skill": ".mini/skills/graphify/SKILL.md",
@@ -152,28 +151,36 @@ def test_default_registry_declares_schema_version_one() -> None:
     assert _default_shared_yaml()["schema_version"] == spec_loader.SCHEMA_VERSION == 1
 
 
-def test_default_registry_platform_order_matches_loaded_platform_keys() -> None:
+def test_default_registry_discovers_product_yaml_files_in_filename_order() -> None:
     registry = load_default_registry()
+    shared = _default_shared_yaml()
+    expected = sorted(
+        product_path.stem
+        for product_path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")
+        if product_path.name != spec_loader.SHARED_REGISTRY_FILENAME
+    )
 
-    assert _default_shared_yaml()["platform_order"] == registry.platform_names
+    assert "platform_order" not in shared
+    assert registry.platform_names == expected
 
 
-def test_load_registry_from_dir_rejects_missing_product_files(tmp_path: Any) -> None:
+def test_load_registry_from_dir_rejects_empty_product_specs(tmp_path: Any) -> None:
     data = _valid_data()
     _write_registry_dir(tmp_path, data)
     (tmp_path / "mini.yaml").unlink()
 
-    with pytest.raises(SpecLoaderError, match="missing platform spec files: mini.yaml"):
+    with pytest.raises(SpecLoaderError, match="expected at least one platform spec file"):
         load_registry_from_dir(tmp_path)
 
 
-def test_load_registry_from_dir_rejects_extra_undeclared_product_files(tmp_path: Any) -> None:
+def test_load_registry_from_dir_discovers_added_product_yaml_files(tmp_path: Any) -> None:
     data = _valid_data()
     _write_registry_dir(tmp_path, data)
-    (tmp_path / "extra.yaml").write_text("scopes: {}\n", encoding="utf-8")
+    (tmp_path / "alpha.yaml").write_text(yaml.safe_dump(deepcopy(data["platforms"]["mini"]), sort_keys=False), encoding="utf-8")
 
-    with pytest.raises(SpecLoaderError, match="undeclared platform spec files: extra.yaml"):
-        load_registry_from_dir(tmp_path)
+    registry = load_registry_from_dir(tmp_path)
+
+    assert registry.platform_names == ["alpha", "mini"]
 
 
 def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> None:
@@ -185,19 +192,18 @@ def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> 
         load_registry_from_dir(tmp_path)
 
 
-def test_load_registry_from_dir_uses_deterministic_platform_order(tmp_path: Any) -> None:
+def test_load_registry_from_dir_uses_deterministic_filename_order(tmp_path: Any) -> None:
     data = _valid_data()
     mini = deepcopy(data["platforms"]["mini"])
-    data["platform_order"] = ["beta", "alpha"]
     data["platforms"] = {
-        "alpha": deepcopy(mini),
         "beta": deepcopy(mini),
+        "alpha": deepcopy(mini),
     }
     _write_registry_dir(tmp_path, data)
 
     registry = load_registry_from_dir(tmp_path)
 
-    assert registry.platform_names == ["beta", "alpha"]
+    assert registry.platform_names == ["alpha", "beta"]
 
 
 def test_default_registry_every_scope_is_runnable_or_explained() -> None:
@@ -456,8 +462,14 @@ def test_loader_rejects_unknown_structured_risk_note() -> None:
     _expect_invalid(data, "unknown structured risk note")
 
 
-def test_loader_rejects_platform_order_mismatch() -> None:
+def test_load_registry_from_data_uses_platform_mapping_order() -> None:
     data = deepcopy(_valid_data())
-    data["platform_order"] = ["other"]
+    mini = deepcopy(data["platforms"]["mini"])
+    data["platforms"] = {
+        "zeta": deepcopy(mini),
+        "alpha": deepcopy(mini),
+    }
 
-    _expect_invalid(data, "declared platform order")
+    registry = load_registry_from_data(data)
+
+    assert registry.platform_names == ["zeta", "alpha"]

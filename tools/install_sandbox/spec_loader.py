@@ -595,11 +595,8 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> model.Sc
     version = registry.get("schema_version")
     if version != SCHEMA_VERSION:
         _fail(f"{source}.schema_version", f"expected schema version {SCHEMA_VERSION}")
-    platform_order = _string_list(registry.get("platform_order"), f"{source}.platform_order", allow_empty=False)
     platforms_value = _mapping(registry.get("platforms"), f"{source}.platforms")
-    loaded_names = tuple(platforms_value.keys())
-    if set(platform_order) != set(loaded_names) or tuple(platform_order) != loaded_names:
-        _fail(f"{source}.platform_order", "declared platform order must equal loaded platform names")
+    platform_names = tuple(platforms_value.keys())
     shared_runtime_validations = _runtime_validation_policies(
         registry.get("target_runtime_validation_policies", {}),
         f"{source}.target_runtime_validation_policies",
@@ -612,7 +609,7 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> model.Sc
             f"{source}.platforms.{platform_name}",
             shared_runtime_validations=shared_runtime_validations,
         )
-        for platform_name in platform_order
+        for platform_name in platform_names
     }
     universal = tuple(
         _universal_uninstall(spec, f"{source}.universal_uninstall_specs[{index}]")
@@ -641,19 +638,16 @@ def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.Sc
     if "platforms" in shared:
         _fail(f"{shared_path}.platforms", "shared registry must not declare product-local platforms")
 
-    platform_order = _string_list(shared.get("platform_order"), f"{shared_path}.platform_order", allow_empty=False)
-    expected_files = {f"{platform_name}.yaml" for platform_name in platform_order}
-    product_files = {product_path.name for product_path in registry_dir.glob("*.yaml") if product_path.name != SHARED_REGISTRY_FILENAME}
-    missing_files = sorted(expected_files - product_files)
-    extra_files = sorted(product_files - expected_files)
-    if missing_files:
-        _fail(str(registry_dir), f"missing platform spec files: {', '.join(missing_files)}")
-    if extra_files:
-        _fail(str(registry_dir), f"undeclared platform spec files: {', '.join(extra_files)}")
+    product_paths = sorted(
+        (product_path for product_path in registry_dir.glob("*.yaml") if product_path.name != SHARED_REGISTRY_FILENAME),
+        key=lambda product_path: product_path.stem,
+    )
+    if not product_paths:
+        _fail(str(registry_dir), "expected at least one platform spec file")
 
     shared["platforms"] = {
-        platform_name: _load_yaml_data(registry_dir / f"{platform_name}.yaml")
-        for platform_name in platform_order
+        product_path.stem: _load_yaml_data(product_path)
+        for product_path in product_paths
     }
     return load_registry_from_data(shared, source=str(registry_dir))
 

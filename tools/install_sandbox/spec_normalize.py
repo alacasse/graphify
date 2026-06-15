@@ -172,7 +172,6 @@ def normalize_registry(registry: specs.ScenarioRegistry) -> dict[str, Any]:
     """Return deterministic primitive data for registry equivalence tests."""
 
     return {
-        "platform_order": registry.platform_names,
         "platforms": {name: _platform_spec(registry.specs[name]) for name in registry.platform_names},
         "universal_uninstall_specs": [_universal_uninstall(spec) for spec in registry.universal_uninstall_specs],
         "disposable_artifact_specs": [_disposable_artifact(spec) for spec in registry.disposable_artifact_specs],

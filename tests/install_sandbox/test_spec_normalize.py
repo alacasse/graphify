@@ -1,25 +1,29 @@
 from __future__ import annotations
 
-from tools.install_sandbox import platform_specs
+from tools.install_sandbox.spec_loader import load_default_registry
 from tools.install_sandbox.spec_normalize import normalize_registry
 
 
+def normalize_default_registry() -> dict[str, object]:
+    return normalize_registry(load_default_registry())
+
+
 def test_normalized_default_registry_is_deterministic() -> None:
-    first = normalize_registry(platform_specs.DEFAULT_SCENARIO_REGISTRY)
-    second = normalize_registry(platform_specs.DEFAULT_SCENARIO_REGISTRY)
+    first = normalize_default_registry()
+    second = normalize_default_registry()
 
     assert first == second
 
 
-def test_normalized_registry_includes_platform_order() -> None:
-    normalized = normalize_registry(platform_specs.DEFAULT_SCENARIO_REGISTRY)
+def test_normalized_registry_includes_platforms_in_registry_order() -> None:
+    registry = load_default_registry()
+    normalized = normalize_registry(registry)
 
-    assert normalized["platform_order"] == platform_specs.ALL_PLATFORMS
-    assert list(normalized["platforms"]) == platform_specs.ALL_PLATFORMS
+    assert list(normalized["platforms"]) == registry.platform_names
 
 
 def test_normalized_registry_includes_nested_expected_path_policies() -> None:
-    normalized = normalize_registry(platform_specs.DEFAULT_SCENARIO_REGISTRY)
+    normalized = normalize_default_registry()
     codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
     hooks = next(entry for entry in codex_project["expected"] if entry["relative"] == ".codex/hooks.json")
     skill = next(entry for entry in codex_project["expected"] if entry["relative"].endswith("SKILL.md"))
@@ -38,7 +42,7 @@ def test_normalized_registry_includes_nested_expected_path_policies() -> None:
 
 
 def test_normalized_registry_includes_high_risk_platform_policies() -> None:
-    normalized = normalize_registry(platform_specs.DEFAULT_SCENARIO_REGISTRY)
+    normalized = normalize_default_registry()
 
     kilo_project = normalized["platforms"]["kilo"]["scopes"]["project"]
     gemini_user = normalized["platforms"]["gemini"]["scopes"]["user"]
@@ -59,7 +63,7 @@ def test_normalized_registry_includes_high_risk_platform_policies() -> None:
 
 
 def test_normalized_registry_includes_synthetic_policies() -> None:
-    normalized = normalize_registry(platform_specs.DEFAULT_SCENARIO_REGISTRY)
+    normalized = normalize_default_registry()
 
     assert normalized["universal_uninstall_specs"][0]["scenario_id"] == "universal-uninstall-user"
     assert normalized["universal_uninstall_specs"][1]["command"] == ["graphify", "uninstall", "--project"]

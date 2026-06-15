@@ -1,28 +1,4 @@
 schema_version: 1
-platform_order:
-- claude
-- codex
-- codebuddy
-- opencode
-- kilo
-- gemini
-- cursor
-- devin
-- aider
-- copilot
-- vscode
-- claw
-- droid
-- trae
-- trae-cn
-- hermes
-- kiro
-- pi
-- antigravity
-- antigravity-windows
-- windows
-- kimi
-- amp
 target_runtime_validation_policies:
   simulated_linux_layout:
     section_title: Windows Validation

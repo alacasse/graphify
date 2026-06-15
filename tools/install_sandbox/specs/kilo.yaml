@@ -1,0 +1,37 @@
+user_skill: .config/kilo/skills/graphify/SKILL.md
+project_skill: .config/kilo/skills/graphify/SKILL.md
+scopes:
+  user:
+    uninstall_command:
+    - graphify
+    - kilo
+    - uninstall
+    expected:
+    - root: home
+      relative: .config/kilo/skills/graphify/SKILL.md
+    - root: home
+      relative: .config/kilo/command/graphify.md
+  project:
+    install_command:
+    - graphify
+    - kilo
+    - install
+    uninstall_command:
+    - graphify
+    - kilo
+    - uninstall
+    expected:
+    - root: home
+      relative: .config/kilo/skills/graphify/SKILL.md
+    - root: home
+      relative: .config/kilo/command/graphify.md
+    - kind: text_section
+      root: project
+      relative: AGENTS.md
+    - root: project
+      relative: .kilo/plugins/graphify.js
+    - kind: json_plugin
+      root: project
+      relative: .kilo/kilo.json
+      schema_name: kilo_config
+      allow_file_uri: true

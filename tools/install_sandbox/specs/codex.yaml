@@ -1,0 +1,25 @@
+universal_uninstall_scopes:
+- project
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .codex/skills/graphify/SKILL.md
+  project:
+    expected:
+    - root: project
+      relative: .codex/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: AGENTS.md
+    - kind: json_hooks
+      root: project
+      relative: .codex/hooks.json
+      schema_name: codex_hooks
+      hooks:
+      - event: PreToolUse
+        matcher: Bash
+        required_fragments:
+        - graphify
+        - hook-check

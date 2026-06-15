@@ -1,0 +1,36 @@
+user_skill: .gemini/config/skills/graphify/SKILL.md
+project_skill: .agents/skills/graphify/SKILL.md
+universal_uninstall_scopes:
+- user
+scopes:
+  user:
+    install_command:
+    - graphify
+    - antigravity
+    - install
+    uninstall_command:
+    - graphify
+    - antigravity
+    - uninstall
+    expected:
+    - root: home
+      relative: .gemini/config/skills/graphify/SKILL.md
+    - kind: text_section
+      root: user_cwd
+      relative: .agents/rules/graphify.md
+    - root: user_cwd
+      relative: .agents/workflows/graphify.md
+  project:
+    equivalent_install_command:
+    - graphify
+    - antigravity
+    - install
+    - --project
+    expected:
+    - root: project
+      relative: .agents/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: .agents/rules/graphify.md
+    - root: project
+      relative: .agents/workflows/graphify.md

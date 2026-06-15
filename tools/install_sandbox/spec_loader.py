@@ -22,7 +22,8 @@ except ImportError:  # pragma: no cover - direct script import fallback
 
 
 SCHEMA_VERSION = 1
-DEFAULT_REGISTRY_PATH = Path(__file__).with_name("specs") / "registry.yaml"
+DEFAULT_REGISTRY_PATH = Path(__file__).with_name("specs")
+SHARED_REGISTRY_FILENAME = "shared.yaml"
 
 _SCOPE_NAMES = {"user", "project"}
 _EFFECT_KINDS = {"file", "skill", "text_section", "json_hooks", "json_plugin"}
@@ -224,7 +225,7 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
     kind = _effect_kind(effect, relative, context)
 
     if kind == "skill":
-        path = model.ExpectedPath(root, relative, remove_on_uninstall=declared_remove_on_uninstall, skill_sidecar_expectation=model.SkillSidecarExpectation())
+        path = model.SkillEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
     elif kind == "text_section":
         marker = _string(effect.get("marker", model.GRAPHIFY_MARKER), f"{context}.marker")
         preserve_user_content = _bool(effect.get("preserve_user_content", _text_section_preserves_user_content(root, relative)), f"{context}.preserve_user_content")
@@ -233,7 +234,7 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
             relative,
             _bool(effect.get("remove_on_uninstall"), f"{context}.remove_on_uninstall") if "remove_on_uninstall" in effect else None,
         )
-        path = model.ExpectedPath(
+        path = model.TextSectionEffect(
             root,
             relative,
             marker=marker,
@@ -245,11 +246,9 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
             ),
         )
     elif kind == "json_hooks":
-        path = model.ExpectedPath(
+        path = model.JsonHooksEffect(
             root,
             relative,
-            content_kind="json",
-            marker="graphify",
             remove_on_uninstall=declared_remove_on_uninstall,
             json_expectation=model.JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
@@ -259,11 +258,9 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
     elif kind == "json_plugin":
         if expected_values is None:
             _fail(context, "json_plugin derivation requires scope expected context")
-        path = model.ExpectedPath(
+        path = model.JsonPluginEffect(
             root,
             relative,
-            content_kind="json",
-            marker="graphify",
             remove_on_uninstall=declared_remove_on_uninstall,
             json_expectation=model.JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
@@ -274,7 +271,7 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
             ),
         )
     else:
-        path = model.ExpectedPath(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
+        path = model.FileEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
 
     return path
 
@@ -319,13 +316,31 @@ def _scope_locality(scope_name: str, expected: tuple[model.ExpectedPath, ...]) -
     return model.MIXED_SCOPE_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
 
 
-def _scope_risk_notes(explicit_notes: tuple[str, ...], locality_note: str | None, *, simulated_linux_layout: bool) -> tuple[str, ...]:
+def _scope_risk_notes(
+    explicit_notes: tuple[str, ...],
+    locality_note: str | None,
+    *,
+    simulated_linux_layout: bool,
+    lacks_user_uninstall: bool,
+) -> tuple[str, ...]:
     notes: tuple[str, ...] = explicit_notes
+    if lacks_user_uninstall:
+        notes = (model.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, *notes)
     if locality_note is not None:
         notes = (locality_note, *notes)
     if simulated_linux_layout:
         notes = (*notes, model.SIMULATED_LINUX_LAYOUT_NOTE)
     return _dedupe(notes)
+
+
+def _generic_install_command(platform_name: str, scope_name: str) -> tuple[str, ...]:
+    if scope_name == "project":
+        return ("graphify", "install", "--project", "--platform", platform_name)
+    return ("graphify", "install", "--platform", platform_name)
+
+
+def _direct_project_install_command(platform_name: str) -> tuple[str, ...]:
+    return ("graphify", platform_name, "install", "--project")
 
 
 def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> model.ScopeSpec:
@@ -341,7 +356,6 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
         if note not in _KNOWN_SCOPE_RISK_NOTES:
             _fail(f"{context}.risk_notes", f"unknown structured risk note: {note}")
     locality_note, derived_allowed_roots = _scope_locality(scope_name, expected)
-    risk_notes = _scope_risk_notes(explicit_risk_notes, locality_note, simulated_linux_layout=simulated_linux_layout)
 
     install_command = None
     if "install_command" in data:
@@ -351,6 +365,13 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
         uninstall_command = _optional_command(data.get("uninstall_command"), f"{context}.uninstall_command")
     else:
         uninstall_command = "generic"
+    lacks_user_uninstall = scope_name == "user" and uninstall_command is None
+    risk_notes = _scope_risk_notes(
+        explicit_risk_notes,
+        locality_note,
+        simulated_linux_layout=simulated_linux_layout,
+        lacks_user_uninstall=lacks_user_uninstall,
+    )
     cwd_root = None
     if "cwd_root" in data:
         cwd_root = _string(data.get("cwd_root"), f"{context}.cwd_root")
@@ -358,6 +379,8 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
     equivalent_install_command = None
     if "equivalent_install_command" in data:
         equivalent_install_command = _optional_command(data.get("equivalent_install_command"), f"{context}.equivalent_install_command")
+    elif scope_name == "project" and (install_command is None or install_command == _generic_install_command(platform_name, scope_name)):
+        equivalent_install_command = _direct_project_install_command(platform_name)
 
     scope = model._scenario(  # type: ignore[attr-defined]
         platform_name,
@@ -464,16 +487,24 @@ def _platform_spec(
         scope_name: _string(reason, f"{context}.unsupported_scopes.{scope_name}")
         for scope_name, reason in unsupported_value.items()
     }
-    user_skill = data.get("user_skill")
-    project_skill = data.get("project_skill")
+    if "user_skill" in data:
+        user_skill_value = data.get("user_skill")
+        user_skill = None if user_skill_value is None else _string(user_skill_value, f"{context}.user_skill")
+    else:
+        user_skill = f".{platform_key}/skills/graphify/SKILL.md"
+    if "project_skill" in data:
+        project_skill_value = data.get("project_skill")
+        project_skill = None if project_skill_value is None else _string(project_skill_value, f"{context}.project_skill")
+    else:
+        project_skill = user_skill
     reference_bundles = tuple(
         _reference_bundle(bundle, f"{context}.reference_bundles[{index}]")
         for index, bundle in enumerate(_sequence(data.get("reference_bundles", []), f"{context}.reference_bundles"))
     )
     return model.PlatformSpec(
         name=name,
-        user_skill=None if user_skill is None else _string(user_skill, f"{context}.user_skill"),
-        project_skill=None if project_skill is None else _string(project_skill, f"{context}.project_skill"),
+        user_skill=user_skill,
+        project_skill=project_skill,
         scopes=scopes,
         unsupported_scopes=unsupported_scopes,
         uses_packaged_references=_bool(data.get("uses_packaged_references", False if reference_bundles else True), f"{context}.uses_packaged_references"),
@@ -596,14 +627,44 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> model.Sc
     return loaded
 
 
-def load_registry_from_yaml(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
+def _load_yaml_data(path: Path) -> object:
     if yaml is None:
         raise SpecLoaderError("PyYAML is required to load install sandbox YAML specs") from _YAML_IMPORT_ERROR
+    with path.open(encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
+    registry_dir = Path(path)
+    shared_path = registry_dir / SHARED_REGISTRY_FILENAME
+    shared = dict(_mapping(_load_yaml_data(shared_path), str(shared_path)))
+    if "platforms" in shared:
+        _fail(f"{shared_path}.platforms", "shared registry must not declare product-local platforms")
+
+    platform_order = _string_list(shared.get("platform_order"), f"{shared_path}.platform_order", allow_empty=False)
+    expected_files = {f"{platform_name}.yaml" for platform_name in platform_order}
+    product_files = {product_path.name for product_path in registry_dir.glob("*.yaml") if product_path.name != SHARED_REGISTRY_FILENAME}
+    missing_files = sorted(expected_files - product_files)
+    extra_files = sorted(product_files - expected_files)
+    if missing_files:
+        _fail(str(registry_dir), f"missing platform spec files: {', '.join(missing_files)}")
+    if extra_files:
+        _fail(str(registry_dir), f"undeclared platform spec files: {', '.join(extra_files)}")
+
+    shared["platforms"] = {
+        platform_name: _load_yaml_data(registry_dir / f"{platform_name}.yaml")
+        for platform_name in platform_order
+    }
+    return load_registry_from_data(shared, source=str(registry_dir))
+
+
+def load_registry_from_yaml(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
     registry_path = Path(path)
-    with registry_path.open(encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
+    if registry_path.is_dir():
+        return load_registry_from_dir(registry_path)
+    data = _load_yaml_data(registry_path)
     return load_registry_from_data(data, source=str(registry_path))
 
 
 def load_default_registry() -> model.ScenarioRegistry:
-    return load_registry_from_yaml(DEFAULT_REGISTRY_PATH)
+    return load_registry_from_dir(DEFAULT_REGISTRY_PATH)

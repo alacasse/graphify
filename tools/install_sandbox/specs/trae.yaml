@@ -1,0 +1,13 @@
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .trae/skills/graphify/SKILL.md
+  project:
+    expected:
+    - root: project
+      relative: .trae/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: AGENTS.md

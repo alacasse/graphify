@@ -1,0 +1,28 @@
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .kiro/skills/graphify/SKILL.md
+  project:
+    install_command:
+    - graphify
+    - kiro
+    - install
+    uninstall_command:
+    - graphify
+    - kiro
+    - uninstall
+    equivalent_install_command:
+    - graphify
+    - install
+    - --project
+    - --platform
+    - kiro
+    expected:
+    - root: project
+      relative: .kiro/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: .kiro/steering/graphify.md
+      marker: 'graphify:'

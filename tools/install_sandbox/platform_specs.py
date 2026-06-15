@@ -5,50 +5,41 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+try:
+    from .expected_effects import (
+        ExpectedPath,
+        FileEffect,
+        JsonExpectation,
+        JsonHookExpectation,
+        JsonHooksEffect,
+        JsonPluginEffect,
+        JsonPluginExpectation,
+        SkillEffect,
+        SkillSidecarExpectation,
+        TextExpectation,
+        TextSectionEffect,
+    )
+except ImportError:  # pragma: no cover - direct script import fallback
+    from expected_effects import (  # type: ignore[no-redef]
+        ExpectedPath,
+        FileEffect,
+        JsonExpectation,
+        JsonHookExpectation,
+        JsonHooksEffect,
+        JsonPluginEffect,
+        JsonPluginExpectation,
+        SkillEffect,
+        SkillSidecarExpectation,
+        TextExpectation,
+        TextSectionEffect,
+    )
+
 
 GRAPHIFY_MARKER = "## graphify"
 PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE = "public_cli_lacks_user_skill_uninstall"
 MIXED_SCOPE_PROJECT_WIRING_NOTE = "mixed_scope_project_wiring"
 MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE = "mixed_scope_global_skill_plus_project_wiring"
 SIMULATED_LINUX_LAYOUT_NOTE = "simulated_linux_file_layout_only"
-
-
-@dataclass(frozen=True)
-class JsonHookExpectation:
-    event: str
-    matcher: str
-    detail_name: str
-    required_fragments: tuple[str, ...] = ("graphify",)
-
-
-@dataclass(frozen=True)
-class JsonPluginExpectation:
-    expected_entry: str
-    allow_file_uri: bool = False
-    detail_name: str = "plugin_present"
-
-
-@dataclass(frozen=True)
-class JsonExpectation:
-    schema_name: str
-    hooks: tuple[JsonHookExpectation, ...] = ()
-    plugin: JsonPluginExpectation | None = None
-
-
-@dataclass(frozen=True)
-class TextExpectation:
-    preserve_user_content: bool = False
-    repair_stale_graphify_section: bool = False
-    remove_graphify_section_on_uninstall: bool = True
-    require_user_content_on_uninstall: bool = False
-
-
-@dataclass(frozen=True)
-class SkillSidecarExpectation:
-    version_name: str = ".graphify_version"
-    references_dir: str = "references"
-    references_tmp_dir: str = "references.tmp"
-    reference_pointer_pattern: str = r"references/([A-Za-z0-9_.-]+\.md)\b"
 
 
 @dataclass(frozen=True)
@@ -124,19 +115,6 @@ class DisposableArtifactScenarioSpec:
     seed_files: tuple[DisposableSeedFile, ...]
     scope_eligibility: tuple[str, ...]
     risk_note: str
-
-
-@dataclass(frozen=True)
-class ExpectedPath:
-    root: str
-    relative: str
-    kind: str = "file"
-    content_kind: Literal["text", "json"] = "text"
-    marker: str | None = None
-    remove_on_uninstall: bool = True
-    json_expectation: JsonExpectation | None = None
-    text_expectation: TextExpectation = field(default_factory=TextExpectation)
-    skill_sidecar_expectation: SkillSidecarExpectation | None = None
 
 
 @dataclass(frozen=True)
@@ -231,7 +209,7 @@ def _declared_install_variants(
 
 
 def _skill(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(root, relative, skill_sidecar_expectation=SkillSidecarExpectation())
+    return SkillEffect(root, relative)
 
 
 def _scenario(

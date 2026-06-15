@@ -1,0 +1,15 @@
+user_skill: .openclaw/skills/graphify/SKILL.md
+project_skill: .openclaw/skills/graphify/SKILL.md
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .openclaw/skills/graphify/SKILL.md
+  project:
+    expected:
+    - root: project
+      relative: .openclaw/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: AGENTS.md

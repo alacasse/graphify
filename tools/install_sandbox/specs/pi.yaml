@@ -1,0 +1,24 @@
+user_skill: .pi/agent/skills/graphify/SKILL.md
+project_skill: .pi/agent/skills/graphify/SKILL.md
+scopes:
+  user:
+    uninstall_command:
+    - graphify
+    - pi
+    - uninstall
+    equivalent_install_command:
+    - graphify
+    - pi
+    - install
+    expected:
+    - root: home
+      relative: .pi/agent/skills/graphify/SKILL.md
+  project:
+    equivalent_install_command:
+    - graphify
+    - pi
+    - install
+    - --project
+    expected:
+    - root: project
+      relative: .pi/agent/skills/graphify/SKILL.md

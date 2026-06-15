@@ -182,6 +182,41 @@ def test_assertion_detects_missing_file(oracle) -> None:
     assert checks[0]["detail"] == "missing"
 
 
+def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:
+    skill = platform_specs.SkillEffect("project", ".unit/graphify/SKILL.md")
+    hooks = platform_specs.JsonHooksEffect(
+        "project",
+        ".unit/hooks.json",
+        json_expectation=platform_specs.JsonExpectation(
+            schema_name="unit_hooks",
+            hooks=(platform_specs.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
+        ),
+    )
+    write_skill(roots["project"], ".unit/graphify/SKILL.md", version="9.9.9")
+    hooks_path = roots["project"] / ".unit/hooks.json"
+    hooks_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "graphify hook-check"}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks = oracle.assert_expected_files(scenario("unit", skill, hooks))
+
+    assert all(check["ok"] for check in checks)
+    assert check_by_relative(checks, ".unit/graphify/.graphify_version")["ok"] is True
+    assert check_by_relative(checks, ".unit/hooks.json")["detail"] == "valid_json=true; schema=unit_hooks; bash_hook_present=True"
+
+
 def test_skill_assertion_detects_missing_and_wrong_version_stamp(oracle, roots) -> None:
     missing_version = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     write_skill(roots["project"], ".aider/graphify/SKILL.md")
@@ -457,6 +492,19 @@ def test_text_policy_is_declared_not_inferred_from_known_file_names(oracle, root
     assert "stale_replaced" not in str(known_check["detail"])
     assert declared_check["ok"] is False
     assert "stale_replaced=False" in str(declared_check["detail"])
+
+
+def test_legacy_expected_path_with_text_policy_dispatches_as_text_section(oracle, roots) -> None:
+    legacy_text_policy = ExpectedPath(
+        "project",
+        "notes.txt",
+        text_expectation=platform_specs.TextExpectation(preserve_user_content=True, require_user_content_on_uninstall=True),
+    )
+    test_scenario = scenario("unit", legacy_text_policy)
+
+    oracle.seed_user_owned_content(test_scenario)
+
+    assert (roots["project"] / "notes.txt").read_text(encoding="utf-8") == f"# User Notes\n\n{file_effects.USER_SENTINEL}\n"
 
 
 def test_uninstall_requires_seeded_user_content_to_survive(oracle, roots) -> None:

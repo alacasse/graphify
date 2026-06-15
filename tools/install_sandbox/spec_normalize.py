@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 try:
+    from .expected_effects import effect_type_name
     from . import platform_specs as specs
 except ImportError:  # pragma: no cover - direct script import fallback
+    from expected_effects import effect_type_name  # type: ignore[no-redef]
     import platform_specs as specs  # type: ignore[no-redef]
 
 
@@ -71,6 +73,7 @@ def _generated_file_expectation(expectation: specs.GeneratedFileExpectation) -> 
 
 def _expected_path(path: specs.ExpectedPath) -> dict[str, object]:
     return {
+        "effect_type": effect_type_name(path),
         "root": path.root,
         "relative": path.relative,
         "kind": path.kind,

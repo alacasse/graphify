@@ -1,0 +1,27 @@
+user_skill: .config/opencode/skills/graphify/SKILL.md
+project_skill: .opencode/skills/graphify/SKILL.md
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .config/opencode/skills/graphify/SKILL.md
+    - root: user_cwd
+      relative: .opencode/plugins/graphify.js
+    - kind: json_plugin
+      root: user_cwd
+      relative: .opencode/opencode.json
+      schema_name: opencode_config
+  project:
+    expected:
+    - root: project
+      relative: .opencode/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: AGENTS.md
+    - root: project
+      relative: .opencode/plugins/graphify.js
+    - kind: json_plugin
+      root: project
+      relative: .opencode/opencode.json
+      schema_name: opencode_config

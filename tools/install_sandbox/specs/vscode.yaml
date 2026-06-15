@@ -1,0 +1,39 @@
+user_skill: .copilot/skills/graphify/SKILL.md
+project_skill: null
+reference_bundles:
+- name: vscode
+  required_package_relative: skill-vscode.md
+- name: copilot
+universal_uninstall_scopes:
+- user
+scopes:
+  user:
+    install_command:
+    - graphify
+    - vscode
+    - install
+    uninstall_command:
+    - graphify
+    - vscode
+    - uninstall
+    expected:
+    - root: home
+      relative: .copilot/skills/graphify/SKILL.md
+    - kind: text_section
+      root: user_cwd
+      relative: .github/copilot-instructions.md
+  project:
+    install_command:
+    - graphify
+    - vscode
+    - install
+    uninstall_command:
+    - graphify
+    - vscode
+    - uninstall
+    expected:
+    - root: home
+      relative: .copilot/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: .github/copilot-instructions.md

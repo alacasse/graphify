@@ -1,0 +1,28 @@
+user_skill: .config/devin/skills/graphify/SKILL.md
+project_skill: .devin/skills/graphify/SKILL.md
+universal_uninstall_scopes:
+- project
+scopes:
+  user:
+    uninstall_command:
+    - graphify
+    - devin
+    - uninstall
+    equivalent_install_command:
+    - graphify
+    - devin
+    - install
+    expected:
+    - root: home
+      relative: .config/devin/skills/graphify/SKILL.md
+  project:
+    equivalent_install_command:
+    - graphify
+    - devin
+    - install
+    - --project
+    expected:
+    - root: project
+      relative: .devin/skills/graphify/SKILL.md
+    - root: project
+      relative: .windsurf/rules/graphify.md

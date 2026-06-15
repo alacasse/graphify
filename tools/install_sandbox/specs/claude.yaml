@@ -1,0 +1,32 @@
+universal_uninstall_scopes:
+- project
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .claude/skills/graphify/SKILL.md
+    - kind: text_section
+      root: home
+      relative: .claude/CLAUDE.md
+      marker: '# graphify'
+  project:
+    expected:
+    - root: project
+      relative: .claude/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: .claude/CLAUDE.md
+      marker: '# graphify'
+    - kind: text_section
+      root: project
+      relative: CLAUDE.md
+    - kind: json_hooks
+      root: project
+      relative: .claude/settings.json
+      schema_name: claude_settings
+      hooks:
+      - event: PreToolUse
+        matcher: Bash
+      - event: PreToolUse
+        matcher: Read|Glob

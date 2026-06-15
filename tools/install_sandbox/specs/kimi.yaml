@@ -1,0 +1,11 @@
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .kimi/skills/graphify/SKILL.md
+  project:
+    equivalent_install_command: null
+    expected:
+    - root: project
+      relative: .kimi/skills/graphify/SKILL.md

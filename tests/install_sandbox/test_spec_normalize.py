@@ -29,9 +29,11 @@ def test_normalized_registry_includes_nested_expected_path_policies() -> None:
         {"label": "direct", "command": ["graphify", "codex", "install", "--project"]},
     ]
     assert codex_project["allowed_roots"] == ["project"]
+    assert hooks["effect_type"] == "json_hooks"
     assert hooks["content_kind"] == "json"
     assert hooks["json_expectation"]["schema_name"] == "codex_hooks"
     assert hooks["json_expectation"]["hooks"][0]["required_fragments"] == ["graphify", "hook-check"]
+    assert skill["effect_type"] == "skill"
     assert skill["skill_sidecar_expectation"]["references_dir"] == "references"
 
 

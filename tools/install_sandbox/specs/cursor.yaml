@@ -1,0 +1,27 @@
+user_skill: null
+project_skill: null
+uses_packaged_references: false
+universal_uninstall_scopes:
+- project
+unsupported_scopes:
+  user: cursor install writes a project-local .cursor rule in the current working
+    directory; sandbox covers that file effect as project scope
+scopes:
+  project:
+    install_command:
+    - graphify
+    - cursor
+    - install
+    uninstall_command:
+    - graphify
+    - cursor
+    - uninstall
+    equivalent_install_command:
+    - graphify
+    - install
+    - --project
+    - --platform
+    - cursor
+    expected:
+    - root: project
+      relative: .cursor/rules/graphify.mdc

@@ -1,0 +1,43 @@
+universal_uninstall_scopes:
+- user
+- project
+scopes:
+  user:
+    uninstall_command:
+    - graphify
+    - uninstall
+    expected:
+    - root: home
+      relative: .codebuddy/skills/graphify/SKILL.md
+    - kind: text_section
+      root: home
+      relative: .codebuddy/CODEBUDDY.md
+    - kind: json_hooks
+      root: home
+      relative: .codebuddy/settings.json
+      schema_name: codebuddy_settings
+      hooks:
+      - event: PreToolUse
+        matcher: Bash
+      - event: PreToolUse
+        matcher: Read|Glob
+  project:
+    equivalent_install_command:
+    - graphify
+    - codebuddy
+    - install
+    expected:
+    - root: project
+      relative: .codebuddy/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: CODEBUDDY.md
+    - kind: json_hooks
+      root: project
+      relative: .codebuddy/settings.json
+      schema_name: codebuddy_settings
+      hooks:
+      - event: PreToolUse
+        matcher: Bash
+      - event: PreToolUse
+        matcher: Read|Glob

@@ -23,7 +23,7 @@ def test_parse_args_requires_platform_or_all() -> None:
 def test_dockerfile_copies_direct_runner_imports() -> None:
     dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
 
-    for module in ("file_walk.py", "harness_specs.py", "json_helpers.py", "spec_loader.py", "status.py"):
+    for module in ("expected_effects.py", "file_walk.py", "harness_specs.py", "json_helpers.py", "spec_loader.py", "status.py"):
         assert f"COPY {module} /runner/{module}" in dockerfile
     assert "COPY specs /runner/specs" in dockerfile
 

@@ -1,0 +1,66 @@
+schema_version: 1
+platform_order:
+- claude
+- codex
+- codebuddy
+- opencode
+- kilo
+- gemini
+- cursor
+- devin
+- aider
+- copilot
+- vscode
+- claw
+- droid
+- trae
+- trae-cn
+- hermes
+- kiro
+- pi
+- antigravity
+- antigravity-windows
+- windows
+- kimi
+- amp
+target_runtime_validation_policies:
+  simulated_linux_layout:
+    section_title: Windows Validation
+    status: payload_consistency_only
+    evidence_path: null
+    strategy: Linux Docker validates Windows-named payload consistency only; real
+      Windows runtime/path semantics require separate Windows validation
+    targets:
+    - windows payload file-effect simulation
+    - antigravity remapping to antigravity-windows
+    - Windows-specific skill payload and references generation
+    - payload consistency for explicit Windows platform selection
+    notes:
+    - Linux sandbox results for windows and antigravity-windows check packaged payloads,
+      references, and generated file consistency only.
+    - This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup
+      semantics, permissions, or target-app discovery.
+universal_uninstall_specs:
+- user
+- project
+disposable_artifact_specs:
+- scenario_id: purge-disposable-graphify-out
+  platform_label: purge
+  scope: project
+  command:
+  - graphify
+  - uninstall
+  - --purge
+  cwd_root: project
+  artifact_subdir: uninstall-purge
+  disposable_path_root: project
+  disposable_path_relative: graphify-out
+  seed_files:
+  - relative: graph.json
+    content: '{"nodes": [], "edges": []}
+
+      '
+  scope_eligibility:
+  - project
+  - both
+  risk_note: purge verified only against disposable sandbox graphify-out state

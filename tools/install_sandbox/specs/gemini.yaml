@@ -1,0 +1,40 @@
+universal_uninstall_scopes:
+- user
+- project
+scopes:
+  user:
+    uninstall_command:
+    - graphify
+    - gemini
+    - uninstall
+    equivalent_install_command:
+    - graphify
+    - gemini
+    - install
+    expected:
+    - root: home
+      relative: .gemini/skills/graphify/SKILL.md
+    - kind: text_section
+      root: user_cwd
+      relative: GEMINI.md
+    - kind: json_hooks
+      root: user_cwd
+      relative: .gemini/settings.json
+      schema_name: gemini_settings
+      hooks:
+      - event: BeforeTool
+        matcher: read_file|list_directory
+  project:
+    expected:
+    - root: project
+      relative: .gemini/skills/graphify/SKILL.md
+    - kind: text_section
+      root: project
+      relative: GEMINI.md
+    - kind: json_hooks
+      root: project
+      relative: .gemini/settings.json
+      schema_name: gemini_settings
+      hooks:
+      - event: BeforeTool
+        matcher: read_file|list_directory

@@ -9,7 +9,8 @@ import pytest
 import yaml
 
 from tools.install_sandbox import platform_specs, spec_loader
-from tools.install_sandbox.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
+from tools.install_sandbox.spec_normalize import normalize_registry
+from tools.install_sandbox.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data, load_registry_from_dir
 
 
 def _skill(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[str, object]:
@@ -73,6 +74,7 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     assert user.uninstall_command is None
     assert user.cwd_root == "user_cwd"
     assert user.allowed_roots == ("home",)
+    assert isinstance(user.expected[0], platform_specs.SkillEffect)
     assert user.expected[0].skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
     assert project is not None
     assert registry.install_variants(project) == (
@@ -80,14 +82,45 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
         platform_specs.InstallCommandVariant("direct", ("graphify", "mini", "install", "--project")),
     )
     agents = next(entry for entry in project.expected if entry.relative == "AGENTS.md")
+    assert isinstance(agents, platform_specs.TextSectionEffect)
     assert agents.text_expectation.preserve_user_content
     assert agents.text_expectation.require_user_content_on_uninstall
     assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-project"
 
 
-def _default_registry_yaml() -> dict[str, Any]:
-    with spec_loader.DEFAULT_REGISTRY_PATH.open(encoding="utf-8") as handle:
+def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture() -> None:
+    explicit = _valid_data()
+    conventional = deepcopy(_valid_data())
+    mini = conventional["platforms"]["mini"]
+    mini.pop("user_skill")
+    mini.pop("project_skill")
+    mini["scopes"]["user"].pop("risk_notes")
+    mini["scopes"]["project"].pop("equivalent_install_command")
+
+    assert normalize_registry(load_registry_from_data(conventional)) == normalize_registry(load_registry_from_data(explicit))
+
+
+def test_loader_preserves_explicit_no_project_install_equivalence() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["project"]["equivalent_install_command"] = None
+
+    registry = load_registry_from_data(data)
+    project = registry.make_scenario("mini", "project")
+
+    assert project is not None
+    assert registry.equivalent_install_command(project) is None
+
+
+def _default_shared_yaml() -> dict[str, Any]:
+    with (spec_loader.DEFAULT_REGISTRY_PATH / spec_loader.SHARED_REGISTRY_FILENAME).open(encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def _write_registry_dir(path: Any, data: dict[str, Any]) -> None:
+    shared = {key: value for key, value in data.items() if key != "platforms"}
+    (path / spec_loader.SHARED_REGISTRY_FILENAME).write_text(yaml.safe_dump(shared, sort_keys=False), encoding="utf-8")
+    for platform_name, platform_data in data["platforms"].items():
+        (path / f"{platform_name}.yaml").write_text(yaml.safe_dump(platform_data, sort_keys=False), encoding="utf-8")
 
 
 def test_default_registry_loads_and_returns_scenario_registry() -> None:
@@ -116,13 +149,55 @@ def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
 
 
 def test_default_registry_declares_schema_version_one() -> None:
-    assert _default_registry_yaml()["schema_version"] == spec_loader.SCHEMA_VERSION == 1
+    assert _default_shared_yaml()["schema_version"] == spec_loader.SCHEMA_VERSION == 1
 
 
 def test_default_registry_platform_order_matches_loaded_platform_keys() -> None:
     registry = load_default_registry()
 
-    assert _default_registry_yaml()["platform_order"] == registry.platform_names
+    assert _default_shared_yaml()["platform_order"] == registry.platform_names
+
+
+def test_load_registry_from_dir_rejects_missing_product_files(tmp_path: Any) -> None:
+    data = _valid_data()
+    _write_registry_dir(tmp_path, data)
+    (tmp_path / "mini.yaml").unlink()
+
+    with pytest.raises(SpecLoaderError, match="missing platform spec files: mini.yaml"):
+        load_registry_from_dir(tmp_path)
+
+
+def test_load_registry_from_dir_rejects_extra_undeclared_product_files(tmp_path: Any) -> None:
+    data = _valid_data()
+    _write_registry_dir(tmp_path, data)
+    (tmp_path / "extra.yaml").write_text("scopes: {}\n", encoding="utf-8")
+
+    with pytest.raises(SpecLoaderError, match="undeclared platform spec files: extra.yaml"):
+        load_registry_from_dir(tmp_path)
+
+
+def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["name"] = "other"
+    _write_registry_dir(tmp_path, data)
+
+    with pytest.raises(SpecLoaderError, match="platform key/name mismatch: mini != other"):
+        load_registry_from_dir(tmp_path)
+
+
+def test_load_registry_from_dir_uses_deterministic_platform_order(tmp_path: Any) -> None:
+    data = _valid_data()
+    mini = deepcopy(data["platforms"]["mini"])
+    data["platform_order"] = ["beta", "alpha"]
+    data["platforms"] = {
+        "alpha": deepcopy(mini),
+        "beta": deepcopy(mini),
+    }
+    _write_registry_dir(tmp_path, data)
+
+    registry = load_registry_from_dir(tmp_path)
+
+    assert registry.platform_names == ["beta", "alpha"]
 
 
 def test_default_registry_every_scope_is_runnable_or_explained() -> None:
@@ -217,6 +292,7 @@ def test_loader_rejects_invalid_scope_names() -> None:
 def test_loader_derives_skill_sidecar_kind_and_rejects_explicit_wrong_kind() -> None:
     derived = load_registry_from_data(_valid_data()).make_scenario("mini", "user")
     assert derived is not None
+    assert isinstance(derived.expected[0], platform_specs.SkillEffect)
     assert derived.expected[0].skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
 
     data = _valid_data()
@@ -246,6 +322,7 @@ def test_loader_derives_json_hook_detail_names() -> None:
     ]
     single_scenario = load_registry_from_data(single).make_scenario("mini", "user")
     assert single_scenario is not None
+    assert isinstance(single_scenario.expected[0], platform_specs.JsonHooksEffect)
     single_json = single_scenario.expected[0].json_expectation
     assert single_json is not None
     assert single_json.hooks[0].detail_name == "graphify_hook_present"
@@ -281,7 +358,9 @@ def test_loader_derives_json_plugin_relative_from_paired_payload() -> None:
     scenario = load_registry_from_data(data).make_scenario("mini", "user")
 
     assert scenario is not None
+    assert isinstance(next(entry for entry in scenario.expected if entry.relative == ".mini/plugins/graphify.js"), platform_specs.FileEffect)
     config = next(entry for entry in scenario.expected if entry.relative == ".mini/config.json")
+    assert isinstance(config, platform_specs.JsonPluginEffect)
     assert config.json_expectation is not None
     assert config.json_expectation.plugin is not None
     assert config.json_expectation.plugin.expected_entry == ".mini/plugins/graphify.js"

@@ -9,11 +9,13 @@ from pathlib import Path
 from typing import Callable, Iterable, Literal
 
 try:
+    from .expected_effects import is_json_effect, is_skill_effect, is_text_section_effect
     from .file_walk import pruned_file_walk
     from .json_helpers import object_dict, object_dicts, object_list
     from .platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
+    from expected_effects import is_json_effect, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from json_helpers import object_dict, object_dicts, object_list
     from platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
@@ -179,7 +181,7 @@ class FileEffectOracle:
         return self.root_path(entry.root) / entry.relative
 
     def is_skill_expected(self, entry: ExpectedPath) -> bool:
-        return entry.skill_sidecar_expectation is not None
+        return is_skill_effect(entry)
 
     def skill_sidecar_expectation(self, entry: ExpectedPath) -> SkillSidecarExpectation:
         if entry.skill_sidecar_expectation is None:
@@ -341,10 +343,10 @@ class FileEffectOracle:
 
     # User content seeding
     def should_seed_user_content(self, entry: ExpectedPath) -> bool:
-        return entry.text_expectation.preserve_user_content
+        return is_text_section_effect(entry) and entry.text_expectation.preserve_user_content
 
     def should_seed_stale_graphify_section(self, entry: ExpectedPath) -> bool:
-        return entry.text_expectation.repair_stale_graphify_section
+        return is_text_section_effect(entry) and entry.text_expectation.repair_stale_graphify_section
 
     def seeded_text(self, entry: ExpectedPath) -> str:
         if self.should_seed_stale_graphify_section(entry) and entry.marker:
@@ -397,7 +399,7 @@ class FileEffectOracle:
         ok, detail = expected_kind_status(path, entry.kind)
         if not ok or not entry.marker:
             return ok, detail
-        if entry.content_kind == "json":
+        if is_json_effect(entry):
             return self.json_marker_status(path, entry)
         return self.text_marker_status(path, entry)
 

@@ -17,6 +17,7 @@ graphify-out/
 .graphify_*.json
 .graphify_python
 .claude/
+.codex/
 skills/
 # The packaged skill bundles under graphify/skills/ are generated, committed
 # artifacts (rendered by tools/skillgen). Keep them tracked even though the

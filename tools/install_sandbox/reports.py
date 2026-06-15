@@ -241,6 +241,7 @@ def print_summary(output: Path, *, passed: int, failed: int) -> None:
                 "failed": failed,
                 "output": str(output),
                 "report": str(output / "report.md"),
+                "agent_summary": str(output / "agent-summary.md"),
                 "target_runtime_verification_performed": False,
             },
             indent=2,

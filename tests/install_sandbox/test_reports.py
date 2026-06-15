@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from tools.install_sandbox import platform_specs, reports, status
 
 
@@ -187,3 +189,11 @@ def test_write_report_markdown(tmp_path) -> None:
     reports.write_report_md(path, {"results": [], "platform_coverage": []})
 
     assert "Graphify Install Sandbox Report" in path.read_text(encoding="utf-8")
+
+
+def test_print_summary_includes_agent_summary_path(tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+    reports.print_summary(tmp_path, passed=1, failed=0)
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["agent_summary"] == str(tmp_path / "agent-summary.md")
+    assert data["target_runtime_verification_performed"] is False

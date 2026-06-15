@@ -23,7 +23,7 @@ def test_parse_args_requires_platform_or_all() -> None:
 def test_dockerfile_copies_direct_runner_imports() -> None:
     dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
 
-    for module in ("expected_effects.py", "file_walk.py", "harness_specs.py", "json_helpers.py", "spec_loader.py", "status.py"):
+    for module in ("agent_summary.py", "expected_effects.py", "file_walk.py", "harness_specs.py", "json_helpers.py", "spec_loader.py", "status.py"):
         assert f"COPY {module} /runner/{module}" in dockerfile
     assert "COPY specs /runner/specs" in dockerfile
 
@@ -130,6 +130,8 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     assert exit_code == 1
     assert calls == ["env", "preflight", "copy:auto", "install-package", "matrix:project:True"]
     assert (output / "report.md").read_text(encoding="utf-8") == "report\n"
+    assert (output / "agent-summary.md").exists()
+    assert json.loads((output / "agent-summary.json").read_text(encoding="utf-8"))["status"] == "FAIL"
     assert manifest["target_runtime_verification"] == {
         "performed": False,
         "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",

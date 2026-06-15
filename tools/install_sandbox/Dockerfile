@@ -34,6 +34,7 @@ RUN mkdir -p /runner /tmp/graphify-home/.config /tmp/graphify-project /sandbox-o
 WORKDIR /runner
 
 COPY sandbox_runner.py /runner/sandbox_runner.py
+COPY agent_summary.py /runner/agent_summary.py
 COPY command_runner.py /runner/command_runner.py
 COPY expected_effects.py /runner/expected_effects.py
 COPY file_effects.py /runner/file_effects.py

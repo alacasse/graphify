@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 try:
+    from tools.install_sandbox import agent_summary
     from tools.install_sandbox.container_runtime import (
         BUILD_TIMEOUT_SECONDS,
         CONTAINER_HOME,
@@ -22,6 +24,7 @@ try:
         shell_join,
     )
 except ModuleNotFoundError:  # pragma: no cover - supports running this file directly from any cwd.
+    import agent_summary  # type: ignore[no-redef]
     from container_runtime import (  # type: ignore[no-redef]
         BUILD_TIMEOUT_SECONDS,
         CONTAINER_HOME,
@@ -37,6 +40,22 @@ except ModuleNotFoundError:  # pragma: no cover - supports running this file dir
         run_command,
         shell_join,
     )
+
+
+def write_and_print_agent_summary(output: Path) -> None:
+    summary = agent_summary.summarize_output(output)
+    agent_summary.write_summary(output, summary)
+    summary_path = output / "agent-summary.md"
+    print(f"agent summary: {summary_path}", file=sys.stderr)
+    print(f"status: {summary.get('status')}", file=sys.stderr)
+    failures = summary.get("failures") if isinstance(summary.get("failures"), list) else []
+    if failures and isinstance(failures[0], dict):
+        first = failures[0]
+        print(f"first failed scenario: {first.get('scenario')}", file=sys.stderr)
+        if first.get("transcript"):
+            print(f"transcript: {first.get('transcript')}", file=sys.stderr)
+    elif summary.get("blocker"):
+        print(f"incomplete reason: {summary.get('blocker')}", file=sys.stderr)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -93,7 +112,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.no_build:
         run_command(build_image_command(runtime=args.runtime, image=args.image), timeout_seconds=BUILD_TIMEOUT_SECONDS, command_class="docker_build")
-    run_command(host_command, timeout_seconds=RUN_TIMEOUT_SECONDS, command_class="docker_run")
+    try:
+        run_command(host_command, timeout_seconds=RUN_TIMEOUT_SECONDS, command_class="docker_run")
+    except subprocess.CalledProcessError as exc:
+        write_and_print_agent_summary(output)
+        return int(exc.returncode)
+    except SystemExit as exc:
+        write_and_print_agent_summary(output)
+        return int(exc.code) if isinstance(exc.code, int) else 1
+    write_and_print_agent_summary(output)
     return 0
 
 

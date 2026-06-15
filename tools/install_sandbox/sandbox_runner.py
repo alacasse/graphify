@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from . import agent_summary
     from . import command_runner
     from . import file_effects
     from . import reference_resolution
@@ -29,6 +30,7 @@ try:
         Scenario,
     )
 except ImportError:
+    import agent_summary
     import command_runner
     import file_effects
     import reference_resolution
@@ -473,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     reports.write_manifest_json(OUTPUT / "manifest.json", manifest)
     reports.write_report_md(OUTPUT / "report.md", manifest)
+    agent_summary.write_summary(OUTPUT, agent_summary.summarize_output(OUTPUT))
     reports.print_summary(OUTPUT, passed=passed, failed=failed)
     return 0 if failed == 0 else 1
 

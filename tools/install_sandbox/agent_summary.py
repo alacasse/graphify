@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any
 
 
+USAGE_GUIDANCE = (
+    "Use this as the first-read diagnostic. For FAIL, fix the listed failed checks "
+    "using the reproduce command; inspect assertions/transcript only if the checks "
+    "are insufficient. For INCOMPLETE, treat the blocker as preflight/package/container "
+    "infrastructure unless artifacts show a code failure."
+)
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -111,6 +119,7 @@ def summarize_incomplete(output_dir: Path, *, manifest_error: str | None = None)
         "output": str(output_dir),
         "reason": reason,
         "blocker": blocker,
+        "usage_guidance": USAGE_GUIDANCE,
         "target_runtime_verification_performed": False,
         "preflight": {
             "repo_mount_exists": preflight.get("repo_mount_exists"),
@@ -178,6 +187,7 @@ def summarize_output(output_dir: Path, *, max_failures: int = 5, max_checks: int
         },
         "target_runtime_verification_performed": False,
         "target_runtime_note": "Target runtime verification not performed by this Tier 1 file-effect sandbox.",
+        "usage_guidance": USAGE_GUIDANCE,
         "failures": failure_summaries,
         "failure_count": len(failures),
         "next_read": "Read listed assertions/transcript files only if the failed checks are insufficient.",
@@ -194,6 +204,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         lines.append(f"Reason: {summary.get('reason')}")
     if summary.get("blocker"):
         lines.append(f"Blocker: {summary.get('blocker')}")
+    if summary.get("usage_guidance"):
+        lines.extend(["", str(summary.get("usage_guidance"))])
 
     graphify = summary.get("graphify") if isinstance(summary.get("graphify"), dict) else {}
     if graphify:

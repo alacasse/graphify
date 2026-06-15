@@ -31,6 +31,8 @@ def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
     assert summary["status"] == "PASS"
     assert summary["graphify"]["passed"] == 2
     assert summary["failures"] == []
+    assert "first-read diagnostic" in summary["usage_guidance"]
+    assert "For FAIL, fix the listed failed checks" in markdown
     assert "Target runtime verification: not performed" in markdown
     assert "Runtime:" not in markdown
 
@@ -128,6 +130,7 @@ def test_incomplete_missing_manifest_reports_preflight_blocker(tmp_path: Path) -
 
     assert summary["status"] == "INCOMPLETE"
     assert summary["blocker"] == "Sandbox preflight failed: repo_mount_read_only"
+    assert "For INCOMPLETE, treat the blocker" in summary["usage_guidance"]
 
 
 def test_incomplete_package_install_failure_details(tmp_path: Path) -> None:

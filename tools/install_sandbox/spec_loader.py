@@ -23,7 +23,6 @@ except ImportError:  # pragma: no cover - direct script import fallback
 
 SCHEMA_VERSION = 1
 DEFAULT_REGISTRY_PATH = Path(__file__).with_name("specs")
-SHARED_REGISTRY_FILENAME = "shared.yaml"
 
 _SCOPE_NAMES = {"user", "project"}
 _EFFECT_KINDS = {"file", "skill", "text_section", "json_hooks", "json_plugin"}
@@ -42,6 +41,30 @@ _KNOWN_SCOPE_RISK_NOTES = {
     model.MIXED_SCOPE_PROJECT_WIRING_NOTE,
     model.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
     model.SIMULATED_LINUX_LAYOUT_NOTE,
+}
+
+_DEFAULT_RUNTIME_VALIDATION_POLICIES = {
+    "simulated_linux_layout": model.TargetRuntimeValidationSpec(
+        section_title="Windows Validation",
+        status="payload_consistency_only",
+        evidence_path=None,
+        strategy=(
+            "Linux Docker validates Windows-named payload consistency only; real "
+            "Windows runtime/path semantics require separate Windows validation"
+        ),
+        targets=(
+            "windows payload file-effect simulation",
+            "antigravity remapping to antigravity-windows",
+            "Windows-specific skill payload and references generation",
+            "payload consistency for explicit Windows platform selection",
+        ),
+        notes=(
+            "Linux sandbox results for windows and antigravity-windows check packaged payloads, "
+            "references, and generated file consistency only.",
+            "This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, "
+            "permissions, or target-app discovery.",
+        ),
+    )
 }
 
 
@@ -437,6 +460,18 @@ def _runtime_validation_policies(value: object, context: str) -> dict[str, model
     return {name: _runtime_validation(policy, f"{context}.{name}") for name, policy in policies.items()}
 
 
+def _shared_runtime_validation_policies(
+    registry: Mapping[str, Any],
+    source: str,
+) -> Mapping[str, model.TargetRuntimeValidationSpec]:
+    if "target_runtime_validation_policies" not in registry:
+        return _DEFAULT_RUNTIME_VALIDATION_POLICIES
+    return _runtime_validation_policies(
+        registry.get("target_runtime_validation_policies"),
+        f"{source}.target_runtime_validation_policies",
+    )
+
+
 def _platform_runtime_validations(
     data: Mapping[str, Any],
     context: str,
@@ -590,6 +625,45 @@ def _disposable_artifact(value: object, context: str) -> model.DisposableArtifac
     )
 
 
+def _default_universal_uninstall_specs() -> tuple[model.UniversalUninstallScenarioSpec, ...]:
+    return (
+        model.UniversalUninstallScenarioSpec(
+            scenario_id="universal-uninstall-user",
+            platform_label="multiple",
+            scope="user",
+            command=("graphify", "uninstall"),
+            cwd_root="user_cwd",
+            eligible_platform_scope="user",
+        ),
+        model.UniversalUninstallScenarioSpec(
+            scenario_id="universal-uninstall-project",
+            platform_label="multiple",
+            scope="project",
+            command=("graphify", "uninstall", "--project"),
+            cwd_root="project",
+            eligible_platform_scope="project",
+        ),
+    )
+
+
+def _default_disposable_artifact_specs() -> tuple[model.DisposableArtifactScenarioSpec, ...]:
+    return (
+        model.DisposableArtifactScenarioSpec(
+            scenario_id="purge-disposable-graphify-out",
+            platform_label="purge",
+            scope="project",
+            command=("graphify", "uninstall", "--purge"),
+            cwd_root="project",
+            artifact_subdir="uninstall-purge",
+            disposable_path_root="project",
+            disposable_path_relative="graphify-out",
+            seed_files=(model.DisposableSeedFile("graph.json", '{"nodes": [], "edges": []}\n'),),
+            scope_eligibility=("project", "both"),
+            risk_note="purge verified only against disposable sandbox graphify-out state",
+        ),
+    )
+
+
 def load_registry_from_data(data: object, *, source: str = "<data>") -> model.ScenarioRegistry:
     registry = _mapping(data, source)
     version = registry.get("schema_version")
@@ -597,10 +671,7 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> model.Sc
         _fail(f"{source}.schema_version", f"expected schema version {SCHEMA_VERSION}")
     platforms_value = _mapping(registry.get("platforms"), f"{source}.platforms")
     platform_names = tuple(platforms_value.keys())
-    shared_runtime_validations = _runtime_validation_policies(
-        registry.get("target_runtime_validation_policies", {}),
-        f"{source}.target_runtime_validation_policies",
-    )
+    shared_runtime_validations = _shared_runtime_validation_policies(registry, source)
 
     specs = {
         platform_name: _platform_spec(
@@ -611,14 +682,20 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> model.Sc
         )
         for platform_name in platform_names
     }
-    universal = tuple(
-        _universal_uninstall(spec, f"{source}.universal_uninstall_specs[{index}]")
-        for index, spec in enumerate(_sequence(registry.get("universal_uninstall_specs", []), f"{source}.universal_uninstall_specs"))
-    )
-    disposable = tuple(
-        _disposable_artifact(spec, f"{source}.disposable_artifact_specs[{index}]")
-        for index, spec in enumerate(_sequence(registry.get("disposable_artifact_specs", []), f"{source}.disposable_artifact_specs"))
-    )
+    if "universal_uninstall_specs" in registry:
+        universal = tuple(
+            _universal_uninstall(spec, f"{source}.universal_uninstall_specs[{index}]")
+            for index, spec in enumerate(_sequence(registry.get("universal_uninstall_specs"), f"{source}.universal_uninstall_specs"))
+        )
+    else:
+        universal = _default_universal_uninstall_specs()
+    if "disposable_artifact_specs" in registry:
+        disposable = tuple(
+            _disposable_artifact(spec, f"{source}.disposable_artifact_specs[{index}]")
+            for index, spec in enumerate(_sequence(registry.get("disposable_artifact_specs"), f"{source}.disposable_artifact_specs"))
+        )
+    else:
+        disposable = _default_disposable_artifact_specs()
     loaded = model.ScenarioRegistry(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
     loaded.validate_roots({root.name for root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots})
     return loaded
@@ -633,23 +710,21 @@ def _load_yaml_data(path: Path) -> object:
 
 def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
     registry_dir = Path(path)
-    shared_path = registry_dir / SHARED_REGISTRY_FILENAME
-    shared = dict(_mapping(_load_yaml_data(shared_path), str(shared_path)))
-    if "platforms" in shared:
-        _fail(f"{shared_path}.platforms", "shared registry must not declare product-local platforms")
-
     product_paths = sorted(
-        (product_path for product_path in registry_dir.glob("*.yaml") if product_path.name != SHARED_REGISTRY_FILENAME),
+        registry_dir.glob("*.yaml"),
         key=lambda product_path: product_path.stem,
     )
     if not product_paths:
         _fail(str(registry_dir), "expected at least one platform spec file")
 
-    shared["platforms"] = {
-        product_path.stem: _load_yaml_data(product_path)
-        for product_path in product_paths
+    data = {
+        "schema_version": SCHEMA_VERSION,
+        "platforms": {
+            product_path.stem: _load_yaml_data(product_path)
+            for product_path in product_paths
+        },
     }
-    return load_registry_from_data(shared, source=str(registry_dir))
+    return load_registry_from_data(data, source=str(registry_dir))
 
 
 def load_registry_from_yaml(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:

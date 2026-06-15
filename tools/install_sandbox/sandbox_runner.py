@@ -425,7 +425,12 @@ def selected_scenarios(args: argparse.Namespace) -> list[Scenario]:
 
 
 def selected_platforms(args: argparse.Namespace) -> list[str]:
-    return SCENARIO_REGISTRY.selected_platforms(all_platforms=args.all, platform_name=args.platform)
+    if args.all:
+        return sorted(SCENARIO_REGISTRY.specs)
+    platform_name = args.platform
+    if platform_name is None or platform_name not in SCENARIO_REGISTRY.specs:
+        raise RuntimeError(f"unknown sandbox platform(s): {platform_name}")
+    return [platform_name]
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -56,8 +56,7 @@ def test_selected_scenarios_projects_platform_registry_selection(monkeypatch) ->
         expected=(ExpectedPath("project", "unit.md"),),
     )
     class Registry:
-        def selected_platforms(self, *, all_platforms: bool, platform_name: str | None) -> list[str]:
-            return ["unit"]
+        specs = {"unit": object()}
 
         def platform_scenarios(self, platform_name: str, scope: str):
             return [scenario]
@@ -67,6 +66,27 @@ def test_selected_scenarios_projects_platform_registry_selection(monkeypatch) ->
     args = sandbox_runner.parse_args(["--platform", "unit", "--scope", "project"])
 
     assert sandbox_runner.selected_scenarios(args) == [scenario]
+
+
+def test_selected_platforms_orders_full_matrix_in_runner(monkeypatch) -> None:
+    class Registry:
+        specs = {"zeta": object(), "alpha": object(), "mini": object()}
+
+    monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
+    args = sandbox_runner.parse_args(["--all", "--scope", "project"])
+
+    assert sandbox_runner.selected_platforms(args) == ["alpha", "mini", "zeta"]
+
+
+def test_selected_platforms_rejects_unknown_platform_in_runner(monkeypatch) -> None:
+    class Registry:
+        specs = {"known": object()}
+
+    monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
+    args = sandbox_runner.parse_args(["--platform", "missing", "--scope", "project"])
+
+    with pytest.raises(RuntimeError, match="unknown sandbox platform"):
+        sandbox_runner.selected_platforms(args)
 
 
 def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, tmp_path) -> None:
@@ -94,8 +114,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     monkeypatch.setattr(sandbox_runner, "install_graphify", lambda env: calls.append("install-package") or {"version": "test", "install_mode": "normal"})
 
     class Registry:
-        def selected_platforms(self, *, all_platforms: bool, platform_name: str | None) -> list[str]:
-            return ["codex"]
+        specs = {"codex": object()}
 
         def platform_scenarios(self, platform_name: str, scope: str):
             return [scenario]

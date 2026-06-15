@@ -110,14 +110,7 @@ def test_loader_preserves_explicit_no_project_install_equivalence() -> None:
     assert registry.equivalent_install_command(project) is None
 
 
-def _default_shared_yaml() -> dict[str, Any]:
-    with (spec_loader.DEFAULT_REGISTRY_PATH / spec_loader.SHARED_REGISTRY_FILENAME).open(encoding="utf-8") as handle:
-        return yaml.safe_load(handle)
-
-
 def _write_registry_dir(path: Any, data: dict[str, Any]) -> None:
-    shared = {key: value for key, value in data.items() if key != "platforms"}
-    (path / spec_loader.SHARED_REGISTRY_FILENAME).write_text(yaml.safe_dump(shared, sort_keys=False), encoding="utf-8")
     for platform_name, platform_data in data["platforms"].items():
         (path / f"{platform_name}.yaml").write_text(yaml.safe_dump(platform_data, sort_keys=False), encoding="utf-8")
 
@@ -147,21 +140,27 @@ def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
     assert result.stdout.strip() == "load_registry_from_yaml"
 
 
-def test_default_registry_declares_schema_version_one() -> None:
-    assert _default_shared_yaml()["schema_version"] == spec_loader.SCHEMA_VERSION == 1
-
-
 def test_default_registry_discovers_product_yaml_files_in_filename_order() -> None:
     registry = load_default_registry()
-    shared = _default_shared_yaml()
     expected = sorted(
         product_path.stem
         for product_path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")
-        if product_path.name != spec_loader.SHARED_REGISTRY_FILENAME
     )
 
-    assert "platform_order" not in shared
     assert registry.platform_names == expected
+
+
+def test_load_registry_from_dir_supplies_code_derived_registry_policies(tmp_path: Any) -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["simulated_linux_layout"] = True
+    _write_registry_dir(tmp_path, data)
+
+    registry = load_registry_from_dir(tmp_path)
+
+    assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-user"
+    assert registry.universal_uninstall_specs[1].scenario_id == "universal-uninstall-project"
+    assert registry.disposable_artifact_specs[0].scenario_id == "purge-disposable-graphify-out"
+    assert registry.platform_spec("mini").target_runtime_validation[0].section_title == "Windows Validation"
 
 
 def test_load_registry_from_dir_rejects_empty_product_specs(tmp_path: Any) -> None:

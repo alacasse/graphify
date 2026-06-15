@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from copy import deepcopy
 from typing import Any
 
@@ -95,6 +97,22 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
     assert registry.specs
     assert registry.universal_uninstall_specs
     assert registry.disposable_artifact_specs
+
+
+def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from tools.install_sandbox.spec_loader import load_registry_from_yaml; print(load_registry_from_yaml.__name__)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "load_registry_from_yaml"
 
 
 def test_default_registry_declares_schema_version_one() -> None:

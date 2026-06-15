@@ -499,86 +499,121 @@ class ScenarioRegistry:
         return _dedupe_notes(*ordered)
 
 
-try:
-    from .spec_loader import load_default_registry
-except ImportError:  # pragma: no cover - direct script import fallback
-    from spec_loader import load_default_registry  # type: ignore[no-redef]
+_DEFAULT_SCENARIO_REGISTRY: ScenarioRegistry | None = None
+_LAZY_DEFAULT_NAMES = {
+    "DEFAULT_SCENARIO_REGISTRY",
+    "SANDBOX_PLATFORM_SPECS",
+    "DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS",
+    "DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS",
+    "ALL_PLATFORMS",
+}
 
 
-DEFAULT_SCENARIO_REGISTRY = load_default_registry()
-SANDBOX_PLATFORM_SPECS = DEFAULT_SCENARIO_REGISTRY.specs
-DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS = DEFAULT_SCENARIO_REGISTRY.universal_uninstall_specs
-DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS = DEFAULT_SCENARIO_REGISTRY.disposable_artifact_specs
-ALL_PLATFORMS = list(SANDBOX_PLATFORM_SPECS)
+def _import_load_default_registry():
+    try:
+        from .spec_loader import load_default_registry
+    except ImportError:  # pragma: no cover - direct script import fallback
+        from spec_loader import load_default_registry  # type: ignore[no-redef]
+    return load_default_registry
+
+
+def _load_default_scenario_registry() -> ScenarioRegistry:
+    global _DEFAULT_SCENARIO_REGISTRY
+    if _DEFAULT_SCENARIO_REGISTRY is None:
+        _DEFAULT_SCENARIO_REGISTRY = _import_load_default_registry()()
+    return _DEFAULT_SCENARIO_REGISTRY
+
+
+def _default_export(name: str):
+    registry = _load_default_scenario_registry()
+    if name == "DEFAULT_SCENARIO_REGISTRY":
+        return registry
+    if name == "SANDBOX_PLATFORM_SPECS":
+        return registry.specs
+    if name == "DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS":
+        return registry.universal_uninstall_specs
+    if name == "DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS":
+        return registry.disposable_artifact_specs
+    if name == "ALL_PLATFORMS":
+        return list(registry.specs)
+    raise AttributeError(name)
+
+
+def __getattr__(name: str):
+    if name in _LAZY_DEFAULT_NAMES:
+        value = _default_export(name)
+        globals()[name] = value
+        return value
+    raise AttributeError(name)
 
 
 def sandbox_platform_specs() -> dict[str, PlatformSpec]:
-    return DEFAULT_SCENARIO_REGISTRY.specs
+    return _load_default_scenario_registry().specs
 
 
 def platform_spec(platform_name: str) -> PlatformSpec:
-    return DEFAULT_SCENARIO_REGISTRY.platform_spec(platform_name)
+    return _load_default_scenario_registry().platform_spec(platform_name)
 
 
 def user_skill(platform_name: str) -> ExpectedPath:
-    return DEFAULT_SCENARIO_REGISTRY.user_skill(platform_name)
+    return _load_default_scenario_registry().user_skill(platform_name)
 
 
 def project_skill(platform_name: str) -> ExpectedPath:
-    return DEFAULT_SCENARIO_REGISTRY.project_skill(platform_name)
+    return _load_default_scenario_registry().project_skill(platform_name)
 
 
 def unsupported_scope_reason(platform_name: str, scope: str) -> str | None:
-    return DEFAULT_SCENARIO_REGISTRY.unsupported_scope_reason(platform_name, scope)
+    return _load_default_scenario_registry().unsupported_scope_reason(platform_name, scope)
 
 
 def direct_uninstall_command(platform_name: str) -> tuple[str, ...] | None:
-    return DEFAULT_SCENARIO_REGISTRY.direct_uninstall_command(platform_name)
+    return _load_default_scenario_registry().direct_uninstall_command(platform_name)
 
 
 def generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
-    return DEFAULT_SCENARIO_REGISTRY.generic_install_command(platform_name, scope)
+    return _load_default_scenario_registry().generic_install_command(platform_name, scope)
 
 
 def direct_install_command(platform_name: str, scope: str) -> tuple[str, ...] | None:
-    return DEFAULT_SCENARIO_REGISTRY.direct_install_command(platform_name, scope)
+    return _load_default_scenario_registry().direct_install_command(platform_name, scope)
 
 
 def equivalent_install_command(scenario: Scenario) -> tuple[str, ...] | None:
-    return DEFAULT_SCENARIO_REGISTRY.equivalent_install_command(scenario)
+    return _load_default_scenario_registry().equivalent_install_command(scenario)
 
 
 def equivalent_install_variants(scenario: Scenario) -> tuple[InstallCommandVariant, InstallCommandVariant] | None:
-    return DEFAULT_SCENARIO_REGISTRY.equivalent_install_variants(scenario)
+    return _load_default_scenario_registry().equivalent_install_variants(scenario)
 
 
 def equivalence_status(scenario: Scenario) -> dict[str, object]:
-    return DEFAULT_SCENARIO_REGISTRY.equivalence_status(scenario)
+    return _load_default_scenario_registry().equivalence_status(scenario)
 
 
 def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
-    return DEFAULT_SCENARIO_REGISTRY.platform_scenarios(platform_name, scope)
+    return _load_default_scenario_registry().platform_scenarios(platform_name, scope)
 
 
 def make_scenario(platform_name: str, scope: str) -> Scenario | None:
-    return DEFAULT_SCENARIO_REGISTRY.make_scenario(platform_name, scope)
+    return _load_default_scenario_registry().make_scenario(platform_name, scope)
 
 
 def target_runtime_validation_sections() -> list[dict[str, object]]:
-    return DEFAULT_SCENARIO_REGISTRY.target_runtime_validation_sections()
+    return _load_default_scenario_registry().target_runtime_validation_sections()
 
 
 def universal_uninstall_scenarios(platforms: list[str], scope: str) -> list[SelectedUniversalUninstallScenario]:
-    return DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenarios(platforms, scope)
+    return _load_default_scenario_registry().universal_uninstall_scenarios(platforms, scope)
 
 
 def disposable_artifact_scenarios(scope: str) -> list[DisposableArtifactScenarioSpec]:
-    return DEFAULT_SCENARIO_REGISTRY.disposable_artifact_scenarios(scope)
+    return _load_default_scenario_registry().disposable_artifact_scenarios(scope)
 
 
 def validate_roots(declared_roots: set[str]) -> None:
-    DEFAULT_SCENARIO_REGISTRY.validate_roots(declared_roots)
+    _load_default_scenario_registry().validate_roots(declared_roots)
 
 
 def risk_notes(*notes: str, platform_name: str | None = None) -> tuple[str, ...]:
-    return DEFAULT_SCENARIO_REGISTRY.risk_notes(*notes, platform_name=platform_name)
+    return _load_default_scenario_registry().risk_notes(*notes, platform_name=platform_name)

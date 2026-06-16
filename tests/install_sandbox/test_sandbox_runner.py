@@ -173,6 +173,93 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     assert manifest["platform_coverage_summary"]["universal_scenario_count"] == 0
 
 
+def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_path) -> None:
+    output = tmp_path / "out"
+
+    scenario = Scenario(
+        platform="codex",
+        scope="project",
+        install_command=("graphify", "install", "--project", "--platform", "codex"),
+        uninstall_command=None,
+        cwd_root="project",
+        expected=(ExpectedPath("project", "AGENTS.md"),),
+    )
+
+    monkeypatch.setattr(sandbox_runner, "OUTPUT", output)
+    monkeypatch.setattr(sandbox_runner, "sandbox_env", lambda: {"HOME": "/tmp/graphify-home"})
+
+    def preflight() -> dict[str, object]:
+        output.mkdir(parents=True, exist_ok=True)
+        return {"project": "/tmp/graphify-project"}
+
+    monkeypatch.setattr(sandbox_runner, "preflight", preflight)
+    monkeypatch.setattr(
+        source_snapshot,
+        "copy_source_tree",
+        lambda copy_source="always", *, config: {"root": "/tmp/graphify-src", "copy_source_mode": copy_source},
+    )
+    monkeypatch.setattr(sandbox_runner, "install_graphify", lambda env: {"version": "test", "install_mode": "normal"})
+
+    class Plan:
+        platforms = ("codex",)
+        requested_scope = "project"
+        standard_scenarios = (scenario,)
+        coverage_records = (
+            {
+                "platform": "codex",
+                "scope": "project",
+                "status": "runnable",
+                "scenario_id": "codex-project",
+                "install_command": list(scenario.install_command),
+            },
+        )
+        target_runtime_validation_sections = ()
+        platform_coverage_summary = {
+            "registered_platform_count": 1,
+            "requested_scope": "project",
+            "runnable_scope_count": 1,
+            "universal_scenario_count": 0,
+            "unsupported_scope_count": 0,
+        }
+        target_runtime_verification = {"performed": False}
+
+    plan = Plan()
+    monkeypatch.setattr(sandbox_runner.validation_plan, "build_validation_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(
+        scenario_lifecycle,
+        "run_validation_plan",
+        lambda *args, **kwargs: [
+            {
+                "id": "codex-project",
+                "platform": "codex",
+                "scope": "project",
+                "passed": True,
+                "graphify_file_effects_passed": True,
+            },
+            {
+                "id": "universal-cleanup",
+                "platform": "universal",
+                "scope": "project",
+                "passed": False,
+                "graphify_file_effects_passed": False,
+            },
+        ],
+    )
+    monkeypatch.setattr(sandbox_runner, "read_os_release", lambda: {"PRETTY_NAME": "Synthetic Linux"})
+    monkeypatch.setattr(reports, "write_report_md", lambda path, manifest: Path(path).write_text("report\n", encoding="utf-8"))
+
+    exit_code = sandbox_runner.main(["--platform", "codex", "--scope", "project"])
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 1
+    assert manifest["scenario_count"] == 2
+    assert manifest["graphify_file_effect_pass_count"] == 1
+    assert manifest["graphify_file_effect_fail_count"] == 1
+    assert manifest["pass_count"] == 1
+    assert manifest["fail_count"] == 1
+    assert manifest["platform_coverage_summary"]["universal_scenario_count"] == 1
+
+
 def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
     source = tmp_path / "graphify-src"

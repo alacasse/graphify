@@ -11,8 +11,10 @@ from tools.install_sandbox.platform_specs import (
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
     ExpectedPath,
+    PlatformSpec,
     Scenario,
     ScenarioRegistry,
+    ScopeSpec,
     UniversalUninstallScenarioSpec,
 )
 
@@ -695,6 +697,95 @@ def test_run_matrix_scenarios_delegates_to_planner_and_runs_plan_once(tmp_path, 
     ]
 
 
+def test_run_matrix_scenarios_preserves_matrix_runner_overrides(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    env = {"HOME": str(factory.home)}
+    registry = ScenarioRegistry(
+        {
+            "first": PlatformSpec(
+                name="first",
+                scopes={
+                    "project": ScopeSpec(
+                        ("install", "first"),
+                        None,
+                        "project",
+                        (ExpectedPath("project", "first.md"),),
+                    )
+                },
+                universal_uninstall_scopes=("project",),
+            ),
+            "second": PlatformSpec(
+                name="second",
+                scopes={
+                    "project": ScopeSpec(
+                        ("install", "second"),
+                        None,
+                        "project",
+                        (ExpectedPath("project", "second.md"),),
+                    )
+                },
+                universal_uninstall_scopes=("project",),
+            ),
+        }
+    )
+    calls: list[str] = []
+
+    def run_scenario(item, scenario_env):
+        calls.append(f"scenario:{item.platform}:{item.scope}:{scenario_env['HOME']}")
+        return {
+            "id": f"{item.platform}-{item.scope}",
+            "platform": item.platform,
+            "scope": item.scope,
+            "passed": True,
+        }
+
+    def run_universal(selected, scenario_env):
+        scenario_platforms = ",".join(scenario.platform for scenario in selected.installed_scenarios)
+        calls.append(f"universal:{selected.spec.scope}:{scenario_platforms}:{scenario_env['HOME']}")
+        return {
+            "id": f"universal-{selected.spec.scope}",
+            "platform": selected.spec.platform_label,
+            "scope": selected.spec.scope,
+            "passed": True,
+        }
+
+    def run_disposable(spec, scenario_env):
+        calls.append(f"disposable:{spec.scenario_id}:{scenario_env['HOME']}")
+        return {
+            "id": spec.scenario_id,
+            "platform": spec.platform_label,
+            "scope": spec.scope,
+            "passed": True,
+        }
+
+    results = scenario_lifecycle.run_matrix_scenarios(
+        ["second", "first"],
+        "project",
+        env,
+        hooks=factory.hooks(
+            scenario_registry=registry,
+            matrix_overrides=scenario_lifecycle.MatrixRunnerOverrides(
+                run_scenario=run_scenario,
+                run_universal_uninstall_scenario=run_universal,
+                run_disposable_artifact_scenario=run_disposable,
+            ),
+        ),
+    )
+
+    assert calls == [
+        f"scenario:second:project:{factory.home}",
+        f"scenario:first:project:{factory.home}",
+        f"universal:project:second,first:{factory.home}",
+        f"disposable:purge-disposable-graphify-out:{factory.home}",
+    ]
+    assert [result["id"] for result in results] == [
+        "second-project",
+        "first-project",
+        "universal-project",
+        "purge-disposable-graphify-out",
+    ]
+
+
 def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
@@ -835,13 +926,18 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         calls.append(f"scenario:{item.platform}")
         return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
 
-    def run_universal(universal_scope, scenarios, env):
-        calls.append(f"universal:{universal_scope}")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenario_id(universal_scope), "platform": "multiple", "scope": universal_scope, "passed": False}
+    def run_universal(selected, env):
+        calls.append(f"universal:{selected.spec.scope}")
+        return {
+            "id": selected.spec.scenario_id,
+            "platform": selected.spec.platform_label,
+            "scope": selected.spec.scope,
+            "passed": False,
+        }
 
-    def run_purge(env):
+    def run_purge(spec, env):
         calls.append("purge")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(), "platform": "purge", "scope": "project", "passed": False}
+        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": False}
 
     results = scenario_lifecycle.run_validation_plan(
         plan,
@@ -859,6 +955,66 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenario_id("project"),
         DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(),
     ]
+
+
+def test_run_validation_plan_preserves_legacy_matrix_runner_override_shapes(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    calls: list[str] = []
+    first = make_scenario("first", "project", uninstall=False)
+    second = make_scenario("second", "project", uninstall=False)
+    universal_spec = UniversalUninstallScenarioSpec(
+        scenario_id="legacy-project-sweep",
+        platform_label="multiple",
+        scope="project",
+        command=("cleanup", "project"),
+        cwd_root="project",
+        eligible_platform_scope="project",
+    )
+    disposable_spec = DisposableArtifactScenarioSpec(
+        scenario_id="legacy-purge",
+        platform_label="purge",
+        scope="project",
+        command=("purge",),
+        cwd_root="project",
+        artifact_subdir="purge",
+        disposable_path_root="project",
+        disposable_path_relative="graphify-out",
+        seed_files=(),
+        scope_eligibility=("project",),
+        risk_note="legacy cleanup",
+    )
+    plan = make_validation_plan(
+        platforms=("first", "second"),
+        scope="project",
+        standard_scenarios=(first, second),
+        universal_uninstall=(scenario_lifecycle.SelectedUniversalUninstallScenario(universal_spec, (first, second)),),
+        disposable_artifacts=(disposable_spec,),
+    )
+
+    def run_scenario(item, env):
+        calls.append(f"scenario:{item.platform}")
+        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+
+    def run_universal(universal_scope, scenarios, env):
+        calls.append(f"universal:{universal_scope}:{','.join(scenario.platform for scenario in scenarios)}")
+        return {"id": universal_spec.scenario_id, "platform": universal_spec.platform_label, "scope": universal_scope, "passed": True}
+
+    def run_purge(env):
+        calls.append("purge")
+        return {"id": disposable_spec.scenario_id, "platform": disposable_spec.platform_label, "scope": disposable_spec.scope, "passed": True}
+
+    results = scenario_lifecycle.run_validation_plan(
+        plan,
+        {},
+        hooks=factory.hooks(
+            run_scenario_func=run_scenario,
+            run_universal_uninstall_scenario_func=run_universal,
+            run_purge_scenario_func=run_purge,
+        ),
+    )
+
+    assert calls == ["scenario:first", "scenario:second", "universal:project:first,second", "purge"]
+    assert [result["id"] for result in results] == ["first-project", "second-project", "legacy-project-sweep", "legacy-purge"]
 
 
 def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_path) -> None:

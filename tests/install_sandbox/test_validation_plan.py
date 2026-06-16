@@ -118,6 +118,8 @@ def test_validation_plan_preserves_explicit_platform_order_and_full_plan_content
         ("claude", "project"),
         ("codex", "project"),
     ]
+    assert plan.synthetic_scenario_count == 2
+    assert plan.scenario_count == 5
     assert len(plan.universal_uninstall) == 1
     assert plan.universal_uninstall[0].spec.scenario_id == "universal-uninstall-project"
     assert [scenario.platform for scenario in plan.universal_uninstall[0].installed_scenarios] == [
@@ -171,6 +173,65 @@ def test_validation_plan_preserves_explicit_platform_order_and_full_plan_content
         "unsupported_scope_count": 0,
     }
     assert plan.target_runtime_verification == validation_plan.TARGET_RUNTIME_VERIFICATION_POLICY
+
+
+def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "alpha": platform_specs.PlatformSpec(
+                name="alpha",
+                scopes={
+                    "user": _scope("alpha-user.txt"),
+                    "project": _scope("alpha-project.txt"),
+                },
+                universal_uninstall_scopes=("user", "project"),
+            ),
+            "beta": platform_specs.PlatformSpec(
+                name="beta",
+                scopes={
+                    "user": _scope("beta-user.txt"),
+                    "project": _scope("beta-project.txt"),
+                },
+                universal_uninstall_scopes=("user", "project"),
+            ),
+        }
+    )
+
+    plan = validation_plan.build_validation_plan(
+        registry,
+        all_platforms=False,
+        selected_platform_names=("beta", "alpha"),
+        scope="both",
+    )
+
+    assert plan.platforms == ("beta", "alpha")
+    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+        ("beta", "user"),
+        ("beta", "project"),
+        ("alpha", "user"),
+        ("alpha", "project"),
+    ]
+    assert [selected.spec.scenario_id for selected in plan.universal_uninstall] == [
+        "universal-uninstall-user",
+        "universal-uninstall-project",
+    ]
+    assert [
+        [(scenario.platform, scenario.scope) for scenario in selected.installed_scenarios]
+        for selected in plan.universal_uninstall
+    ] == [
+        [("beta", "user"), ("alpha", "user")],
+        [("beta", "project"), ("alpha", "project")],
+    ]
+    assert [scenario.scenario_id for scenario in plan.disposable_artifacts] == ["purge-disposable-graphify-out"]
+    assert plan.synthetic_scenario_count == 3
+    assert plan.scenario_count == 7
+    assert plan.platform_coverage_summary == {
+        "registered_platform_count": 2,
+        "requested_scope": "both",
+        "runnable_scope_count": 4,
+        "universal_scenario_count": 3,
+        "unsupported_scope_count": 0,
+    }
 
 
 def test_validation_plan_rejects_unknown_explicit_platform_names() -> None:

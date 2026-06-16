@@ -49,5 +49,6 @@ COPY reports.py /runner/reports.py
 COPY scenario_lifecycle.py /runner/scenario_lifecycle.py
 COPY source_snapshot.py /runner/source_snapshot.py
 COPY status.py /runner/status.py
+COPY validation_plan.py /runner/validation_plan.py
 
 ENTRYPOINT ["python", "/runner/sandbox_runner.py"]

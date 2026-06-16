@@ -134,45 +134,9 @@ def _platform_spec(platform: specs.PlatformSpec) -> dict[str, object]:
     }
 
 
-def _universal_uninstall(spec: specs.UniversalUninstallScenarioSpec) -> dict[str, object]:
-    return {
-        "scenario_id": spec.scenario_id,
-        "platform_label": spec.platform_label,
-        "scope": spec.scope,
-        "command": list(spec.command),
-        "cwd_root": spec.cwd_root,
-        "eligible_platform_scope": spec.eligible_platform_scope,
-        "minimum_installed_scenarios": spec.minimum_installed_scenarios,
-        "artifact_subdir": spec.artifact_subdir,
-        "risk_note": spec.risk_note,
-    }
-
-
-def _seed_file(seed: specs.DisposableSeedFile) -> dict[str, object]:
-    return {"relative": seed.relative, "content": seed.content}
-
-
-def _disposable_artifact(spec: specs.DisposableArtifactScenarioSpec) -> dict[str, object]:
-    return {
-        "scenario_id": spec.scenario_id,
-        "platform_label": spec.platform_label,
-        "scope": spec.scope,
-        "command": list(spec.command),
-        "cwd_root": spec.cwd_root,
-        "artifact_subdir": spec.artifact_subdir,
-        "disposable_path_root": spec.disposable_path_root,
-        "disposable_path_relative": spec.disposable_path_relative,
-        "seed_files": [_seed_file(seed) for seed in spec.seed_files],
-        "scope_eligibility": list(spec.scope_eligibility),
-        "risk_note": spec.risk_note,
-    }
-
-
 def normalize_registry(registry: specs.ScenarioRegistry) -> dict[str, Any]:
     """Return deterministic primitive data for registry equivalence tests."""
 
     return {
         "platforms": {name: _platform_spec(registry.specs[name]) for name in registry.platform_names},
-        "universal_uninstall_specs": [_universal_uninstall(spec) for spec in registry.universal_uninstall_specs],
-        "disposable_artifact_specs": [_disposable_artifact(spec) for spec in registry.disposable_artifact_specs],
     }

@@ -23,7 +23,16 @@ def test_parse_args_requires_platform_or_all() -> None:
 def test_dockerfile_copies_direct_runner_imports() -> None:
     dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
 
-    for module in ("agent_summary.py", "expected_effects.py", "file_walk.py", "harness_specs.py", "json_helpers.py", "spec_loader.py", "status.py"):
+    for module in (
+        "agent_summary.py",
+        "expected_effects.py",
+        "file_walk.py",
+        "harness_specs.py",
+        "json_helpers.py",
+        "spec_loader.py",
+        "status.py",
+        "validation_plan.py",
+    ):
         assert f"COPY {module} /runner/{module}" in dockerfile
     assert "COPY specs /runner/specs" in dockerfile
 
@@ -119,17 +128,48 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         def platform_scenarios(self, platform_name: str, scope: str):
             return [scenario]
 
-        def coverage_records(self, platforms: list[str], scope: str):
-            return []
-
-        def target_runtime_validation_sections(self):
-            return [{"section_title": "Synthetic Runtime", "status": "declared"}]
-
     monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
+    plan = sandbox_runner.validation_plan.ValidationPlan(
+        platforms=("codex",),
+        requested_scope="project",
+        standard_scenarios=(scenario,),
+        universal_uninstall=(),
+        disposable_artifacts=(),
+        coverage_records=(
+            {
+                "platform": "codex",
+                "scope": "project",
+                "status": "runnable",
+                "scenario_id": "codex-project",
+                "install_command": list(scenario.install_command),
+                "uninstall_command": None,
+                "generic_direct_equivalence": {"status": "not_applicable"},
+                "risk_notes": [],
+            },
+        ),
+        target_runtime_validation_sections=({"section_title": "Synthetic Runtime", "status": "declared"},),
+        platform_coverage_summary={
+            "registered_platform_count": 99,
+            "requested_scope": "project",
+            "runnable_scope_count": 1,
+            "universal_scenario_count": 0,
+            "unsupported_scope_count": 77,
+        },
+    )
+    def build_plan(registry, *, all_platforms, platform_name=None, scope="both", **kwargs):
+        assert registry is sandbox_runner.SCENARIO_REGISTRY
+        calls.append(f"plan:{platform_name}:{scope}:{all_platforms}")
+        return plan
+
+    monkeypatch.setattr(
+        sandbox_runner.validation_plan,
+        "build_validation_plan",
+        build_plan,
+    )
     monkeypatch.setattr(
         scenario_lifecycle,
-        "run_matrix_scenarios",
-        lambda platforms, scope, env, *, hooks, fail_fast_scenarios=False: calls.append(f"matrix:{scope}:{fail_fast_scenarios}")
+        "run_validation_plan",
+        lambda plan_arg, env, hooks, fail_fast_scenarios=False: calls.append(f"validation-plan:{plan_arg.requested_scope}:{fail_fast_scenarios}")
         or [
             {
                 "id": "codex-project",
@@ -147,7 +187,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
 
     assert exit_code == 1
-    assert calls == ["env", "preflight", "copy:auto", "install-package", "matrix:project:True"]
+    assert calls == ["env", "preflight", "copy:auto", "install-package", "plan:codex:project:False", "validation-plan:project:True"]
     assert (output / "report.md").read_text(encoding="utf-8") == "report\n"
     assert (output / "agent-summary.md").exists()
     assert json.loads((output / "agent-summary.json").read_text(encoding="utf-8"))["status"] == "FAIL"
@@ -157,8 +197,12 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     }
     assert manifest["target_runtime_validation_sections"] == [{"section_title": "Synthetic Runtime", "status": "declared"}]
     assert "target_tool_runtime" not in manifest
+    assert manifest["scenario_count"] == len(manifest["results"])
     assert manifest["graphify_file_effect_fail_count"] == 1
     assert manifest["platform_coverage_summary"]["runnable_scope_count"] == 1
+    assert manifest["platform_coverage_summary"]["registered_platform_count"] == 99
+    assert manifest["platform_coverage_summary"]["unsupported_scope_count"] == 77
+    assert manifest["platform_coverage_summary"]["universal_scenario_count"] == 0
 
 
 def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp_path) -> None:

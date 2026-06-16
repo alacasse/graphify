@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
 try:
+    from . import validation_plan
     from .platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec
 except ImportError:
+    import validation_plan  # type: ignore[no-redef]
     from platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec
 
 
@@ -404,6 +406,88 @@ class ScenarioLifecycleHooks:
     matrix_overrides: MatrixRunnerOverrides = field(default_factory=MatrixRunnerOverrides)
 
 
+def _plan_coverage_records(platforms: tuple[str, ...], scope: str, *, hooks: ScenarioLifecycleHooks) -> tuple[dict[str, object], ...]:
+    try:
+        return tuple(hooks.scenario_registry.coverage_records(list(platforms), scope))
+    except RuntimeError:
+        if hooks.matrix_overrides.platform_scenarios is not None:
+            return ()
+        raise
+
+
+def _selected_scopes(scope: str) -> tuple[str, ...]:
+    return ("user", "project") if scope == "both" else (scope,)
+
+
+def _target_runtime_validation_sections(platforms: tuple[str, ...], *, hooks: ScenarioLifecycleHooks) -> tuple[dict[str, object], ...]:
+    try:
+        return validation_plan.target_runtime_validation_sections(hooks.scenario_registry, platforms)
+    except RuntimeError:
+        if hooks.matrix_overrides.platform_scenarios is not None:
+            return ()
+        raise
+
+
+def build_validation_plan(platforms: list[str], scope: str, *, hooks: ScenarioLifecycleHooks) -> validation_plan.ValidationPlan:
+    overrides = hooks.matrix_overrides
+    platform_scenarios = overrides.platform_scenarios or hooks.scenario_registry.platform_scenarios
+    selected_platforms = tuple(platforms)
+    if overrides.universal_uninstall_scenarios is None:
+        universal = universal_uninstall_scenarios(platforms, scope, hooks=hooks)
+    else:
+        universal = [selected_universal_uninstall(group, hooks=hooks) for group in overrides.universal_uninstall_scenarios(platforms, scope)]
+    disposable_specs = overrides.disposable_artifact_scenarios or (lambda selected_scope: disposable_artifact_scenarios(selected_scope, hooks=hooks))
+    disposable = tuple(disposable_specs(scope))
+    standard = tuple(scenario for platform_name in selected_platforms for scenario in platform_scenarios(platform_name, scope))
+    coverage = _plan_coverage_records(selected_platforms, scope, hooks=hooks)
+    return validation_plan.ValidationPlan(
+        platforms=selected_platforms,
+        requested_scope=scope,
+        standard_scenarios=standard,
+        universal_uninstall=tuple(universal),
+        disposable_artifacts=disposable,
+        coverage_records=coverage,
+        target_runtime_validation_sections=_target_runtime_validation_sections(hooks=hooks),
+        platform_coverage_summary={
+            "registered_platform_count": len(selected_platforms),
+            "requested_scope": scope,
+            "runnable_scope_count": len(standard),
+            "universal_scenario_count": len(universal) + len(disposable),
+            "unsupported_scope_count": sum(1 for record in coverage if record["status"] == "unsupported"),
+        },
+        target_runtime_verification=dict(validation_plan.TARGET_RUNTIME_VERIFICATION_POLICY),
+    )
+
+
+def _compat_plan(
+    *,
+    platforms: tuple[str, ...],
+    scope: str,
+    standard_scenarios: tuple[Scenario, ...],
+    universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...],
+    disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...],
+    coverage_records: tuple[dict[str, object], ...],
+    target_runtime_validation_sections: tuple[dict[str, object], ...],
+) -> validation_plan.ValidationPlan:
+    unsupported = sum(1 for record in coverage_records if record.get("status") == "unsupported")
+    return validation_plan.ValidationPlan(
+        platforms=platforms,
+        requested_scope=scope,
+        standard_scenarios=standard_scenarios,
+        universal_uninstall=universal_uninstall,
+        disposable_artifacts=disposable_artifacts,
+        coverage_records=coverage_records,
+        target_runtime_validation_sections=target_runtime_validation_sections,
+        platform_coverage_summary={
+            "registered_platform_count": len(platforms),
+            "requested_scope": scope,
+            "runnable_scope_count": len(standard_scenarios),
+            "universal_scenario_count": len(universal_uninstall) + len(disposable_artifacts),
+            "unsupported_scope_count": unsupported,
+        },
+    )
+
+
 def scenario_artifact_dir(scenario_name: str, *, hooks: ScenarioLifecycleHooks) -> Path:
     return hooks.paths.scenario_artifact_dir(scenario_name)
 
@@ -694,6 +778,8 @@ class UniversalUninstallLifecycle:
 def universal_uninstall_spec_for_scope(scope: str, *, hooks: ScenarioLifecycleHooks) -> UniversalUninstallScenarioSpec:
     spec = hooks.scenario_registry.universal_uninstall_spec_for_scope(scope)
     if spec is None:
+        spec = next((policy_spec for policy_spec in validation_plan.DEFAULT_HARNESS_POLICY.universal_uninstall_specs if policy_spec.scope == scope), None)
+    if spec is None:
         raise RuntimeError(f"no universal uninstall scenario declaration for scope: {scope}")
     return spec
 
@@ -804,7 +890,7 @@ class DisposableArtifactLifecycle:
 
 
 def run_purge_scenario(env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    scenarios = hooks.scenario_registry.disposable_artifact_scenarios("project")
+    scenarios = disposable_artifact_scenarios("project", hooks=hooks)
     if not scenarios:
         raise RuntimeError("no disposable artifact scenario declaration for project scope")
     return DisposableArtifactLifecycle(scenarios[0], env, hooks).run()
@@ -815,38 +901,87 @@ def run_disposable_artifact_scenario(spec: DisposableArtifactScenarioSpec, env: 
 
 
 def disposable_artifact_scenarios(scope: str, *, hooks: ScenarioLifecycleHooks) -> list[DisposableArtifactScenarioSpec]:
-    return hooks.scenario_registry.disposable_artifact_scenarios(scope)
+    specs = hooks.scenario_registry.disposable_artifact_specs or validation_plan.DEFAULT_HARNESS_POLICY.disposable_artifact_specs
+    return [spec for spec in specs if scope in spec.scope_eligibility]
 
 
 def universal_uninstall_scenarios(platforms: list[str], scope: str, *, hooks: ScenarioLifecycleHooks) -> list[SelectedUniversalUninstallScenario]:
-    return hooks.scenario_registry.universal_uninstall_scenarios(platforms, scope)
+    requested = set(platforms)
+    selected_scopes = set(_selected_scopes(scope))
+    specs = hooks.scenario_registry.universal_uninstall_specs or validation_plan.DEFAULT_HARNESS_POLICY.universal_uninstall_specs
+    selected: list[SelectedUniversalUninstallScenario] = []
+    for universal_spec in specs:
+        if universal_spec.scope not in selected_scopes:
+            continue
+        scenarios = [
+            hooks.scenario_registry.make_scenario(platform_name, universal_spec.eligible_platform_scope)
+            for platform_name, spec in hooks.scenario_registry.specs.items()
+            if platform_name in requested and universal_spec.eligible_platform_scope in spec.universal_uninstall_scopes
+        ]
+        runnable = tuple(scenario for scenario in scenarios if scenario is not None)
+        if len(runnable) >= universal_spec.minimum_installed_scenarios:
+            selected.append(SelectedUniversalUninstallScenario(universal_spec, runnable))
+    return selected
 
 
-def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], *, hooks: ScenarioLifecycleHooks, fail_fast_scenarios: bool = False) -> list[dict[str, object]]:
+def run_validation_plan(plan: validation_plan.ValidationPlan, env: dict[str, str], hooks: ScenarioLifecycleHooks, fail_fast_scenarios: bool = False) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
     overrides = hooks.matrix_overrides
     run_one = overrides.run_scenario or (lambda scenario, scenario_env: run_scenario(scenario, scenario_env, hooks=hooks))
-    universal_groups = overrides.universal_uninstall_scenarios or (lambda selected_platforms, selected_scope: universal_uninstall_scenarios(selected_platforms, selected_scope, hooks=hooks))
     run_universal_override = overrides.run_universal_uninstall_scenario
-    disposable_specs = overrides.disposable_artifact_scenarios or (lambda selected_scope: disposable_artifact_scenarios(selected_scope, hooks=hooks))
     run_disposable = overrides.run_disposable_artifact_scenario or (lambda spec, scenario_env: run_disposable_artifact_scenario(spec, scenario_env, hooks=hooks))
     run_purge = overrides.run_purge_scenario
-    platform_scenarios = overrides.platform_scenarios or hooks.scenario_registry.platform_scenarios
-    for scenario in [scenario for platform_name in platforms for scenario in platform_scenarios(platform_name, scope)]:
+    for scenario in plan.standard_scenarios:
         result = run_one(scenario, env)
         results.append(result)
         if fail_fast_scenarios and result.get("passed") is not True:
             return results
     if any(result.get("passed") is not True for result in results):
         return results
-    for universal_group in universal_groups(platforms, scope):
-        selected = selected_universal_uninstall(universal_group, hooks=hooks)
+    for selected in plan.universal_uninstall_scenarios:
         if run_universal_override is None:
             result = run_universal_uninstall_scenario(selected, env=env, hooks=hooks)
         else:
             result = run_universal_override(selected.spec.scope, list(selected.installed_scenarios), env)
         results.append(result)
-    for disposable_spec in disposable_specs(scope):
+    for disposable_spec in plan.disposable_artifact_scenarios:
         result = run_purge(env) if run_purge is not None else run_disposable(disposable_spec, env)
         results.append(result)
     return results
+
+
+def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], *, hooks: ScenarioLifecycleHooks, fail_fast_scenarios: bool = False) -> list[dict[str, object]]:
+    overrides = hooks.matrix_overrides
+    selected_platforms = tuple(platforms)
+    platform_scenarios = overrides.platform_scenarios or hooks.scenario_registry.platform_scenarios
+    standard = tuple(scenario for platform_name in selected_platforms for scenario in platform_scenarios(platform_name, scope))
+    coverage = _plan_coverage_records(selected_platforms, scope, hooks=hooks)
+    runtime_sections = _target_runtime_validation_sections(selected_platforms, hooks=hooks)
+    standard_plan = _compat_plan(
+        platforms=selected_platforms,
+        scope=scope,
+        standard_scenarios=standard,
+        universal_uninstall=(),
+        disposable_artifacts=(),
+        coverage_records=coverage,
+        target_runtime_validation_sections=runtime_sections,
+    )
+    results = run_validation_plan(standard_plan, env, hooks, fail_fast_scenarios=fail_fast_scenarios)
+    if len(results) < len(standard) or any(result.get("passed") is not True for result in results):
+        return results
+
+    if overrides.universal_uninstall_scenarios is None:
+        universal = tuple(universal_uninstall_scenarios(platforms, scope, hooks=hooks))
+    else:
+        universal = tuple(selected_universal_uninstall(group, hooks=hooks) for group in overrides.universal_uninstall_scenarios(platforms, scope))
+    disposable_specs = overrides.disposable_artifact_scenarios or (lambda selected_scope: disposable_artifact_scenarios(selected_scope, hooks=hooks))
+    synthetic_plan = _compat_plan(
+        platforms=selected_platforms,
+        scope=scope,
+        standard_scenarios=(),
+        universal_uninstall=universal,
+        disposable_artifacts=tuple(disposable_specs(scope)),
+        coverage_records=coverage,
+        target_runtime_validation_sections=runtime_sections,
+    )
+    return results + run_validation_plan(synthetic_plan, env, hooks)

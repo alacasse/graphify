@@ -30,11 +30,14 @@ def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
 
     assert summary["status"] == "PASS"
     assert summary["graphify"]["passed"] == 2
+    assert summary["graphify"]["scenarios"] == 2
+    assert summary["target_runtime_verification_performed"] is False
     assert summary["failures"] == []
     assert "first-read diagnostic" in summary["usage_guidance"]
     assert "For FAIL, fix the listed failed checks" in markdown
     assert "Target runtime verification: not performed" in markdown
     assert "Runtime:" not in markdown
+    assert "target_tool_runtime" not in json.dumps(summary)
 
 
 def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:

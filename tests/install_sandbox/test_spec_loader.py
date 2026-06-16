@@ -120,8 +120,8 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
 
     assert isinstance(registry, platform_specs.ScenarioRegistry)
     assert registry.specs
-    assert registry.universal_uninstall_specs
-    assert registry.disposable_artifact_specs
+    assert registry.universal_uninstall_specs == ()
+    assert registry.disposable_artifact_specs == ()
 
 
 def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
@@ -150,17 +150,16 @@ def test_default_registry_discovers_product_yaml_files_in_filename_order() -> No
     assert registry.platform_names == expected
 
 
-def test_load_registry_from_dir_supplies_code_derived_registry_policies(tmp_path: Any) -> None:
+def test_load_registry_from_dir_does_not_supply_synthetic_registry_policies(tmp_path: Any) -> None:
     data = _valid_data()
     data["platforms"]["mini"]["simulated_linux_layout"] = True
     _write_registry_dir(tmp_path, data)
 
     registry = load_registry_from_dir(tmp_path)
 
-    assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-user"
-    assert registry.universal_uninstall_specs[1].scenario_id == "universal-uninstall-project"
-    assert registry.disposable_artifact_specs[0].scenario_id == "purge-disposable-graphify-out"
-    assert registry.platform_spec("mini").target_runtime_validation[0].section_title == "Windows Validation"
+    assert registry.universal_uninstall_specs == ()
+    assert registry.disposable_artifact_specs == ()
+    assert registry.platform_spec("mini").target_runtime_validation == ()
 
 
 def test_load_registry_from_dir_rejects_empty_product_specs(tmp_path: Any) -> None:
@@ -421,17 +420,17 @@ def test_loader_derives_scope_locality_and_simulated_notes() -> None:
     )
 
 
-def test_loader_attaches_shared_runtime_validation_to_simulated_platforms() -> None:
+def test_loader_preserves_explicit_target_runtime_validation() -> None:
     data = _valid_data()
-    data["target_runtime_validation_policies"] = {
-        "simulated_linux_layout": {
+    data["platforms"]["mini"]["target_runtime_validation"] = [
+        {
             "section_title": "Windows Validation",
             "status": "payload_consistency_only",
             "strategy": "payload check only",
             "targets": ["windows payload"],
             "notes": ["runtime validation is external"],
         }
-    }
+    ]
     data["platforms"]["mini"]["simulated_linux_layout"] = True
 
     spec = load_registry_from_data(data).platform_spec("mini")
@@ -447,11 +446,11 @@ def test_loader_attaches_shared_runtime_validation_to_simulated_platforms() -> N
     )
 
 
-def test_loader_rejects_unknown_runtime_validation_policy() -> None:
+def test_loader_ignores_top_level_runtime_validation_policies() -> None:
     data = _valid_data()
     data["target_runtime_validation_policies"] = {"typo": {}}
 
-    _expect_invalid(data, "unknown runtime validation policy")
+    assert load_registry_from_data(data).platform_spec("mini").target_runtime_validation == ()
 
 
 def test_loader_rejects_unknown_structured_risk_note() -> None:

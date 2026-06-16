@@ -59,26 +59,11 @@ def test_normalized_registry_includes_high_risk_platform_policies() -> None:
         {"name": "copilot", "required_package_relative": None},
     ]
     assert antigravity_windows["simulated_linux_layout"] is True
-    assert windows["target_runtime_validation"][0]["section_title"] == "Windows Validation"
+    assert windows["target_runtime_validation"] == []
 
 
-def test_normalized_registry_includes_synthetic_policies() -> None:
+def test_normalized_registry_omits_harness_policies() -> None:
     normalized = normalize_default_registry()
 
-    assert normalized["universal_uninstall_specs"][0]["scenario_id"] == "universal-uninstall-user"
-    assert normalized["universal_uninstall_specs"][1]["command"] == ["graphify", "uninstall", "--project"]
-    assert normalized["disposable_artifact_specs"] == [
-        {
-            "scenario_id": "purge-disposable-graphify-out",
-            "platform_label": "purge",
-            "scope": "project",
-            "command": ["graphify", "uninstall", "--purge"],
-            "cwd_root": "project",
-            "artifact_subdir": "uninstall-purge",
-            "disposable_path_root": "project",
-            "disposable_path_relative": "graphify-out",
-            "seed_files": [{"relative": "graph.json", "content": '{"nodes": [], "edges": []}\n'}],
-            "scope_eligibility": ["project", "both"],
-            "risk_note": "purge verified only against disposable sandbox graphify-out state",
-        }
-    ]
+    assert "universal_uninstall_specs" not in normalized
+    assert "disposable_artifact_specs" not in normalized

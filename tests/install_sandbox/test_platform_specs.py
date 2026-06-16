@@ -223,7 +223,7 @@ def test_simulated_runtime_products_declare_linux_layout_limits() -> None:
     assert simulated_platforms == {"antigravity-windows", "windows"}
     for platform_name in simulated_platforms:
         spec = REGISTRY.platform_spec(platform_name)
-        assert spec.target_runtime_validation
+        assert spec.target_runtime_validation == ()
         for scope in ("user", "project"):
             scenario = REGISTRY.make_scenario(platform_name, scope)
             if scenario is not None:
@@ -420,7 +420,6 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
         }
     ]
     assert platform_specs.ScenarioRegistry({"plain": platform_specs.PlatformSpec(name="plain")}).target_runtime_validation_sections() == []
-    assert platform_specs.target_runtime_validation_sections()
 
 
 def test_disposable_artifact_scenarios_are_declared_by_scope() -> None:
@@ -441,10 +440,6 @@ def test_disposable_artifact_scenarios_are_declared_by_scope() -> None:
 
     assert registry.disposable_artifact_scenarios("project") == [spec]
     assert registry.disposable_artifact_scenarios("user") == []
-    assert platform_specs.disposable_artifact_scenarios("project") == list(
-        REGISTRY.disposable_artifact_scenarios("project")
-    )
-    assert REGISTRY.purge_disposable_graphify_out_scenario_id() == REGISTRY.disposable_artifact_scenarios("project")[0].scenario_id
 
 
 def test_universal_uninstall_scenarios_return_declared_policy() -> None:
@@ -484,7 +479,6 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
     assert selected[0].spec.command == ("tool", "remove", "all")
     assert selected[0].spec.cwd_root == "user_cwd"
     assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha"]
-    assert platform_specs.universal_uninstall_scenarios(["codex", "claude", "gemini"], "project")
 
 
 def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
@@ -576,9 +570,5 @@ def test_generic_direct_equivalence_applicability() -> None:
     assert REGISTRY.equivalent_install_command(cursor_project) == ("graphify", "install", "--project", "--platform", "cursor")
 
 
-def test_universal_scenario_selection_requires_multiple_platforms() -> None:
-    assert REGISTRY.universal_uninstall_groups(["codex"], "project") == []
-
-    groups = REGISTRY.universal_uninstall_groups(["codex", "claude", "gemini"], "project")
-    assert len(groups) == 1
-    assert groups[0][0] == "project"
+def test_default_registry_does_not_own_universal_uninstall_selection() -> None:
+    assert REGISTRY.universal_uninstall_groups(["codex", "claude", "gemini"], "project") == []

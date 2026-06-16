@@ -639,16 +639,13 @@ def test_matrix_collects_graphify_failures(tmp_path) -> None:
         calls.append(item.platform)
         return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": False, "graphify_file_effects_passed": False}
 
-    def unexpected_universal(*args, **kwargs):
-        raise AssertionError("universal uninstall should not run after a Graphify install failure")
-
     def unexpected_purge(*args, **kwargs):
         raise AssertionError("purge scenario should not run after a Graphify install failure")
 
     hooks = factory.hooks(
         platform_scenarios=platform_scenarios,
         run_scenario_func=run_scenario,
-        universal_uninstall_scenarios_func=unexpected_universal,
+        universal_uninstall_scenarios_func=lambda platforms, scope: [],
         run_purge_scenario_func=unexpected_purge,
     )
 
@@ -676,9 +673,6 @@ def test_matrix_skips_universal_uninstall_and_purge_until_all_standard_scenarios
             "graphify_file_effects_passed": item.platform == "second",
         }
 
-    def unexpected_universal(*args, **kwargs):
-        raise AssertionError("universal uninstall should run only after all standard scenarios pass")
-
     def unexpected_purge(*args, **kwargs):
         raise AssertionError("purge should run only after all standard scenarios pass")
 
@@ -689,7 +683,7 @@ def test_matrix_skips_universal_uninstall_and_purge_until_all_standard_scenarios
         hooks=factory.hooks(
             platform_scenarios=platform_scenarios,
             run_scenario_func=run_scenario,
-            universal_uninstall_scenarios_func=unexpected_universal,
+            universal_uninstall_scenarios_func=lambda platforms, scope: [],
             run_purge_scenario_func=unexpected_purge,
         ),
     )
@@ -709,11 +703,22 @@ def test_matrix_fail_fast_stops_first_graphify_failure(tmp_path) -> None:
         calls.append(item.platform)
         return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": False}
 
+    def unexpected_universal(*args, **kwargs):
+        raise AssertionError("universal selection should not run after fail-fast standard failure")
+
+    def unexpected_disposable(*args, **kwargs):
+        raise AssertionError("disposable selection should not run after fail-fast standard failure")
+
     results = scenario_lifecycle.run_matrix_scenarios(
         ["first", "second"],
         "project",
         {},
-        hooks=factory.hooks(platform_scenarios=platform_scenarios, run_scenario_func=run_scenario),
+        hooks=factory.hooks(
+            platform_scenarios=platform_scenarios,
+            run_scenario_func=run_scenario,
+            universal_uninstall_scenarios_func=unexpected_universal,
+            disposable_artifact_scenarios_func=unexpected_disposable,
+        ),
         fail_fast_scenarios=True,
     )
 

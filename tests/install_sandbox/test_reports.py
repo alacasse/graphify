@@ -124,6 +124,7 @@ def test_report_markdown_generation() -> None:
         "Synthetic Linux",
         "| Platform | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |",
         "codex-project",
+        "- Scenario count: 2.",
         "Target runtime verification: not performed by this Tier 1 file-effect sandbox.",
         "graphify cursor install",
         "boom",
@@ -134,6 +135,8 @@ def test_report_markdown_generation() -> None:
         "Linux sandbox does not prove synthetic target runtime behavior.",
     ):
         assert expected in markdown
+    assert "target_runtime_verification" not in markdown
+    assert "target_tool_runtime" not in markdown
 
 
 def test_report_markdown_omits_target_runtime_validation_sections_when_metadata_absent() -> None:

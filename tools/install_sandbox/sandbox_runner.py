@@ -22,6 +22,7 @@ try:
     from . import reports
     from . import scenario_lifecycle
     from . import source_snapshot
+    from . import validation_plan
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
@@ -37,6 +38,7 @@ except ImportError:
     import reports
     import scenario_lifecycle
     import source_snapshot
+    import validation_plan
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from platform_specs import (
@@ -392,6 +394,7 @@ def scenario_lifecycle_hooks(
 
 def preflight() -> dict[str, object]:
     SCENARIO_REGISTRY.validate_roots(ROOT_REGISTRY.declared_expected_root_names())
+    validation_plan.DEFAULT_HARNESS_POLICY.validate_roots(ROOT_REGISTRY.declared_expected_root_names())
     for root in ROOT_REGISTRY.roots:
         path = RUNTIME_ROOTS[root.name]
         if root.reset or root.mount_mode == "rw" or root.name == "xdg_config_home":
@@ -439,15 +442,21 @@ def main(argv: list[str] | None = None) -> int:
     preflight_data = preflight()
     src_data = source_snapshot.copy_source_tree(args.copy_source, config=source_snapshot_config())
     package_data = install_graphify(env)
-    platforms = selected_platforms(args)
-    scenarios = selected_scenarios(args)
+    hooks = scenario_lifecycle_hooks()
+    plan = validation_plan.build_validation_plan(
+        SCENARIO_REGISTRY,
+        all_platforms=args.all,
+        platform_name=args.platform,
+        scope=args.scope,
+    )
 
-    results = scenario_lifecycle.run_matrix_scenarios(platforms, args.scope, env, hooks=scenario_lifecycle_hooks(), fail_fast_scenarios=args.fail_fast_scenarios)
+    results = scenario_lifecycle.run_validation_plan(plan, env, hooks, fail_fast_scenarios=args.fail_fast_scenarios)
     passed = sum(1 for result in results if result["passed"])
     failed = len(results) - passed
 
-    coverage = SCENARIO_REGISTRY.coverage_records(platforms, args.scope)
-    unsupported = sum(1 for record in coverage if record["status"] == "unsupported")
+    coverage = list(getattr(plan, "platform_coverage", plan.coverage_records))
+    platform_coverage_summary = dict(plan.platform_coverage_summary)
+    platform_coverage_summary["universal_scenario_count"] = max(0, len(results) - len(plan.standard_scenarios))
     manifest = {
         "harness_version": HARNESS_VERSION,
         "python_version": sys.version,
@@ -457,19 +466,10 @@ def main(argv: list[str] | None = None) -> int:
         "package_install": package_data,
         "source_snapshot": src_data,
         "preflight": preflight_data,
-        "target_runtime_verification": {
-            "performed": False,
-            "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
-        },
-        "target_runtime_validation_sections": SCENARIO_REGISTRY.target_runtime_validation_sections(),
+        "target_runtime_verification": plan.target_runtime_verification,
+        "target_runtime_validation_sections": list(getattr(plan, "runtime_limitation_sections", plan.target_runtime_validation_sections)),
         "platform_coverage": coverage,
-        "platform_coverage_summary": {
-            "registered_platform_count": len(platforms),
-            "requested_scope": args.scope,
-            "runnable_scope_count": len(scenarios),
-            "universal_scenario_count": max(0, len(results) - len(scenarios)),
-            "unsupported_scope_count": unsupported,
-        },
+        "platform_coverage_summary": platform_coverage_summary,
         "scenario_count": len(results),
         "graphify_file_effect_pass_count": passed,
         "graphify_file_effect_fail_count": failed,

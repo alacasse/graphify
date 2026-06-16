@@ -55,49 +55,6 @@ def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_pa
     assert env["PATH"].endswith(":/usr/bin")
 
 
-def test_selected_scenarios_projects_platform_registry_selection(monkeypatch) -> None:
-    scenario = Scenario(
-        platform="unit",
-        scope="project",
-        install_command=("graphify", "install", "--platform", "unit"),
-        uninstall_command=None,
-        cwd_root="project",
-        expected=(ExpectedPath("project", "unit.md"),),
-    )
-    class Registry:
-        specs = {"unit": object()}
-
-        def platform_scenarios(self, platform_name: str, scope: str):
-            return [scenario]
-
-    registry = Registry()
-    monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", registry)
-    args = sandbox_runner.parse_args(["--platform", "unit", "--scope", "project"])
-
-    assert sandbox_runner.selected_scenarios(args) == [scenario]
-
-
-def test_selected_platforms_orders_full_matrix_in_runner(monkeypatch) -> None:
-    class Registry:
-        specs = {"zeta": object(), "alpha": object(), "mini": object()}
-
-    monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
-    args = sandbox_runner.parse_args(["--all", "--scope", "project"])
-
-    assert sandbox_runner.selected_platforms(args) == ["alpha", "mini", "zeta"]
-
-
-def test_selected_platforms_rejects_unknown_platform_in_runner(monkeypatch) -> None:
-    class Registry:
-        specs = {"known": object()}
-
-    monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
-    args = sandbox_runner.parse_args(["--platform", "missing", "--scope", "project"])
-
-    with pytest.raises(RuntimeError, match="unknown sandbox platform"):
-        sandbox_runner.selected_platforms(args)
-
-
 def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
     calls: list[str] = []
@@ -129,13 +86,13 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
             return [scenario]
 
     monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
-    plan = sandbox_runner.validation_plan.ValidationPlan(
-        platforms=("codex",),
-        requested_scope="project",
-        standard_scenarios=(scenario,),
-        universal_uninstall=(),
-        disposable_artifacts=(),
-        coverage_records=(
+    class Plan:
+        platforms = ("codex",)
+        requested_scope = "project"
+        standard_scenarios = (scenario,)
+        universal_uninstall = ()
+        disposable_artifacts = ()
+        coverage_records = (
             {
                 "platform": "codex",
                 "scope": "project",
@@ -146,16 +103,24 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
                 "generic_direct_equivalence": {"status": "not_applicable"},
                 "risk_notes": [],
             },
-        ),
-        target_runtime_validation_sections=({"section_title": "Synthetic Runtime", "status": "declared"},),
-        platform_coverage_summary={
+        )
+        target_runtime_validation_sections = ({"section_title": "Synthetic Runtime", "status": "declared"},)
+        platform_coverage_summary = {
             "registered_platform_count": 99,
             "requested_scope": "project",
             "runnable_scope_count": 1,
             "universal_scenario_count": 0,
             "unsupported_scope_count": 77,
-        },
-    )
+        }
+        target_runtime_verification = {
+            "performed": False,
+            "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
+        }
+
+        platform_coverage = ({"platform": "legacy-alias", "status": "must-not-appear"},)
+        runtime_limitation_sections = ({"section_title": "Legacy Alias", "status": "must-not-appear"},)
+
+    plan = Plan()
     def build_plan(registry, *, all_platforms, platform_name=None, scope="both", **kwargs):
         assert registry is sandbox_runner.SCENARIO_REGISTRY
         calls.append(f"plan:{platform_name}:{scope}:{all_platforms}")
@@ -197,6 +162,9 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     }
     assert manifest["target_runtime_validation_sections"] == [{"section_title": "Synthetic Runtime", "status": "declared"}]
     assert "target_tool_runtime" not in manifest
+    assert manifest["platform_coverage"] == list(plan.coverage_records)
+    assert "legacy-alias" not in json.dumps(manifest)
+    assert "Legacy Alias" not in json.dumps(manifest)
     assert manifest["scenario_count"] == len(manifest["results"])
     assert manifest["graphify_file_effect_fail_count"] == 1
     assert manifest["platform_coverage_summary"]["runnable_scope_count"] == 1

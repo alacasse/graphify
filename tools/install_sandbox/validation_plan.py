@@ -217,7 +217,19 @@ def _selected_scopes(scope: str) -> tuple[str, ...]:
     raise RuntimeError(f"unknown sandbox scope: {scope}")
 
 
-def selected_platforms(registry: ScenarioRegistry, *, all_platforms: bool, platform_name: str | None) -> tuple[str, ...]:
+def selected_platforms(
+    registry: ScenarioRegistry,
+    *,
+    all_platforms: bool,
+    platform_name: str | None,
+    selected_platform_names: Iterable[str] | None = None,
+) -> tuple[str, ...]:
+    if selected_platform_names is not None:
+        selected = tuple(selected_platform_names)
+        unknown = [name for name in selected if name not in registry.specs]
+        if unknown:
+            raise RuntimeError(f"unknown sandbox platform(s): {', '.join(unknown)}")
+        return selected
     if all_platforms:
         return tuple(sorted(registry.specs))
     if platform_name is None or platform_name not in registry.specs:
@@ -362,6 +374,7 @@ def build_validation_plan(
     *,
     all_platforms: bool,
     platform_name: str | None = None,
+    selected_platform_names: Iterable[str] | None = None,
     scope: str = "both",
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
     root_registry: SandboxRootRegistry = DEFAULT_SANDBOX_ROOT_REGISTRY,
@@ -371,7 +384,12 @@ def build_validation_plan(
         registry.validate_roots(declared_roots)
     policy.validate_roots(declared_roots)
 
-    platforms = selected_platforms(registry, all_platforms=all_platforms, platform_name=platform_name)
+    platforms = selected_platforms(
+        registry,
+        all_platforms=all_platforms,
+        platform_name=platform_name,
+        selected_platform_names=selected_platform_names,
+    )
     standard = _standard_scenarios(registry, platforms, scope)
     universal = universal_uninstall_scenarios(registry, platforms, scope, policy)
     disposable = disposable_artifact_scenarios(registry, scope, policy)

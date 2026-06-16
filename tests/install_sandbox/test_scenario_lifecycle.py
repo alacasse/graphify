@@ -5,16 +5,14 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
-from tools.install_sandbox import scenario_lifecycle
+from tools.install_sandbox import scenario_lifecycle, validation_plan
 from tools.install_sandbox.platform_specs import (
     DEFAULT_SCENARIO_REGISTRY,
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
     ExpectedPath,
-    PlatformSpec,
     Scenario,
     ScenarioRegistry,
-    ScopeSpec,
     UniversalUninstallScenarioSpec,
 )
 
@@ -50,6 +48,45 @@ def make_scenario(platform: str = "codex", scope: str = "project", *, uninstall:
         uninstall_command=("graphify", "uninstall", "--platform", platform) if uninstall else None,
         cwd_root="project" if scope == "project" else "user_cwd",
         expected=(ExpectedPath("project" if scope == "project" else "home", f"{platform}-{scope}.md"),),
+    )
+
+
+def make_validation_plan(
+    *,
+    platforms: tuple[str, ...] = ("codex",),
+    scope: str = "project",
+    standard_scenarios: tuple[Scenario, ...] = (),
+    universal_uninstall: tuple[scenario_lifecycle.SelectedUniversalUninstallScenario, ...] = (),
+    disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...] = (),
+) -> validation_plan.ValidationPlan:
+    coverage_records = tuple(
+        {
+            "platform": scenario.platform,
+            "scope": scenario.scope,
+            "status": "runnable",
+            "scenario_id": DEFAULT_SCENARIO_REGISTRY.scenario_id(scenario.platform, scenario.scope),
+            "install_command": list(scenario.install_command),
+            "uninstall_command": None if scenario.uninstall_command is None else list(scenario.uninstall_command),
+            "generic_direct_equivalence": {"status": "not_applicable"},
+            "risk_notes": [],
+        }
+        for scenario in standard_scenarios
+    )
+    return validation_plan.ValidationPlan(
+        platforms=platforms,
+        requested_scope=scope,
+        standard_scenarios=standard_scenarios,
+        universal_uninstall=universal_uninstall,
+        disposable_artifacts=disposable_artifacts,
+        coverage_records=coverage_records,
+        target_runtime_validation_sections=(),
+        platform_coverage_summary={
+            "registered_platform_count": len(platforms),
+            "requested_scope": scope,
+            "runnable_scope_count": len(standard_scenarios),
+            "universal_scenario_count": len(universal_uninstall) + len(disposable_artifacts),
+            "unsupported_scope_count": 0,
+        },
     )
 
 
@@ -227,12 +264,9 @@ class HookFactory:
         matrix_overrides = overrides.pop(
             "matrix_overrides",
             scenario_lifecycle.MatrixRunnerOverrides(
-                platform_scenarios=overrides.pop("platform_scenarios", None),
                 run_scenario=overrides.pop("run_scenario_func", None),
-                universal_uninstall_scenarios=overrides.pop("universal_uninstall_scenarios_func", None),
                 run_universal_uninstall_scenario=overrides.pop("run_universal_uninstall_scenario_func", None),
                 run_purge_scenario=overrides.pop("run_purge_scenario_func", None),
-                disposable_artifact_scenarios=overrides.pop("disposable_artifact_scenarios_func", None),
                 run_disposable_artifact_scenario=overrides.pop("run_disposable_artifact_scenario_func", None),
             ),
         )
@@ -628,40 +662,72 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
     assert undeclared_path.exists()
 
 
-def test_matrix_collects_graphify_failures(tmp_path) -> None:
+def test_run_matrix_scenarios_delegates_to_planner_and_runs_plan_once(tmp_path, monkeypatch) -> None:
     factory = HookFactory(tmp_path)
-    calls: list[str] = []
+    hooks = factory.hooks()
+    env = {"HOME": str(factory.home)}
+    plan = make_validation_plan(platforms=("first", "second"), scope="project")
+    calls: list[tuple[str, object]] = []
 
-    def platform_scenarios(platform_name: str, scope: str):
-        return [make_scenario(platform_name, "project", uninstall=False)]
+    def build_plan(registry, *, all_platforms, platform_name=None, selected_platform_names=None, scope="both", **kwargs):
+        calls.append(("build", registry, all_platforms, platform_name, tuple(selected_platform_names), scope, kwargs))
+        return plan
 
-    def run_scenario(item, env):
-        calls.append(item.platform)
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": False, "graphify_file_effects_passed": False}
+    def run_plan(plan_arg, env_arg, hooks_arg, fail_fast_scenarios=False):
+        calls.append(("run", plan_arg, env_arg, hooks_arg, fail_fast_scenarios))
+        return [{"id": "sentinel", "passed": True}]
 
-    def unexpected_purge(*args, **kwargs):
-        raise AssertionError("purge scenario should not run after a Graphify install failure")
+    monkeypatch.setattr(scenario_lifecycle.validation_plan, "build_validation_plan", build_plan)
+    monkeypatch.setattr(scenario_lifecycle, "run_validation_plan", run_plan)
 
-    hooks = factory.hooks(
-        platform_scenarios=platform_scenarios,
-        run_scenario_func=run_scenario,
-        universal_uninstall_scenarios_func=lambda platforms, scope: [],
-        run_purge_scenario_func=unexpected_purge,
+    results = scenario_lifecycle.run_matrix_scenarios(
+        ["first", "second"],
+        "project",
+        env,
+        hooks=hooks,
+        fail_fast_scenarios=True,
     )
 
-    results = scenario_lifecycle.run_matrix_scenarios(["first", "second"], "project", {}, hooks=hooks)
+    assert results == [{"id": "sentinel", "passed": True}]
+    assert calls == [
+        ("build", hooks.scenario_registry, False, None, ("first", "second"), "project", {}),
+        ("run", plan, env, hooks, True),
+    ]
 
-    assert calls == ["first", "second"]
-    assert len(results) == 2
-    assert all(result["passed"] is False for result in results)
 
-
-def test_matrix_skips_universal_uninstall_and_purge_until_all_standard_scenarios_pass(tmp_path) -> None:
+def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
-
-    def platform_scenarios(platform_name: str, scope: str):
-        return [make_scenario(platform_name, "project", uninstall=False)]
+    first = make_scenario("first", "project", uninstall=False)
+    second = make_scenario("second", "project", uninstall=False)
+    universal_spec = UniversalUninstallScenarioSpec(
+        scenario_id="project-sweep",
+        platform_label="multiple",
+        scope="project",
+        command=("cleanup", "project"),
+        cwd_root="project",
+        eligible_platform_scope="project",
+    )
+    disposable_spec = DisposableArtifactScenarioSpec(
+        scenario_id="purge-project-cache",
+        platform_label="purge",
+        scope="project",
+        command=("purge", "project"),
+        cwd_root="project",
+        artifact_subdir="purge",
+        disposable_path_root="project",
+        disposable_path_relative="graphify-out",
+        seed_files=(),
+        scope_eligibility=("project",),
+        risk_note="project cleanup",
+    )
+    plan = make_validation_plan(
+        platforms=("first", "second"),
+        scope="project",
+        standard_scenarios=(first, second),
+        universal_uninstall=(scenario_lifecycle.SelectedUniversalUninstallScenario(universal_spec, (first, second)),),
+        disposable_artifacts=(disposable_spec,),
+    )
 
     def run_scenario(item, env):
         calls.append(f"scenario:{item.platform}")
@@ -673,18 +739,16 @@ def test_matrix_skips_universal_uninstall_and_purge_until_all_standard_scenarios
             "graphify_file_effects_passed": item.platform == "second",
         }
 
-    def unexpected_purge(*args, **kwargs):
-        raise AssertionError("purge should run only after all standard scenarios pass")
+    def unexpected_synthetic(*args, **kwargs):
+        raise AssertionError("synthetic scenarios should not run after a Graphify install failure")
 
-    results = scenario_lifecycle.run_matrix_scenarios(
-        ["first", "second"],
-        "project",
+    results = scenario_lifecycle.run_validation_plan(
+        plan,
         {},
         hooks=factory.hooks(
-            platform_scenarios=platform_scenarios,
             run_scenario_func=run_scenario,
-            universal_uninstall_scenarios_func=lambda platforms, scope: [],
-            run_purge_scenario_func=unexpected_purge,
+            run_universal_uninstall_scenario_func=unexpected_synthetic,
+            run_purge_scenario_func=unexpected_synthetic,
         ),
     )
 
@@ -692,32 +756,27 @@ def test_matrix_skips_universal_uninstall_and_purge_until_all_standard_scenarios
     assert [result["passed"] for result in results] == [False, True]
 
 
-def test_matrix_fail_fast_stops_first_graphify_failure(tmp_path) -> None:
+def test_run_validation_plan_fail_fast_stops_first_graphify_failure(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
-
-    def platform_scenarios(platform_name: str, scope: str):
-        return [make_scenario(platform_name, "project", uninstall=False)]
+    plan = make_validation_plan(
+        platforms=("first", "second"),
+        scope="project",
+        standard_scenarios=(
+            make_scenario("first", "project", uninstall=False),
+            make_scenario("second", "project", uninstall=False),
+        ),
+    )
 
     def run_scenario(item, env):
         calls.append(item.platform)
         return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": False}
 
-    def unexpected_universal(*args, **kwargs):
-        raise AssertionError("universal selection should not run after fail-fast standard failure")
-
-    def unexpected_disposable(*args, **kwargs):
-        raise AssertionError("disposable selection should not run after fail-fast standard failure")
-
-    results = scenario_lifecycle.run_matrix_scenarios(
-        ["first", "second"],
-        "project",
+    results = scenario_lifecycle.run_validation_plan(
+        plan,
         {},
         hooks=factory.hooks(
-            platform_scenarios=platform_scenarios,
             run_scenario_func=run_scenario,
-            universal_uninstall_scenarios_func=unexpected_universal,
-            disposable_artifact_scenarios_func=unexpected_disposable,
         ),
         fail_fast_scenarios=True,
     )
@@ -727,19 +786,54 @@ def test_matrix_fail_fast_stops_first_graphify_failure(tmp_path) -> None:
     assert results[0]["passed"] is False
 
 
-def test_matrix_collects_universal_failures_and_runs_purge(tmp_path) -> None:
+def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cleanup(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
-
-    def platform_scenarios(platform_name: str, scope: str):
-        return [make_scenario(platform_name, "project", uninstall=False)]
+    first = make_scenario("first", "project", uninstall=False)
+    second = make_scenario("second", "project", uninstall=False)
+    user_spec = UniversalUninstallScenarioSpec(
+        scenario_id="universal-uninstall-user",
+        platform_label="multiple",
+        scope="user",
+        command=("graphify", "uninstall"),
+        cwd_root="user_cwd",
+        eligible_platform_scope="user",
+    )
+    project_spec = UniversalUninstallScenarioSpec(
+        scenario_id="universal-uninstall-project",
+        platform_label="multiple",
+        scope="project",
+        command=("graphify", "uninstall", "--project"),
+        cwd_root="project",
+        eligible_platform_scope="project",
+    )
+    disposable_spec = DisposableArtifactScenarioSpec(
+        scenario_id=DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(),
+        platform_label="purge",
+        scope="project",
+        command=("graphify", "uninstall", "--purge"),
+        cwd_root="project",
+        artifact_subdir="uninstall-purge",
+        disposable_path_root="project",
+        disposable_path_relative="graphify-out",
+        seed_files=(),
+        scope_eligibility=("project",),
+        risk_note="purge verified only against disposable sandbox graphify-out state",
+    )
+    plan = make_validation_plan(
+        platforms=("first", "second"),
+        scope="both",
+        standard_scenarios=(first, second),
+        universal_uninstall=(
+            scenario_lifecycle.SelectedUniversalUninstallScenario(user_spec, (make_scenario("first", "user"), make_scenario("second", "user"))),
+            scenario_lifecycle.SelectedUniversalUninstallScenario(project_spec, (first, second)),
+        ),
+        disposable_artifacts=(disposable_spec,),
+    )
 
     def run_scenario(item, env):
         calls.append(f"scenario:{item.platform}")
         return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
-
-    def universal_groups(platforms, scope):
-        return [("user", [make_scenario("first", "user"), make_scenario("second", "user")]), ("project", [make_scenario("first", "project"), make_scenario("second", "project")])]
 
     def run_universal(universal_scope, scenarios, env):
         calls.append(f"universal:{universal_scope}")
@@ -749,14 +843,11 @@ def test_matrix_collects_universal_failures_and_runs_purge(tmp_path) -> None:
         calls.append("purge")
         return {"id": DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(), "platform": "purge", "scope": "project", "passed": False}
 
-    results = scenario_lifecycle.run_matrix_scenarios(
-        ["first", "second"],
-        "both",
+    results = scenario_lifecycle.run_validation_plan(
+        plan,
         {},
         hooks=factory.hooks(
-            platform_scenarios=platform_scenarios,
             run_scenario_func=run_scenario,
-            universal_uninstall_scenarios_func=universal_groups,
             run_universal_uninstall_scenario_func=run_universal,
             run_purge_scenario_func=run_purge,
         ),
@@ -770,7 +861,7 @@ def test_matrix_collects_universal_failures_and_runs_purge(tmp_path) -> None:
     ]
 
 
-def test_matrix_preserves_selected_universal_uninstall_spec(tmp_path) -> None:
+def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     factory.command_results = [0]
     scenario = make_scenario("arbitrary", "project", uninstall=False)
@@ -788,18 +879,18 @@ def test_matrix_preserves_selected_universal_uninstall_spec(tmp_path) -> None:
     def run_scenario(item, env):
         return {"id": "arbitrary-project", "platform": item.platform, "scope": item.scope, "passed": True, "graphify_file_effects_passed": True}
 
-    def universal_groups(platforms, scope):
-        return [scenario_lifecycle.SelectedUniversalUninstallScenario(universal_spec, (scenario,))]
+    plan = make_validation_plan(
+        platforms=("arbitrary",),
+        scope="project",
+        standard_scenarios=(scenario,),
+        universal_uninstall=(scenario_lifecycle.SelectedUniversalUninstallScenario(universal_spec, (scenario,)),),
+    )
 
-    results = scenario_lifecycle.run_matrix_scenarios(
-        ["arbitrary"],
-        "project",
+    results = scenario_lifecycle.run_validation_plan(
+        plan,
         {},
         hooks=factory.hooks(
-            platform_scenarios=lambda platform_name, scope: [scenario],
             run_scenario_func=run_scenario,
-            universal_uninstall_scenarios_func=universal_groups,
-            disposable_artifact_scenarios_func=lambda scope: [],
         ),
     )
 
@@ -812,44 +903,10 @@ def test_matrix_preserves_selected_universal_uninstall_spec(tmp_path) -> None:
     assert factory.command_records[-1]["cwd"] == factory.user_cwd
 
 
-def test_matrix_runs_purge_for_project_scope_after_standard_scenarios_pass(tmp_path) -> None:
+def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_branching(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
-
-    def platform_scenarios(platform_name: str, scope: str):
-        return [make_scenario(platform_name, "project", uninstall=False)]
-
-    def run_scenario(item, env):
-        calls.append(f"scenario:{item.platform}")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
-
-    def universal_groups(platforms, scope):
-        calls.append(f"universal-groups:{scope}")
-        return []
-
-    def run_purge(env):
-        calls.append("purge")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(), "platform": "purge", "scope": "project", "passed": True}
-
-    results = scenario_lifecycle.run_matrix_scenarios(
-        ["first", "second"],
-        "project",
-        {},
-        hooks=factory.hooks(
-            platform_scenarios=platform_scenarios,
-            run_scenario_func=run_scenario,
-            universal_uninstall_scenarios_func=universal_groups,
-            run_purge_scenario_func=run_purge,
-        ),
-    )
-
-    assert calls == ["scenario:first", "scenario:second", "universal-groups:project", "purge"]
-    assert results[-1]["id"] == DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id()
-
-
-def test_matrix_runs_registry_disposable_scenarios_without_scope_branching(tmp_path) -> None:
-    factory = HookFactory(tmp_path)
-    calls: list[str] = []
+    scenario = make_scenario("arbitrary", "user", uninstall=False)
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id="user-disposable-cleanup",
         platform_label="cleanup",
@@ -863,37 +920,25 @@ def test_matrix_runs_registry_disposable_scenarios_without_scope_branching(tmp_p
         scope_eligibility=("user",),
         risk_note="user-scope disposable cleanup",
     )
-    registry = ScenarioRegistry(
-        specs={
-            "arbitrary": PlatformSpec(
-                name="arbitrary",
-                scopes={
-                    "user": ScopeSpec(
-                        install_command=("install", "arbitrary"),
-                        uninstall_command=None,
-                        cwd_root="home",
-                        expected=(),
-                    )
-                },
-            )
-        },
-        disposable_artifact_specs=(disposable_spec,),
+    plan = make_validation_plan(
+        platforms=("arbitrary",),
+        scope="user",
+        standard_scenarios=(scenario,),
+        disposable_artifacts=(disposable_spec,),
     )
 
     def run_scenario(item, env):
         calls.append(f"scenario:{item.platform}:{item.scope}")
-        return {"id": registry.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
+        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")
         return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
 
-    results = scenario_lifecycle.run_matrix_scenarios(
-        ["arbitrary"],
-        "user",
+    results = scenario_lifecycle.run_validation_plan(
+        plan,
         {},
         hooks=factory.hooks(
-            scenario_registry=registry,
             run_scenario_func=run_scenario,
             run_disposable_artifact_scenario_func=run_disposable,
         ),

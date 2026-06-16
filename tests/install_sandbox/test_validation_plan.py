@@ -101,6 +101,91 @@ def test_validation_plan_rejects_unknown_platform() -> None:
         validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="missing", scope="project")
 
 
+def test_validation_plan_preserves_explicit_platform_order_and_full_plan_contents() -> None:
+    registry = _planner_registry()
+
+    plan = validation_plan.build_validation_plan(
+        registry,
+        all_platforms=False,
+        platform_name=None,
+        selected_platform_names=("gemini", "claude", "codex"),
+        scope="project",
+    )
+
+    assert plan.platforms == ("gemini", "claude", "codex")
+    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+        ("gemini", "project"),
+        ("claude", "project"),
+        ("codex", "project"),
+    ]
+    assert len(plan.universal_uninstall) == 1
+    assert plan.universal_uninstall[0].spec.scenario_id == "universal-uninstall-project"
+    assert [scenario.platform for scenario in plan.universal_uninstall[0].installed_scenarios] == [
+        "gemini",
+        "claude",
+        "codex",
+    ]
+    assert [scenario.scenario_id for scenario in plan.disposable_artifacts] == ["purge-disposable-graphify-out"]
+    generic_direct_equivalence = {
+        "status": "not_applicable",
+        "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
+    }
+    assert plan.coverage_records == (
+        {
+            "platform": "gemini",
+            "scope": "project",
+            "status": "runnable",
+            "scenario_id": "gemini-project",
+            "install_command": ["graphify", "install"],
+            "uninstall_command": ["graphify", "uninstall"],
+            "generic_direct_equivalence": generic_direct_equivalence,
+            "risk_notes": [],
+        },
+        {
+            "platform": "claude",
+            "scope": "project",
+            "status": "runnable",
+            "scenario_id": "claude-project",
+            "install_command": ["graphify", "install"],
+            "uninstall_command": ["graphify", "uninstall"],
+            "generic_direct_equivalence": generic_direct_equivalence,
+            "risk_notes": [],
+        },
+        {
+            "platform": "codex",
+            "scope": "project",
+            "status": "runnable",
+            "scenario_id": "codex-project",
+            "install_command": ["graphify", "install"],
+            "uninstall_command": ["graphify", "uninstall"],
+            "generic_direct_equivalence": generic_direct_equivalence,
+            "risk_notes": [],
+        },
+    )
+    assert plan.target_runtime_validation_sections == ()
+    assert plan.platform_coverage_summary == {
+        "registered_platform_count": 3,
+        "requested_scope": "project",
+        "runnable_scope_count": 3,
+        "universal_scenario_count": 2,
+        "unsupported_scope_count": 0,
+    }
+    assert plan.target_runtime_verification == validation_plan.TARGET_RUNTIME_VERIFICATION_POLICY
+
+
+def test_validation_plan_rejects_unknown_explicit_platform_names() -> None:
+    registry = _planner_registry()
+
+    with pytest.raises(RuntimeError, match="unknown sandbox platform\\(s\\): missing, absent"):
+        validation_plan.build_validation_plan(
+            registry,
+            all_platforms=False,
+            platform_name=None,
+            selected_platform_names=("gemini", "missing", "absent"),
+            scope="project",
+        )
+
+
 def test_validation_plan_derives_universal_uninstall_from_policy_and_target_facts() -> None:
     registry = _planner_registry()
 

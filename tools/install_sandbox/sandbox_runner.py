@@ -354,7 +354,6 @@ def risk_report(scenario: Scenario, passed: bool) -> dict[str, object]:
 def scenario_lifecycle_hooks(
     *,
     run_scenario_func=None,
-    universal_uninstall_scenarios_func=None,
     run_universal_uninstall_scenario_func=None,
     run_purge_scenario_func=None,
 ) -> scenario_lifecycle.ScenarioLifecycleHooks:
@@ -383,9 +382,7 @@ def scenario_lifecycle_hooks(
         ),
         scenario_registry=SCENARIO_REGISTRY,
         matrix_overrides=scenario_lifecycle.MatrixRunnerOverrides(
-            platform_scenarios=SCENARIO_REGISTRY.platform_scenarios,
             run_scenario=run_scenario_func,
-            universal_uninstall_scenarios=universal_uninstall_scenarios_func,
             run_universal_uninstall_scenario=run_universal_uninstall_scenario_func,
             run_purge_scenario=run_purge_scenario_func,
         ),
@@ -419,23 +416,6 @@ def preflight() -> dict[str, object]:
     return checks
 
 
-def selected_scenarios(args: argparse.Namespace) -> list[Scenario]:
-    platforms = selected_platforms(args)
-    scenarios: list[Scenario] = []
-    for platform_name in platforms:
-        scenarios.extend(SCENARIO_REGISTRY.platform_scenarios(platform_name, args.scope))
-    return scenarios
-
-
-def selected_platforms(args: argparse.Namespace) -> list[str]:
-    if args.all:
-        return sorted(SCENARIO_REGISTRY.specs)
-    platform_name = args.platform
-    if platform_name is None or platform_name not in SCENARIO_REGISTRY.specs:
-        raise RuntimeError(f"unknown sandbox platform(s): {platform_name}")
-    return [platform_name]
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     env = sandbox_env()
@@ -454,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     passed = sum(1 for result in results if result["passed"])
     failed = len(results) - passed
 
-    coverage = list(getattr(plan, "platform_coverage", plan.coverage_records))
+    coverage = list(plan.coverage_records)
     platform_coverage_summary = dict(plan.platform_coverage_summary)
     platform_coverage_summary["universal_scenario_count"] = max(0, len(results) - len(plan.standard_scenarios))
     manifest = {
@@ -467,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
         "source_snapshot": src_data,
         "preflight": preflight_data,
         "target_runtime_verification": plan.target_runtime_verification,
-        "target_runtime_validation_sections": list(getattr(plan, "runtime_limitation_sections", plan.target_runtime_validation_sections)),
+        "target_runtime_validation_sections": list(plan.target_runtime_validation_sections),
         "platform_coverage": coverage,
         "platform_coverage_summary": platform_coverage_summary,
         "scenario_count": len(results),

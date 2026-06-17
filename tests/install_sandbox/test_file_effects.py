@@ -436,6 +436,45 @@ def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:
     assert plan[2].text_expectation is None
 
 
+def test_install_surface_core_derives_user_content_seed_plans() -> None:
+    stale_section = section("project", "stale-notes.md", preserve_user_content=True)
+    legacy_text_policy = ExpectedPath(
+        "home",
+        "legacy-notes.txt",
+        text_expectation=platform_specs.TextExpectation(preserve_user_content=True),
+    )
+    no_preserve_text_section = section("project", "no-preserve.md")
+    plain_surface = ExpectedPath("project", "plain.txt")
+    json_surface = ExpectedPath("project", "settings.json", content_kind="json", marker="graphify")
+
+    plans = install_surface_core.user_content_seed_plans(
+        (
+            stale_section,
+            legacy_text_policy,
+            no_preserve_text_section,
+            plain_surface,
+            json_surface,
+        )
+    )
+
+    assert plans == (
+        install_surface_core.UserContentSeedPlan(
+            root_name="project",
+            relative=Path("stale-notes.md"),
+            text=(
+                f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n"
+                f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n\n"
+                "## User Section\nThis section should survive Graphify install and uninstall.\n"
+            ),
+        ),
+        install_surface_core.UserContentSeedPlan(
+            root_name="home",
+            relative=Path("legacy-notes.txt"),
+            text=f"# User Notes\n\n{file_effects.USER_SENTINEL}\n",
+        ),
+    )
+
+
 def test_expected_generated_keys_reuse_generated_state_plan() -> None:
     notes = section("project", "notes.md", preserve_user_content=True)
     skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 try:
-    from .expected_effects import is_skill_effect, is_text_section_effect
+    from .expected_effects import is_skill_effect
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
         STALE_GRAPHIFY_SENTINEL,
@@ -47,15 +47,19 @@ try:
         skill_sidecar_expectation,
         skill_version_status,
         skill_version_relative,
+        seeded_user_content_text,
+        should_seed_stale_graphify_section,
+        should_seed_user_content,
         text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
         uninstalled_surface_status,
+        user_content_seed_plans,
     )
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
-    from expected_effects import is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
+    from expected_effects import is_skill_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL,
@@ -96,10 +100,14 @@ except ImportError:
         skill_sidecar_expectation,
         skill_version_status,
         skill_version_relative,
+        seeded_user_content_text,
+        should_seed_stale_graphify_section,
+        should_seed_user_content,
         text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
         uninstalled_surface_status,
+        user_content_seed_plans,
     )
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution
@@ -286,26 +294,19 @@ class FileEffectOracle:
 
     # User content seeding
     def should_seed_user_content(self, entry: InstallSurface) -> bool:
-        return is_text_section_effect(entry) and entry.text_expectation.preserve_user_content
+        return should_seed_user_content(entry)
 
     def should_seed_stale_graphify_section(self, entry: InstallSurface) -> bool:
-        return is_text_section_effect(entry) and entry.text_expectation.repair_stale_graphify_section
+        return should_seed_stale_graphify_section(entry)
 
     def seeded_text(self, entry: InstallSurface) -> str:
-        if self.should_seed_stale_graphify_section(entry) and entry.marker:
-            return (
-                f"# User Notes\n\n{USER_SENTINEL}\n\n"
-                f"{entry.marker}\n{STALE_GRAPHIFY_SENTINEL}\n\n"
-                "## User Section\nThis section should survive Graphify install and uninstall.\n"
-            )
-        return f"# User Notes\n\n{USER_SENTINEL}\n"
+        return seeded_user_content_text(entry)
 
     def seed_user_owned_content(self, scenario: Scenario) -> None:
-        for entry in scenario.expected:
-            if self.should_seed_user_content(entry):
-                path = self.expected_path(entry)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(self.seeded_text(entry), encoding="utf-8")
+        for plan in user_content_seed_plans(scenario.expected):
+            path = self.root_path(plan.root_name) / plan.relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(plan.text, encoding="utf-8")
 
     # JSON/text marker validation
     def json_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:

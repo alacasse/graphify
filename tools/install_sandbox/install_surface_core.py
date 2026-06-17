@@ -17,6 +17,7 @@ try:
         TextExpectation,
         is_json_effect,
         is_skill_effect,
+        is_text_section_effect,
     )
     from .json_helpers import object_dict, object_dicts, object_list
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
@@ -30,6 +31,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         TextExpectation,
         is_json_effect,
         is_skill_effect,
+        is_text_section_effect,
     )
     from json_helpers import object_dict, object_dicts, object_list  # type: ignore[no-redef]
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus  # type: ignore[no-redef]
@@ -86,6 +88,13 @@ class StateEntryPlan:
     key: str
     marker: str | None = None
     text_expectation: TextExpectation | None = None
+
+
+@dataclass(frozen=True)
+class UserContentSeedPlan:
+    root_name: str
+    relative: Path
+    text: str
 
 
 class GeneratedFileExpectationLike(Protocol):
@@ -396,6 +405,46 @@ def skill_reference_pointer_status(
     return True, "no_reference_pointers"
 
 
+def expects_user_content_preserved(surface: InstallSurface) -> bool:
+    return surface.text_expectation.preserve_user_content
+
+
+def expects_stale_graphify_section_repaired(surface: InstallSurface) -> bool:
+    return surface.text_expectation.repair_stale_graphify_section
+
+
+def should_seed_user_content(surface: InstallSurface) -> bool:
+    return is_text_section_effect(surface) and expects_user_content_preserved(surface)
+
+
+def should_seed_stale_graphify_section(surface: InstallSurface) -> bool:
+    return is_text_section_effect(surface) and expects_stale_graphify_section_repaired(surface)
+
+
+def seeded_user_content_text(surface: InstallSurface) -> str:
+    if should_seed_stale_graphify_section(surface) and surface.marker:
+        return (
+            f"# User Notes\n\n{USER_SENTINEL}\n\n"
+            f"{surface.marker}\n{STALE_GRAPHIFY_SENTINEL}\n\n"
+            "## User Section\nThis section should survive Graphify install and uninstall.\n"
+        )
+    return f"# User Notes\n\n{USER_SENTINEL}\n"
+
+
+def user_content_seed_plans(surfaces: Iterable[InstallSurface]) -> tuple[UserContentSeedPlan, ...]:
+    plans: list[UserContentSeedPlan] = []
+    for surface in surfaces:
+        if should_seed_user_content(surface):
+            plans.append(
+                UserContentSeedPlan(
+                    root_name=surface.root,
+                    relative=Path(surface.relative),
+                    text=seeded_user_content_text(surface),
+                )
+            )
+    return tuple(plans)
+
+
 def uninstalled_skill_sidecar_status(exists: bool) -> tuple[bool, str]:
     return not exists, "sidecar_still_exists" if exists else "removed"
 
@@ -482,14 +531,6 @@ def json_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
     marker = surface.marker or ""
     marker_present = bool(marker) and json_value_contains_marker(data, marker)
     return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"
-
-
-def expects_user_content_preserved(surface: InstallSurface) -> bool:
-    return surface.text_expectation.preserve_user_content
-
-
-def expects_stale_graphify_section_repaired(surface: InstallSurface) -> bool:
-    return surface.text_expectation.repair_stale_graphify_section
 
 
 def text_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:

@@ -10,24 +10,21 @@ try:
     from .expected_effects import is_json_effect, is_skill_effect
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
-        STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL,
+        STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
+        USER_SENTINEL as _USER_SENTINEL,
         FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
         ReferenceSidecarExpectation,
         GeneratedFileDecision,
-        command_hook_present,
         decide_generated_file_observation,
         generated_artifact_copy_plan,
-        expected_kind_status,
         expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
         file_fingerprint_from_observation,
         generated_file_observation,
         graphify_section_removed,
-        hooks_by_event,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
         is_excluded_generated_path,
@@ -36,10 +33,7 @@ try:
         is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status_from_observation,
-        json_expectation_status,
-        json_value_contains_marker,
         planned_state_entries,
-        plugin_config_present,
         reference_sidecar_expectation,
         references_tmp_absence_status,
         resolve_install_root,
@@ -62,30 +56,27 @@ try:
         uninstalled_surface_status_from_observation,
         user_content_seed_plans,
     )
-    from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
+    from .platform_specs import InstallSurface, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
     from expected_effects import is_json_effect, is_skill_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
-        STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL,
+        STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
+        USER_SENTINEL as _USER_SENTINEL,
         FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
         ReferenceSidecarExpectation,
         GeneratedFileDecision,
-        command_hook_present,
         decide_generated_file_observation,
         generated_artifact_copy_plan,
-        expected_kind_status,
         expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
         file_fingerprint_from_observation,
         generated_file_observation,
         graphify_section_removed,
-        hooks_by_event,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
         is_excluded_generated_path,
@@ -94,10 +85,7 @@ except ImportError:
         is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status_from_observation,
-        json_expectation_status,
-        json_value_contains_marker,
         planned_state_entries,
-        plugin_config_present,
         reference_sidecar_expectation,
         references_tmp_absence_status,
         resolve_install_root,
@@ -120,9 +108,12 @@ except ImportError:
         uninstalled_surface_status_from_observation,
         user_content_seed_plans,
     )
-    from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
+    from platform_specs import InstallSurface, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution
 
+
+STALE_GRAPHIFY_SENTINEL = _STALE_GRAPHIFY_SENTINEL
+USER_SENTINEL = _USER_SENTINEL
 
 GENERATED_COPY_EXCLUDES = (
     ".local",

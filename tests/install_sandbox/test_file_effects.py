@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -966,6 +967,132 @@ def test_marker_status_path_reading_compatibility_wrappers_preserve_details(root
     )
 
 
+def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> None:
+    legacy_wrappers = {
+        "expected_kind_status",
+        "install_surface_kind_status",
+        "json_marker_status",
+        "text_marker_status",
+        "installed_surface_status",
+        "uninstalled_surface_status",
+        "file_fingerprint",
+    }
+    tree = ast.parse(Path(file_effects.__file__).read_text(encoding="utf-8"))
+
+    def dotted_name(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            parent = dotted_name(node.value)
+            if parent is None:
+                return None
+            return f"{parent}.{node.attr}"
+        return None
+
+    imported_from_core = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_core")
+        for alias in node.names
+    }
+    wildcard_core_imports = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_core")
+        for alias in node.names
+        if alias.name == "*"
+    }
+    module_imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if any(part == "install_surface_core" for part in alias.name.split("."))
+    }
+    imported_core_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and (node.module is None or node.module.endswith("install_sandbox"))
+        for alias in node.names
+        if alias.name == "install_surface_core"
+    }
+    core_module_aliases = {
+        alias.asname or alias.name.rsplit(".", maxsplit=1)[-1]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if any(part == "install_surface_core" for part in alias.name.split("."))
+    } | {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and (node.module is None or node.module.endswith("install_sandbox"))
+        for alias in node.names
+        if alias.name == "install_surface_core"
+    }
+    direct_calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    module_qualified_calls = {
+        dotted
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in legacy_wrappers
+        if (dotted := dotted_name(node.func)) is not None
+        and (
+            dotted.rsplit(".", maxsplit=1)[0] in core_module_aliases
+            or ".install_surface_core." in dotted
+        )
+    }
+
+    assert not wildcard_core_imports
+    assert imported_from_core.isdisjoint(legacy_wrappers)
+    assert not module_imports
+    assert not imported_core_modules
+    assert direct_calls.isdisjoint(legacy_wrappers)
+    assert not module_qualified_calls
+
+
+def test_assert_expected_files_uses_oracle_installed_surface_observation(oracle, roots, monkeypatch) -> None:
+    surface = section("project", "virtual-notes.md", preserve_user_content=True)
+    path = roots["project"] / "virtual-notes.md"
+    observed_text = f"{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    observed = install_surface_core.InstallSurfaceObservation(
+        path=path,
+        exists=True,
+        is_file=True,
+        text=observed_text,
+    )
+    calls: list[InstallSurface] = []
+
+    def installed_surface_observation(
+        self: file_effects.FileEffectOracle,
+        entry: InstallSurface,
+    ) -> install_surface_core.InstallSurfaceObservation:
+        calls.append(entry)
+        return observed
+
+    monkeypatch.setattr(file_effects.FileEffectOracle, "installed_surface_observation", installed_surface_observation)
+
+    checks = oracle.assert_expected_files(scenario("unit", surface))
+
+    assert calls == [surface]
+    assert not path.exists()
+    assert checks == [
+        {
+            "path": str(path),
+            "ok": True,
+            "detail": "marker_count=1; user_content_preserved; stale_replaced=True",
+            "root": "project",
+            "relative": "virtual-notes.md",
+        }
+    ]
+
+
 def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
@@ -1270,6 +1397,41 @@ def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_o
     )
 
 
+def test_assert_uninstalled_uses_oracle_uninstalled_surface_observation(oracle, roots, monkeypatch) -> None:
+    surface = section("project", "virtual-notes.md", preserve_user_content=True)
+    path = roots["project"] / "virtual-notes.md"
+    observed = install_surface_core.UninstallSurfaceObservation(
+        path=path,
+        exists=True,
+        is_file=True,
+        text=f"{file_effects.USER_SENTINEL}\n\n## User Section\n",
+    )
+    calls: list[InstallSurface] = []
+
+    def uninstalled_surface_observation(
+        self: file_effects.FileEffectOracle,
+        entry: InstallSurface,
+    ) -> install_surface_core.UninstallSurfaceObservation:
+        calls.append(entry)
+        return observed
+
+    monkeypatch.setattr(file_effects.FileEffectOracle, "uninstalled_surface_observation", uninstalled_surface_observation)
+
+    checks = oracle.assert_uninstalled(scenario("unit", surface))
+
+    assert calls == [surface]
+    assert not path.exists()
+    assert checks == [
+        {
+            "path": str(path),
+            "ok": True,
+            "detail": "graphify_removed=True; user_content_preserved=True",
+            "root": "project",
+            "relative": "virtual-notes.md",
+        }
+    ]
+
+
 def test_oracle_routes_uninstalled_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
@@ -1380,6 +1542,34 @@ def test_oracle_captures_fingerprint_observations_without_assertion_record_shape
         "stale_graphify_present": True,
     }
     assert not {"path", "ok", "detail"} & set(notes_payload)
+
+
+def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(oracle, roots, monkeypatch) -> None:
+    surface = section("project", "virtual-notes.md", preserve_user_content=True)
+    path = roots["project"] / "virtual-notes.md"
+    calls: list[tuple[Path, str | None, platform_specs.TextExpectation | None]] = []
+
+    def file_fingerprint(
+        self: file_effects.FileEffectOracle,
+        observed_path: Path,
+        marker: str | None = None,
+        text_expectation: platform_specs.TextExpectation | None = None,
+    ) -> dict[str, object]:
+        calls.append((observed_path, marker, text_expectation))
+        return {"observed": observed_path.name, "marker": marker}
+
+    monkeypatch.setattr(file_effects.FileEffectOracle, "file_fingerprint", file_fingerprint)
+
+    state = oracle.scenario_file_state(scenario("unit", surface))
+
+    assert calls == [(path, platform_specs.GRAPHIFY_MARKER, surface.text_expectation)]
+    assert not path.exists()
+    assert state == {
+        "project/virtual-notes.md": {
+            "observed": "virtual-notes.md",
+            "marker": platform_specs.GRAPHIFY_MARKER,
+        }
+    }
 
 
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:

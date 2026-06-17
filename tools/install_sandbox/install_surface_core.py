@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Mapping
+from typing import Iterable, Literal, Mapping, Protocol
 
 try:
     from .expected_effects import (
@@ -13,7 +14,9 @@ try:
         JsonHookExpectation,
         JsonPluginExpectation,
         SkillSidecarExpectation,
+        TextExpectation,
         is_json_effect,
+        is_skill_effect,
     )
     from .json_helpers import object_dict, object_dicts, object_list
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
@@ -24,7 +27,9 @@ except ImportError:  # pragma: no cover - direct script import fallback
         JsonHookExpectation,
         JsonPluginExpectation,
         SkillSidecarExpectation,
+        TextExpectation,
         is_json_effect,
+        is_skill_effect,
     )
     from json_helpers import object_dict, object_dicts, object_list  # type: ignore[no-redef]
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus  # type: ignore[no-redef]
@@ -39,6 +44,14 @@ class InstallSurfaceStatus:
     path: Path
     ok: bool
     detail: str
+
+
+class GeneratedFileExpectationLike(Protocol):
+    relative_substrings: tuple[str, ...]
+    text_suffixes: tuple[str, ...]
+    content_markers: tuple[str, ...]
+    include_user_content_sentinel: bool
+    max_text_bytes: int
 
 
 ReferenceSidecarMode = Literal["absent", "source_error", "installed_directory"]
@@ -128,6 +141,74 @@ def expected_skill_sidecar_relatives(surface: InstallSurface, resolution: Packag
     }
     relatives.update(reference_sidecar_expectation(resolution).expected_relatives(skill_relative_dir(surface), sidecar))
     return relatives
+
+
+def expected_generated_relative_keys(expected: Iterable[InstallSurface], resolution: PackagedReferenceResolution) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for surface in expected:
+        keys.add((surface.root, surface.relative))
+        if is_skill_effect(surface):
+            for relative in expected_skill_sidecar_relatives(surface, resolution):
+                keys.add((surface.root, relative.as_posix()))
+    return keys
+
+
+def is_excluded_generated_path(relative: Path, excludes: Iterable[str]) -> bool:
+    excluded_parts = set(excludes)
+    return any(part in excluded_parts for part in relative.parts)
+
+
+def is_expected_generated_key(expected: Iterable[InstallSurface], root_name: str, relative: Path) -> bool:
+    return any(surface.root == root_name and surface.relative == relative.as_posix() for surface in expected)
+
+
+def is_skill_sidecar_relative(expected: Iterable[InstallSurface], root_name: str, relative: Path) -> bool:
+    for surface in expected:
+        if root_name != surface.root or not is_skill_effect(surface):
+            continue
+        if relative == skill_version_relative(surface):
+            return True
+        for sidecar_dir in (skill_references_relative(surface), skill_references_tmp_relative(surface)):
+            try:
+                relative.relative_to(sidecar_dir)
+                return True
+            except ValueError:
+                pass
+    return False
+
+
+def is_small_text_candidate(expectation: GeneratedFileExpectationLike, *, file_size: int, suffix: str) -> bool:
+    if file_size > expectation.max_text_bytes:
+        return False
+    return suffix in expectation.text_suffixes
+
+
+def text_mentions_expected_generated_marker(expectation: GeneratedFileExpectationLike, text: str) -> bool:
+    lowered = text.lower()
+    if any(marker.lower() in lowered for marker in expectation.content_markers):
+        return True
+    return expectation.include_user_content_sentinel and USER_SENTINEL in text
+
+
+def is_relevant_generated_file(
+    expectation: GeneratedFileExpectationLike,
+    expected: Iterable[InstallSurface],
+    root_name: str,
+    relative: Path,
+    *,
+    small_text_candidate: bool,
+    mentions_expected_marker: bool,
+) -> bool:
+    rel = relative.as_posix()
+    if is_expected_generated_key(expected, root_name, relative):
+        return True
+    if is_skill_sidecar_relative(expected, root_name, relative):
+        return True
+    if any(fragment.lower() in rel.lower() for fragment in expectation.relative_substrings):
+        return True
+    if not small_text_candidate:
+        return False
+    return mentions_expected_marker
 
 
 def skill_version_status(version_text: str | None, expected_version: str) -> tuple[bool, str]:
@@ -337,3 +418,21 @@ def uninstalled_surface_status(surface: InstallSurface, roots: Mapping[str, Path
         return InstallSurfaceStatus(path, ok, detail)
     ok = not path.exists()
     return InstallSurfaceStatus(path, ok, "removed" if ok else "still_exists")
+
+
+def file_fingerprint(path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
+    if not path.exists():
+        return {"exists": False}
+    if path.is_dir():
+        return {"exists": True, "kind": "dir"}
+    data = path.read_bytes()
+    item: dict[str, object] = {"exists": True, "kind": "file", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    if marker:
+        text = data.decode("utf-8", errors="replace")
+        item["marker_count"] = text.count(marker)
+        expectation = text_expectation or TextExpectation()
+        if expectation.preserve_user_content:
+            item["user_content_preserved"] = USER_SENTINEL in text
+        if expectation.repair_stale_graphify_section:
+            item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
+    return item

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,10 +14,17 @@ try:
         ReferenceSidecarExpectation,
         command_hook_present,
         expected_kind_status,
+        expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
+        file_fingerprint,
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
+        is_excluded_generated_path,
+        is_expected_generated_key,
+        is_relevant_generated_file,
+        is_skill_sidecar_relative,
+        is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status,
         json_expectation_status,
@@ -38,6 +44,7 @@ try:
         skill_sidecar_expectation,
         skill_version_status,
         skill_version_relative,
+        text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
         uninstalled_surface_status,
@@ -53,10 +60,17 @@ except ImportError:
         ReferenceSidecarExpectation,
         command_hook_present,
         expected_kind_status,
+        expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
+        file_fingerprint,
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
+        is_excluded_generated_path,
+        is_expected_generated_key,
+        is_relevant_generated_file,
+        is_skill_sidecar_relative,
+        is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status,
         json_expectation_status,
@@ -76,6 +90,7 @@ except ImportError:
         skill_sidecar_expectation,
         skill_version_status,
         skill_version_relative,
+        text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
         uninstalled_surface_status,
@@ -344,13 +359,7 @@ class FileEffectOracle:
         return checks
 
     def expected_generated_relative_keys(self, scenario: Scenario) -> set[tuple[str, str]]:
-        keys: set[tuple[str, str]] = set()
-        for entry in scenario.expected:
-            keys.add((entry.root, entry.relative))
-            if self.is_skill_expected(entry):
-                for relative in self.expected_skill_sidecar_relatives(scenario, entry):
-                    keys.add((entry.root, relative.as_posix()))
-        return keys
+        return expected_generated_relative_keys(scenario.expected, self.packaged_reference_resolution(scenario.platform))
 
     # Generated-file discovery/copying
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
@@ -398,21 +407,7 @@ class FileEffectOracle:
         return checks
 
     def file_fingerprint(self, path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
-        if not path.exists():
-            return {"exists": False}
-        if path.is_dir():
-            return {"exists": True, "kind": "dir"}
-        data = path.read_bytes()
-        item: dict[str, object] = {"exists": True, "kind": "file", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
-        if marker:
-            text = data.decode("utf-8", errors="replace")
-            item["marker_count"] = text.count(marker)
-            expectation = text_expectation or TextExpectation()
-            if expectation.preserve_user_content:
-                item["user_content_preserved"] = USER_SENTINEL in text
-            if expectation.repair_stale_graphify_section:
-                item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
-        return item
+        return file_fingerprint(path, marker, text_expectation)
 
     # Idempotency state
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:
@@ -427,58 +422,49 @@ class FileEffectOracle:
         return state
 
     def should_exclude_generated_path(self, relative: Path) -> bool:
-        return any(part in GENERATED_COPY_EXCLUDES for part in relative.parts)
+        return is_excluded_generated_path(relative, GENERATED_COPY_EXCLUDES)
 
     def is_expected_generated_key(self, scenario: Scenario, root_name: str, relative: Path) -> bool:
-        expected = {(entry.root, entry.relative) for entry in scenario.expected}
-        return (root_name, relative.as_posix()) in expected
+        return is_expected_generated_key(scenario.expected, root_name, relative)
 
     def is_skill_sidecar_relative(self, scenario: Scenario, root_name: str, relative: Path) -> bool:
-        for entry in scenario.expected:
-            if root_name != entry.root or not self.is_skill_expected(entry):
-                continue
-            if relative == self.skill_version_relative(entry):
-                return True
-            for sidecar_dir in (self.skill_references_relative(entry), self.skill_references_tmp_relative(entry)):
-                try:
-                    relative.relative_to(sidecar_dir)
-                    return True
-                except ValueError:
-                    pass
-        return False
+        return is_skill_sidecar_relative(scenario.expected, root_name, relative)
 
     def is_small_text_candidate(self, scenario: Scenario, path: Path) -> bool:
         try:
             size = path.stat().st_size
         except OSError:
             return False
-        expectation = scenario.generated_file_expectation
-        if size > expectation.max_text_bytes:
-            return False
-        return path.suffix in expectation.text_suffixes
+        return is_small_text_candidate(scenario.generated_file_expectation, file_size=size, suffix=path.suffix)
 
     def file_mentions_expected_generated_marker(self, scenario: Scenario, path: Path) -> bool:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return False
-        lowered = text.lower()
-        expectation = scenario.generated_file_expectation
-        if any(marker.lower() in lowered for marker in expectation.content_markers):
-            return True
-        return expectation.include_user_content_sentinel and USER_SENTINEL in text
+        return text_mentions_expected_generated_marker(scenario.generated_file_expectation, text)
 
     def is_relevant_generated_file(self, scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
-        rel = relative.as_posix()
-        if self.is_expected_generated_key(scenario, root_name, relative):
+        if is_relevant_generated_file(
+            scenario.generated_file_expectation,
+            scenario.expected,
+            root_name,
+            relative,
+            small_text_candidate=False,
+            mentions_expected_marker=False,
+        ):
             return True
-        if self.is_skill_sidecar_relative(scenario, root_name, relative):
-            return True
-        if any(fragment.lower() in rel.lower() for fragment in scenario.generated_file_expectation.relative_substrings):
-            return True
-        if not self.is_small_text_candidate(scenario, path):
+        small_text_candidate = self.is_small_text_candidate(scenario, path)
+        if not small_text_candidate:
             return False
-        return self.file_mentions_expected_generated_marker(scenario, path)
+        return is_relevant_generated_file(
+            scenario.generated_file_expectation,
+            scenario.expected,
+            root_name,
+            relative,
+            small_text_candidate=small_text_candidate,
+            mentions_expected_marker=self.file_mentions_expected_generated_marker(scenario, path),
+        )
 
     def copy_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
         out = artifact_dir / "generated-files"

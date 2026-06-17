@@ -28,6 +28,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "expected_effects.py",
         "file_walk.py",
         "harness_specs.py",
+        "install_surface_core.py",
         "json_helpers.py",
         "spec_loader.py",
         "status.py",

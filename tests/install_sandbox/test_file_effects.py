@@ -175,6 +175,86 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix(tmp_pat
     assert "status=available" in detail
 
 
+def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -> None:
+    default_entry = expected_skill("project", ".aider/graphify/SKILL.md")
+    custom_entry = expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md")
+
+    assert oracle.skill_relative_dir(default_entry) == Path(".aider/graphify")
+    assert oracle.skill_version_relative(default_entry) == Path(".aider/graphify/.graphify_version")
+    assert oracle.skill_references_relative(default_entry) == Path(".aider/graphify/references")
+    assert oracle.skill_references_tmp_relative(default_entry) == Path(".aider/graphify/references.tmp")
+
+    assert oracle.skill_relative_dir(custom_entry) == Path(".custom/graphify")
+    assert oracle.skill_version_relative(custom_entry) == Path(".custom/graphify/.graphify_version")
+    assert oracle.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
+    assert oracle.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected_relatives"),
+    [
+        (
+            "claude",
+            {
+                ".claude/skills/graphify/.graphify_version",
+                ".claude/skills/graphify/references.tmp",
+                ".claude/skills/graphify/references",
+                ".claude/skills/graphify/references/query.md",
+                ".claude/skills/graphify/references/update.md",
+            },
+        ),
+        (
+            "empty",
+            {
+                ".empty/graphify/.graphify_version",
+                ".empty/graphify/references.tmp",
+                ".empty/graphify/references",
+            },
+        ),
+        (
+            "aider",
+            {
+                ".aider/graphify/.graphify_version",
+                ".aider/graphify/references.tmp",
+            },
+        ),
+        (
+            "no_eligible",
+            {
+                ".no_eligible/graphify/.graphify_version",
+                ".no_eligible/graphify/references.tmp",
+            },
+        ),
+        (
+            "missing",
+            {
+                ".missing/graphify/.graphify_version",
+                ".missing/graphify/references.tmp",
+                ".missing/graphify/references",
+            },
+        ),
+        (
+            "not_directory",
+            {
+                ".not_directory/graphify/.graphify_version",
+                ".not_directory/graphify/references.tmp",
+                ".not_directory/graphify/references",
+            },
+        ),
+    ],
+)
+def test_expected_skill_sidecar_relatives_follow_packaged_reference_status(
+    oracle: file_effects.FileEffectOracle,
+    platform: str,
+    expected_relatives: set[str],
+) -> None:
+    relative = ".claude/skills/graphify/SKILL.md" if platform == "claude" else f".{platform}/graphify/SKILL.md"
+    entry = expected_skill("project", relative)
+    test_scenario = scenario(platform, entry)
+
+    assert oracle.expected_skill_sidecar_relatives(test_scenario, entry) == {Path(relative) for relative in expected_relatives}
+
+
 def test_assertion_detects_missing_file(oracle) -> None:
     checks = oracle.assert_expected_files(scenario("unit", ExpectedPath("project", "missing.txt")))
 
@@ -429,6 +509,63 @@ def test_skill_assertion_detects_missing_and_wrong_version_stamp(oracle, roots) 
     assert "expected=9.9.9" in str(version["detail"])
 
 
+def test_installed_skill_sidecar_records_render_sandbox_check_shape(oracle, roots) -> None:
+    test_scenario = scenario("claude", expected_skill("project", ".claude/skills/graphify/SKILL.md"))
+    skill = write_skill(
+        roots["project"],
+        ".claude/skills/graphify/SKILL.md",
+        body="See references/query.md and references/update.md for details.\n",
+        version="9.9.9",
+    )
+    refs = skill.parent / "references"
+    refs.mkdir()
+    (refs / "query.md").write_text("# query\n", encoding="utf-8")
+    (refs / "update.md").write_text("# update\n", encoding="utf-8")
+
+    checks = oracle.assert_expected_files(test_scenario)
+
+    version = check_by_relative(checks, ".claude/skills/graphify/.graphify_version")
+    assert version == {
+        "path": str(roots["project"] / ".claude/skills/graphify/.graphify_version"),
+        "ok": True,
+        "detail": "actual=9.9.9; expected=9.9.9",
+        "root": "project",
+        "relative": ".claude/skills/graphify/.graphify_version",
+    }
+
+    refs_tmp = check_by_relative(checks, ".claude/skills/graphify/references.tmp")
+    assert refs_tmp == {
+        "path": str(roots["project"] / ".claude/skills/graphify/references.tmp"),
+        "ok": True,
+        "detail": "absent",
+        "root": "project",
+        "relative": ".claude/skills/graphify/references.tmp",
+    }
+
+    packaged_refs = check_by_relative(checks, ".claude/skills/graphify/references")
+    assert packaged_refs["path"] == str(roots["project"] / ".claude/skills/graphify/references")
+    assert packaged_refs["ok"] is True
+    assert packaged_refs["root"] == "project"
+    assert packaged_refs["relative"] == ".claude/skills/graphify/references"
+    assert packaged_refs["detail"] == (
+        "status=available; actual_names=['query.md', 'update.md']; "
+        "expected_names=['query.md', 'update.md']; missing=[]; extra=[]"
+    )
+
+    pointer_check = next(
+        check
+        for check in checks
+        if check.get("relative") == ".claude/skills/graphify/SKILL.md" and str(check.get("detail")).startswith("pointers=")
+    )
+    assert pointer_check == {
+        "path": str(roots["project"] / ".claude/skills/graphify/SKILL.md"),
+        "ok": True,
+        "detail": "pointers=['query.md', 'update.md']; missing=[]",
+        "root": "project",
+        "relative": ".claude/skills/graphify/SKILL.md",
+    }
+
+
 def test_skill_assertion_detects_missing_references_sidecar_from_body_pointer(oracle, roots) -> None:
     test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     write_skill(
@@ -624,6 +761,182 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
     assert ("project", ".aider/graphify/references") not in absent_generated_keys
     assert not any(key[1].startswith(".aider/graphify/references/") for key in absent_generated_keys)
     assert "project/.aider/graphify/references" not in oracle.scenario_file_state(absent)
+
+
+@pytest.mark.parametrize(
+    ("platform", "skill_relative", "generated_relatives", "state_relatives"),
+    [
+        (
+            "claude",
+            ".claude/skills/graphify/SKILL.md",
+            {
+                ".claude/skills/graphify/SKILL.md",
+                ".claude/skills/graphify/.graphify_version",
+                ".claude/skills/graphify/references.tmp",
+                ".claude/skills/graphify/references",
+                ".claude/skills/graphify/references/query.md",
+                ".claude/skills/graphify/references/update.md",
+            },
+            {
+                ".claude/skills/graphify/SKILL.md",
+                ".claude/skills/graphify/.graphify_version",
+                ".claude/skills/graphify/references.tmp",
+                ".claude/skills/graphify/references",
+                ".claude/skills/graphify/references/query.md",
+                ".claude/skills/graphify/references/update.md",
+            },
+        ),
+        (
+            "empty",
+            ".empty/graphify/SKILL.md",
+            {
+                ".empty/graphify/SKILL.md",
+                ".empty/graphify/.graphify_version",
+                ".empty/graphify/references.tmp",
+                ".empty/graphify/references",
+            },
+            {
+                ".empty/graphify/SKILL.md",
+                ".empty/graphify/.graphify_version",
+                ".empty/graphify/references.tmp",
+                ".empty/graphify/references",
+            },
+        ),
+        (
+            "aider",
+            ".aider/graphify/SKILL.md",
+            {
+                ".aider/graphify/SKILL.md",
+                ".aider/graphify/.graphify_version",
+                ".aider/graphify/references.tmp",
+            },
+            {
+                ".aider/graphify/SKILL.md",
+                ".aider/graphify/.graphify_version",
+                ".aider/graphify/references.tmp",
+            },
+        ),
+        (
+            "no_eligible",
+            ".no_eligible/graphify/SKILL.md",
+            {
+                ".no_eligible/graphify/SKILL.md",
+                ".no_eligible/graphify/.graphify_version",
+                ".no_eligible/graphify/references.tmp",
+            },
+            {
+                ".no_eligible/graphify/SKILL.md",
+                ".no_eligible/graphify/.graphify_version",
+                ".no_eligible/graphify/references.tmp",
+            },
+        ),
+        (
+            "missing",
+            ".missing/graphify/SKILL.md",
+            {
+                ".missing/graphify/SKILL.md",
+                ".missing/graphify/.graphify_version",
+                ".missing/graphify/references.tmp",
+                ".missing/graphify/references",
+            },
+            {
+                ".missing/graphify/SKILL.md",
+                ".missing/graphify/.graphify_version",
+                ".missing/graphify/references.tmp",
+                ".missing/graphify/references",
+            },
+        ),
+        (
+            "not_directory",
+            ".not_directory/graphify/SKILL.md",
+            {
+                ".not_directory/graphify/SKILL.md",
+                ".not_directory/graphify/.graphify_version",
+                ".not_directory/graphify/references.tmp",
+                ".not_directory/graphify/references",
+            },
+            {
+                ".not_directory/graphify/SKILL.md",
+                ".not_directory/graphify/.graphify_version",
+                ".not_directory/graphify/references.tmp",
+                ".not_directory/graphify/references",
+            },
+        ),
+    ],
+)
+def test_sidecar_generated_keys_and_idempotency_state_follow_packaged_reference_status(
+    oracle: file_effects.FileEffectOracle,
+    roots: dict[str, Path],
+    platform: str,
+    skill_relative: str,
+    generated_relatives: set[str],
+    state_relatives: set[str],
+) -> None:
+    test_scenario = scenario(platform, expected_skill("project", skill_relative))
+    skill = write_skill(roots["project"], skill_relative, version="9.9.9")
+    if platform in {"claude", "empty"}:
+        refs = skill.parent / "references"
+        refs.mkdir()
+        if platform == "claude":
+            (refs / "query.md").write_text("# query\n", encoding="utf-8")
+            (refs / "update.md").write_text("# update\n", encoding="utf-8")
+
+    assert oracle.expected_generated_relative_keys(test_scenario) == {("project", relative) for relative in generated_relatives}
+    assert set(oracle.scenario_file_state(test_scenario)) == {f"project/{relative}" for relative in state_relatives}
+
+
+def test_uninstall_skill_sidecar_checks_require_version_references_and_tmp_removal(oracle, roots) -> None:
+    test_scenario = scenario("claude", expected_skill("project", ".claude/skills/graphify/SKILL.md"))
+    skill = write_skill(roots["project"], ".claude/skills/graphify/SKILL.md", version="9.9.9")
+    refs = skill.parent / "references"
+    refs.mkdir()
+    (refs / "query.md").write_text("# query\n", encoding="utf-8")
+    refs_tmp = skill.parent / "references.tmp"
+    refs_tmp.mkdir()
+    (refs_tmp / "partial.md").write_text("partial\n", encoding="utf-8")
+
+    checks = oracle.assert_uninstalled(test_scenario)
+
+    version = check_by_relative(checks, ".claude/skills/graphify/.graphify_version")
+    assert version == {
+        "path": str(roots["project"] / ".claude/skills/graphify/.graphify_version"),
+        "ok": False,
+        "detail": "sidecar_still_exists",
+        "root": "project",
+        "relative": ".claude/skills/graphify/.graphify_version",
+    }
+    assert check_by_relative(checks, ".claude/skills/graphify/references")["detail"] == "sidecar_still_exists"
+    assert check_by_relative(checks, ".claude/skills/graphify/references.tmp")["detail"] == "sidecar_still_exists"
+
+    (skill.parent / ".graphify_version").unlink()
+    (refs / "query.md").unlink()
+    refs.rmdir()
+    (refs_tmp / "partial.md").unlink()
+    refs_tmp.rmdir()
+
+    checks = oracle.assert_uninstalled(test_scenario)
+
+    assert check_by_relative(checks, ".claude/skills/graphify/.graphify_version") == {
+        "path": str(roots["project"] / ".claude/skills/graphify/.graphify_version"),
+        "ok": True,
+        "detail": "removed",
+        "root": "project",
+        "relative": ".claude/skills/graphify/.graphify_version",
+    }
+    assert check_by_relative(checks, ".claude/skills/graphify/references") == {
+        "path": str(roots["project"] / ".claude/skills/graphify/references"),
+        "ok": True,
+        "detail": "removed",
+        "root": "project",
+        "relative": ".claude/skills/graphify/references",
+    }
+    assert check_by_relative(checks, ".claude/skills/graphify/references.tmp") == {
+        "path": str(roots["project"] / ".claude/skills/graphify/references.tmp"),
+        "ok": True,
+        "detail": "removed",
+        "root": "project",
+        "relative": ".claude/skills/graphify/references.tmp",
+    }
 
 
 def test_is_skill_sidecar_relative_matches_version_and_nested_reference_paths(oracle) -> None:

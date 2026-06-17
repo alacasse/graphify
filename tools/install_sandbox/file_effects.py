@@ -15,6 +15,7 @@ try:
         USER_SENTINEL,
         command_hook_present,
         expected_kind_status,
+        graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
         installed_surface_status,
@@ -25,6 +26,7 @@ try:
         resolve_install_root,
         resolve_install_surface_path,
         text_marker_status,
+        uninstalled_surface_status,
     )
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
@@ -36,6 +38,7 @@ except ImportError:
         USER_SENTINEL,
         command_hook_present,
         expected_kind_status,
+        graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
         installed_surface_status,
@@ -46,6 +49,7 @@ except ImportError:
         resolve_install_root,
         resolve_install_surface_path,
         text_marker_status,
+        uninstalled_surface_status,
     )
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
@@ -346,27 +350,11 @@ class FileEffectOracle:
         return checks
 
     def uninstalled_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        path = self.expected_path(entry)
-        text_expectation = entry.text_expectation
-        if entry.marker and text_expectation.require_user_content_on_uninstall:
-            if path.exists() and path.is_file():
-                text = path.read_text(encoding="utf-8", errors="replace")
-                graphify_removed = self.graphify_section_removed(text, entry)
-                user_preserved = USER_SENTINEL in text
-                return graphify_removed and user_preserved, f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}"
-            return False, "user_content_file_missing"
-        if entry.marker and text_expectation.remove_graphify_section_on_uninstall and path.exists():
-            text = path.read_text(encoding="utf-8", errors="replace")
-            ok = self.graphify_section_removed(text, entry)
-            detail = "graphify_removed; user_content_preserved" if USER_SENTINEL in text else "graphify_removed"
-            return ok, detail
-        ok = not path.exists()
-        return ok, "removed" if ok else "still_exists"
+        status = uninstalled_surface_status(entry, self.roots)
+        return status.ok, status.detail
 
     def graphify_section_removed(self, text: str, entry: InstallSurface) -> bool:
-        marker_removed = not entry.marker or entry.marker not in text
-        stale_removed = not entry.text_expectation.repair_stale_graphify_section or STALE_GRAPHIFY_SENTINEL not in text
-        return marker_removed and stale_removed
+        return graphify_section_removed(text, entry)
 
     def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
         if not self.is_skill_expected(entry):

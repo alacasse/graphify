@@ -350,6 +350,35 @@ def test_uninstall_surface_status_contracts(oracle, roots) -> None:
     assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
 
 
+def test_install_surface_core_resolves_uninstalled_surface_status(roots) -> None:
+    plain = InstallSurface("project", "plain.txt")
+    plain_status = install_surface_core.uninstalled_surface_status(plain, roots)
+
+    assert plain_status.path == roots["project"] / "plain.txt"
+    assert plain_status.ok is True
+    assert plain_status.detail == "removed"
+
+    text_section = section("project", "notes.md", preserve_user_content=True)
+    notes_path = roots["project"] / "notes.md"
+    notes_path.write_text(f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n", encoding="utf-8")
+
+    text_status = install_surface_core.uninstalled_surface_status(text_section, roots)
+
+    assert text_status.path == notes_path
+    assert text_status.ok is True
+    assert text_status.detail == "graphify_removed=True; user_content_preserved=True"
+
+    notes_path.write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+
+    stale_status = install_surface_core.uninstalled_surface_status(text_section, roots)
+
+    assert stale_status.ok is False
+    assert stale_status.detail == "graphify_removed=False; user_content_preserved=True"
+
+
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:
     skill = platform_specs.SkillEffect("project", ".unit/graphify/SKILL.md")
     hooks = platform_specs.JsonHooksEffect(

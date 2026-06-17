@@ -165,3 +165,28 @@ def installed_surface_status(surface: InstallSurface, roots: Mapping[str, Path])
     else:
         ok, detail = text_marker_status(status.path, surface)
     return InstallSurfaceStatus(status.path, ok, detail)
+
+
+def graphify_section_removed(text: str, surface: InstallSurface) -> bool:
+    marker_removed = not surface.marker or surface.marker not in text
+    stale_removed = not surface.text_expectation.repair_stale_graphify_section or STALE_GRAPHIFY_SENTINEL not in text
+    return marker_removed and stale_removed
+
+
+def uninstalled_surface_status(surface: InstallSurface, roots: Mapping[str, Path]) -> InstallSurfaceStatus:
+    path = resolve_install_surface_path(surface, roots)
+    text_expectation = surface.text_expectation
+    if surface.marker and text_expectation.require_user_content_on_uninstall:
+        if path.exists() and path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            graphify_removed = graphify_section_removed(text, surface)
+            user_preserved = USER_SENTINEL in text
+            return InstallSurfaceStatus(path, graphify_removed and user_preserved, f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}")
+        return InstallSurfaceStatus(path, False, "user_content_file_missing")
+    if surface.marker and text_expectation.remove_graphify_section_on_uninstall and path.exists():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        ok = graphify_section_removed(text, surface)
+        detail = "graphify_removed; user_content_preserved" if USER_SENTINEL in text else "graphify_removed"
+        return InstallSurfaceStatus(path, ok, detail)
+    ok = not path.exists()
+    return InstallSurfaceStatus(path, ok, "removed" if ok else "still_exists")

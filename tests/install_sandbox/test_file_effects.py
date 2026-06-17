@@ -150,29 +150,81 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix(tmp_pat
 
     refs_dir = tmp_path / "references"
     absent = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("intentionally_absent", detail="absent refs"))
-    ok, detail = file_effects.reference_sidecar_installed_status(absent, refs_dir, installed_reference_names)
+    ok, detail = install_surface_core.installed_reference_sidecar_status(
+        absent,
+        references_exists=refs_dir.exists(),
+        references_is_dir=refs_dir.is_dir(),
+        installed_names=installed_reference_names(refs_dir),
+    )
     assert ok is True
     assert detail == "intentionally_absent; references_absent; absent refs"
 
     refs_dir.mkdir()
-    ok, detail = file_effects.reference_sidecar_installed_status(absent, refs_dir, installed_reference_names)
+    ok, detail = install_surface_core.installed_reference_sidecar_status(
+        absent,
+        references_exists=refs_dir.exists(),
+        references_is_dir=refs_dir.is_dir(),
+        installed_names=installed_reference_names(refs_dir),
+    )
     assert ok is False
     assert detail == "intentionally_absent; references_present; absent refs"
 
     source_error = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("missing", detail="missing /package/refs"))
-    ok, detail = file_effects.reference_sidecar_installed_status(source_error, refs_dir, installed_reference_names)
+    ok, detail = install_surface_core.installed_reference_sidecar_status(
+        source_error,
+        references_exists=refs_dir.exists(),
+        references_is_dir=refs_dir.is_dir(),
+        installed_names=installed_reference_names(refs_dir),
+    )
     assert ok is False
     assert detail == "missing; missing /package/refs"
 
     expected = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("available", ("query.md",), "available refs"))
-    ok, detail = file_effects.reference_sidecar_installed_status(expected, refs_dir, installed_reference_names)
+    ok, detail = install_surface_core.installed_reference_sidecar_status(
+        expected,
+        references_exists=refs_dir.exists(),
+        references_is_dir=refs_dir.is_dir(),
+        installed_names=installed_reference_names(refs_dir),
+    )
     assert ok is False
     assert "missing=['query.md']" in detail
 
     (refs_dir / "query.md").write_text("query\n", encoding="utf-8")
-    ok, detail = file_effects.reference_sidecar_installed_status(expected, refs_dir, installed_reference_names)
+    ok, detail = install_surface_core.installed_reference_sidecar_status(
+        expected,
+        references_exists=refs_dir.exists(),
+        references_is_dir=refs_dir.is_dir(),
+        installed_names=installed_reference_names(refs_dir),
+    )
     assert ok is True
     assert "status=available" in detail
+
+
+def test_install_surface_core_evaluates_skill_sidecar_status_decisions() -> None:
+    sidecar = platform_specs.SkillSidecarExpectation()
+
+    assert install_surface_core.skill_version_status(None, "9.9.9") == (False, "missing; expected=9.9.9")
+    assert install_surface_core.skill_version_status("9.9.9\n", "9.9.9") == (True, "actual=9.9.9; expected=9.9.9")
+    assert install_surface_core.references_tmp_absence_status(False) == (True, "absent")
+    assert install_surface_core.references_tmp_absence_status(True) == (False, "present")
+    assert install_surface_core.skill_reference_pointer_status(
+        sidecar,
+        "See references/query.md and references/update.md",
+        references_is_dir=True,
+        installed_names=("query.md",),
+    ) == (False, "pointers=['query.md', 'update.md']; missing=['update.md']")
+    assert install_surface_core.skill_reference_pointer_status(
+        sidecar,
+        "See references/query.md",
+        references_is_dir=False,
+        installed_names=(),
+    ) == (False, "references_missing; skill_mentions_references=true; pointers=['query.md']")
+    assert install_surface_core.skill_reference_pointer_status(sidecar, "No pointers here", references_is_dir=False, installed_names=()) == (
+        True,
+        "no_reference_pointers",
+    )
+    assert install_surface_core.uninstalled_skill_sidecar_status(False) == (True, "removed")
+    assert install_surface_core.uninstalled_skill_sidecar_status(True) == (False, "sidecar_still_exists")
 
 
 def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -> None:

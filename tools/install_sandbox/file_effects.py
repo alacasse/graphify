@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,21 +19,27 @@ try:
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
+        installed_reference_sidecar_status,
         installed_surface_status,
         json_expectation_status,
         json_marker_status,
         json_value_contains_marker,
         plugin_config_present,
         reference_sidecar_expectation,
+        references_tmp_absence_status,
         resolve_install_root,
         resolve_install_surface_path,
         skill_dir_for_entry,
+        skill_reference_pointer_status,
+        skill_reference_pointers,
         skill_references_relative,
         skill_references_tmp_relative,
         skill_relative_dir,
         skill_sidecar_expectation,
+        skill_version_status,
         skill_version_relative,
         text_marker_status,
+        uninstalled_skill_sidecar_status,
         uninstalled_surface_status,
     )
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
@@ -52,21 +57,27 @@ except ImportError:
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
+        installed_reference_sidecar_status,
         installed_surface_status,
         json_expectation_status,
         json_marker_status,
         json_value_contains_marker,
         plugin_config_present,
         reference_sidecar_expectation,
+        references_tmp_absence_status,
         resolve_install_root,
         resolve_install_surface_path,
         skill_dir_for_entry,
+        skill_reference_pointer_status,
+        skill_reference_pointers,
         skill_references_relative,
         skill_references_tmp_relative,
         skill_relative_dir,
         skill_sidecar_expectation,
+        skill_version_status,
         skill_version_relative,
         text_marker_status,
+        uninstalled_skill_sidecar_status,
         uninstalled_surface_status,
     )
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
@@ -88,31 +99,6 @@ def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = 
         record["relative"] = relative.as_posix() if isinstance(relative, Path) else relative
     record.update(extra)
     return record
-
-
-def reference_sidecar_installed_status(
-    expectation: ReferenceSidecarExpectation,
-    refs_dir: Path,
-    installed_reference_names: Callable[[Path], list[str]],
-) -> tuple[bool, str]:
-    expected_names = list(expectation.expected_names)
-    if expectation.mode == "absent":
-        refs_ok = not refs_dir.exists()
-        refs_state = "references_absent" if refs_ok else "references_present"
-        return refs_ok, f"{expectation.status}; {refs_state}; {expectation.detail}"
-    if expectation.mode == "source_error":
-        return False, f"{expectation.status}; {expectation.detail}"
-    if not refs_dir.exists():
-        return False, f"references_missing; status={expectation.status}; expected_names={expected_names}; {expectation.detail}"
-    if not refs_dir.is_dir():
-        return False, f"references_not_directory; status={expectation.status}; expected_names={expected_names}; {expectation.detail}"
-
-    actual_names = installed_reference_names(refs_dir)
-    missing = sorted(set(expected_names) - set(actual_names))
-    extra = sorted(set(actual_names) - set(expected_names))
-    refs_ok = not missing and not extra
-    refs_detail = f"status={expectation.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
-    return refs_ok, refs_detail
 
 
 @dataclass(frozen=True)
@@ -175,7 +161,7 @@ class FileEffectOracle:
         return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
 
     def skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> list[str]:
-        return sorted(set(re.findall(self.skill_sidecar_expectation(entry).reference_pointer_pattern, skill_text)))
+        return skill_reference_pointers(self.skill_sidecar_expectation(entry), skill_text)
 
     # Skill sidecar checks
     def check_skill_version(self, entry: InstallSurface) -> dict[str, object]:
@@ -183,23 +169,19 @@ class FileEffectOracle:
         version_path = skill_dir / self.skill_sidecar_expectation(entry).version_name
         version_relative = self.skill_version_relative(entry)
         expected_version = self.expected_graphify_version()
-        if version_path.exists():
-            actual_version = version_path.read_text(encoding="utf-8", errors="replace").strip()
-            version_ok = actual_version == expected_version
-            version_detail = f"actual={actual_version}; expected={expected_version}"
-        else:
-            version_ok = False
-            version_detail = f"missing; expected={expected_version}"
+        version_text = version_path.read_text(encoding="utf-8", errors="replace") if version_path.exists() else None
+        version_ok, version_detail = skill_version_status(version_text, expected_version)
         return self.skill_assertion_record(entry, version_relative, version_ok, version_detail)
 
     def check_references_tmp_absent(self, entry: InstallSurface) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
         refs_tmp = skill_dir / self.skill_sidecar_expectation(entry).references_tmp_dir
+        tmp_ok, tmp_detail = references_tmp_absence_status(refs_tmp.exists())
         return self.skill_assertion_record(
             entry,
             self.skill_references_tmp_relative(entry),
-            not refs_tmp.exists(),
-            "absent" if not refs_tmp.exists() else "present",
+            tmp_ok,
+            tmp_detail,
         )
 
     def check_packaged_references(self, scenario: Scenario, entry: InstallSurface) -> dict[str, object]:
@@ -207,24 +189,23 @@ class FileEffectOracle:
         refs_dir = skill_dir / self.skill_sidecar_expectation(entry).references_dir
         refs_relative = self.skill_references_relative(entry)
         expectation = self.reference_sidecar_expectation(scenario)
-        refs_ok, refs_detail = reference_sidecar_installed_status(expectation, refs_dir, self.installed_reference_names)
+        refs_ok, refs_detail = installed_reference_sidecar_status(
+            expectation,
+            references_exists=refs_dir.exists(),
+            references_is_dir=refs_dir.is_dir(),
+            installed_names=self.installed_reference_names(refs_dir),
+        )
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
     def check_skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> dict[str, object]:
         sidecar = self.skill_sidecar_expectation(entry)
-        mentions_references = bool(re.search(sidecar.reference_pointer_pattern, skill_text)) or f"{sidecar.references_dir}/" in skill_text
-        pointers = self.skill_reference_pointers(entry, skill_text)
         refs_dir = self.skill_dir_for_entry(entry) / sidecar.references_dir
-        if mentions_references and not refs_dir.is_dir():
-            pointer_ok = False
-            pointer_detail = f"{sidecar.references_dir}_missing; skill_mentions_references=true; pointers={pointers}"
-        elif pointers:
-            missing_pointers = [name for name in pointers if not (refs_dir / name).is_file()]
-            pointer_ok = not missing_pointers
-            pointer_detail = f"pointers={pointers}; missing={missing_pointers}"
-        else:
-            pointer_ok = True
-            pointer_detail = "no_reference_pointers"
+        pointer_ok, pointer_detail = skill_reference_pointer_status(
+            sidecar,
+            skill_text,
+            references_is_dir=refs_dir.is_dir(),
+            installed_names=self.installed_reference_names(refs_dir),
+        )
         return self.skill_assertion_record(entry, Path(entry.relative), pointer_ok, pointer_detail)
 
     def assert_installed_skill_sidecar(self, scenario: Scenario, entry: InstallSurface) -> list[dict[str, object]]:
@@ -339,12 +320,12 @@ class FileEffectOracle:
         checks: list[dict[str, object]] = []
         for relative in (self.skill_version_relative(entry), self.skill_references_relative(entry), self.skill_references_tmp_relative(entry)):
             sidecar_path = self.root_path(entry.root) / relative
-            sidecar_ok = not sidecar_path.exists()
+            sidecar_ok, sidecar_detail = uninstalled_skill_sidecar_status(sidecar_path.exists())
             checks.append(
                 check_record(
                     sidecar_path,
                     sidecar_ok,
-                    "removed" if sidecar_ok else "sidecar_still_exists",
+                    sidecar_detail,
                     root=entry.root,
                     relative=relative,
                 )

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from pathlib import Path
@@ -731,7 +732,10 @@ def _find_vcs_root(start: Path) -> Path | None:
     """Walk upward from start; return the first directory containing a VCS marker."""
     current = start.resolve()
     home = Path.home()
+    temp_root = Path(tempfile.gettempdir()).resolve()
     while True:
+        if current == temp_root:
+            return None
         if any((current / m).exists() for m in _VCS_MARKERS):
             return current
         parent = current.parent

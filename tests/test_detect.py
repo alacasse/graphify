@@ -172,6 +172,26 @@ def test_graphifyignore_hermetic_without_vcs(tmp_path):
     assert result["graphifyignore_patterns"] == 0
 
 
+def test_graphifyignore_hermetic_ignores_tempdir_vcs_marker(tmp_path, monkeypatch):
+    """A stray VCS marker at the system temp root must not own temp fixtures."""
+    monkeypatch.setattr(detect_mod.tempfile, "gettempdir", lambda: str(tmp_path))
+    (tmp_path / ".git").mkdir()
+    parent = tmp_path / "case"
+    parent.mkdir()
+    (parent / ".graphifyignore").write_text("vendor/\n")
+    sub = parent / "packages" / "mylib"
+    sub.mkdir(parents=True)
+    (sub / "main.py").write_text("x = 1")
+    vendor = sub / "vendor"
+    vendor.mkdir()
+    (vendor / "dep.py").write_text("y = 2")
+
+    result = detect(sub)
+
+    assert any("vendor" in f for f in result["files"]["code"])
+    assert result["graphifyignore_patterns"] == 0
+
+
 def test_graphifyignore_discovered_from_parent_in_vcs(tmp_path):
     """Inside a VCS repo, parent .graphifyignore applies to subdirectory scans."""
     (tmp_path / ".git").mkdir()

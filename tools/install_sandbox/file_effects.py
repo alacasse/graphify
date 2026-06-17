@@ -13,6 +13,7 @@ try:
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         InstallSurfaceObservation,
+        UninstallSurfaceObservation,
         ReferenceSidecarExpectation,
         GeneratedFileDecision,
         command_hook_present,
@@ -61,7 +62,7 @@ try:
         text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
-        uninstalled_surface_status,
+        uninstalled_surface_status_from_observation,
         user_content_seed_plans,
     )
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
@@ -73,6 +74,7 @@ except ImportError:
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         InstallSurfaceObservation,
+        UninstallSurfaceObservation,
         ReferenceSidecarExpectation,
         GeneratedFileDecision,
         command_hook_present,
@@ -121,7 +123,7 @@ except ImportError:
         text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
-        uninstalled_surface_status,
+        uninstalled_surface_status_from_observation,
         user_content_seed_plans,
     )
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
@@ -396,8 +398,40 @@ class FileEffectOracle:
             checks.extend(self.assert_installed_skill_sidecar(scenario, entry))
         return checks
 
+    def uninstalled_surface_observation(self, entry: InstallSurface) -> UninstallSurfaceObservation:
+        path = self.expected_path(entry)
+        base = UninstallSurfaceObservation(
+            path=path,
+            exists=path.exists(),
+            is_file=path.is_file(),
+            is_dir=path.is_dir(),
+        )
+        text_expectation = entry.text_expectation
+        if entry.marker and text_expectation.require_user_content_on_uninstall:
+            if not (base.exists and base.is_file):
+                return base
+        elif not (entry.marker and text_expectation.remove_graphify_section_on_uninstall and base.exists):
+            return base
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return UninstallSurfaceObservation(
+                path=path,
+                exists=base.exists,
+                is_file=base.is_file,
+                is_dir=base.is_dir,
+                text_error_detail=f"text_read_failed={exc}",
+            )
+        return UninstallSurfaceObservation(
+            path=path,
+            exists=base.exists,
+            is_file=base.is_file,
+            is_dir=base.is_dir,
+            text=text,
+        )
+
     def uninstalled_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        status = uninstalled_surface_status(entry, self.roots)
+        status = uninstalled_surface_status_from_observation(entry, self.uninstalled_surface_observation(entry))
         return status.ok, status.detail
 
     def graphify_section_removed(self, text: str, entry: InstallSurface) -> bool:

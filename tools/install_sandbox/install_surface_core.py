@@ -61,6 +61,16 @@ class InstallSurfaceObservation:
 
 
 @dataclass(frozen=True)
+class UninstallSurfaceObservation:
+    path: Path
+    exists: bool
+    is_file: bool = False
+    is_dir: bool = False
+    text: str | None = None
+    text_error_detail: str | None = None
+
+
+@dataclass(frozen=True)
 class GeneratedFileObservation:
     root_name: str
     relative: Path
@@ -768,23 +778,83 @@ def graphify_section_removed(text: str, surface: InstallSurface) -> bool:
     return marker_removed and stale_removed
 
 
+def uninstalled_surface_status_from_observation(
+    surface: InstallSurface,
+    observation: UninstallSurfaceObservation,
+) -> InstallSurfaceStatus:
+    text_expectation = surface.text_expectation
+    if surface.marker and text_expectation.require_user_content_on_uninstall:
+        if observation.exists and observation.is_file:
+            if observation.text_error_detail is not None:
+                return InstallSurfaceStatus(observation.path, False, observation.text_error_detail)
+            if observation.text is None:
+                raise AssertionError(f"uninstall text observation has no data: {observation.path}")
+            graphify_removed = graphify_section_removed(observation.text, surface)
+            user_preserved = USER_SENTINEL in observation.text
+            return InstallSurfaceStatus(
+                observation.path,
+                graphify_removed and user_preserved,
+                f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}",
+            )
+        return InstallSurfaceStatus(observation.path, False, "user_content_file_missing")
+    if surface.marker and text_expectation.remove_graphify_section_on_uninstall and observation.exists:
+        if observation.text_error_detail is not None:
+            return InstallSurfaceStatus(observation.path, False, observation.text_error_detail)
+        if observation.text is None:
+            raise AssertionError(f"uninstall text observation has no data: {observation.path}")
+        ok = graphify_section_removed(observation.text, surface)
+        detail = "graphify_removed; user_content_preserved" if USER_SENTINEL in observation.text else "graphify_removed"
+        return InstallSurfaceStatus(observation.path, ok, detail)
+    ok = not observation.exists
+    return InstallSurfaceStatus(observation.path, ok, "removed" if ok else "still_exists")
+
+
 def uninstalled_surface_status(surface: InstallSurface, roots: Mapping[str, Path]) -> InstallSurfaceStatus:
     path = resolve_install_surface_path(surface, roots)
     text_expectation = surface.text_expectation
     if surface.marker and text_expectation.require_user_content_on_uninstall:
         if path.exists() and path.is_file():
             text = path.read_text(encoding="utf-8", errors="replace")
-            graphify_removed = graphify_section_removed(text, surface)
-            user_preserved = USER_SENTINEL in text
-            return InstallSurfaceStatus(path, graphify_removed and user_preserved, f"graphify_removed={graphify_removed}; user_content_preserved={user_preserved}")
-        return InstallSurfaceStatus(path, False, "user_content_file_missing")
+            return uninstalled_surface_status_from_observation(
+                surface,
+                UninstallSurfaceObservation(
+                    path=path,
+                    exists=True,
+                    is_file=True,
+                    is_dir=False,
+                    text=text,
+                ),
+            )
+        return uninstalled_surface_status_from_observation(
+            surface,
+            UninstallSurfaceObservation(
+                path=path,
+                exists=path.exists(),
+                is_file=path.is_file(),
+                is_dir=path.is_dir(),
+            ),
+        )
     if surface.marker and text_expectation.remove_graphify_section_on_uninstall and path.exists():
         text = path.read_text(encoding="utf-8", errors="replace")
-        ok = graphify_section_removed(text, surface)
-        detail = "graphify_removed; user_content_preserved" if USER_SENTINEL in text else "graphify_removed"
-        return InstallSurfaceStatus(path, ok, detail)
-    ok = not path.exists()
-    return InstallSurfaceStatus(path, ok, "removed" if ok else "still_exists")
+        return uninstalled_surface_status_from_observation(
+            surface,
+            UninstallSurfaceObservation(
+                path=path,
+                exists=True,
+                is_file=path.is_file(),
+                is_dir=path.is_dir(),
+                text=text,
+            ),
+        )
+    return uninstalled_surface_status_from_observation(
+        surface,
+        UninstallSurfaceObservation(
+            path=path,
+            exists=path.exists(),
+            is_file=path.is_file(),
+            is_dir=path.is_dir(),
+        ),
+    )
 
 
 def file_fingerprint(path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:

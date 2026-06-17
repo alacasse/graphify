@@ -1059,6 +1059,112 @@ def test_install_surface_core_resolves_uninstalled_surface_status(roots) -> None
     assert stale_status.detail == "graphify_removed=False; user_content_preserved=True"
 
 
+def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -> None:
+    plain = InstallSurface("project", "plain.txt")
+
+    removed_status = install_surface_core.uninstalled_surface_status_from_observation(
+        plain,
+        install_surface_core.UninstallSurfaceObservation(
+            path=Path("/observed/plain.txt"),
+            exists=False,
+        ),
+    )
+
+    assert removed_status == install_surface_core.InstallSurfaceStatus(
+        Path("/observed/plain.txt"),
+        ok=True,
+        detail="removed",
+    )
+
+    still_exists_status = install_surface_core.uninstalled_surface_status_from_observation(
+        plain,
+        install_surface_core.UninstallSurfaceObservation(
+            path=Path("/observed/plain.txt"),
+            exists=True,
+            is_file=True,
+            text="still here\n",
+        ),
+    )
+
+    assert still_exists_status.ok is False
+    assert still_exists_status.detail == "still_exists"
+
+    preserved_text = section("project", "notes.md", preserve_user_content=True)
+    preserved_status = install_surface_core.uninstalled_surface_status_from_observation(
+        preserved_text,
+        install_surface_core.UninstallSurfaceObservation(
+            path=Path("/observed/notes.md"),
+            exists=True,
+            is_file=True,
+            text=f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n",
+        ),
+    )
+
+    assert preserved_status.ok is True
+    assert preserved_status.detail == "graphify_removed=True; user_content_preserved=True"
+
+    stale_status = install_surface_core.uninstalled_surface_status_from_observation(
+        preserved_text,
+        install_surface_core.UninstallSurfaceObservation(
+            path=Path("/observed/notes.md"),
+            exists=True,
+            is_file=True,
+            text=f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        ),
+    )
+
+    assert stale_status.ok is False
+    assert stale_status.detail == "graphify_removed=False; user_content_preserved=True"
+
+    missing_user_content_status = install_surface_core.uninstalled_surface_status_from_observation(
+        preserved_text,
+        install_surface_core.UninstallSurfaceObservation(
+            path=Path("/observed/notes.md"),
+            exists=False,
+        ),
+    )
+
+    assert missing_user_content_status.ok is False
+    assert missing_user_content_status.detail == "user_content_file_missing"
+
+    read_error_status = install_surface_core.uninstalled_surface_status_from_observation(
+        preserved_text,
+        install_surface_core.UninstallSurfaceObservation(
+            path=Path("/observed/notes.md"),
+            exists=True,
+            is_file=True,
+            text_error_detail="text_read_failed=permission denied",
+        ),
+    )
+
+    assert read_error_status.ok is False
+    assert read_error_status.detail == "text_read_failed=permission denied"
+
+
+def test_oracle_routes_uninstalled_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
+    surface = section("project", "notes.md", preserve_user_content=True)
+    path = roots["project"] / "notes.md"
+    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n"
+    path.write_text(text, encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def decide_from_observation(entry, observation):
+        captured["entry"] = entry
+        captured["observation"] = observation
+        return install_surface_core.InstallSurfaceStatus(observation.path, True, "observed_by_core")
+
+    monkeypatch.setattr(file_effects, "uninstalled_surface_status_from_observation", decide_from_observation)
+
+    assert oracle.uninstalled_entry_status(surface) == (True, "observed_by_core")
+    assert captured["entry"] is surface
+    observation = captured["observation"]
+    assert isinstance(observation, install_surface_core.UninstallSurfaceObservation)
+    assert observation.path == path
+    assert observation.exists is True
+    assert observation.is_file is True
+    assert observation.text == text
+
+
 def test_oracle_renders_uninstalled_surface_observations_as_assertion_records(oracle, roots) -> None:
     plain = InstallSurface("project", "plain.txt")
     preserved_text = section("project", "notes.md", preserve_user_content=True)

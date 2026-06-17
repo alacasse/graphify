@@ -205,6 +205,21 @@ def expected_skill_sidecar_relatives(surface: InstallSurface, resolution: Packag
     return relatives
 
 
+def expected_manifest_relatives(
+    surfaces: Iterable[InstallSurface],
+    resolution: PackagedReferenceResolution,
+    root_name: str,
+) -> set[Path]:
+    relatives: set[Path] = set()
+    for surface in surfaces:
+        if surface.root != root_name:
+            continue
+        relatives.add(Path(surface.relative))
+        if is_skill_effect(surface):
+            relatives.update(expected_skill_sidecar_relatives(surface, resolution))
+    return relatives
+
+
 def _planned_state_entries(
     expected: Iterable[InstallSurface],
     resolution: PackagedReferenceResolution,

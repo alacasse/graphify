@@ -560,6 +560,35 @@ def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_reso
         install_surface_core.skill_sidecar_expectation(InstallSurface("project", "notes.md"))
 
 
+def test_install_surface_core_derives_expected_manifest_relatives_for_root() -> None:
+    project_notes = InstallSurface("project", "AGENTS.md")
+    project_skill = expected_skill("project", ".claude/skills/graphify/SKILL.md")
+    home_skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
+
+    assert install_surface_core.expected_manifest_relatives(
+        (project_notes, project_skill, home_skill),
+        resolution("available", ("query.md", "update.md")),
+        "project",
+    ) == {
+        Path("AGENTS.md"),
+        Path(".claude/skills/graphify/SKILL.md"),
+        Path(".claude/skills/graphify/.graphify_version"),
+        Path(".claude/skills/graphify/references.tmp"),
+        Path(".claude/skills/graphify/references"),
+        Path(".claude/skills/graphify/references/query.md"),
+        Path(".claude/skills/graphify/references/update.md"),
+    }
+    assert install_surface_core.expected_manifest_relatives(
+        (project_notes, project_skill, home_skill),
+        resolution("intentionally_absent"),
+        "home",
+    ) == {
+        Path(".codex/skills/graphify/SKILL.md"),
+        Path(".codex/skills/graphify/.graphify_version"),
+        Path(".codex/skills/graphify/references.tmp"),
+    }
+
+
 @pytest.mark.parametrize(
     ("platform", "expected_relatives"),
     [

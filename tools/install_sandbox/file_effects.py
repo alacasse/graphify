@@ -16,6 +16,7 @@ try:
         command_hook_present,
         decide_generated_file_observation,
         expected_kind_status,
+        expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
         file_fingerprint,
@@ -70,6 +71,7 @@ except ImportError:
         command_hook_present,
         decide_generated_file_observation,
         expected_kind_status,
+        expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
         file_fingerprint,
@@ -294,15 +296,11 @@ class FileEffectOracle:
         return seeded
 
     def expected_manifest_relatives(self, scenario: Scenario, root_name: str) -> set[Path]:
-        relatives: set[Path] = set()
-        for entry in scenario.expected:
-            if entry.root != root_name:
-                continue
-            relative = Path(entry.relative)
-            relatives.add(relative)
-            if self.is_skill_expected(entry):
-                relatives.update(self.expected_skill_sidecar_relatives(scenario, entry))
-        return relatives
+        return core_expected_manifest_relatives(
+            scenario.expected,
+            self.packaged_reference_resolution(scenario.platform),
+            root_name,
+        )
 
     # User content seeding
     def should_seed_user_content(self, entry: InstallSurface) -> bool:

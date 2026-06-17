@@ -880,11 +880,11 @@ def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) ->
     assert status.detail == "file"
 
 
-def test_installed_surface_status_path_reading_compatibility_wrapper_matches_observation_decision(roots) -> None:
+def test_installed_surface_status_observation_helper_preserves_paths_and_details(roots) -> None:
     missing = InstallSurface("project", "missing.txt")
     missing_path = roots["project"] / "missing.txt"
 
-    assert install_surface_core.installed_surface_status(missing, roots) == install_surface_core.installed_surface_status_from_observation(
+    assert install_surface_core.installed_surface_status_from_observation(
         missing,
         install_surface_core.InstallSurfaceObservation(
             path=missing_path,
@@ -897,12 +897,8 @@ def test_installed_surface_status_path_reading_compatibility_wrapper_matches_obs
     text_surface = section("project", "notes.md", preserve_user_content=True)
     text_path = roots["project"] / "notes.md"
     text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
-    text_path.write_text(
-        text,
-        encoding="utf-8",
-    )
 
-    assert install_surface_core.installed_surface_status(text_surface, roots) == install_surface_core.installed_surface_status_from_observation(
+    assert install_surface_core.installed_surface_status_from_observation(
         text_surface,
         install_surface_core.InstallSurfaceObservation(
             path=text_path,
@@ -916,9 +912,8 @@ def test_installed_surface_status_path_reading_compatibility_wrapper_matches_obs
     json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
     json_path = roots["project"] / "settings.json"
     json_data = {"hooks": [{"command": "graphify query"}]}
-    json_path.write_text(json.dumps(json_data), encoding="utf-8")
 
-    assert install_surface_core.installed_surface_status(json_surface, roots) == install_surface_core.installed_surface_status_from_observation(
+    assert install_surface_core.installed_surface_status_from_observation(
         json_surface,
         install_surface_core.InstallSurfaceObservation(
             path=json_path,
@@ -1144,7 +1139,10 @@ def test_oracle_renders_installed_surface_observations_as_assertion_records(orac
     test_scenario = scenario("unit", missing, wrong_kind, text_surface, registered_json)
 
     decisions = [
-        install_surface_core.installed_surface_status(surface, roots)
+        install_surface_core.installed_surface_status_from_observation(
+            surface,
+            oracle.installed_surface_observation(surface),
+        )
         for surface in test_scenario.expected
     ]
     checks = oracle.assert_expected_files(test_scenario)
@@ -1349,11 +1347,11 @@ def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -
 # preferred core tests should target observation-shaped helpers above.
 
 
-def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_observation_decision(roots) -> None:
+def test_uninstalled_surface_status_observation_helper_preserves_paths_and_details(roots) -> None:
     plain = InstallSurface("project", "plain.txt")
     plain_path = roots["project"] / "plain.txt"
 
-    assert install_surface_core.uninstalled_surface_status(plain, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+    assert install_surface_core.uninstalled_surface_status_from_observation(
         plain,
         install_surface_core.UninstallSurfaceObservation(
             path=plain_path,
@@ -1366,9 +1364,8 @@ def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_o
     text_section = section("project", "notes.md", preserve_user_content=True)
     notes_path = roots["project"] / "notes.md"
     preserved_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n"
-    notes_path.write_text(preserved_text, encoding="utf-8")
 
-    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+    assert install_surface_core.uninstalled_surface_status_from_observation(
         text_section,
         install_surface_core.UninstallSurfaceObservation(
             path=notes_path,
@@ -1380,12 +1377,8 @@ def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_o
     )
 
     stale_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
-    notes_path.write_text(
-        stale_text,
-        encoding="utf-8",
-    )
 
-    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+    assert install_surface_core.uninstalled_surface_status_from_observation(
         text_section,
         install_surface_core.UninstallSurfaceObservation(
             path=notes_path,
@@ -1480,7 +1473,10 @@ def test_oracle_renders_uninstalled_surface_observations_as_assertion_records(or
     test_scenario = scenario("unit", plain, preserved_text, repaired_text, kept)
 
     decisions = [
-        install_surface_core.uninstalled_surface_status(surface, roots)
+        install_surface_core.uninstalled_surface_status_from_observation(
+            surface,
+            oracle.uninstalled_surface_observation(surface),
+        )
         for surface in (plain, preserved_text, repaired_text)
     ]
     checks = oracle.assert_uninstalled(test_scenario)

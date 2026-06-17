@@ -9,6 +9,7 @@ try:
     from .expected_effects import (
         ExpectedPath,
         FileEffect,
+        InstallSurface,
         JsonExpectation,
         JsonHookExpectation,
         JsonHooksEffect,
@@ -23,6 +24,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
     from expected_effects import (  # type: ignore[no-redef]
         ExpectedPath,
         FileEffect,
+        InstallSurface,
         JsonExpectation,
         JsonHookExpectation,
         JsonHooksEffect,
@@ -124,7 +126,7 @@ class Scenario:
     install_command: tuple[str, ...]
     uninstall_command: tuple[str, ...] | None
     cwd_root: str
-    expected: tuple[ExpectedPath, ...]
+    expected: tuple[InstallSurface, ...]
     risk_notes: tuple[str, ...] = field(default_factory=tuple)
     allowed_roots: tuple[str, ...] = ()
     generated_file_expectation: GeneratedFileExpectation = field(default_factory=GeneratedFileExpectation)
@@ -135,7 +137,7 @@ class ScopeSpec:
     install_command: tuple[str, ...]
     uninstall_command: tuple[str, ...] | None
     cwd_root: str
-    expected: tuple[ExpectedPath, ...]
+    expected: tuple[InstallSurface, ...]
     risk_notes: tuple[str, ...] = field(default_factory=tuple)
     equivalent_install_command: tuple[str, ...] | None = None
     install_variants: tuple[InstallCommandVariant, ...] = ()
@@ -208,14 +210,14 @@ def _declared_install_variants(
     return tuple(variants)
 
 
-def _skill(root: str, relative: str) -> ExpectedPath:
+def _skill(root: str, relative: str) -> InstallSurface:
     return SkillEffect(root, relative)
 
 
 def _scenario(
     platform_name: str,
     scope: str,
-    expected: tuple[ExpectedPath, ...],
+    expected: tuple[InstallSurface, ...],
     *,
     install_command: tuple[str, ...] | None = None,
     uninstall_command: tuple[str, ...] | None | Literal["generic"] = "generic",
@@ -274,13 +276,13 @@ class ScenarioRegistry:
             raise RuntimeError(f"unknown sandbox platform(s): {', '.join(str(name) for name in unknown)}")
         return [str(name) for name in platforms]
 
-    def user_skill(self, platform_name: str) -> ExpectedPath:
+    def user_skill(self, platform_name: str) -> InstallSurface:
         skill = self.platform_spec(platform_name).user_skill
         if skill is None:
             raise RuntimeError(f"sandbox platform has no user skill path: {platform_name}")
         return _skill("home", skill)
 
-    def project_skill(self, platform_name: str) -> ExpectedPath:
+    def project_skill(self, platform_name: str) -> InstallSurface:
         skill = self.platform_spec(platform_name).project_skill
         if skill is None:
             raise RuntimeError(f"sandbox platform has no project skill path: {platform_name}")
@@ -533,11 +535,11 @@ def platform_spec(platform_name: str) -> PlatformSpec:
     return _load_default_scenario_registry().platform_spec(platform_name)
 
 
-def user_skill(platform_name: str) -> ExpectedPath:
+def user_skill(platform_name: str) -> InstallSurface:
     return _load_default_scenario_registry().user_skill(platform_name)
 
 
-def project_skill(platform_name: str) -> ExpectedPath:
+def project_skill(platform_name: str) -> InstallSurface:
     return _load_default_scenario_registry().project_skill(platform_name)
 
 

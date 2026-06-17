@@ -13,7 +13,7 @@ def _scope(relative: str = "graphify.txt") -> platform_specs.ScopeSpec:
         install_command=("graphify", "install"),
         uninstall_command=("graphify", "uninstall"),
         cwd_root="project",
-        expected=(platform_specs.ExpectedPath("project", relative),),
+        expected=(platform_specs.InstallSurface("project", relative),),
     )
 
 
@@ -59,13 +59,13 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
                         install_command=("install", "zeta-user"),
                         uninstall_command=None,
                         cwd_root="user_cwd",
-                        expected=(platform_specs.ExpectedPath("home", "zeta-user.txt"),),
+                        expected=(platform_specs.InstallSurface("home", "zeta-user.txt"),),
                     ),
                     "project": platform_specs.ScopeSpec(
                         install_command=("install", "zeta-project"),
                         uninstall_command=None,
                         cwd_root="project",
-                        expected=(platform_specs.ExpectedPath("project", "zeta-project.txt"),),
+                        expected=(platform_specs.InstallSurface("project", "zeta-project.txt"),),
                     ),
                 },
             ),
@@ -76,7 +76,7 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
                         install_command=("install", "alpha-project"),
                         uninstall_command=None,
                         cwd_root="project",
-                        expected=(platform_specs.ExpectedPath("project", "alpha-project.txt"),),
+                        expected=(platform_specs.InstallSurface("project", "alpha-project.txt"),),
                     )
                 },
                 unsupported_scopes={"user": "not supported"},

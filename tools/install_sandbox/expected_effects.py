@@ -87,7 +87,8 @@ class JsonPluginEffect(FileEffect):
     marker: str | None = "graphify"
 
 
-ExpectedPath = FileEffect
+InstallSurface = FileEffect
+ExpectedPath = InstallSurface
 
 
 def _has_text_section_policy(effect: FileEffect) -> bool:

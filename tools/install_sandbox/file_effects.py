@@ -12,13 +12,13 @@ try:
     from .expected_effects import is_json_effect, is_skill_effect, is_text_section_effect
     from .file_walk import pruned_file_walk
     from .json_helpers import object_dict, object_dicts, object_list
-    from .platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
+    from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
     from expected_effects import is_json_effect, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from json_helpers import object_dict, object_dicts, object_list
-    from platform_specs import ExpectedPath, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
+    from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 
 
@@ -177,36 +177,36 @@ class FileEffectOracle:
         except KeyError as exc:
             raise AssertionError(f"unknown root: {root}") from exc
 
-    def expected_path(self, entry: ExpectedPath) -> Path:
+    def expected_path(self, entry: InstallSurface) -> Path:
         return self.root_path(entry.root) / entry.relative
 
-    def is_skill_expected(self, entry: ExpectedPath) -> bool:
+    def is_skill_expected(self, entry: InstallSurface) -> bool:
         return is_skill_effect(entry)
 
-    def skill_sidecar_expectation(self, entry: ExpectedPath) -> SkillSidecarExpectation:
+    def skill_sidecar_expectation(self, entry: InstallSurface) -> SkillSidecarExpectation:
         if entry.skill_sidecar_expectation is None:
             raise AssertionError(f"expected path has no skill sidecar expectation: {entry.root}/{entry.relative}")
         return entry.skill_sidecar_expectation
 
-    def skill_dir_for_entry(self, entry: ExpectedPath) -> Path:
+    def skill_dir_for_entry(self, entry: InstallSurface) -> Path:
         return self.expected_path(entry).parent
 
-    def skill_relative_dir(self, entry: ExpectedPath) -> Path:
+    def skill_relative_dir(self, entry: InstallSurface) -> Path:
         return Path(entry.relative).parent
 
-    def skill_assertion_record(self, entry: ExpectedPath, relative: Path, ok: bool, detail: str) -> dict[str, object]:
+    def skill_assertion_record(self, entry: InstallSurface, relative: Path, ok: bool, detail: str) -> dict[str, object]:
         return check_record(self.root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
 
-    def skill_version_relative(self, entry: ExpectedPath) -> Path:
+    def skill_version_relative(self, entry: InstallSurface) -> Path:
         return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).version_name
 
-    def skill_references_relative(self, entry: ExpectedPath) -> Path:
+    def skill_references_relative(self, entry: InstallSurface) -> Path:
         return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).references_dir
 
-    def skill_references_tmp_relative(self, entry: ExpectedPath) -> Path:
+    def skill_references_tmp_relative(self, entry: InstallSurface) -> Path:
         return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).references_tmp_dir
 
-    def expected_skill_sidecar_relatives(self, scenario: Scenario, entry: ExpectedPath) -> set[Path]:
+    def expected_skill_sidecar_relatives(self, scenario: Scenario, entry: InstallSurface) -> set[Path]:
         sidecar = self.skill_sidecar_expectation(entry)
         relatives = {
             self.skill_version_relative(entry),
@@ -215,14 +215,14 @@ class FileEffectOracle:
         relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(self.skill_relative_dir(entry), sidecar))
         return relatives
 
-    def installed_skill_reference_relatives(self, entry: ExpectedPath) -> set[Path]:
+    def installed_skill_reference_relatives(self, entry: InstallSurface) -> set[Path]:
         refs_dir = self.skill_dir_for_entry(entry) / self.skill_sidecar_expectation(entry).references_dir
         refs_relative = self.skill_references_relative(entry)
         if not refs_dir.is_dir():
             return set()
         return {refs_relative / path.name for path in refs_dir.glob("*.md") if path.is_file()}
 
-    def tracked_skill_sidecar_relatives(self, scenario: Scenario, entry: ExpectedPath) -> set[Path]:
+    def tracked_skill_sidecar_relatives(self, scenario: Scenario, entry: InstallSurface) -> set[Path]:
         return self.expected_skill_sidecar_relatives(scenario, entry) | self.installed_skill_reference_relatives(entry)
 
     def reference_sidecar_expectation(self, scenario: Scenario) -> ReferenceSidecarExpectation:
@@ -233,11 +233,11 @@ class FileEffectOracle:
             return []
         return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
 
-    def skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> list[str]:
+    def skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> list[str]:
         return sorted(set(re.findall(self.skill_sidecar_expectation(entry).reference_pointer_pattern, skill_text)))
 
     # Skill sidecar checks
-    def check_skill_version(self, entry: ExpectedPath) -> dict[str, object]:
+    def check_skill_version(self, entry: InstallSurface) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
         version_path = skill_dir / self.skill_sidecar_expectation(entry).version_name
         version_relative = self.skill_version_relative(entry)
@@ -251,7 +251,7 @@ class FileEffectOracle:
             version_detail = f"missing; expected={expected_version}"
         return self.skill_assertion_record(entry, version_relative, version_ok, version_detail)
 
-    def check_references_tmp_absent(self, entry: ExpectedPath) -> dict[str, object]:
+    def check_references_tmp_absent(self, entry: InstallSurface) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
         refs_tmp = skill_dir / self.skill_sidecar_expectation(entry).references_tmp_dir
         return self.skill_assertion_record(
@@ -261,7 +261,7 @@ class FileEffectOracle:
             "absent" if not refs_tmp.exists() else "present",
         )
 
-    def check_packaged_references(self, scenario: Scenario, entry: ExpectedPath) -> dict[str, object]:
+    def check_packaged_references(self, scenario: Scenario, entry: InstallSurface) -> dict[str, object]:
         skill_dir = self.skill_dir_for_entry(entry)
         refs_dir = skill_dir / self.skill_sidecar_expectation(entry).references_dir
         refs_relative = self.skill_references_relative(entry)
@@ -269,7 +269,7 @@ class FileEffectOracle:
         refs_ok, refs_detail = expectation.check_installed(refs_dir, self.installed_reference_names)
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
-    def check_skill_reference_pointers(self, entry: ExpectedPath, skill_text: str) -> dict[str, object]:
+    def check_skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> dict[str, object]:
         sidecar = self.skill_sidecar_expectation(entry)
         mentions_references = bool(re.search(sidecar.reference_pointer_pattern, skill_text)) or f"{sidecar.references_dir}/" in skill_text
         pointers = self.skill_reference_pointers(entry, skill_text)
@@ -286,7 +286,7 @@ class FileEffectOracle:
             pointer_detail = "no_reference_pointers"
         return self.skill_assertion_record(entry, Path(entry.relative), pointer_ok, pointer_detail)
 
-    def assert_installed_skill_sidecar(self, scenario: Scenario, entry: ExpectedPath) -> list[dict[str, object]]:
+    def assert_installed_skill_sidecar(self, scenario: Scenario, entry: InstallSurface) -> list[dict[str, object]]:
         if not self.is_skill_expected(entry):
             return []
 
@@ -305,8 +305,8 @@ class FileEffectOracle:
             checks.extend(self.assert_installed_skill_sidecar(scenario, entry))
         return checks
 
-    def progressive_skill_entries(self, scenario: Scenario) -> list[ExpectedPath]:
-        entries: list[ExpectedPath] = []
+    def progressive_skill_entries(self, scenario: Scenario) -> list[InstallSurface]:
+        entries: list[InstallSurface] = []
         expectation = self.reference_sidecar_expectation(scenario)
         for entry in scenario.expected:
             if self.is_skill_expected(entry) and expectation.includes_reference_dir:
@@ -342,13 +342,13 @@ class FileEffectOracle:
         return relatives
 
     # User content seeding
-    def should_seed_user_content(self, entry: ExpectedPath) -> bool:
+    def should_seed_user_content(self, entry: InstallSurface) -> bool:
         return is_text_section_effect(entry) and entry.text_expectation.preserve_user_content
 
-    def should_seed_stale_graphify_section(self, entry: ExpectedPath) -> bool:
+    def should_seed_stale_graphify_section(self, entry: InstallSurface) -> bool:
         return is_text_section_effect(entry) and entry.text_expectation.repair_stale_graphify_section
 
-    def seeded_text(self, entry: ExpectedPath) -> str:
+    def seeded_text(self, entry: InstallSurface) -> str:
         if self.should_seed_stale_graphify_section(entry) and entry.marker:
             return (
                 f"# User Notes\n\n{USER_SENTINEL}\n\n"
@@ -365,7 +365,7 @@ class FileEffectOracle:
                 path.write_text(self.seeded_text(entry), encoding="utf-8")
 
     # JSON/text marker validation
-    def json_marker_status(self, path: Path, entry: ExpectedPath) -> tuple[bool, str]:
+    def json_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
@@ -378,7 +378,7 @@ class FileEffectOracle:
         marker_present = bool(marker) and json_value_contains_marker(data, marker)
         return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"
 
-    def text_marker_status(self, path: Path, entry: ExpectedPath) -> tuple[bool, str]:
+    def text_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         marker_count = text.count(entry.marker or "")
         ok = marker_count == 1
@@ -394,7 +394,7 @@ class FileEffectOracle:
             detail += f"; stale_replaced={stale_replaced}"
         return ok, detail
 
-    def expected_entry_status(self, entry: ExpectedPath) -> tuple[bool, str]:
+    def expected_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
         path = self.expected_path(entry)
         ok, detail = expected_kind_status(path, entry.kind)
         if not ok or not entry.marker:
@@ -413,7 +413,7 @@ class FileEffectOracle:
             checks.extend(self.assert_installed_skill_sidecar(scenario, entry))
         return checks
 
-    def uninstalled_entry_status(self, entry: ExpectedPath) -> tuple[bool, str]:
+    def uninstalled_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
         path = self.expected_path(entry)
         text_expectation = entry.text_expectation
         if entry.marker and text_expectation.require_user_content_on_uninstall:
@@ -431,12 +431,12 @@ class FileEffectOracle:
         ok = not path.exists()
         return ok, "removed" if ok else "still_exists"
 
-    def graphify_section_removed(self, text: str, entry: ExpectedPath) -> bool:
+    def graphify_section_removed(self, text: str, entry: InstallSurface) -> bool:
         marker_removed = not entry.marker or entry.marker not in text
         stale_removed = not entry.text_expectation.repair_stale_graphify_section or STALE_GRAPHIFY_SENTINEL not in text
         return marker_removed and stale_removed
 
-    def uninstalled_skill_sidecar_checks(self, entry: ExpectedPath) -> list[dict[str, object]]:
+    def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
         if not self.is_skill_expected(entry):
             return []
         checks: list[dict[str, object]] = []

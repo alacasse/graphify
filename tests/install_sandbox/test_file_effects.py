@@ -7,7 +7,7 @@ import pytest
 
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import platform_specs
-from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
+from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
 
@@ -46,7 +46,7 @@ def oracle(roots) -> file_effects.FileEffectOracle:
     )
 
 
-def scenario(platform: str, *expected: ExpectedPath, scope: str = "project") -> Scenario:
+def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -> Scenario:
     return Scenario(
         platform=platform,
         scope=scope,
@@ -57,12 +57,12 @@ def scenario(platform: str, *expected: ExpectedPath, scope: str = "project") -> 
     )
 
 
-def expected_skill(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+def expected_skill(root: str, relative: str) -> InstallSurface:
+    return InstallSurface(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
 
 
-def expected_skill_with_docs_sidecar(root: str, relative: str) -> ExpectedPath:
-    return ExpectedPath(
+def expected_skill_with_docs_sidecar(root: str, relative: str) -> InstallSurface:
+    return InstallSurface(
         root,
         relative,
         skill_sidecar_expectation=platform_specs.SkillSidecarExpectation(
@@ -73,8 +73,8 @@ def expected_skill_with_docs_sidecar(root: str, relative: str) -> ExpectedPath:
     )
 
 
-def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> ExpectedPath:
-    return ExpectedPath(
+def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
+    return InstallSurface(
         root,
         relative,
         marker=marker,
@@ -180,6 +180,34 @@ def test_assertion_detects_missing_file(oracle) -> None:
     assert len(checks) == 1
     assert checks[0]["ok"] is False
     assert checks[0]["detail"] == "missing"
+
+
+def test_install_surface_alias_is_accepted_by_scenario_and_oracle(oracle, roots) -> None:
+    assert platform_specs.ExpectedPath is platform_specs.InstallSurface
+
+    surface = platform_specs.InstallSurface("project", "surface.txt")
+    (roots["project"] / "surface.txt").write_text("installed\n", encoding="utf-8")
+    test_scenario = Scenario(
+        platform="unit",
+        scope="project",
+        install_command=("true",),
+        uninstall_command=None,
+        cwd_root="project",
+        expected=(surface,),
+    )
+
+    checks = oracle.assert_expected_files(test_scenario)
+
+    assert test_scenario.expected == (surface,)
+    assert checks == [
+        {
+            "path": str(roots["project"] / "surface.txt"),
+            "ok": True,
+            "detail": "file",
+            "root": "project",
+            "relative": "surface.txt",
+        }
+    ]
 
 
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:

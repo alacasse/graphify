@@ -217,7 +217,7 @@ def _text_section_removes_on_uninstall(root: str, relative: str, declared_remove
     return True
 
 
-def _expected_path(effect_value: object, context: str, *, expected_values: list[Any] | None = None) -> model.ExpectedPath:
+def _expected_path(effect_value: object, context: str, *, expected_values: list[Any] | None = None) -> model.InstallSurface:
     effect = _mapping(effect_value, context)
     root, relative, declared_remove_on_uninstall = _effect_common(effect, context)
     kind = _effect_kind(effect, relative, context)
@@ -303,7 +303,7 @@ def _dedupe(items: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for item in items if item))
 
 
-def _scope_locality(scope_name: str, expected: tuple[model.ExpectedPath, ...]) -> tuple[str | None, tuple[str, ...]]:
+def _scope_locality(scope_name: str, expected: tuple[model.InstallSurface, ...]) -> tuple[str | None, tuple[str, ...]]:
     roots = {entry.root for entry in expected}
     if scope_name == "project":
         if roots <= {"project"}:

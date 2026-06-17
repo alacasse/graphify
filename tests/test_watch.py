@@ -176,6 +176,29 @@ def test_graphify_root_preserves_absolute_when_user_supplied(tmp_path):
     )
 
 
+def test_rebuild_code_passes_viz_limit_to_html_renderer(tmp_path, monkeypatch):
+    """Large update/watch rebuilds should aggregate graph.html instead of
+    calling to_html in its raise-over-cap mode.
+    """
+    from graphify.watch import _rebuild_code
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "lib.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    seen_limits: list[int | None] = []
+
+    def fake_to_html(G, communities, output_path, **kwargs):
+        seen_limits.append(kwargs.get("node_limit"))
+        Path(output_path).write_text("<html/>", encoding="utf-8")
+
+    monkeypatch.setenv("GRAPHIFY_VIZ_NODE_LIMIT", "1")
+    monkeypatch.setattr("graphify.export.to_html", fake_to_html)
+
+    assert _rebuild_code(corpus, acquire_lock=False) is True
+    assert seen_limits == [1]
+    assert (corpus / "graphify-out" / "graph.html").exists()
+
+
 def test_rebuild_code_evicts_nodes_from_deleted_files(tmp_path):
     """#1007: graphify update (_rebuild_code with no changed_paths) must remove
     nodes and edges from files deleted since the last run."""

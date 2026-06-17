@@ -2,6 +2,7 @@ import json
 import re
 import tempfile
 from pathlib import Path
+import networkx as nx
 from graphify.build import build_from_json
 from graphify.cluster import cluster
 from graphify.export import to_json, to_cypher, to_graphml, to_html, to_canvas, to_obsidian
@@ -164,6 +165,24 @@ def test_to_html_member_counts_accepted():
         out = Path(tmp) / "graph.html"
         to_html(G, communities, str(out), member_counts=member_counts)
         assert out.exists()
+
+
+def test_to_html_node_limit_writes_aggregated_community_view():
+    G = nx.Graph()
+    G.add_node("a", label="A")
+    G.add_node("b", label="B")
+    G.add_edge("a", "b", relation="CALLS", confidence="EXTRACTED")
+    communities = {0: ["a"], 1: ["b"]}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "graph.html"
+        to_html(G, communities, str(out), node_limit=1)
+        content = out.read_text(encoding="utf-8")
+
+    assert "RAW_NODES" in content
+    assert "Community 0" in content
+    assert "Community 1" in content
+    assert "cross-community edges" in content
 
 
 def test_to_canvas_file_paths_relative_to_vault():

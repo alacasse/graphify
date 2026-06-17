@@ -509,7 +509,7 @@ def _rebuild_code(
         from graphify.cluster import cluster, remap_communities_to_previous, score_all
         from graphify.analyze import god_nodes, surprising_connections, suggest_questions
         from graphify.report import generate
-        from graphify.export import to_json, to_html
+        from graphify.export import to_json, to_html, _viz_node_limit
         from graphify.security import check_graph_file_size_cap
 
         detected = detect(watch_path, follow_symlinks=follow_symlinks)
@@ -825,12 +825,20 @@ def _rebuild_code(
         except Exception:
             pass
 
-        # to_html raises ValueError for graphs > MAX_NODES_FOR_VIZ (5000).
-        # Wrap so core outputs (graph.json + GRAPH_REPORT.md) always land.
+        # Pass the configured viz limit so oversized graphs use the same
+        # community-aggregation fallback as `graphify export html`.
+        viz_node_limit = _viz_node_limit()
+        html_node_limit = viz_node_limit if viz_node_limit > 0 else None
         html_written = False
         if not no_change:
             try:
-                to_html(G, communities, str(out / "graph.html"), community_labels=labels or None)
+                to_html(
+                    G,
+                    communities,
+                    str(out / "graph.html"),
+                    community_labels=labels or None,
+                    node_limit=html_node_limit,
+                )
                 html_written = True
             except ValueError as viz_err:
                 print(f"[graphify watch] Skipped graph.html: {viz_err}")

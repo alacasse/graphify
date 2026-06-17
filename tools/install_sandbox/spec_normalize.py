@@ -5,9 +5,11 @@ from typing import Any
 try:
     from .expected_effects import effect_type_name
     from . import platform_specs as specs
+    from .platform_specs import InstallTargetCatalog, InstallTargetSpec
 except ImportError:  # pragma: no cover - direct script import fallback
     from expected_effects import effect_type_name  # type: ignore[no-redef]
     import platform_specs as specs  # type: ignore[no-redef]
+    from platform_specs import InstallTargetCatalog, InstallTargetSpec  # type: ignore[no-redef]
 
 
 def _command(command: tuple[str, ...] | None) -> list[str] | None:
@@ -119,7 +121,7 @@ def _runtime_validation(validation: specs.TargetRuntimeValidationSpec) -> dict[s
     }
 
 
-def _platform_spec(platform: specs.PlatformSpec) -> dict[str, object]:
+def _platform_spec(platform: InstallTargetSpec) -> dict[str, object]:
     return {
         "name": platform.name,
         "user_skill": platform.user_skill,
@@ -134,7 +136,7 @@ def _platform_spec(platform: specs.PlatformSpec) -> dict[str, object]:
     }
 
 
-def normalize_registry(registry: specs.ScenarioRegistry) -> dict[str, Any]:
+def normalize_registry(registry: InstallTargetCatalog) -> dict[str, Any]:
     """Return deterministic primitive data for registry equivalence tests."""
 
     return {

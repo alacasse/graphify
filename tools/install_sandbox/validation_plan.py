@@ -8,8 +8,8 @@ try:
     from .platform_specs import (
         DisposableArtifactScenarioSpec,
         DisposableSeedFile,
+        InstallTargetCatalog,
         Scenario,
-        ScenarioRegistry,
         SelectedUniversalUninstallScenario,
         TargetRuntimeValidationSpec,
         UniversalUninstallScenarioSpec,
@@ -19,8 +19,8 @@ except ImportError:  # pragma: no cover - direct script import fallback
     from platform_specs import (  # type: ignore[no-redef]
         DisposableArtifactScenarioSpec,
         DisposableSeedFile,
+        InstallTargetCatalog,
         Scenario,
-        ScenarioRegistry,
         SelectedUniversalUninstallScenario,
         TargetRuntimeValidationSpec,
         UniversalUninstallScenarioSpec,
@@ -185,6 +185,10 @@ class ValidationPlan:
         return self.platforms
 
     @property
+    def selected_targets(self) -> tuple[str, ...]:
+        return self.platforms
+
+    @property
     def universal_uninstall_scenarios(self) -> tuple[SelectedUniversalUninstallScenario, ...]:
         return self.universal_uninstall
 
@@ -218,18 +222,18 @@ def _selected_scopes(scope: str) -> tuple[str, ...]:
 
 
 def selected_platforms(
-    registry: ScenarioRegistry,
+    registry: InstallTargetCatalog,
     *,
     all_platforms: bool,
     platform_name: str | None,
     selected_platform_names: Iterable[str] | None = None,
 ) -> tuple[str, ...]:
     if selected_platform_names is not None:
-        selected = tuple(selected_platform_names)
-        unknown = [name for name in selected if name not in registry.specs]
+        selected_targets = tuple(selected_platform_names)
+        unknown = [name for name in selected_targets if name not in registry.specs]
         if unknown:
             raise RuntimeError(f"unknown sandbox platform(s): {', '.join(unknown)}")
-        return selected
+        return selected_targets
     if all_platforms:
         return tuple(sorted(registry.specs))
     if platform_name is None or platform_name not in registry.specs:
@@ -237,7 +241,7 @@ def selected_platforms(
     return (platform_name,)
 
 
-def _standard_scenarios(registry: ScenarioRegistry, platforms: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
+def _standard_scenarios(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
     if not hasattr(registry, "make_scenario") and hasattr(registry, "platform_scenarios"):
         return tuple(scenario for platform_name in platforms for scenario in registry.platform_scenarios(platform_name, scope))
     scenarios: list[Scenario] = []
@@ -249,7 +253,7 @@ def _standard_scenarios(registry: ScenarioRegistry, platforms: tuple[str, ...], 
     return tuple(scenarios)
 
 
-def coverage_records(registry: ScenarioRegistry, platforms: tuple[str, ...], scope: str) -> tuple[dict[str, object], ...]:
+def coverage_records(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[dict[str, object], ...]:
     if not hasattr(registry, "make_scenario") and hasattr(registry, "coverage_records"):
         return tuple(registry.coverage_records(list(platforms), scope))
     records: list[dict[str, object]] = []
@@ -283,7 +287,7 @@ def coverage_records(registry: ScenarioRegistry, platforms: tuple[str, ...], sco
 
 
 def universal_uninstall_scenarios(
-    registry: ScenarioRegistry,
+    registry: InstallTargetCatalog,
     platforms: tuple[str, ...],
     scope: str,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
@@ -310,7 +314,7 @@ def universal_uninstall_scenarios(
 
 
 def disposable_artifact_scenarios(
-    registry: ScenarioRegistry,
+    registry: InstallTargetCatalog,
     scope: str,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[DisposableArtifactScenarioSpec, ...]:
@@ -331,7 +335,7 @@ def _dedupe_sections(sections: Iterable[TargetRuntimeValidationSpec]) -> tuple[d
 
 
 def target_runtime_validation_sections(
-    registry: ScenarioRegistry,
+    registry: InstallTargetCatalog,
     platforms: tuple[str, ...] | None = None,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[dict[str, object], ...]:
@@ -370,7 +374,7 @@ def _coverage_summary(
 
 
 def build_validation_plan(
-    registry: ScenarioRegistry,
+    registry: InstallTargetCatalog,
     *,
     all_platforms: bool,
     platform_name: str | None = None,
@@ -384,26 +388,26 @@ def build_validation_plan(
         registry.validate_roots(declared_roots)
     policy.validate_roots(declared_roots)
 
-    platforms = selected_platforms(
+    selected_targets = selected_platforms(
         registry,
         all_platforms=all_platforms,
         platform_name=platform_name,
         selected_platform_names=selected_platform_names,
     )
-    standard = _standard_scenarios(registry, platforms, scope)
-    universal = universal_uninstall_scenarios(registry, platforms, scope, policy)
+    standard = _standard_scenarios(registry, selected_targets, scope)
+    universal = universal_uninstall_scenarios(registry, selected_targets, scope, policy)
     disposable = disposable_artifact_scenarios(registry, scope, policy)
-    coverage = coverage_records(registry, platforms, scope)
+    coverage = coverage_records(registry, selected_targets, scope)
     return ValidationPlan(
-        platforms=platforms,
+        platforms=selected_targets,
         requested_scope=scope,
         standard_scenarios=standard,
         universal_uninstall=universal,
         disposable_artifacts=disposable,
         coverage_records=coverage,
-        target_runtime_validation_sections=target_runtime_validation_sections(registry, platforms, policy),
+        target_runtime_validation_sections=target_runtime_validation_sections(registry, selected_targets, policy),
         platform_coverage_summary=_coverage_summary(
-            platforms=platforms,
+            platforms=selected_targets,
             scope=scope,
             standard_scenarios=standard,
             universal_uninstall_scenarios=universal,

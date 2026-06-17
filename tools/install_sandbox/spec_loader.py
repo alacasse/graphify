@@ -15,9 +15,11 @@ else:
 
 try:
     from . import platform_specs as model
+    from .platform_specs import InstallTargetCatalog, InstallTargetSpec
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
 except ImportError:  # pragma: no cover - direct script import fallback
     import platform_specs as model  # type: ignore[no-redef]
+    from platform_specs import InstallTargetCatalog, InstallTargetSpec  # type: ignore[no-redef]
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
 
 
@@ -438,7 +440,7 @@ def _platform_spec(
     platform_key: str,
     value: object,
     context: str,
-) -> model.PlatformSpec:
+) -> InstallTargetSpec:
     data = _mapping(value, context)
     name = platform_key
     if "name" in data:
@@ -564,7 +566,7 @@ def _disposable_artifact(value: object, context: str) -> model.DisposableArtifac
     )
 
 
-def load_registry_from_data(data: object, *, source: str = "<data>") -> model.ScenarioRegistry:
+def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallTargetCatalog:
     registry = _mapping(data, source)
     version = registry.get("schema_version")
     if version != SCHEMA_VERSION:
@@ -606,7 +608,7 @@ def _load_yaml_data(path: Path) -> object:
         return yaml.safe_load(handle)
 
 
-def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
+def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> InstallTargetCatalog:
     registry_dir = Path(path)
     product_paths = sorted(
         (
@@ -629,7 +631,7 @@ def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.Sc
     return load_registry_from_data(data, source=str(registry_dir))
 
 
-def load_registry_from_yaml(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
+def load_registry_from_yaml(path: Path | str = DEFAULT_REGISTRY_PATH) -> InstallTargetCatalog:
     registry_path = Path(path)
     if registry_path.is_dir():
         return load_registry_from_dir(registry_path)
@@ -637,5 +639,5 @@ def load_registry_from_yaml(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.S
     return load_registry_from_data(data, source=str(registry_path))
 
 
-def load_default_registry() -> model.ScenarioRegistry:
+def load_default_registry() -> InstallTargetCatalog:
     return load_registry_from_dir(DEFAULT_REGISTRY_PATH)

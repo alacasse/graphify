@@ -87,6 +87,7 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
     plan = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="both")
 
     assert plan.platforms == ("alpha", "zeta")
+    assert plan.selected_targets == ("alpha", "zeta")
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("alpha", "project"),
         ("zeta", "user"),
@@ -113,6 +114,7 @@ def test_validation_plan_preserves_explicit_platform_order_and_full_plan_content
     )
 
     assert plan.platforms == ("gemini", "claude", "codex")
+    assert plan.selected_targets == plan.platforms
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("gemini", "project"),
         ("claude", "project"),
@@ -244,6 +246,20 @@ def test_validation_plan_rejects_unknown_explicit_platform_names() -> None:
             platform_name=None,
             selected_platform_names=("gemini", "missing", "absent"),
             scope="project",
+        )
+
+
+def test_validation_plan_does_not_accept_selected_targets_constructor_input() -> None:
+    with pytest.raises(TypeError, match="selected_targets"):
+        validation_plan.ValidationPlan(  # type: ignore[call-arg]
+            selected_targets=("codex",),
+            requested_scope="project",
+            standard_scenarios=(),
+            universal_uninstall=(),
+            disposable_artifacts=(),
+            coverage_records=(),
+            target_runtime_validation_sections=(),
+            platform_coverage_summary={},
         )
 
 

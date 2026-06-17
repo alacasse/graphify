@@ -168,6 +168,9 @@ class PlatformSpec:
     target_runtime_validation: tuple[TargetRuntimeValidationSpec, ...] = ()
 
 
+InstallTargetSpec = PlatformSpec
+
+
 def _dedupe_notes(*notes: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(note for note in notes if note))
 
@@ -257,24 +260,34 @@ class ScenarioRegistry:
     disposable_artifact_specs: tuple[DisposableArtifactScenarioSpec, ...] = ()
 
     @property
-    def platform_names(self) -> list[str]:
+    def target_names(self) -> list[str]:
         return list(self.specs)
 
-    def platform_spec(self, platform_name: str) -> PlatformSpec:
+    @property
+    def platform_names(self) -> list[str]:
+        return self.target_names
+
+    def target_spec(self, target_name: str) -> PlatformSpec:
         try:
-            return self.specs[platform_name]
+            return self.specs[target_name]
         except KeyError as exc:
-            raise RuntimeError(f"unknown sandbox platform: {platform_name}") from exc
+            raise RuntimeError(f"unknown sandbox platform: {target_name}") from exc
+
+    def platform_spec(self, platform_name: str) -> PlatformSpec:
+        return self.target_spec(platform_name)
 
     def selected_scopes(self, scope: str) -> list[str]:
         return ["user", "project"] if scope == "both" else [scope]
 
-    def selected_platforms(self, *, all_platforms: bool, platform_name: str | None) -> list[str]:
-        platforms = self.platform_names if all_platforms else [platform_name]
-        unknown = [name for name in platforms if name not in self.specs]
+    def selected_targets(self, *, all_platforms: bool, target_name: str | None) -> list[str]:
+        targets = self.target_names if all_platforms else [target_name]
+        unknown = [name for name in targets if name not in self.specs]
         if unknown:
             raise RuntimeError(f"unknown sandbox platform(s): {', '.join(str(name) for name in unknown)}")
-        return [str(name) for name in platforms]
+        return [str(name) for name in targets]
+
+    def selected_platforms(self, *, all_platforms: bool, platform_name: str | None) -> list[str]:
+        return self.selected_targets(all_platforms=all_platforms, target_name=platform_name)
 
     def user_skill(self, platform_name: str) -> InstallSurface:
         skill = self.platform_spec(platform_name).user_skill
@@ -340,8 +353,13 @@ class ScenarioRegistry:
             generated_file_expectation=scope_spec.generated_file_expectation,
         )
 
+    def target_scenarios(self, target_name: str, scope: str) -> list[Scenario]:
+        self.target_spec(target_name)
+        return [scenario for one_scope in self.selected_scopes(scope) if (scenario := self.make_scenario(target_name, one_scope)) is not None]
+
     def platform_scenarios(self, platform_name: str, scope: str) -> list[Scenario]:
-        return [scenario for one_scope in self.selected_scopes(scope) if (scenario := self.make_scenario(platform_name, one_scope)) is not None]
+        self.platform_spec(platform_name)
+        return self.target_scenarios(platform_name, scope)
 
     def equivalent_install_command(self, scenario: Scenario) -> tuple[str, ...] | None:
         variants = self.install_variants(scenario)
@@ -479,6 +497,9 @@ class ScenarioRegistry:
         return _dedupe_notes(*ordered)
 
 
+InstallTargetCatalog = ScenarioRegistry
+
+
 _DEFAULT_SCENARIO_REGISTRY: ScenarioRegistry | None = None
 _LAZY_DEFAULT_NAMES = {
     "DEFAULT_SCENARIO_REGISTRY",
@@ -528,7 +549,23 @@ def __getattr__(name: str):
 
 
 def sandbox_platform_specs() -> dict[str, PlatformSpec]:
+    return install_target_specs()
+
+
+def default_install_target_catalog() -> ScenarioRegistry:
+    return _load_default_scenario_registry()
+
+
+def install_target_specs() -> dict[str, PlatformSpec]:
     return _load_default_scenario_registry().specs
+
+
+def install_target_spec(target_name: str) -> PlatformSpec:
+    return _load_default_scenario_registry().target_spec(target_name)
+
+
+def install_target_scenarios(target_name: str, scope: str) -> list[Scenario]:
+    return _load_default_scenario_registry().target_scenarios(target_name, scope)
 
 
 def platform_spec(platform_name: str) -> PlatformSpec:

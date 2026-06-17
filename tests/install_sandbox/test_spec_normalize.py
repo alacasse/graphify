@@ -4,6 +4,15 @@ from tools.install_sandbox.spec_loader import load_default_registry
 from tools.install_sandbox.spec_normalize import normalize_registry
 
 
+FORBIDDEN_TARGET_ALIAS_KEYS = {
+    "install_target_catalog",
+    "install_targets",
+    "selected_targets",
+    "target_catalog",
+    "target_specs",
+}
+
+
 def normalize_default_registry() -> dict[str, object]:
     return normalize_registry(load_default_registry())
 
@@ -20,6 +29,68 @@ def test_normalized_registry_includes_platforms_in_registry_order() -> None:
     normalized = normalize_registry(registry)
 
     assert list(normalized["platforms"]) == registry.platform_names
+
+
+def test_normalized_registry_top_level_key_set_is_stable() -> None:
+    normalized = normalize_default_registry()
+
+    assert set(normalized) == {"platforms"}
+
+
+def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
+    normalized = normalize_default_registry()
+    codex_platform = normalized["platforms"]["codex"]
+    codex_project = codex_platform["scopes"]["project"]
+    hooks = next(entry for entry in codex_project["expected"] if entry["relative"] == ".codex/hooks.json")
+
+    assert set(codex_platform) == {
+        "name",
+        "user_skill",
+        "project_skill",
+        "uses_packaged_references",
+        "simulated_linux_layout",
+        "scopes",
+        "unsupported_scopes",
+        "reference_bundles",
+        "universal_uninstall_scopes",
+        "target_runtime_validation",
+    }
+    assert set(codex_project) == {
+        "install_command",
+        "uninstall_command",
+        "cwd_root",
+        "expected",
+        "risk_notes",
+        "equivalent_install_command",
+        "install_variants",
+        "allowed_roots",
+        "generated_file_expectation",
+    }
+    assert set(hooks) == {
+        "effect_type",
+        "root",
+        "relative",
+        "kind",
+        "content_kind",
+        "marker",
+        "remove_on_uninstall",
+        "text_expectation",
+        "json_expectation",
+        "skill_sidecar_expectation",
+    }
+
+
+def test_normalized_registry_does_not_emit_install_target_alias_keys() -> None:
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            assert FORBIDDEN_TARGET_ALIAS_KEYS.isdisjoint(value)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(normalize_default_registry())
 
 
 def test_normalized_registry_includes_nested_expected_path_policies() -> None:

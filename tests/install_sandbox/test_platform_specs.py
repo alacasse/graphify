@@ -40,6 +40,79 @@ def test_scenario_id() -> None:
     assert REGISTRY.purge_disposable_graphify_out_scenario_id() == "purge-disposable-graphify-out"
 
 
+def test_install_target_aliases_are_identity_aliases() -> None:
+    assert platform_specs.InstallTargetSpec is platform_specs.PlatformSpec
+    assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
+
+
+def test_install_target_accessors_match_legacy_platform_accessors() -> None:
+    assert REGISTRY.target_names == REGISTRY.platform_names == platform_specs.ALL_PLATFORMS
+    assert REGISTRY.target_spec("codex") is REGISTRY.platform_spec("codex")
+    assert REGISTRY.selected_targets(all_platforms=True, target_name=None) == REGISTRY.selected_platforms(
+        all_platforms=True,
+        platform_name=None,
+    )
+    assert REGISTRY.selected_targets(all_platforms=False, target_name="codex") == REGISTRY.selected_platforms(
+        all_platforms=False,
+        platform_name="codex",
+    )
+    assert REGISTRY.target_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
+
+
+def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        REGISTRY.target_spec("missing-target")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        REGISTRY.platform_spec("missing-target")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
+        REGISTRY.selected_targets(all_platforms=False, target_name="missing-target")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
+        REGISTRY.selected_platforms(all_platforms=False, platform_name="missing-target")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        REGISTRY.target_scenarios("missing-target", "both")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        REGISTRY.platform_scenarios("missing-target", "both")
+
+
+def test_install_target_module_helpers_match_default_registry() -> None:
+    assert platform_specs.default_install_target_catalog() is REGISTRY
+    assert platform_specs.install_target_specs() is REGISTRY.specs
+    assert platform_specs.install_target_spec("codex") is REGISTRY.target_spec("codex")
+    assert platform_specs.install_target_scenarios("cursor", "both") == REGISTRY.target_scenarios("cursor", "both")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        platform_specs.install_target_spec("missing-target")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        platform_specs.install_target_scenarios("missing-target", "both")
+
+
+def test_install_target_helpers_use_existing_default_registry_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "cached-target": platform_specs.PlatformSpec(
+                name="cached-target",
+                scopes={
+                    "project": platform_specs.ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(platform_specs.ExpectedPath("project", "cached.txt"),),
+                    )
+                },
+            )
+        }
+    )
+    monkeypatch.setattr(platform_specs, "_DEFAULT_SCENARIO_REGISTRY", registry)
+
+    assert platform_specs.default_install_target_catalog() is registry
+    assert platform_specs.install_target_specs() is registry.specs
+    assert platform_specs.install_target_spec("cached-target") is registry.target_spec("cached-target")
+    assert platform_specs.install_target_scenarios("cached-target", "project") == registry.target_scenarios(
+        "cached-target",
+        "project",
+    )
+    assert "DEFAULT_INSTALL_TARGET_CATALOG" not in platform_specs._LAZY_DEFAULT_NAMES
+
+
 def test_expected_path_manifest_logic() -> None:
     user = REGISTRY.make_scenario("codex", "user")
     project = REGISTRY.make_scenario("codex", "project")

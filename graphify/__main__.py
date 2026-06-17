@@ -326,6 +326,10 @@ def _remove_skill_file(platform_name: str, *, project: bool = False, project_dir
     if refs_dir.exists():
         shutil.rmtree(refs_dir)
         removed = True
+    refs_tmp = skill_dst.parent / "references.tmp"
+    if refs_tmp.exists():
+        shutil.rmtree(refs_tmp)
+        removed = True
     for d in (skill_dst.parent, skill_dst.parent.parent, skill_dst.parent.parent.parent):
         try:
             d.rmdir()
@@ -1818,6 +1822,12 @@ def _kilo_uninstall_global() -> list[str]:
     version_file = skill_dst.parent / ".graphify_version"
     if version_file.exists():
         version_file.unlink()
+    refs_dir = skill_dst.parent / "references"
+    if refs_dir.exists():
+        shutil.rmtree(refs_dir)
+    refs_tmp = skill_dst.parent / "references.tmp"
+    if refs_tmp.exists():
+        shutil.rmtree(refs_tmp)
     for d in (
         skill_dst.parent,
         skill_dst.parent.parent,

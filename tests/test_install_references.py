@@ -124,12 +124,16 @@ def test_uninstall_removes_references_then_walks_dirs(tmp_path, fake_bundle):
     _install(tmp_path, platform)
     skill_dir = tmp_path / ".claude" / "skills" / "graphify"
     assert (skill_dir / "references").is_dir()
+    refs_tmp = skill_dir / "references.tmp"
+    refs_tmp.mkdir()
+    (refs_tmp / "partial.md").write_text("partial staged reference", encoding="utf-8")
 
     with patch("graphify.__main__.Path.home", return_value=tmp_path):
         removed = mainmod._remove_skill_file(platform)
 
     assert removed
     assert not skill_dir.exists()
+    assert not refs_tmp.exists()
     # The 3-level walk collapsed the now-empty skill dirs.
     assert not (tmp_path / ".claude" / "skills").exists()
 

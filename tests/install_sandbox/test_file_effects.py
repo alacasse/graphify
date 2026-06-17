@@ -139,7 +139,7 @@ def registered_json_shape_check(oracle: file_effects.FileEffectOracle, roots: di
     ],
 )
 def test_reference_sidecar_expectation_owns_expected_relatives(status: str, names: tuple[str, ...], expected_relatives: set[str]) -> None:
-    expectation = file_effects.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
+    expectation = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
 
     assert expectation.expected_relatives(Path(".unit/graphify"), platform_specs.SkillSidecarExpectation()) == {Path(relative) for relative in expected_relatives}
 
@@ -149,28 +149,28 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix(tmp_pat
         return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
 
     refs_dir = tmp_path / "references"
-    absent = file_effects.ReferenceSidecarExpectation.from_resolution(resolution("intentionally_absent", detail="absent refs"))
-    ok, detail = absent.check_installed(refs_dir, installed_reference_names)
+    absent = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("intentionally_absent", detail="absent refs"))
+    ok, detail = file_effects.reference_sidecar_installed_status(absent, refs_dir, installed_reference_names)
     assert ok is True
     assert detail == "intentionally_absent; references_absent; absent refs"
 
     refs_dir.mkdir()
-    ok, detail = absent.check_installed(refs_dir, installed_reference_names)
+    ok, detail = file_effects.reference_sidecar_installed_status(absent, refs_dir, installed_reference_names)
     assert ok is False
     assert detail == "intentionally_absent; references_present; absent refs"
 
-    source_error = file_effects.ReferenceSidecarExpectation.from_resolution(resolution("missing", detail="missing /package/refs"))
-    ok, detail = source_error.check_installed(refs_dir, installed_reference_names)
+    source_error = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("missing", detail="missing /package/refs"))
+    ok, detail = file_effects.reference_sidecar_installed_status(source_error, refs_dir, installed_reference_names)
     assert ok is False
     assert detail == "missing; missing /package/refs"
 
-    expected = file_effects.ReferenceSidecarExpectation.from_resolution(resolution("available", ("query.md",), "available refs"))
-    ok, detail = expected.check_installed(refs_dir, installed_reference_names)
+    expected = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("available", ("query.md",), "available refs"))
+    ok, detail = file_effects.reference_sidecar_installed_status(expected, refs_dir, installed_reference_names)
     assert ok is False
     assert "missing=['query.md']" in detail
 
     (refs_dir / "query.md").write_text("query\n", encoding="utf-8")
-    ok, detail = expected.check_installed(refs_dir, installed_reference_names)
+    ok, detail = file_effects.reference_sidecar_installed_status(expected, refs_dir, installed_reference_names)
     assert ok is True
     assert "status=available" in detail
 
@@ -178,6 +178,16 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix(tmp_pat
 def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -> None:
     default_entry = expected_skill("project", ".aider/graphify/SKILL.md")
     custom_entry = expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md")
+
+    assert install_surface_core.skill_relative_dir(default_entry) == Path(".aider/graphify")
+    assert install_surface_core.skill_version_relative(default_entry) == Path(".aider/graphify/.graphify_version")
+    assert install_surface_core.skill_references_relative(default_entry) == Path(".aider/graphify/references")
+    assert install_surface_core.skill_references_tmp_relative(default_entry) == Path(".aider/graphify/references.tmp")
+
+    assert install_surface_core.skill_relative_dir(custom_entry) == Path(".custom/graphify")
+    assert install_surface_core.skill_version_relative(custom_entry) == Path(".custom/graphify/.graphify_version")
+    assert install_surface_core.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
+    assert install_surface_core.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
 
     assert oracle.skill_relative_dir(default_entry) == Path(".aider/graphify")
     assert oracle.skill_version_relative(default_entry) == Path(".aider/graphify/.graphify_version")
@@ -188,6 +198,21 @@ def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -
     assert oracle.skill_version_relative(custom_entry) == Path(".custom/graphify/.graphify_version")
     assert oracle.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
     assert oracle.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
+
+
+def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_resolved_references() -> None:
+    entry = expected_skill("project", ".claude/skills/graphify/SKILL.md")
+
+    assert install_surface_core.expected_skill_sidecar_relatives(entry, resolution("available", ("query.md", "update.md"))) == {
+        Path(".claude/skills/graphify/.graphify_version"),
+        Path(".claude/skills/graphify/references.tmp"),
+        Path(".claude/skills/graphify/references"),
+        Path(".claude/skills/graphify/references/query.md"),
+        Path(".claude/skills/graphify/references/update.md"),
+    }
+
+    with pytest.raises(AssertionError, match="expected path has no skill sidecar expectation: project/notes.md"):
+        install_surface_core.skill_sidecar_expectation(InstallSurface("project", "notes.md"))
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Literal
+from typing import Callable, Iterable
 
 try:
     from .expected_effects import is_skill_effect, is_text_section_effect
@@ -13,8 +13,10 @@ try:
     from .install_surface_core import (
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
+        ReferenceSidecarExpectation,
         command_hook_present,
         expected_kind_status,
+        expected_skill_sidecar_relatives,
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
@@ -23,21 +25,30 @@ try:
         json_marker_status,
         json_value_contains_marker,
         plugin_config_present,
+        reference_sidecar_expectation,
         resolve_install_root,
         resolve_install_surface_path,
+        skill_dir_for_entry,
+        skill_references_relative,
+        skill_references_tmp_relative,
+        skill_relative_dir,
+        skill_sidecar_expectation,
+        skill_version_relative,
         text_marker_status,
         uninstalled_surface_status,
     )
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
-    from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
+    from .reference_resolution import PackagedReferenceResolution
 except ImportError:
     from expected_effects import is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
+        ReferenceSidecarExpectation,
         command_hook_present,
         expected_kind_status,
+        expected_skill_sidecar_relatives,
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
@@ -46,13 +57,20 @@ except ImportError:
         json_marker_status,
         json_value_contains_marker,
         plugin_config_present,
+        reference_sidecar_expectation,
         resolve_install_root,
         resolve_install_surface_path,
+        skill_dir_for_entry,
+        skill_references_relative,
+        skill_references_tmp_relative,
+        skill_relative_dir,
+        skill_sidecar_expectation,
+        skill_version_relative,
         text_marker_status,
         uninstalled_surface_status,
     )
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
-    from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
+    from reference_resolution import PackagedReferenceResolution
 
 
 GENERATED_COPY_EXCLUDES = (
@@ -72,62 +90,29 @@ def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = 
     return record
 
 
-ReferenceSidecarMode = Literal["absent", "source_error", "installed_directory"]
+def reference_sidecar_installed_status(
+    expectation: ReferenceSidecarExpectation,
+    refs_dir: Path,
+    installed_reference_names: Callable[[Path], list[str]],
+) -> tuple[bool, str]:
+    expected_names = list(expectation.expected_names)
+    if expectation.mode == "absent":
+        refs_ok = not refs_dir.exists()
+        refs_state = "references_absent" if refs_ok else "references_present"
+        return refs_ok, f"{expectation.status}; {refs_state}; {expectation.detail}"
+    if expectation.mode == "source_error":
+        return False, f"{expectation.status}; {expectation.detail}"
+    if not refs_dir.exists():
+        return False, f"references_missing; status={expectation.status}; expected_names={expected_names}; {expectation.detail}"
+    if not refs_dir.is_dir():
+        return False, f"references_not_directory; status={expectation.status}; expected_names={expected_names}; {expectation.detail}"
 
-
-@dataclass(frozen=True)
-class ReferenceSidecarExpectation:
-    status: ReferenceResolutionStatus
-    mode: ReferenceSidecarMode
-    expected_names: tuple[str, ...]
-    detail: str
-
-    @classmethod
-    def from_resolution(cls, resolution: PackagedReferenceResolution) -> ReferenceSidecarExpectation:
-        if resolution.status in {"intentionally_absent", "no_eligible_bundle"}:
-            mode: ReferenceSidecarMode = "absent"
-        elif resolution.status in {"missing", "not_directory"}:
-            mode = "source_error"
-        else:
-            mode = "installed_directory"
-        return cls(
-            status=resolution.status,
-            mode=mode,
-            expected_names=resolution.expected_names,
-            detail=resolution.detail,
-        )
-
-    @property
-    def includes_reference_dir(self) -> bool:
-        return self.mode in {"source_error", "installed_directory"}
-
-    def expected_relatives(self, skill_relative_dir: Path, sidecar: SkillSidecarExpectation) -> set[Path]:
-        if not self.includes_reference_dir:
-            return set()
-        references = skill_relative_dir / sidecar.references_dir
-        relatives = {references}
-        relatives.update(references / name for name in self.expected_names)
-        return relatives
-
-    def check_installed(self, refs_dir: Path, installed_reference_names: Callable[[Path], list[str]]) -> tuple[bool, str]:
-        expected_names = list(self.expected_names)
-        if self.mode == "absent":
-            refs_ok = not refs_dir.exists()
-            refs_state = "references_absent" if refs_ok else "references_present"
-            return refs_ok, f"{self.status}; {refs_state}; {self.detail}"
-        if self.mode == "source_error":
-            return False, f"{self.status}; {self.detail}"
-        if not refs_dir.exists():
-            return False, f"references_missing; status={self.status}; expected_names={expected_names}; {self.detail}"
-        if not refs_dir.is_dir():
-            return False, f"references_not_directory; status={self.status}; expected_names={expected_names}; {self.detail}"
-
-        actual_names = installed_reference_names(refs_dir)
-        missing = sorted(set(expected_names) - set(actual_names))
-        extra = sorted(set(actual_names) - set(expected_names))
-        refs_ok = not missing and not extra
-        refs_detail = f"status={self.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
-        return refs_ok, refs_detail
+    actual_names = installed_reference_names(refs_dir)
+    missing = sorted(set(expected_names) - set(actual_names))
+    extra = sorted(set(actual_names) - set(expected_names))
+    refs_ok = not missing and not extra
+    refs_detail = f"status={expectation.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
+    return refs_ok, refs_detail
 
 
 @dataclass(frozen=True)
@@ -148,36 +133,28 @@ class FileEffectOracle:
         return is_skill_effect(entry)
 
     def skill_sidecar_expectation(self, entry: InstallSurface) -> SkillSidecarExpectation:
-        if entry.skill_sidecar_expectation is None:
-            raise AssertionError(f"expected path has no skill sidecar expectation: {entry.root}/{entry.relative}")
-        return entry.skill_sidecar_expectation
+        return skill_sidecar_expectation(entry)
 
     def skill_dir_for_entry(self, entry: InstallSurface) -> Path:
-        return self.expected_path(entry).parent
+        return skill_dir_for_entry(entry, self.roots)
 
     def skill_relative_dir(self, entry: InstallSurface) -> Path:
-        return Path(entry.relative).parent
+        return skill_relative_dir(entry)
 
     def skill_assertion_record(self, entry: InstallSurface, relative: Path, ok: bool, detail: str) -> dict[str, object]:
         return check_record(self.root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
 
     def skill_version_relative(self, entry: InstallSurface) -> Path:
-        return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).version_name
+        return skill_version_relative(entry)
 
     def skill_references_relative(self, entry: InstallSurface) -> Path:
-        return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).references_dir
+        return skill_references_relative(entry)
 
     def skill_references_tmp_relative(self, entry: InstallSurface) -> Path:
-        return self.skill_relative_dir(entry) / self.skill_sidecar_expectation(entry).references_tmp_dir
+        return skill_references_tmp_relative(entry)
 
     def expected_skill_sidecar_relatives(self, scenario: Scenario, entry: InstallSurface) -> set[Path]:
-        sidecar = self.skill_sidecar_expectation(entry)
-        relatives = {
-            self.skill_version_relative(entry),
-            self.skill_references_tmp_relative(entry),
-        }
-        relatives.update(self.reference_sidecar_expectation(scenario).expected_relatives(self.skill_relative_dir(entry), sidecar))
-        return relatives
+        return expected_skill_sidecar_relatives(entry, self.packaged_reference_resolution(scenario.platform))
 
     def installed_skill_reference_relatives(self, entry: InstallSurface) -> set[Path]:
         refs_dir = self.skill_dir_for_entry(entry) / self.skill_sidecar_expectation(entry).references_dir
@@ -190,7 +167,7 @@ class FileEffectOracle:
         return self.expected_skill_sidecar_relatives(scenario, entry) | self.installed_skill_reference_relatives(entry)
 
     def reference_sidecar_expectation(self, scenario: Scenario) -> ReferenceSidecarExpectation:
-        return ReferenceSidecarExpectation.from_resolution(self.packaged_reference_resolution(scenario.platform))
+        return reference_sidecar_expectation(self.packaged_reference_resolution(scenario.platform))
 
     def installed_reference_names(self, refs_dir: Path) -> list[str]:
         if not refs_dir.is_dir():
@@ -230,7 +207,7 @@ class FileEffectOracle:
         refs_dir = skill_dir / self.skill_sidecar_expectation(entry).references_dir
         refs_relative = self.skill_references_relative(entry)
         expectation = self.reference_sidecar_expectation(scenario)
-        refs_ok, refs_detail = expectation.check_installed(refs_dir, self.installed_reference_names)
+        refs_ok, refs_detail = reference_sidecar_installed_status(expectation, refs_dir, self.installed_reference_names)
         return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
     def check_skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> dict[str, object]:

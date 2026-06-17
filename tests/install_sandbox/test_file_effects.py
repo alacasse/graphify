@@ -390,18 +390,22 @@ def test_install_surface_core_derives_generated_artifact_copy_destination() -> N
 
 
 def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path) -> None:
-    missing = tmp_path / "missing.md"
-    directory = tmp_path / "dir"
-    directory.mkdir()
-    notes = tmp_path / "notes.md"
     notes_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## graphify\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
-    notes.write_text(notes_text, encoding="utf-8")
 
-    assert install_surface_core.file_fingerprint(missing) == {"exists": False}
-    assert install_surface_core.file_fingerprint(directory) == {"exists": True, "kind": "dir"}
+    assert install_surface_core.file_fingerprint_from_observation(
+        install_surface_core.FileFingerprintObservation(exists=False)
+    ) == {"exists": False}
+    assert install_surface_core.file_fingerprint_from_observation(
+        install_surface_core.FileFingerprintObservation(exists=True, kind="dir")
+    ) == {"exists": True, "kind": "dir"}
 
-    fingerprint = install_surface_core.file_fingerprint(
-        notes,
+    fingerprint = install_surface_core.file_fingerprint_from_observation(
+        install_surface_core.FileFingerprintObservation(
+            exists=True,
+            kind="file",
+            data=notes_text.encode("utf-8"),
+            text=notes_text,
+        ),
         "## graphify",
         platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True),
     )
@@ -413,6 +417,14 @@ def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path
     assert fingerprint["user_content_preserved"] is True
     assert fingerprint["stale_graphify_present"] is True
     assert isinstance(fingerprint["sha256"], str)
+
+    notes = tmp_path / "notes.md"
+    notes.write_text(notes_text, encoding="utf-8")
+    assert install_surface_core.file_fingerprint(
+        notes,
+        "## graphify",
+        platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True),
+    ) == fingerprint
 
 
 def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:

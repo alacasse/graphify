@@ -12,6 +12,7 @@ try:
     from .install_surface_core import (
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
+        FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
         ReferenceSidecarExpectation,
@@ -23,7 +24,7 @@ try:
         expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
-        file_fingerprint,
+        file_fingerprint_from_observation,
         generated_file_observation,
         graphify_section_removed,
         hooks_by_event,
@@ -73,6 +74,7 @@ except ImportError:
     from install_surface_core import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
+        FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
         ReferenceSidecarExpectation,
@@ -84,7 +86,7 @@ except ImportError:
         expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
-        file_fingerprint,
+        file_fingerprint_from_observation,
         generated_file_observation,
         graphify_section_removed,
         hooks_by_event,
@@ -527,7 +529,19 @@ class FileEffectOracle:
         return checks
 
     def file_fingerprint(self, path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
-        return file_fingerprint(path, marker, text_expectation)
+        if not path.exists():
+            observation = FileFingerprintObservation(exists=False)
+        elif path.is_dir():
+            observation = FileFingerprintObservation(exists=True, kind="dir")
+        else:
+            data = path.read_bytes()
+            observation = FileFingerprintObservation(
+                exists=True,
+                kind="file",
+                data=data,
+                text=data.decode("utf-8", errors="replace") if marker else None,
+            )
+        return file_fingerprint_from_observation(observation, marker, text_expectation)
 
     # Idempotency state
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:

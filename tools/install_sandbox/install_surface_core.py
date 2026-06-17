@@ -71,6 +71,14 @@ class UninstallSurfaceObservation:
 
 
 @dataclass(frozen=True)
+class FileFingerprintObservation:
+    exists: bool
+    kind: Literal["file", "dir"] | None = None
+    data: bytes | None = None
+    text: str | None = None
+
+
+@dataclass(frozen=True)
 class GeneratedFileObservation:
     root_name: str
     relative: Path
@@ -857,15 +865,23 @@ def uninstalled_surface_status(surface: InstallSurface, roots: Mapping[str, Path
     )
 
 
-def file_fingerprint(path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
-    if not path.exists():
+def file_fingerprint_from_observation(
+    observation: FileFingerprintObservation,
+    marker: str | None = None,
+    text_expectation: TextExpectation | None = None,
+) -> dict[str, object]:
+    if not observation.exists:
         return {"exists": False}
-    if path.is_dir():
+    if observation.kind == "dir":
         return {"exists": True, "kind": "dir"}
-    data = path.read_bytes()
+    if observation.data is None:
+        raise AssertionError("file fingerprint observation has no bytes")
+    data = observation.data
     item: dict[str, object] = {"exists": True, "kind": "file", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
     if marker:
-        text = data.decode("utf-8", errors="replace")
+        if observation.text is None:
+            raise AssertionError("file fingerprint observation has no decoded text")
+        text = observation.text
         item["marker_count"] = text.count(marker)
         expectation = text_expectation or TextExpectation()
         if expectation.preserve_user_content:
@@ -873,3 +889,19 @@ def file_fingerprint(path: Path, marker: str | None = None, text_expectation: Te
         if expectation.repair_stale_graphify_section:
             item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
     return item
+
+
+def file_fingerprint(path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
+    if not path.exists():
+        observation = FileFingerprintObservation(exists=False)
+    elif path.is_dir():
+        observation = FileFingerprintObservation(exists=True, kind="dir")
+    else:
+        data = path.read_bytes()
+        observation = FileFingerprintObservation(
+            exists=True,
+            kind="file",
+            data=data,
+            text=data.decode("utf-8", errors="replace") if marker else None,
+        )
+    return file_fingerprint_from_observation(observation, marker, text_expectation)

@@ -389,7 +389,7 @@ def test_install_surface_core_derives_generated_artifact_copy_destination() -> N
     )
 
 
-def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path) -> None:
+def test_install_surface_core_decides_file_fingerprint_from_observed_facts() -> None:
     notes_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## graphify\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
 
     assert install_surface_core.file_fingerprint_from_observation(
@@ -418,13 +418,9 @@ def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path
     assert fingerprint["stale_graphify_present"] is True
     assert isinstance(fingerprint["sha256"], str)
 
-    notes = tmp_path / "notes.md"
-    notes.write_text(notes_text, encoding="utf-8")
-    assert install_surface_core.file_fingerprint(
-        notes,
-        "## graphify",
-        platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True),
-    ) == fingerprint
+
+# Compatibility wrappers below this point still read paths for current callers;
+# preferred core tests should target observation-shaped helpers above.
 
 
 def test_file_fingerprint_path_reading_compatibility_wrapper_matches_observation_decision(tmp_path: Path) -> None:
@@ -868,6 +864,10 @@ def test_install_surface_core_decides_installed_status_from_observed_facts() -> 
     assert invalid_json_status.detail == "invalid_json=Expecting value"
 
 
+# Compatibility wrappers below this point still read paths for current callers;
+# preferred core tests should target observation-shaped helpers above.
+
+
 def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) -> None:
     surface = InstallSurface("project", "installed.txt")
     (roots["project"] / "installed.txt").write_text("installed\n", encoding="utf-8")
@@ -1136,54 +1136,6 @@ def test_uninstall_surface_status_contracts(oracle, roots) -> None:
     assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
 
 
-def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_observation_decision(roots) -> None:
-    plain = InstallSurface("project", "plain.txt")
-    plain_path = roots["project"] / "plain.txt"
-
-    assert install_surface_core.uninstalled_surface_status(plain, roots) == install_surface_core.uninstalled_surface_status_from_observation(
-        plain,
-        install_surface_core.UninstallSurfaceObservation(
-            path=plain_path,
-            exists=False,
-            is_file=False,
-            is_dir=False,
-        ),
-    )
-
-    text_section = section("project", "notes.md", preserve_user_content=True)
-    notes_path = roots["project"] / "notes.md"
-    preserved_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n"
-    notes_path.write_text(preserved_text, encoding="utf-8")
-
-    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
-        text_section,
-        install_surface_core.UninstallSurfaceObservation(
-            path=notes_path,
-            exists=True,
-            is_file=True,
-            is_dir=False,
-            text=preserved_text,
-        ),
-    )
-
-    stale_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
-    notes_path.write_text(
-        stale_text,
-        encoding="utf-8",
-    )
-
-    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
-        text_section,
-        install_surface_core.UninstallSurfaceObservation(
-            path=notes_path,
-            exists=True,
-            is_file=True,
-            is_dir=False,
-            text=stale_text,
-        ),
-    )
-
-
 def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -> None:
     plain = InstallSurface("project", "plain.txt")
 
@@ -1264,6 +1216,58 @@ def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -
 
     assert read_error_status.ok is False
     assert read_error_status.detail == "text_read_failed=permission denied"
+
+
+# Compatibility wrappers below this point still read paths for current callers;
+# preferred core tests should target observation-shaped helpers above.
+
+
+def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_observation_decision(roots) -> None:
+    plain = InstallSurface("project", "plain.txt")
+    plain_path = roots["project"] / "plain.txt"
+
+    assert install_surface_core.uninstalled_surface_status(plain, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+        plain,
+        install_surface_core.UninstallSurfaceObservation(
+            path=plain_path,
+            exists=False,
+            is_file=False,
+            is_dir=False,
+        ),
+    )
+
+    text_section = section("project", "notes.md", preserve_user_content=True)
+    notes_path = roots["project"] / "notes.md"
+    preserved_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n"
+    notes_path.write_text(preserved_text, encoding="utf-8")
+
+    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+        text_section,
+        install_surface_core.UninstallSurfaceObservation(
+            path=notes_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+            text=preserved_text,
+        ),
+    )
+
+    stale_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
+    notes_path.write_text(
+        stale_text,
+        encoding="utf-8",
+    )
+
+    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+        text_section,
+        install_surface_core.UninstallSurfaceObservation(
+            path=notes_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+            text=stale_text,
+        ),
+    )
 
 
 def test_oracle_routes_uninstalled_surface_observation_to_core(oracle, roots, monkeypatch) -> None:

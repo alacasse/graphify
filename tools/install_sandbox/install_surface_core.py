@@ -46,6 +46,39 @@ class InstallSurfaceStatus:
     detail: str
 
 
+@dataclass(frozen=True)
+class GeneratedFileObservation:
+    root_name: str
+    relative: Path
+    suffix: str
+    file_size: int | None
+    mentions_expected_marker: bool
+    expected_key: bool
+    skill_sidecar_relative: bool
+    excluded_path: bool
+    relative_substring_match: bool
+    small_text_candidate: bool
+
+    @property
+    def path_relevant(self) -> bool:
+        return self.expected_key or self.skill_sidecar_relative or self.relative_substring_match
+
+    @property
+    def needs_text_marker_match(self) -> bool:
+        return not self.excluded_path and not self.path_relevant and self.small_text_candidate
+
+
+@dataclass(frozen=True)
+class GeneratedFileDecision:
+    observation: GeneratedFileObservation
+    is_relevant: bool
+    is_ignored: bool
+
+    @property
+    def should_include(self) -> bool:
+        return self.is_relevant and not self.is_ignored
+
+
 class GeneratedFileExpectationLike(Protocol):
     relative_substrings: tuple[str, ...]
     text_suffixes: tuple[str, ...]
@@ -190,6 +223,40 @@ def text_mentions_expected_generated_marker(expectation: GeneratedFileExpectatio
     return expectation.include_user_content_sentinel and USER_SENTINEL in text
 
 
+def generated_file_observation(
+    expectation: GeneratedFileExpectationLike,
+    expected: Iterable[InstallSurface],
+    root_name: str,
+    relative: Path,
+    *,
+    file_size: int | None,
+    mentions_expected_marker: bool,
+    excluded_path: bool,
+) -> GeneratedFileObservation:
+    rel = relative.as_posix()
+    return GeneratedFileObservation(
+        root_name=root_name,
+        relative=relative,
+        suffix=relative.suffix,
+        file_size=file_size,
+        mentions_expected_marker=mentions_expected_marker,
+        expected_key=is_expected_generated_key(expected, root_name, relative),
+        skill_sidecar_relative=is_skill_sidecar_relative(expected, root_name, relative),
+        excluded_path=excluded_path,
+        relative_substring_match=any(fragment.lower() in rel.lower() for fragment in expectation.relative_substrings),
+        small_text_candidate=file_size is not None and is_small_text_candidate(expectation, file_size=file_size, suffix=relative.suffix),
+    )
+
+
+def decide_generated_file_observation(observation: GeneratedFileObservation) -> GeneratedFileDecision:
+    relevant = observation.path_relevant or (observation.small_text_candidate and observation.mentions_expected_marker)
+    return GeneratedFileDecision(
+        observation=observation,
+        is_relevant=relevant,
+        is_ignored=observation.excluded_path,
+    )
+
+
 def is_relevant_generated_file(
     expectation: GeneratedFileExpectationLike,
     expected: Iterable[InstallSurface],
@@ -200,15 +267,19 @@ def is_relevant_generated_file(
     mentions_expected_marker: bool,
 ) -> bool:
     rel = relative.as_posix()
-    if is_expected_generated_key(expected, root_name, relative):
-        return True
-    if is_skill_sidecar_relative(expected, root_name, relative):
-        return True
-    if any(fragment.lower() in rel.lower() for fragment in expectation.relative_substrings):
-        return True
-    if not small_text_candidate:
-        return False
-    return mentions_expected_marker
+    observation = GeneratedFileObservation(
+        root_name=root_name,
+        relative=relative,
+        suffix=relative.suffix,
+        file_size=0 if small_text_candidate else None,
+        mentions_expected_marker=mentions_expected_marker,
+        expected_key=is_expected_generated_key(expected, root_name, relative),
+        skill_sidecar_relative=is_skill_sidecar_relative(expected, root_name, relative),
+        excluded_path=False,
+        relative_substring_match=any(fragment.lower() in rel.lower() for fragment in expectation.relative_substrings),
+        small_text_candidate=small_text_candidate,
+    )
+    return decide_generated_file_observation(observation).is_relevant
 
 
 def skill_version_status(version_text: str | None, expected_version: str) -> tuple[bool, str]:

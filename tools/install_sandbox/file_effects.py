@@ -12,17 +12,19 @@ try:
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         ReferenceSidecarExpectation,
+        GeneratedFileDecision,
         command_hook_present,
+        decide_generated_file_observation,
         expected_kind_status,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
         file_fingerprint,
+        generated_file_observation,
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
-        is_relevant_generated_file,
         is_skill_sidecar_relative,
         is_small_text_candidate,
         installed_reference_sidecar_status,
@@ -58,17 +60,19 @@ except ImportError:
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         ReferenceSidecarExpectation,
+        GeneratedFileDecision,
         command_hook_present,
+        decide_generated_file_observation,
         expected_kind_status,
         expected_generated_relative_keys,
         expected_skill_sidecar_relatives,
         file_fingerprint,
+        generated_file_observation,
         graphify_section_removed,
         hooks_by_event,
         install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
-        is_relevant_generated_file,
         is_skill_sidecar_relative,
         is_small_text_candidate,
         installed_reference_sidecar_status,
@@ -380,11 +384,10 @@ class FileEffectOracle:
             for path in self.pruned_file_walk(root):
                 relative = path.relative_to(root)
                 rel = relative.as_posix()
-                if self.should_exclude_generated_path(relative):
-                    continue
                 if (root_name, rel) in expected:
                     continue
-                if not self.is_relevant_generated_file(scenario, root_name, relative, path):
+                decision = self.generated_file_decision(scenario, root_name, relative, path, apply_excludes=True)
+                if not decision.should_include:
                     continue
                 checks.append(
                     check_record(
@@ -431,11 +434,8 @@ class FileEffectOracle:
         return is_skill_sidecar_relative(scenario.expected, root_name, relative)
 
     def is_small_text_candidate(self, scenario: Scenario, path: Path) -> bool:
-        try:
-            size = path.stat().st_size
-        except OSError:
-            return False
-        return is_small_text_candidate(scenario.generated_file_expectation, file_size=size, suffix=path.suffix)
+        size = self.generated_file_size(path)
+        return size is not None and is_small_text_candidate(scenario.generated_file_expectation, file_size=size, suffix=path.suffix)
 
     def file_mentions_expected_generated_marker(self, scenario: Scenario, path: Path) -> bool:
         try:
@@ -444,27 +444,46 @@ class FileEffectOracle:
             return False
         return text_mentions_expected_generated_marker(scenario.generated_file_expectation, text)
 
-    def is_relevant_generated_file(self, scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
-        if is_relevant_generated_file(
+    def generated_file_size(self, path: Path) -> int | None:
+        try:
+            return path.stat().st_size
+        except OSError:
+            return None
+
+    def generated_file_decision(
+        self,
+        scenario: Scenario,
+        root_name: str,
+        relative: Path,
+        path: Path,
+        *,
+        apply_excludes: bool,
+    ) -> GeneratedFileDecision:
+        excluded_path = apply_excludes and self.should_exclude_generated_path(relative)
+        size = None if excluded_path else self.generated_file_size(path)
+        observation = generated_file_observation(
             scenario.generated_file_expectation,
             scenario.expected,
             root_name,
             relative,
-            small_text_candidate=False,
+            file_size=size,
             mentions_expected_marker=False,
-        ):
-            return True
-        small_text_candidate = self.is_small_text_candidate(scenario, path)
-        if not small_text_candidate:
-            return False
-        return is_relevant_generated_file(
-            scenario.generated_file_expectation,
-            scenario.expected,
-            root_name,
-            relative,
-            small_text_candidate=small_text_candidate,
-            mentions_expected_marker=self.file_mentions_expected_generated_marker(scenario, path),
+            excluded_path=excluded_path,
         )
+        if observation.needs_text_marker_match:
+            observation = generated_file_observation(
+                scenario.generated_file_expectation,
+                scenario.expected,
+                root_name,
+                relative,
+                file_size=size,
+                mentions_expected_marker=self.file_mentions_expected_generated_marker(scenario, path),
+                excluded_path=excluded_path,
+            )
+        return decide_generated_file_observation(observation)
+
+    def is_relevant_generated_file(self, scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
+        return self.generated_file_decision(scenario, root_name, relative, path, apply_excludes=False).is_relevant
 
     def copy_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
         out = artifact_dir / "generated-files"
@@ -476,7 +495,7 @@ class FileEffectOracle:
             target = out / root_name
             for path in self.pruned_file_walk(root):
                 rel = path.relative_to(root)
-                if self.should_exclude_generated_path(rel) or not self.is_relevant_generated_file(scenario, root_name, rel, path):
+                if not self.generated_file_decision(scenario, root_name, rel, path, apply_excludes=True).should_include:
                     continue
                 dest = target / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)

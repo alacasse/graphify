@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
 try:
-    from .expected_effects import is_skill_effect
+    from .expected_effects import is_json_effect, is_skill_effect
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
+        InstallSurfaceObservation,
         ReferenceSidecarExpectation,
         GeneratedFileDecision,
         command_hook_present,
@@ -25,12 +27,14 @@ try:
         graphify_section_removed,
         hooks_by_event,
         idempotency_state_changes,
+        install_surface_kind_status_from_observation,
         install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
         is_skill_sidecar_relative,
         is_small_text_candidate,
         installed_reference_sidecar_status,
+        installed_surface_status_from_observation,
         installed_surface_status,
         json_expectation_status,
         json_marker_status,
@@ -63,11 +67,12 @@ try:
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
-    from expected_effects import is_skill_effect  # type: ignore[no-redef]
+    from expected_effects import is_json_effect, is_skill_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
+        InstallSurfaceObservation,
         ReferenceSidecarExpectation,
         GeneratedFileDecision,
         command_hook_present,
@@ -82,12 +87,14 @@ except ImportError:
         graphify_section_removed,
         hooks_by_event,
         idempotency_state_changes,
+        install_surface_kind_status_from_observation,
         install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
         is_skill_sidecar_relative,
         is_small_text_candidate,
         installed_reference_sidecar_status,
+        installed_surface_status_from_observation,
         installed_surface_status,
         json_expectation_status,
         json_marker_status,
@@ -329,8 +336,54 @@ class FileEffectOracle:
     def text_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
         return text_marker_status(path, entry)
 
+    def installed_surface_observation(self, entry: InstallSurface) -> InstallSurfaceObservation:
+        path = self.expected_path(entry)
+        base = InstallSurfaceObservation(
+            path=path,
+            exists=path.exists(),
+            is_file=path.is_file(),
+            is_dir=path.is_dir(),
+        )
+        status = install_surface_kind_status_from_observation(entry, base)
+        if not status.ok or not entry.marker:
+            return base
+        if is_json_effect(entry):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                return InstallSurfaceObservation(
+                    path=path,
+                    exists=base.exists,
+                    is_file=base.is_file,
+                    is_dir=base.is_dir,
+                    json_error_detail=f"invalid_json={exc.msg}",
+                )
+            except OSError as exc:
+                return InstallSurfaceObservation(
+                    path=path,
+                    exists=base.exists,
+                    is_file=base.is_file,
+                    is_dir=base.is_dir,
+                    json_error_detail=f"json_read_failed={exc}",
+                )
+            return InstallSurfaceObservation(
+                path=path,
+                exists=base.exists,
+                is_file=base.is_file,
+                is_dir=base.is_dir,
+                json_data=data,
+                json_loaded=True,
+            )
+        return InstallSurfaceObservation(
+            path=path,
+            exists=base.exists,
+            is_file=base.is_file,
+            is_dir=base.is_dir,
+            text=path.read_text(encoding="utf-8", errors="replace"),
+        )
+
     def expected_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        status = installed_surface_status(entry, self.roots)
+        status = installed_surface_status_from_observation(entry, self.installed_surface_observation(entry))
         return status.ok, status.detail
 
     # Install/uninstall assertions

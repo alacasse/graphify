@@ -752,6 +752,78 @@ def test_install_surface_kind_status_contracts(oracle, roots) -> None:
     assert oracle.expected_entry_status(InstallSurface("project", "missing-dir", kind="dir")) == (False, "missing")
 
 
+def test_install_surface_core_decides_installed_status_from_observed_facts() -> None:
+    missing = InstallSurface("project", "missing.txt")
+    missing_observation = install_surface_core.InstallSurfaceObservation(
+        path=Path("/observed/missing.txt"),
+        exists=False,
+    )
+
+    missing_status = install_surface_core.installed_surface_status_from_observation(missing, missing_observation)
+
+    assert missing_status == install_surface_core.InstallSurfaceStatus(
+        Path("/observed/missing.txt"),
+        ok=False,
+        detail="missing",
+    )
+
+    wrong_kind = InstallSurface("project", "wrong-kind", kind="dir")
+    wrong_kind_status = install_surface_core.installed_surface_status_from_observation(
+        wrong_kind,
+        install_surface_core.InstallSurfaceObservation(
+            path=Path("/observed/wrong-kind"),
+            exists=True,
+            is_file=True,
+            is_dir=False,
+        ),
+    )
+
+    assert wrong_kind_status.ok is False
+    assert wrong_kind_status.detail == "expected_directory_but_not_directory"
+
+    text_surface = section("project", "notes.md", preserve_user_content=True)
+    text_status = install_surface_core.installed_surface_status_from_observation(
+        text_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=Path("/observed/notes.md"),
+            exists=True,
+            is_file=True,
+            text=f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+        ),
+    )
+
+    assert text_status.ok is True
+    assert text_status.detail == "marker_count=1; user_content_preserved; stale_replaced=True"
+
+    json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
+    json_status = install_surface_core.installed_surface_status_from_observation(
+        json_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=Path("/observed/settings.json"),
+            exists=True,
+            is_file=True,
+            json_data={"hooks": [{"command": "graphify query"}]},
+            json_loaded=True,
+        ),
+    )
+
+    assert json_status.ok is True
+    assert json_status.detail == "valid_json=true; schema=generic_marker; marker_present=True"
+
+    invalid_json_status = install_surface_core.installed_surface_status_from_observation(
+        json_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=Path("/observed/settings.json"),
+            exists=True,
+            is_file=True,
+            json_error_detail="invalid_json=Expecting value",
+        ),
+    )
+
+    assert invalid_json_status.ok is False
+    assert invalid_json_status.detail == "invalid_json=Expecting value"
+
+
 def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) -> None:
     surface = InstallSurface("project", "installed.txt")
     (roots["project"] / "installed.txt").write_text("installed\n", encoding="utf-8")
@@ -786,6 +858,30 @@ def test_install_surface_core_resolves_installed_marker_status(roots) -> None:
     assert json_status.path == json_path
     assert json_status.ok is True
     assert json_status.detail == "valid_json=true; schema=generic_marker; marker_present=True"
+
+
+def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
+    surface = section("project", "notes.md", preserve_user_content=True)
+    path = roots["project"] / "notes.md"
+    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    path.write_text(text, encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def decide_from_observation(entry, observation):
+        captured["entry"] = entry
+        captured["observation"] = observation
+        return install_surface_core.InstallSurfaceStatus(observation.path, True, "observed_by_core")
+
+    monkeypatch.setattr(file_effects, "installed_surface_status_from_observation", decide_from_observation)
+
+    assert oracle.expected_entry_status(surface) == (True, "observed_by_core")
+    assert captured["entry"] is surface
+    observation = captured["observation"]
+    assert isinstance(observation, install_surface_core.InstallSurfaceObservation)
+    assert observation.path == path
+    assert observation.exists is True
+    assert observation.is_file is True
+    assert observation.text == text
 
 
 def test_oracle_renders_installed_surface_observations_as_assertion_records(oracle, roots) -> None:

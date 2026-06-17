@@ -49,6 +49,18 @@ class InstallSurfaceStatus:
 
 
 @dataclass(frozen=True)
+class InstallSurfaceObservation:
+    path: Path
+    exists: bool
+    is_file: bool = False
+    is_dir: bool = False
+    text: str | None = None
+    json_data: object = None
+    json_loaded: bool = False
+    json_error_detail: str | None = None
+
+
+@dataclass(frozen=True)
 class GeneratedFileObservation:
     root_name: str
     relative: Path
@@ -536,20 +548,43 @@ def uninstalled_skill_sidecar_status(exists: bool) -> tuple[bool, str]:
     return not exists, "sidecar_still_exists" if exists else "removed"
 
 
-def expected_kind_status(path: Path, kind: str) -> tuple[bool, str]:
-    if not path.exists():
+def expected_kind_status_from_observation(observation: InstallSurfaceObservation, kind: str) -> tuple[bool, str]:
+    if not observation.exists:
         return False, "missing"
     if kind == "file":
-        return path.is_file(), "file" if path.is_file() else "expected_file_but_not_file"
+        return observation.is_file, "file" if observation.is_file else "expected_file_but_not_file"
     if kind == "dir":
-        return path.is_dir(), "directory" if path.is_dir() else "expected_directory_but_not_directory"
+        return observation.is_dir, "directory" if observation.is_dir else "expected_directory_but_not_directory"
     return True, "exists"
+
+
+def install_surface_kind_status_from_observation(
+    surface: InstallSurface,
+    observation: InstallSurfaceObservation,
+) -> InstallSurfaceStatus:
+    ok, detail = expected_kind_status_from_observation(observation, surface.kind)
+    return InstallSurfaceStatus(observation.path, ok, detail)
+
+
+def expected_kind_status(path: Path, kind: str) -> tuple[bool, str]:
+    observation = InstallSurfaceObservation(
+        path=path,
+        exists=path.exists(),
+        is_file=path.is_file(),
+        is_dir=path.is_dir(),
+    )
+    return expected_kind_status_from_observation(observation, kind)
 
 
 def install_surface_kind_status(surface: InstallSurface, roots: Mapping[str, Path]) -> InstallSurfaceStatus:
     path = resolve_install_surface_path(surface, roots)
-    ok, detail = expected_kind_status(path, surface.kind)
-    return InstallSurfaceStatus(path, ok, detail)
+    observation = InstallSurfaceObservation(
+        path=path,
+        exists=path.exists(),
+        is_file=path.is_file(),
+        is_dir=path.is_dir(),
+    )
+    return install_surface_kind_status_from_observation(surface, observation)
 
 
 def json_value_contains_marker(value: object, marker: str) -> bool:
@@ -606,13 +641,15 @@ def json_expectation_status(data: object, expectation: JsonExpectation) -> tuple
     return ok, detail
 
 
-def json_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return False, f"invalid_json={exc.msg}"
-    except OSError as exc:
-        return False, f"json_read_failed={exc}"
+def json_marker_status_from_observation(
+    surface: InstallSurface,
+    observation: InstallSurfaceObservation,
+) -> tuple[bool, str]:
+    if observation.json_error_detail is not None:
+        return False, observation.json_error_detail
+    if not observation.json_loaded:
+        raise AssertionError(f"json observation has no data or error: {observation.path}")
+    data = observation.json_data
     if surface.json_expectation is not None:
         return json_expectation_status(data, surface.json_expectation)
     marker = surface.marker or ""
@@ -620,8 +657,26 @@ def json_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
     return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"
 
 
-def text_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def json_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return json_marker_status_from_observation(
+            surface,
+            InstallSurfaceObservation(path=path, exists=True, is_file=True, json_error_detail=f"invalid_json={exc.msg}"),
+        )
+    except OSError as exc:
+        return json_marker_status_from_observation(
+            surface,
+            InstallSurfaceObservation(path=path, exists=True, is_file=True, json_error_detail=f"json_read_failed={exc}"),
+        )
+    return json_marker_status_from_observation(
+        surface,
+        InstallSurfaceObservation(path=path, exists=True, is_file=True, json_data=data, json_loaded=True),
+    )
+
+
+def text_marker_status_from_text(text: str, surface: InstallSurface) -> tuple[bool, str]:
     marker_count = text.count(surface.marker or "")
     ok = marker_count == 1
     detail = f"marker_count={marker_count}"
@@ -637,15 +692,74 @@ def text_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
     return ok, detail
 
 
-def installed_surface_status(surface: InstallSurface, roots: Mapping[str, Path]) -> InstallSurfaceStatus:
-    status = install_surface_kind_status(surface, roots)
+def text_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
+    return text_marker_status_from_text(path.read_text(encoding="utf-8", errors="replace"), surface)
+
+
+def installed_surface_status_from_observation(
+    surface: InstallSurface,
+    observation: InstallSurfaceObservation,
+) -> InstallSurfaceStatus:
+    status = install_surface_kind_status_from_observation(surface, observation)
     if not status.ok or not surface.marker:
         return status
     if is_json_effect(surface):
-        ok, detail = json_marker_status(status.path, surface)
+        ok, detail = json_marker_status_from_observation(surface, observation)
     else:
-        ok, detail = text_marker_status(status.path, surface)
+        if observation.text is None:
+            raise AssertionError(f"text observation has no data: {observation.path}")
+        ok, detail = text_marker_status_from_text(observation.text, surface)
     return InstallSurfaceStatus(status.path, ok, detail)
+
+
+def installed_surface_status(surface: InstallSurface, roots: Mapping[str, Path]) -> InstallSurfaceStatus:
+    path = resolve_install_surface_path(surface, roots)
+    observation = InstallSurfaceObservation(
+        path=path,
+        exists=path.exists(),
+        is_file=path.is_file(),
+        is_dir=path.is_dir(),
+    )
+    status = install_surface_kind_status_from_observation(surface, observation)
+    if not status.ok or not surface.marker:
+        return status
+    if is_json_effect(surface):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            observation = InstallSurfaceObservation(
+                path=path,
+                exists=observation.exists,
+                is_file=observation.is_file,
+                is_dir=observation.is_dir,
+                json_error_detail=f"invalid_json={exc.msg}",
+            )
+        except OSError as exc:
+            observation = InstallSurfaceObservation(
+                path=path,
+                exists=observation.exists,
+                is_file=observation.is_file,
+                is_dir=observation.is_dir,
+                json_error_detail=f"json_read_failed={exc}",
+            )
+        else:
+            observation = InstallSurfaceObservation(
+                path=path,
+                exists=observation.exists,
+                is_file=observation.is_file,
+                is_dir=observation.is_dir,
+                json_data=data,
+                json_loaded=True,
+            )
+    else:
+        observation = InstallSurfaceObservation(
+            path=path,
+            exists=observation.exists,
+            is_file=observation.is_file,
+            is_dir=observation.is_dir,
+            text=path.read_text(encoding="utf-8", errors="replace"),
+        )
+    return installed_surface_status_from_observation(surface, observation)
 
 
 def graphify_section_removed(text: str, surface: InstallSurface) -> bool:

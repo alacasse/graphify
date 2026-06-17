@@ -565,6 +565,14 @@ def assert_idempotent_state(before: dict[str, dict[str, object]], after: dict[st
     return checks
 
 
+def _universal_uninstall_adapter_checks(
+    install_checks: Iterable[dict[str, object]],
+    uninstall_checks: Iterable[dict[str, object]],
+    unexpected_checks: Iterable[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [*install_checks, *uninstall_checks, *unexpected_checks]
+
+
 @dataclass(frozen=True)
 class ScenarioFileEffectsAdapter:
     oracle: FileEffectOracle
@@ -619,10 +627,18 @@ class ScenarioFileEffectsAdapter:
     ) -> list[dict[str, object]]:
         scenarios = list(installed_scenarios)
         expected_keys = self.oracle.expected_generated_relative_keys_for_scenarios(scenarios)
-        return (
-            install_checks
-            + [check for scenario in scenarios for check in self.oracle.assert_uninstalled(scenario)]
-            + self.oracle.assert_no_unexpected_graphify_files(runner_scenario, phase="universal_uninstall", expected_keys=expected_keys)
+        uninstall_checks: list[dict[str, object]] = []
+        for scenario in scenarios:
+            uninstall_checks.extend(self.oracle.assert_uninstalled(scenario))
+        unexpected_checks = self.oracle.assert_no_unexpected_graphify_files(
+            runner_scenario,
+            phase="universal_uninstall",
+            expected_keys=expected_keys,
+        )
+        return _universal_uninstall_adapter_checks(
+            install_checks,
+            uninstall_checks,
+            unexpected_checks,
         )
 
     def disposable_artifact_checks(self, disposable_path: Path, removed: bool) -> list[dict[str, object]]:

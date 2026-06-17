@@ -1955,6 +1955,76 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
     ]
 
 
+def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(oracle) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class RecordingOracle(file_effects.FileEffectOracle):
+        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+            super().__init__(
+                roots=wrapped.roots,
+                packaged_reference_resolution=wrapped.packaged_reference_resolution,
+                expected_graphify_version=wrapped.expected_graphify_version,
+                manifest_prune_dirs=wrapped.manifest_prune_dirs,
+            )
+
+        def expected_generated_relative_keys_for_scenarios(self, scenarios):
+            items = list(scenarios)
+            calls.append(("expected_generated_relative_keys_for_scenarios", tuple(item.platform for item in items)))
+            return {("project", "first.md"), ("home", "second.md")}
+
+        def assert_uninstalled(self, scenario_arg):
+            calls.append(("assert_uninstalled", scenario_arg.platform))
+            if scenario_arg.platform == "first":
+                return [
+                    {"path": "first.md", "ok": True, "detail": "removed"},
+                    {"path": "first-sidecar", "ok": True, "detail": "removed"},
+                ]
+            return [{"path": "second.md", "ok": True, "detail": "removed"}]
+
+        def assert_no_unexpected_graphify_files(self, scenario_arg, *, phase, expected_keys=None):
+            calls.append(("assert_no_unexpected_graphify_files", scenario_arg.platform, phase, expected_keys))
+            return [
+                {"path": "leftover.md", "ok": False, "detail": "unexpected_graphify_related_file_after_universal_uninstall"},
+                {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
+            ]
+
+    def write_manifest(*args, **kwargs) -> None:
+        raise AssertionError("not used")
+
+    def equivalence_check(scenario_arg, env, artifact_dir):
+        raise AssertionError("not used")
+
+    adapter = file_effects.ScenarioFileEffectsAdapter(RecordingOracle(oracle), write_manifest, equivalence_check)
+    runner = scenario("runner", ExpectedPath("project", "runner.md"))
+    first = scenario("first", ExpectedPath("project", "first.md"))
+    second = scenario("second", ExpectedPath("home", "second.md"))
+    install_checks = [
+        {"path": "first-install", "ok": True, "detail": "installed"},
+        {"path": "second-install", "ok": True, "detail": "installed"},
+    ]
+
+    assert adapter.universal_uninstall_checks(runner, (first, second), install_checks) == [
+        {"path": "first-install", "ok": True, "detail": "installed"},
+        {"path": "second-install", "ok": True, "detail": "installed"},
+        {"path": "first.md", "ok": True, "detail": "removed"},
+        {"path": "first-sidecar", "ok": True, "detail": "removed"},
+        {"path": "second.md", "ok": True, "detail": "removed"},
+        {"path": "leftover.md", "ok": False, "detail": "unexpected_graphify_related_file_after_universal_uninstall"},
+        {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
+    ]
+    assert calls == [
+        ("expected_generated_relative_keys_for_scenarios", ("first", "second")),
+        ("assert_uninstalled", "first"),
+        ("assert_uninstalled", "second"),
+        (
+            "assert_no_unexpected_graphify_files",
+            "runner",
+            "universal_uninstall",
+            {("project", "first.md"), ("home", "second.md")},
+        ),
+    ]
+
+
 def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots, tmp_path) -> None:
     calls: list[tuple[object, ...]] = []
 

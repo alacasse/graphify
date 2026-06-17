@@ -5,7 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Mapping, Protocol
+from typing import AbstractSet, Iterable, Literal, Mapping, Protocol
 
 try:
     from .expected_effects import (
@@ -185,17 +185,7 @@ def expected_skill_sidecar_relatives(surface: InstallSurface, resolution: Packag
     return relatives
 
 
-def expected_generated_relative_keys(expected: Iterable[InstallSurface], resolution: PackagedReferenceResolution) -> set[tuple[str, str]]:
-    keys: set[tuple[str, str]] = set()
-    for surface in expected:
-        keys.add((surface.root, surface.relative))
-        if is_skill_effect(surface):
-            for relative in expected_skill_sidecar_relatives(surface, resolution):
-                keys.add((surface.root, relative.as_posix()))
-    return keys
-
-
-def planned_state_entries(
+def _planned_state_entries(
     expected: Iterable[InstallSurface],
     resolution: PackagedReferenceResolution,
     *,
@@ -226,6 +216,23 @@ def planned_state_entries(
                 )
             )
     return tuple(entries)
+
+
+def expected_generated_relative_keys(expected: Iterable[InstallSurface], resolution: PackagedReferenceResolution) -> set[tuple[str, str]]:
+    return {(entry.root_name, entry.relative.as_posix()) for entry in _planned_state_entries(expected, resolution)}
+
+
+def planned_state_entries(
+    expected: Iterable[InstallSurface],
+    resolution: PackagedReferenceResolution,
+    *,
+    installed_skill_reference_relatives: Mapping[tuple[str, str], Iterable[Path]] | None = None,
+) -> tuple[StateEntryPlan, ...]:
+    return _planned_state_entries(
+        expected,
+        resolution,
+        installed_skill_reference_relatives=installed_skill_reference_relatives,
+    )
 
 
 def is_excluded_generated_path(relative: Path, excludes: Iterable[str]) -> bool:
@@ -274,6 +281,7 @@ def generated_file_observation(
     file_size: int | None,
     mentions_expected_marker: bool,
     excluded_path: bool,
+    expected_keys: AbstractSet[tuple[str, str]] | None = None,
 ) -> GeneratedFileObservation:
     rel = relative.as_posix()
     return GeneratedFileObservation(
@@ -282,7 +290,11 @@ def generated_file_observation(
         suffix=relative.suffix,
         file_size=file_size,
         mentions_expected_marker=mentions_expected_marker,
-        expected_key=is_expected_generated_key(expected, root_name, relative),
+        expected_key=(
+            (root_name, rel) in expected_keys
+            if expected_keys is not None
+            else is_expected_generated_key(expected, root_name, relative)
+        ),
         skill_sidecar_relative=is_skill_sidecar_relative(expected, root_name, relative),
         excluded_path=excluded_path,
         relative_substring_match=any(fragment.lower() in rel.lower() for fragment in expectation.relative_substrings),

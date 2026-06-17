@@ -367,6 +367,12 @@ class FileEffectOracle:
     def expected_generated_relative_keys(self, scenario: Scenario) -> set[tuple[str, str]]:
         return expected_generated_relative_keys(scenario.expected, self.packaged_reference_resolution(scenario.platform))
 
+    def expected_generated_relative_keys_for_scenarios(self, scenarios: Iterable[Scenario]) -> set[tuple[str, str]]:
+        keys: set[tuple[str, str]] = set()
+        for scenario in scenarios:
+            keys.update(self.expected_generated_relative_keys(scenario))
+        return keys
+
     # Generated-file discovery/copying
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
         yield from pruned_file_walk(base, self.manifest_prune_dirs)
@@ -386,9 +392,16 @@ class FileEffectOracle:
             for path in self.pruned_file_walk(root):
                 relative = path.relative_to(root)
                 rel = relative.as_posix()
-                if (root_name, rel) in expected:
+                decision = self.generated_file_decision(
+                    scenario,
+                    root_name,
+                    relative,
+                    path,
+                    apply_excludes=True,
+                    expected_keys=expected,
+                )
+                if decision.observation.expected_key:
                     continue
-                decision = self.generated_file_decision(scenario, root_name, relative, path, apply_excludes=True)
                 if not decision.should_include:
                     continue
                 checks.append(
@@ -469,6 +482,7 @@ class FileEffectOracle:
         path: Path,
         *,
         apply_excludes: bool,
+        expected_keys: set[tuple[str, str]] | None = None,
     ) -> GeneratedFileDecision:
         excluded_path = apply_excludes and self.should_exclude_generated_path(relative)
         size = None if excluded_path else self.generated_file_size(path)
@@ -480,6 +494,7 @@ class FileEffectOracle:
             file_size=size,
             mentions_expected_marker=False,
             excluded_path=excluded_path,
+            expected_keys=expected_keys,
         )
         if observation.needs_text_marker_match:
             observation = generated_file_observation(
@@ -490,6 +505,7 @@ class FileEffectOracle:
                 file_size=size,
                 mentions_expected_marker=self.file_mentions_expected_generated_marker(scenario, path),
                 excluded_path=excluded_path,
+                expected_keys=expected_keys,
             )
         return decide_generated_file_observation(observation)
 
@@ -500,13 +516,21 @@ class FileEffectOracle:
         out = artifact_dir / "generated-files"
         if out.exists():
             shutil.rmtree(out)
+        expected_keys = self.expected_generated_relative_keys(scenario)
         for root_name, root in self.roots.items():
             if not root.exists():
                 continue
             target = out / root_name
             for path in self.pruned_file_walk(root):
                 rel = path.relative_to(root)
-                if not self.generated_file_decision(scenario, root_name, rel, path, apply_excludes=True).should_include:
+                if not self.generated_file_decision(
+                    scenario,
+                    root_name,
+                    rel,
+                    path,
+                    apply_excludes=True,
+                    expected_keys=expected_keys,
+                ).should_include:
                     continue
                 dest = target / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -574,7 +598,7 @@ class ScenarioFileEffectsAdapter:
         install_checks: list[dict[str, object]],
     ) -> list[dict[str, object]]:
         scenarios = list(installed_scenarios)
-        expected_keys = set().union(*(self.oracle.expected_generated_relative_keys(scenario) for scenario in scenarios))
+        expected_keys = self.oracle.expected_generated_relative_keys_for_scenarios(scenarios)
         return (
             install_checks
             + [check for scenario in scenarios for check in self.oracle.assert_uninstalled(scenario)]

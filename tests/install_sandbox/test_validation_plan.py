@@ -288,22 +288,34 @@ def test_validation_plan_derives_runtime_limitation_sections_from_policy() -> No
 
 
 def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() -> None:
+    selected_runtime = platform_specs.TargetRuntimeValidationSpec(
+        section_title="Selected Runtime",
+        status="runtime_validated",
+        evidence_path="runtime/selected-evidence.json",
+        strategy="run the selected platform against its target runtime",
+        targets=("selected target app", "selected cleanup behavior"),
+        notes=("captures runtime-only integration behavior", "keeps report metadata explicit"),
+    )
+    unselected_runtime = platform_specs.TargetRuntimeValidationSpec(
+        section_title="Unselected Runtime",
+        status="declared",
+        evidence_path="runtime/unselected-evidence.json",
+        strategy="not selected",
+        targets=("windows",),
+        notes=("must not leak",),
+    )
     registry = platform_specs.ScenarioRegistry(
         {
-            "codex": platform_specs.PlatformSpec(name="codex", scopes={"project": _scope("codex.txt")}),
+            "codex": platform_specs.PlatformSpec(
+                name="codex",
+                scopes={"project": _scope("codex.txt")},
+                target_runtime_validation=(selected_runtime,),
+            ),
             "windows": platform_specs.PlatformSpec(
                 name="windows",
                 scopes={"project": _scope("windows.txt")},
                 simulated_linux_layout=True,
-                target_runtime_validation=(
-                    platform_specs.TargetRuntimeValidationSpec(
-                        section_title="Unselected Runtime",
-                        status="declared",
-                        strategy="not selected",
-                        targets=("windows",),
-                        notes=("must not leak",),
-                    ),
-                ),
+                target_runtime_validation=(unselected_runtime,),
             ),
         }
     )
@@ -311,11 +323,35 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() ->
     selected = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="project")
     all_platforms = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
 
-    assert selected.target_runtime_validation_sections == ()
-    assert [section["section_title"] for section in all_platforms.target_runtime_validation_sections] == [
-        "Unselected Runtime",
-        "Windows Validation",
-    ]
+    assert selected.target_runtime_validation_sections == (
+        {
+            "section_title": "Selected Runtime",
+            "status": "runtime_validated",
+            "evidence_path": "runtime/selected-evidence.json",
+            "strategy": "run the selected platform against its target runtime",
+            "targets": ["selected target app", "selected cleanup behavior"],
+            "notes": ["captures runtime-only integration behavior", "keeps report metadata explicit"],
+        },
+    )
+    assert all_platforms.target_runtime_validation_sections == (
+        {
+            "section_title": "Selected Runtime",
+            "status": "runtime_validated",
+            "evidence_path": "runtime/selected-evidence.json",
+            "strategy": "run the selected platform against its target runtime",
+            "targets": ["selected target app", "selected cleanup behavior"],
+            "notes": ["captures runtime-only integration behavior", "keeps report metadata explicit"],
+        },
+        {
+            "section_title": "Unselected Runtime",
+            "status": "declared",
+            "evidence_path": "runtime/unselected-evidence.json",
+            "strategy": "not selected",
+            "targets": ["windows"],
+            "notes": ["must not leak"],
+        },
+        validation_plan.DEFAULT_HARNESS_POLICY.runtime_limitation_sections[0].to_manifest(),
+    )
 
 
 def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:

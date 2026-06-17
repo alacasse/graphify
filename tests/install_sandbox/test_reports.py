@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tools.install_sandbox import platform_specs, reports, status
+from tools.install_sandbox import reports, status
 
 
 def test_known_status_values_are_serializable_file_effect_statuses() -> None:
@@ -162,24 +162,16 @@ def test_report_markdown_omits_target_runtime_validation_sections_when_metadata_
 
 
 def test_target_runtime_validation_sections_are_registry_declared_manifest_data() -> None:
-    registry = platform_specs.ScenarioRegistry(
+    sections = [
         {
-            "arbitrary-target": platform_specs.PlatformSpec(
-                name="arbitrary-target",
-                target_runtime_validation=(
-                    platform_specs.TargetRuntimeValidationSpec(
-                        section_title="Arbitrary Target Runtime",
-                        status="payload_only",
-                        evidence_path="runtime/evidence.json",
-                        strategy="declared synthetic strategy",
-                        targets=("non-windows target",),
-                        notes=("declared note",),
-                    ),
-                ),
-            )
+            "section_title": "Arbitrary Target Runtime",
+            "status": "payload_only",
+            "evidence_path": "runtime/evidence.json",
+            "strategy": "declared synthetic strategy",
+            "targets": ["non-windows target"],
+            "notes": ["declared note"],
         }
-    )
-    sections = registry.target_runtime_validation_sections()
+    ]
 
     markdown = reports.render_report_md({"results": [], "platform_coverage": [], "target_runtime_validation_sections": sections})
 
@@ -187,6 +179,7 @@ def test_target_runtime_validation_sections_are_registry_declared_manifest_data(
     assert "declared synthetic strategy" in markdown
     assert "non-windows target" in markdown
     assert "runtime/evidence.json" in markdown
+    assert "declared note" in markdown
 
 
 def test_write_report_markdown(tmp_path) -> None:

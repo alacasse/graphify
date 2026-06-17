@@ -91,6 +91,12 @@ class StateEntryPlan:
 
 
 @dataclass(frozen=True)
+class IdempotencyStateChange:
+    key: str
+    stable: bool
+
+
+@dataclass(frozen=True)
 class UserContentSeedPlan:
     root_name: str
     relative: Path
@@ -267,6 +273,16 @@ def planned_state_entries(
         expected,
         resolution,
         installed_skill_reference_relatives=installed_skill_reference_relatives,
+    )
+
+
+def idempotency_state_changes(
+    before: Mapping[str, Mapping[str, object]],
+    after: Mapping[str, Mapping[str, object]],
+) -> tuple[IdempotencyStateChange, ...]:
+    return tuple(
+        IdempotencyStateChange(key=key, stable=before.get(key) == after.get(key))
+        for key in sorted(set(before) | set(after))
     )
 
 

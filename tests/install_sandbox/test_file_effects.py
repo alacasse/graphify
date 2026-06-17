@@ -436,6 +436,28 @@ def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:
     assert plan[2].text_expectation is None
 
 
+def test_install_surface_core_derives_ordered_idempotency_state_changes() -> None:
+    before = {
+        "project/changed.md": {"exists": True, "sha256": "before"},
+        "project/removed.md": {"exists": True, "sha256": "removed"},
+        "project/stable.md": {"exists": True, "sha256": "same"},
+    }
+    after = {
+        "project/added.md": {"exists": True, "sha256": "added"},
+        "project/changed.md": {"exists": True, "sha256": "after"},
+        "project/stable.md": {"exists": True, "sha256": "same"},
+    }
+
+    changes = install_surface_core.idempotency_state_changes(before, after)
+
+    assert changes == (
+        install_surface_core.IdempotencyStateChange("project/added.md", stable=False),
+        install_surface_core.IdempotencyStateChange("project/changed.md", stable=False),
+        install_surface_core.IdempotencyStateChange("project/removed.md", stable=False),
+        install_surface_core.IdempotencyStateChange("project/stable.md", stable=True),
+    )
+
+
 def test_install_surface_core_derives_user_content_seed_plans() -> None:
     stale_section = section("project", "stale-notes.md", preserve_user_content=True)
     legacy_text_policy = ExpectedPath(
@@ -1644,11 +1666,20 @@ def test_expected_path_kind_is_enforced(oracle, roots) -> None:
 
 
 def test_idempotency_state_detects_content_change() -> None:
-    before = {"project/AGENTS.md": {"exists": True, "sha256": "a"}}
-    after = {"project/AGENTS.md": {"exists": True, "sha256": "b"}}
+    before = {
+        "project/AGENTS.md": {"exists": True, "sha256": "a"},
+        "project/notes.md": {"exists": True, "sha256": "same"},
+    }
+    after = {
+        "project/AGENTS.md": {"exists": True, "sha256": "b"},
+        "project/notes.md": {"exists": True, "sha256": "same"},
+    }
 
     checks = file_effects.assert_idempotent_state(before, after)
-    assert checks[0]["ok"] is False
+    assert checks == [
+        {"path": "project/AGENTS.md", "ok": False, "detail": "changed_after_repeat_install"},
+        {"path": "project/notes.md", "ok": True, "detail": "unchanged_after_repeat_install"},
+    ]
     assert file_effects.assert_idempotent_state(before, before)[0]["ok"] is True
 
 

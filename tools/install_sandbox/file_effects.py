@@ -23,6 +23,7 @@ try:
         generated_file_observation,
         graphify_section_removed,
         hooks_by_event,
+        idempotency_state_changes,
         install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
@@ -78,6 +79,7 @@ except ImportError:
         generated_file_observation,
         graphify_section_removed,
         hooks_by_event,
+        idempotency_state_changes,
         install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
@@ -550,9 +552,14 @@ class FileEffectOracle:
 
 def assert_idempotent_state(before: dict[str, dict[str, object]], after: dict[str, dict[str, object]]) -> list[dict[str, object]]:
     checks: list[dict[str, object]] = []
-    for key in sorted(set(before) | set(after)):
-        stable = before.get(key) == after.get(key)
-        checks.append(check_record(key, stable, "unchanged_after_repeat_install" if stable else "changed_after_repeat_install"))
+    for change in idempotency_state_changes(before, after):
+        checks.append(
+            check_record(
+                change.key,
+                change.stable,
+                "unchanged_after_repeat_install" if change.stable else "changed_after_repeat_install",
+            )
+        )
     return checks
 
 

@@ -210,6 +210,109 @@ def test_install_surface_alias_is_accepted_by_scenario_and_oracle(oracle, roots)
     ]
 
 
+def test_install_surface_path_uses_declared_root_and_relative(oracle, roots) -> None:
+    surface = InstallSurface("project", "nested/surface.txt")
+
+    assert oracle.expected_path(surface) == roots["project"] / "nested/surface.txt"
+
+    with pytest.raises(AssertionError, match="unknown root: missing"):
+        oracle.expected_path(InstallSurface("missing", "surface.txt"))
+
+
+def test_install_surface_kind_status_contracts(oracle, roots) -> None:
+    file_surface = InstallSurface("project", "installed.txt")
+    dir_surface = InstallSurface("project", "installed-dir", kind="dir")
+    generic_surface = InstallSurface("project", "socketish", kind="exists")
+    wrong_dir_surface = InstallSurface("project", "wrong-dir", kind="dir")
+
+    (roots["project"] / "installed.txt").write_text("installed\n", encoding="utf-8")
+    (roots["project"] / "installed-dir").mkdir()
+    (roots["project"] / "socketish").write_text("installed\n", encoding="utf-8")
+    (roots["project"] / "wrong-dir").write_text("not a directory\n", encoding="utf-8")
+
+    assert oracle.expected_entry_status(file_surface) == (True, "file")
+    assert oracle.expected_entry_status(dir_surface) == (True, "directory")
+    assert oracle.expected_entry_status(generic_surface) == (True, "exists")
+    assert oracle.expected_entry_status(wrong_dir_surface) == (False, "expected_directory_but_not_directory")
+    assert oracle.expected_entry_status(InstallSurface("project", "missing-dir", kind="dir")) == (False, "missing")
+
+
+def test_text_marker_status_preserves_user_content_and_replaces_stale_section(oracle, roots) -> None:
+    surface = section("project", "notes.md", preserve_user_content=True)
+    path = roots["project"] / "notes.md"
+
+    path.write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+        encoding="utf-8",
+    )
+    assert oracle.expected_entry_status(surface) == (True, "marker_count=1; user_content_preserved; stale_replaced=True")
+
+    path.write_text(
+        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\nfirst\n\n{platform_specs.GRAPHIFY_MARKER}\nsecond\n",
+        encoding="utf-8",
+    )
+    assert oracle.expected_entry_status(surface) == (False, "marker_count=2; user_content_missing; stale_replaced=True")
+
+    path.write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+    assert oracle.expected_entry_status(surface) == (False, "marker_count=1; user_content_preserved; stale_replaced=False")
+
+
+def test_json_surface_marker_status_contracts(oracle, roots) -> None:
+    generic = InstallSurface("project", "generic.json", content_kind="json", marker="graphify")
+    generic_path = roots["project"] / "generic.json"
+    generic_path.write_text(json.dumps({"hooks": [{"command": "graphify query"}]}), encoding="utf-8")
+
+    assert oracle.expected_entry_status(generic) == (True, "valid_json=true; schema=generic_marker; marker_present=True")
+
+    generic_path.write_text(json.dumps({"hooks": [{"command": "other"}]}), encoding="utf-8")
+    assert oracle.expected_entry_status(generic) == (False, "valid_json=true; schema=generic_marker; marker_present=False")
+
+    registered = InstallSurface(
+        "project",
+        "hooks.json",
+        content_kind="json",
+        marker="graphify",
+        json_expectation=platform_specs.JsonExpectation(
+            schema_name="unit_hooks",
+            hooks=(platform_specs.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
+        ),
+    )
+    registered_path = roots["project"] / "hooks.json"
+    registered_path.write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "graphify hook-check"}]}]}}),
+        encoding="utf-8",
+    )
+
+    assert oracle.expected_entry_status(registered) == (True, "valid_json=true; schema=unit_hooks; bash_hook_present=True")
+
+    registered_path.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}), encoding="utf-8")
+    assert oracle.expected_entry_status(registered) == (False, "valid_json=true; schema=unit_hooks; bash_hook_present=False")
+
+
+def test_uninstall_surface_status_contracts(oracle, roots) -> None:
+    plain = InstallSurface("project", "plain.txt")
+    plain_path = roots["project"] / "plain.txt"
+
+    assert oracle.uninstalled_entry_status(plain) == (True, "removed")
+
+    plain_path.write_text("still here\n", encoding="utf-8")
+    assert oracle.uninstalled_entry_status(plain) == (False, "still_exists")
+
+    text_section = section("project", "notes.md", preserve_user_content=True)
+    notes_path = roots["project"] / "notes.md"
+    notes_path.write_text(f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n", encoding="utf-8")
+    assert oracle.uninstalled_entry_status(text_section) == (True, "graphify_removed=True; user_content_preserved=True")
+
+    notes_path.write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+    assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
+
+
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:
     skill = platform_specs.SkillEffect("project", ".unit/graphify/SKILL.md")
     hooks = platform_specs.JsonHooksEffect(

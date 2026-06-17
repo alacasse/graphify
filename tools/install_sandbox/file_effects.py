@@ -11,12 +11,24 @@ from typing import Callable, Iterable, Literal
 try:
     from .expected_effects import is_json_effect, is_skill_effect, is_text_section_effect
     from .file_walk import pruned_file_walk
+    from .install_surface_core import (
+        expected_kind_status,
+        install_surface_kind_status,
+        resolve_install_root,
+        resolve_install_surface_path,
+    )
     from .json_helpers import object_dict, object_dicts, object_list
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
     from expected_effects import is_json_effect, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
+    from install_surface_core import (  # type: ignore[no-redef]
+        expected_kind_status,
+        install_surface_kind_status,
+        resolve_install_root,
+        resolve_install_surface_path,
+    )
     from json_helpers import object_dict, object_dicts, object_list
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
@@ -99,16 +111,6 @@ class ReferenceSidecarExpectation:
         return refs_ok, refs_detail
 
 
-def expected_kind_status(path: Path, kind: str) -> tuple[bool, str]:
-    if not path.exists():
-        return False, "missing"
-    if kind == "file":
-        return path.is_file(), "file" if path.is_file() else "expected_file_but_not_file"
-    if kind == "dir":
-        return path.is_dir(), "directory" if path.is_dir() else "expected_directory_but_not_directory"
-    return True, "exists"
-
-
 def json_value_contains_marker(value: object, marker: str) -> bool:
     if isinstance(value, dict):
         return any(marker in str(key) or json_value_contains_marker(item, marker) for key, item in value.items())
@@ -172,13 +174,10 @@ class FileEffectOracle:
 
     # Path helpers
     def root_path(self, root: str) -> Path:
-        try:
-            return self.roots[root]
-        except KeyError as exc:
-            raise AssertionError(f"unknown root: {root}") from exc
+        return resolve_install_root(root, self.roots)
 
     def expected_path(self, entry: InstallSurface) -> Path:
-        return self.root_path(entry.root) / entry.relative
+        return resolve_install_surface_path(entry, self.roots)
 
     def is_skill_expected(self, entry: InstallSurface) -> bool:
         return is_skill_effect(entry)
@@ -395,8 +394,10 @@ class FileEffectOracle:
         return ok, detail
 
     def expected_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        path = self.expected_path(entry)
-        ok, detail = expected_kind_status(path, entry.kind)
+        status = install_surface_kind_status(entry, self.roots)
+        path = status.path
+        ok = status.ok
+        detail = status.detail
         if not ok or not entry.marker:
             return ok, detail
         if is_json_effect(entry):

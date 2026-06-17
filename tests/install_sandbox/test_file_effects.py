@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import file_effects
+from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
@@ -235,6 +236,17 @@ def test_install_surface_kind_status_contracts(oracle, roots) -> None:
     assert oracle.expected_entry_status(generic_surface) == (True, "exists")
     assert oracle.expected_entry_status(wrong_dir_surface) == (False, "expected_directory_but_not_directory")
     assert oracle.expected_entry_status(InstallSurface("project", "missing-dir", kind="dir")) == (False, "missing")
+
+
+def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) -> None:
+    surface = InstallSurface("project", "installed.txt")
+    (roots["project"] / "installed.txt").write_text("installed\n", encoding="utf-8")
+
+    status = install_surface_core.install_surface_kind_status(surface, roots)
+
+    assert status.path == roots["project"] / "installed.txt"
+    assert status.ok is True
+    assert status.detail == "file"
 
 
 def test_text_marker_status_preserves_user_content_and_replaces_stale_section(oracle, roots) -> None:

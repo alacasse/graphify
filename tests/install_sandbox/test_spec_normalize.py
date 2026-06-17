@@ -65,5 +65,6 @@ def test_normalized_registry_includes_high_risk_platform_policies() -> None:
 def test_normalized_registry_omits_harness_policies() -> None:
     normalized = normalize_default_registry()
 
+    assert "platform_order" not in normalized
     assert "universal_uninstall_specs" not in normalized
     assert "disposable_artifact_specs" not in normalized

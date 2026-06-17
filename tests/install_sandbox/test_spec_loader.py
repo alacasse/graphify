@@ -145,6 +145,7 @@ def test_default_registry_discovers_product_yaml_files_in_filename_order() -> No
     expected = sorted(
         product_path.stem
         for product_path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")
+        if product_path.name != "shared.yaml"
     )
 
     assert registry.platform_names == expected
@@ -198,6 +199,23 @@ def test_load_registry_from_dir_uses_deterministic_filename_order(tmp_path: Any)
         "alpha": deepcopy(mini),
     }
     _write_registry_dir(tmp_path, data)
+
+    registry = load_registry_from_dir(tmp_path)
+
+    assert registry.platform_names == ["alpha", "beta"]
+
+
+def test_load_registry_from_dir_ignores_shared_yaml_and_orders_by_filename_stem(
+    tmp_path: Any,
+) -> None:
+    data = _valid_data()
+    mini = deepcopy(data["platforms"]["mini"])
+    (tmp_path / "beta.yaml").write_text(yaml.safe_dump(mini, sort_keys=False), encoding="utf-8")
+    (tmp_path / "alpha.yaml").write_text(yaml.safe_dump(mini, sort_keys=False), encoding="utf-8")
+    (tmp_path / "shared.yaml").write_text(
+        yaml.safe_dump({"not": "a platform spec"}, sort_keys=False),
+        encoding="utf-8",
+    )
 
     registry = load_registry_from_dir(tmp_path)
 
@@ -303,6 +321,25 @@ def test_loader_derives_skill_sidecar_kind_and_rejects_explicit_wrong_kind() -> 
     data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["kind"] = "file"
 
     _expect_invalid(data, "SKILL.md effects must use kind: skill or omit kind")
+
+
+def test_loader_derives_plain_file_effect_from_non_skill_relative_path() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+        {"root": "home", "relative": ".mini/config.toml", "remove_on_uninstall": False}
+    ]
+
+    user = load_registry_from_data(data).make_scenario("mini", "user")
+
+    assert user is not None
+    effect = user.expected[0]
+    assert isinstance(effect, platform_specs.FileEffect)
+    assert not isinstance(effect, platform_specs.SkillEffect)
+    assert effect.root == "home"
+    assert effect.relative == ".mini/config.toml"
+    assert effect.content_kind == "text"
+    assert effect.marker is None
+    assert effect.remove_on_uninstall is False
 
 
 def test_loader_rejects_removed_plugin_file_kind() -> None:

@@ -609,7 +609,11 @@ def _load_yaml_data(path: Path) -> object:
 def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> model.ScenarioRegistry:
     registry_dir = Path(path)
     product_paths = sorted(
-        registry_dir.glob("*.yaml"),
+        (
+            product_path
+            for product_path in registry_dir.glob("*.yaml")
+            if product_path.name != "shared.yaml"
+        ),
         key=lambda product_path: product_path.stem,
     )
     if not product_paths:

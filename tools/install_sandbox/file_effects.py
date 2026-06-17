@@ -50,6 +50,7 @@ try:
         seeded_user_content_text,
         should_seed_stale_graphify_section,
         should_seed_user_content,
+        stale_sidecar_seed_plans,
         text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
@@ -103,6 +104,7 @@ except ImportError:
         seeded_user_content_text,
         should_seed_stale_graphify_section,
         should_seed_user_content,
+        stale_sidecar_seed_plans,
         text_mentions_expected_generated_marker,
         text_marker_status,
         uninstalled_skill_sidecar_status,
@@ -119,6 +121,12 @@ GENERATED_COPY_EXCLUDES = (
     "__pycache__",
     ".pytest_cache",
 )
+
+STALE_SIDECAR_SEED_DETAILS = {
+    "stale_reference_fragment": "seeded_stale_reference_fragment",
+    "staged_reference_fragment": "seeded_staged_reference_fragment",
+}
+
 
 def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = None, relative: str | Path | None = None, **extra: object) -> dict[str, object]:
     record: dict[str, object] = {"path": str(path), "ok": ok, "detail": detail}
@@ -257,28 +265,32 @@ class FileEffectOracle:
         return checks
 
     def progressive_skill_entries(self, scenario: Scenario) -> list[InstallSurface]:
-        entries: list[InstallSurface] = []
-        expectation = self.reference_sidecar_expectation(scenario)
-        for entry in scenario.expected:
-            if self.is_skill_expected(entry) and expectation.includes_reference_dir:
-                entries.append(entry)
-        return entries
+        resolution = self.packaged_reference_resolution(scenario.platform)
+        return [
+            entry
+            for entry in scenario.expected
+            if stale_sidecar_seed_plans((entry,), resolution)
+        ]
 
     def seed_stale_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]:
         seeded: list[dict[str, object]] = []
-        for entry in self.progressive_skill_entries(scenario):
-            skill_dir = self.skill_dir_for_entry(entry)
-            refs_dir = skill_dir / self.skill_sidecar_expectation(entry).references_dir
-            refs_dir.mkdir(parents=True, exist_ok=True)
-            stale_ref = refs_dir / "stale-sandbox-fragment.md"
-            stale_ref.write_text("stale sandbox reference fragment\n", encoding="utf-8")
-            seeded.append(self.skill_assertion_record(entry, self.skill_references_relative(entry) / stale_ref.name, True, "seeded_stale_reference_fragment"))
-
-            refs_tmp = skill_dir / self.skill_sidecar_expectation(entry).references_tmp_dir
-            refs_tmp.mkdir(parents=True, exist_ok=True)
-            partial = refs_tmp / "partial.md"
-            partial.write_text("partial staged reference fragment\n", encoding="utf-8")
-            seeded.append(self.skill_assertion_record(entry, self.skill_references_tmp_relative(entry) / partial.name, True, "seeded_staged_reference_fragment"))
+        plans = stale_sidecar_seed_plans(
+            scenario.expected,
+            self.packaged_reference_resolution(scenario.platform),
+        )
+        for plan in plans:
+            path = self.root_path(plan.root_name) / plan.relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(plan.text, encoding="utf-8")
+            seeded.append(
+                check_record(
+                    path,
+                    True,
+                    STALE_SIDECAR_SEED_DETAILS[plan.kind],
+                    root=plan.root_name,
+                    relative=plan.relative,
+                )
+            )
         return seeded
 
     def expected_manifest_relatives(self, scenario: Scenario, root_name: str) -> set[Path]:

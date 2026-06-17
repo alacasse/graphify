@@ -475,6 +475,37 @@ def test_install_surface_core_derives_user_content_seed_plans() -> None:
     )
 
 
+def test_install_surface_core_derives_stale_sidecar_seed_plans() -> None:
+    skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
+    plain_surface = ExpectedPath("project", "AGENTS.md")
+
+    plans = install_surface_core.stale_sidecar_seed_plans(
+        (plain_surface, skill),
+        resolution("available", ("query.md",)),
+    )
+
+    assert plans == (
+        install_surface_core.StaleSidecarSeedPlan(
+            root_name="home",
+            relative=Path(".codex/skills/graphify/references/stale-sandbox-fragment.md"),
+            text="stale sandbox reference fragment\n",
+            kind="stale_reference_fragment",
+        ),
+        install_surface_core.StaleSidecarSeedPlan(
+            root_name="home",
+            relative=Path(".codex/skills/graphify/references.tmp/partial.md"),
+            text="partial staged reference fragment\n",
+            kind="staged_reference_fragment",
+        ),
+    )
+    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("empty")) == plans
+    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("missing")) == plans
+    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("not_directory")) == plans
+    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("intentionally_absent")) == ()
+    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("no_eligible_bundle")) == ()
+    assert install_surface_core.stale_sidecar_seed_plans((plain_surface,), resolution("available", ("query.md",))) == ()
+
+
 def test_expected_generated_keys_reuse_generated_state_plan() -> None:
     notes = section("project", "notes.md", preserve_user_content=True)
     skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")

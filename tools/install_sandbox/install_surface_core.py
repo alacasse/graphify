@@ -97,6 +97,17 @@ class UserContentSeedPlan:
     text: str
 
 
+StaleSidecarSeedKind = Literal["stale_reference_fragment", "staged_reference_fragment"]
+
+
+@dataclass(frozen=True)
+class StaleSidecarSeedPlan:
+    root_name: str
+    relative: Path
+    text: str
+    kind: StaleSidecarSeedKind
+
+
 class GeneratedFileExpectationLike(Protocol):
     relative_substrings: tuple[str, ...]
     text_suffixes: tuple[str, ...]
@@ -442,6 +453,36 @@ def user_content_seed_plans(surfaces: Iterable[InstallSurface]) -> tuple[UserCon
                     text=seeded_user_content_text(surface),
                 )
             )
+    return tuple(plans)
+
+
+def stale_sidecar_seed_plans(
+    surfaces: Iterable[InstallSurface],
+    resolution: PackagedReferenceResolution,
+) -> tuple[StaleSidecarSeedPlan, ...]:
+    if not reference_sidecar_expectation(resolution).includes_reference_dir:
+        return ()
+
+    plans: list[StaleSidecarSeedPlan] = []
+    for surface in surfaces:
+        if not is_skill_effect(surface):
+            continue
+        plans.extend(
+            (
+                StaleSidecarSeedPlan(
+                    root_name=surface.root,
+                    relative=skill_references_relative(surface) / "stale-sandbox-fragment.md",
+                    text="stale sandbox reference fragment\n",
+                    kind="stale_reference_fragment",
+                ),
+                StaleSidecarSeedPlan(
+                    root_name=surface.root,
+                    relative=skill_references_tmp_relative(surface) / "partial.md",
+                    text="partial staged reference fragment\n",
+                    kind="staged_reference_fragment",
+                ),
+            )
+        )
     return tuple(plans)
 
 

@@ -427,6 +427,38 @@ def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path
     ) == fingerprint
 
 
+def test_file_fingerprint_path_reading_compatibility_wrapper_matches_observation_decision(tmp_path: Path) -> None:
+    marker = "## graphify"
+    text_expectation = platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True)
+
+    missing = tmp_path / "missing.md"
+    assert install_surface_core.file_fingerprint(missing) == install_surface_core.file_fingerprint_from_observation(
+        install_surface_core.FileFingerprintObservation(exists=False)
+    )
+
+    directory = tmp_path / "notes-dir"
+    directory.mkdir()
+    assert install_surface_core.file_fingerprint(directory) == install_surface_core.file_fingerprint_from_observation(
+        install_surface_core.FileFingerprintObservation(exists=True, kind="dir")
+    )
+
+    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{marker}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
+    path = tmp_path / "notes.md"
+    path.write_text(text, encoding="utf-8")
+    data = text.encode("utf-8")
+
+    assert install_surface_core.file_fingerprint(path, marker, text_expectation) == install_surface_core.file_fingerprint_from_observation(
+        install_surface_core.FileFingerprintObservation(
+            exists=True,
+            kind="file",
+            data=data,
+            text=text,
+        ),
+        marker,
+        text_expectation,
+    )
+
+
 def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:
     notes = section("project", "notes.md", preserve_user_content=True)
     skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
@@ -847,29 +879,91 @@ def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) ->
     assert status.detail == "file"
 
 
-def test_install_surface_core_resolves_installed_marker_status(roots) -> None:
+def test_installed_surface_status_path_reading_compatibility_wrapper_matches_observation_decision(roots) -> None:
+    missing = InstallSurface("project", "missing.txt")
+    missing_path = roots["project"] / "missing.txt"
+
+    assert install_surface_core.installed_surface_status(missing, roots) == install_surface_core.installed_surface_status_from_observation(
+        missing,
+        install_surface_core.InstallSurfaceObservation(
+            path=missing_path,
+            exists=False,
+            is_file=False,
+            is_dir=False,
+        ),
+    )
+
     text_surface = section("project", "notes.md", preserve_user_content=True)
     text_path = roots["project"] / "notes.md"
+    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
     text_path.write_text(
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+        text,
         encoding="utf-8",
     )
 
-    text_status = install_surface_core.installed_surface_status(text_surface, roots)
-
-    assert text_status.path == text_path
-    assert text_status.ok is True
-    assert text_status.detail == "marker_count=1; user_content_preserved; stale_replaced=True"
+    assert install_surface_core.installed_surface_status(text_surface, roots) == install_surface_core.installed_surface_status_from_observation(
+        text_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=text_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+            text=text,
+        ),
+    )
 
     json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
     json_path = roots["project"] / "settings.json"
-    json_path.write_text(json.dumps({"hooks": [{"command": "graphify query"}]}), encoding="utf-8")
+    json_data = {"hooks": [{"command": "graphify query"}]}
+    json_path.write_text(json.dumps(json_data), encoding="utf-8")
 
-    json_status = install_surface_core.installed_surface_status(json_surface, roots)
+    assert install_surface_core.installed_surface_status(json_surface, roots) == install_surface_core.installed_surface_status_from_observation(
+        json_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=json_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+            json_data=json_data,
+            json_loaded=True,
+        ),
+    )
 
-    assert json_status.path == json_path
-    assert json_status.ok is True
-    assert json_status.detail == "valid_json=true; schema=generic_marker; marker_present=True"
+
+def test_marker_status_path_reading_compatibility_wrappers_preserve_details(roots, monkeypatch) -> None:
+    json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
+    json_path = roots["project"] / "settings.json"
+
+    json_path.write_text("{", encoding="utf-8")
+    json_status = install_surface_core.json_marker_status(json_path, json_surface)
+    assert json_status[0] is False
+    assert json_status[1] == "invalid_json=Expecting property name enclosed in double quotes"
+
+    original_read_text = Path.read_text
+
+    def raise_json_read_error(path: Path, *args, **kwargs):
+        if path == json_path:
+            raise OSError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", raise_json_read_error)
+    assert install_surface_core.json_marker_status(json_path, json_surface) == (
+        False,
+        "json_read_failed=permission denied",
+    )
+    monkeypatch.setattr(Path, "read_text", original_read_text)
+
+    text_surface = section("project", "notes.md", preserve_user_content=True)
+    text_path = roots["project"] / "notes.md"
+    text_path.write_text(
+        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\nfirst\n\n{platform_specs.GRAPHIFY_MARKER}\nsecond\n",
+        encoding="utf-8",
+    )
+
+    assert install_surface_core.text_marker_status(text_path, text_surface) == install_surface_core.text_marker_status_from_text(
+        text_path.read_text(encoding="utf-8", errors="replace"),
+        text_surface,
+    )
 
 
 def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
@@ -1042,33 +1136,52 @@ def test_uninstall_surface_status_contracts(oracle, roots) -> None:
     assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
 
 
-def test_install_surface_core_resolves_uninstalled_surface_status(roots) -> None:
+def test_uninstalled_surface_status_path_reading_compatibility_wrapper_matches_observation_decision(roots) -> None:
     plain = InstallSurface("project", "plain.txt")
-    plain_status = install_surface_core.uninstalled_surface_status(plain, roots)
+    plain_path = roots["project"] / "plain.txt"
 
-    assert plain_status.path == roots["project"] / "plain.txt"
-    assert plain_status.ok is True
-    assert plain_status.detail == "removed"
+    assert install_surface_core.uninstalled_surface_status(plain, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+        plain,
+        install_surface_core.UninstallSurfaceObservation(
+            path=plain_path,
+            exists=False,
+            is_file=False,
+            is_dir=False,
+        ),
+    )
 
     text_section = section("project", "notes.md", preserve_user_content=True)
     notes_path = roots["project"] / "notes.md"
-    notes_path.write_text(f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n", encoding="utf-8")
+    preserved_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n"
+    notes_path.write_text(preserved_text, encoding="utf-8")
 
-    text_status = install_surface_core.uninstalled_surface_status(text_section, roots)
+    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+        text_section,
+        install_surface_core.UninstallSurfaceObservation(
+            path=notes_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+            text=preserved_text,
+        ),
+    )
 
-    assert text_status.path == notes_path
-    assert text_status.ok is True
-    assert text_status.detail == "graphify_removed=True; user_content_preserved=True"
-
+    stale_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
     notes_path.write_text(
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        stale_text,
         encoding="utf-8",
     )
 
-    stale_status = install_surface_core.uninstalled_surface_status(text_section, roots)
-
-    assert stale_status.ok is False
-    assert stale_status.detail == "graphify_removed=False; user_content_preserved=True"
+    assert install_surface_core.uninstalled_surface_status(text_section, roots) == install_surface_core.uninstalled_surface_status_from_observation(
+        text_section,
+        install_surface_core.UninstallSurfaceObservation(
+            path=notes_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+            text=stale_text,
+        ),
+    )
 
 
 def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -> None:

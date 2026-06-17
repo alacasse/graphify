@@ -402,6 +402,40 @@ def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path
     assert isinstance(fingerprint["sha256"], str)
 
 
+def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:
+    notes = section("project", "notes.md", preserve_user_content=True)
+    skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
+
+    plan = install_surface_core.planned_state_entries(
+        (notes, skill),
+        resolution("available", ("query.md",)),
+        installed_skill_reference_relatives={
+            ("home", ".codex/skills/graphify/SKILL.md"): {
+                Path(".codex/skills/graphify/references/local.md"),
+            },
+        },
+    )
+
+    assert [entry.key for entry in plan] == [
+        "project/notes.md",
+        "home/.codex/skills/graphify/SKILL.md",
+        "home/.codex/skills/graphify/.graphify_version",
+        "home/.codex/skills/graphify/references",
+        "home/.codex/skills/graphify/references.tmp",
+        "home/.codex/skills/graphify/references/local.md",
+        "home/.codex/skills/graphify/references/query.md",
+    ]
+    assert plan[0].root_name == "project"
+    assert plan[0].relative == Path("notes.md")
+    assert plan[0].marker == platform_specs.GRAPHIFY_MARKER
+    assert plan[0].text_expectation is not None
+    assert plan[0].text_expectation.preserve_user_content is True
+    assert plan[1].root_name == "home"
+    assert plan[1].relative == Path(".codex/skills/graphify/SKILL.md")
+    assert plan[2].marker is None
+    assert plan[2].text_expectation is None
+
+
 def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -> None:
     default_entry = expected_skill("project", ".aider/graphify/SKILL.md")
     custom_entry = expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md")

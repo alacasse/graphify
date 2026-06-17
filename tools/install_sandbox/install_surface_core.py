@@ -79,6 +79,15 @@ class GeneratedFileDecision:
         return self.is_relevant and not self.is_ignored
 
 
+@dataclass(frozen=True)
+class StateEntryPlan:
+    root_name: str
+    relative: Path
+    key: str
+    marker: str | None = None
+    text_expectation: TextExpectation | None = None
+
+
 class GeneratedFileExpectationLike(Protocol):
     relative_substrings: tuple[str, ...]
     text_suffixes: tuple[str, ...]
@@ -184,6 +193,39 @@ def expected_generated_relative_keys(expected: Iterable[InstallSurface], resolut
             for relative in expected_skill_sidecar_relatives(surface, resolution):
                 keys.add((surface.root, relative.as_posix()))
     return keys
+
+
+def planned_state_entries(
+    expected: Iterable[InstallSurface],
+    resolution: PackagedReferenceResolution,
+    *,
+    installed_skill_reference_relatives: Mapping[tuple[str, str], Iterable[Path]] | None = None,
+) -> tuple[StateEntryPlan, ...]:
+    installed_relatives = installed_skill_reference_relatives or {}
+    entries: list[StateEntryPlan] = []
+    for surface in expected:
+        entries.append(
+            StateEntryPlan(
+                root_name=surface.root,
+                relative=Path(surface.relative),
+                key=f"{surface.root}/{surface.relative}",
+                marker=surface.marker,
+                text_expectation=surface.text_expectation,
+            )
+        )
+        if not is_skill_effect(surface):
+            continue
+        sidecar_relatives = set(expected_skill_sidecar_relatives(surface, resolution))
+        sidecar_relatives.update(installed_relatives.get((surface.root, surface.relative), ()))
+        for relative in sorted(sidecar_relatives, key=lambda item: item.as_posix()):
+            entries.append(
+                StateEntryPlan(
+                    root_name=surface.root,
+                    relative=relative,
+                    key=f"{surface.root}/{relative.as_posix()}",
+                )
+            )
+    return tuple(entries)
 
 
 def is_excluded_generated_path(relative: Path, excludes: Iterable[str]) -> bool:

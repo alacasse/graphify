@@ -32,6 +32,7 @@ try:
         json_expectation_status,
         json_marker_status,
         json_value_contains_marker,
+        planned_state_entries,
         plugin_config_present,
         reference_sidecar_expectation,
         references_tmp_absence_status,
@@ -80,6 +81,7 @@ except ImportError:
         json_expectation_status,
         json_marker_status,
         json_value_contains_marker,
+        planned_state_entries,
         plugin_config_present,
         reference_sidecar_expectation,
         references_tmp_absence_status,
@@ -415,13 +417,22 @@ class FileEffectOracle:
     # Idempotency state
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:
         state: dict[str, dict[str, object]] = {}
-        for entry in scenario.expected:
-            key = f"{entry.root}/{entry.relative}"
-            state[key] = self.file_fingerprint(self.expected_path(entry), entry.marker, entry.text_expectation)
-            if not self.is_skill_expected(entry):
-                continue
-            for relative in sorted(self.tracked_skill_sidecar_relatives(scenario, entry), key=lambda item: item.as_posix()):
-                state[f"{entry.root}/{relative.as_posix()}"] = self.file_fingerprint(self.root_path(entry.root) / relative)
+        installed_reference_relatives = {
+            (entry.root, entry.relative): self.installed_skill_reference_relatives(entry)
+            for entry in scenario.expected
+            if self.is_skill_expected(entry)
+        }
+        plan = planned_state_entries(
+            scenario.expected,
+            self.packaged_reference_resolution(scenario.platform),
+            installed_skill_reference_relatives=installed_reference_relatives,
+        )
+        for entry in plan:
+            state[entry.key] = self.file_fingerprint(
+                self.root_path(entry.root_name) / entry.relative,
+                entry.marker,
+                entry.text_expectation,
+            )
         return state
 
     def should_exclude_generated_path(self, relative: Path) -> bool:

@@ -788,6 +788,76 @@ def test_install_surface_core_resolves_installed_marker_status(roots) -> None:
     assert json_status.detail == "valid_json=true; schema=generic_marker; marker_present=True"
 
 
+def test_oracle_renders_installed_surface_observations_as_assertion_records(oracle, roots) -> None:
+    missing = InstallSurface("project", "missing.txt")
+    wrong_kind = InstallSurface("project", "wrong-kind", kind="dir")
+    text_surface = section("project", "notes.md", preserve_user_content=True)
+    registered_json = InstallSurface(
+        "project",
+        "hooks.json",
+        content_kind="json",
+        marker="graphify",
+        json_expectation=platform_specs.JsonExpectation(
+            schema_name="unit_hooks",
+            hooks=(platform_specs.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
+        ),
+    )
+    (roots["project"] / "wrong-kind").write_text("not a directory\n", encoding="utf-8")
+    (roots["project"] / "notes.md").write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+    (roots["project"] / "hooks.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}}),
+        encoding="utf-8",
+    )
+    test_scenario = scenario("unit", missing, wrong_kind, text_surface, registered_json)
+
+    decisions = [
+        install_surface_core.installed_surface_status(surface, roots)
+        for surface in test_scenario.expected
+    ]
+    checks = oracle.assert_expected_files(test_scenario)
+
+    assert [(decision.ok, decision.detail) for decision in decisions] == [
+        (False, "missing"),
+        (False, "expected_directory_but_not_directory"),
+        (False, "marker_count=1; user_content_preserved; stale_replaced=False"),
+        (False, "valid_json=true; schema=unit_hooks; bash_hook_present=False"),
+    ]
+    assert checks == [
+        {
+            "path": str(roots["project"] / "missing.txt"),
+            "ok": False,
+            "detail": "missing",
+            "root": "project",
+            "relative": "missing.txt",
+        },
+        {
+            "path": str(roots["project"] / "wrong-kind"),
+            "ok": False,
+            "detail": "expected_directory_but_not_directory",
+            "root": "project",
+            "relative": "wrong-kind",
+        },
+        {
+            "path": str(roots["project"] / "notes.md"),
+            "ok": False,
+            "detail": "marker_count=1; user_content_preserved; stale_replaced=False",
+            "root": "project",
+            "relative": "notes.md",
+        },
+        {
+            "path": str(roots["project"] / "hooks.json"),
+            "ok": False,
+            "detail": "valid_json=true; schema=unit_hooks; bash_hook_present=False",
+            "root": "project",
+            "relative": "hooks.json",
+        },
+    ]
+
+
 def test_text_marker_status_preserves_user_content_and_replaces_stale_section(oracle, roots) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
@@ -891,6 +961,94 @@ def test_install_surface_core_resolves_uninstalled_surface_status(roots) -> None
 
     assert stale_status.ok is False
     assert stale_status.detail == "graphify_removed=False; user_content_preserved=True"
+
+
+def test_oracle_renders_uninstalled_surface_observations_as_assertion_records(oracle, roots) -> None:
+    plain = InstallSurface("project", "plain.txt")
+    preserved_text = section("project", "notes.md", preserve_user_content=True)
+    repaired_text = InstallSurface(
+        "project",
+        "repaired.md",
+        marker=platform_specs.GRAPHIFY_MARKER,
+        text_expectation=platform_specs.TextExpectation(remove_graphify_section_on_uninstall=True),
+    )
+    kept = InstallSurface("project", "kept.txt", remove_on_uninstall=False)
+    (roots["project"] / "plain.txt").write_text("still installed\n", encoding="utf-8")
+    (roots["project"] / "notes.md").write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        encoding="utf-8",
+    )
+    (roots["project"] / "repaired.md").write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n",
+        encoding="utf-8",
+    )
+    (roots["project"] / "kept.txt").write_text("outside uninstall scope\n", encoding="utf-8")
+    test_scenario = scenario("unit", plain, preserved_text, repaired_text, kept)
+
+    decisions = [
+        install_surface_core.uninstalled_surface_status(surface, roots)
+        for surface in (plain, preserved_text, repaired_text)
+    ]
+    checks = oracle.assert_uninstalled(test_scenario)
+
+    assert [(decision.ok, decision.detail) for decision in decisions] == [
+        (False, "still_exists"),
+        (False, "graphify_removed=False; user_content_preserved=True"),
+        (True, "graphify_removed; user_content_preserved"),
+    ]
+    assert checks == [
+        {
+            "path": str(roots["project"] / "plain.txt"),
+            "ok": False,
+            "detail": "still_exists",
+            "root": "project",
+            "relative": "plain.txt",
+        },
+        {
+            "path": str(roots["project"] / "notes.md"),
+            "ok": False,
+            "detail": "graphify_removed=False; user_content_preserved=True",
+            "root": "project",
+            "relative": "notes.md",
+        },
+        {
+            "path": str(roots["project"] / "repaired.md"),
+            "ok": True,
+            "detail": "graphify_removed; user_content_preserved",
+            "root": "project",
+            "relative": "repaired.md",
+        },
+    ]
+
+
+def test_oracle_captures_fingerprint_observations_without_assertion_record_shape(oracle, roots) -> None:
+    missing = InstallSurface("project", "missing.md")
+    directory = InstallSurface("project", "installed-dir", kind="dir")
+    text_surface = section("project", "notes.md", preserve_user_content=True)
+    (roots["project"] / "installed-dir").mkdir()
+    notes_text = (
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
+    )
+    (roots["project"] / "notes.md").write_text(notes_text, encoding="utf-8")
+    test_scenario = scenario("unit", missing, directory, text_surface)
+
+    state = oracle.scenario_file_state(test_scenario)
+    notes_payload = state["project/notes.md"]
+
+    assert state["project/missing.md"] == {"exists": False}
+    assert state["project/installed-dir"] == {"exists": True, "kind": "dir"}
+    assert notes_payload == {
+        "exists": True,
+        "kind": "file",
+        "sha256": hashlib.sha256(notes_text.encode("utf-8")).hexdigest(),
+        "size": len(notes_text.encode("utf-8")),
+        "marker_count": 1,
+        "user_content_preserved": True,
+        "stale_graphify_present": True,
+    }
+    assert not {"path", "ok", "detail"} & set(notes_payload)
 
 
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:

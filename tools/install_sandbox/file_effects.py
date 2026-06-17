@@ -30,16 +30,13 @@ try:
         hooks_by_event,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
-        install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
         is_skill_sidecar_relative,
         is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status_from_observation,
-        installed_surface_status,
         json_expectation_status,
-        json_marker_status,
         json_value_contains_marker,
         planned_state_entries,
         plugin_config_present,
@@ -61,7 +58,6 @@ try:
         should_seed_user_content,
         stale_sidecar_seed_plans,
         text_mentions_expected_generated_marker,
-        text_marker_status,
         uninstalled_skill_sidecar_status,
         uninstalled_surface_status_from_observation,
         user_content_seed_plans,
@@ -92,16 +88,13 @@ except ImportError:
         hooks_by_event,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
-        install_surface_kind_status,
         is_excluded_generated_path,
         is_expected_generated_key,
         is_skill_sidecar_relative,
         is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status_from_observation,
-        installed_surface_status,
         json_expectation_status,
-        json_marker_status,
         json_value_contains_marker,
         planned_state_entries,
         plugin_config_present,
@@ -123,7 +116,6 @@ except ImportError:
         should_seed_user_content,
         stale_sidecar_seed_plans,
         text_mentions_expected_generated_marker,
-        text_marker_status,
         uninstalled_skill_sidecar_status,
         uninstalled_surface_status_from_observation,
         user_content_seed_plans,
@@ -332,13 +324,6 @@ class FileEffectOracle:
             path = self.root_path(plan.root_name) / plan.relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(plan.text, encoding="utf-8")
-
-    # JSON/text marker validation
-    def json_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
-        return json_marker_status(path, entry)
-
-    def text_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
-        return text_marker_status(path, entry)
 
     def installed_surface_observation(self, entry: InstallSurface) -> InstallSurfaceObservation:
         path = self.expected_path(entry)

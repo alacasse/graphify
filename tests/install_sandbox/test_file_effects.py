@@ -376,6 +376,19 @@ def test_install_surface_core_classifies_generated_file_relevance_decisions() ->
     )
 
 
+def test_install_surface_core_derives_generated_artifact_copy_destination() -> None:
+    plan = install_surface_core.generated_artifact_copy_plan(
+        "project",
+        Path("nested/graphify-output.txt"),
+    )
+
+    assert plan == install_surface_core.GeneratedArtifactCopyPlan(
+        root_name="project",
+        source_relative=Path("nested/graphify-output.txt"),
+        destination_relative=Path("project/nested/graphify-output.txt"),
+    )
+
+
 def test_install_surface_core_calculates_idempotency_fingerprints(tmp_path: Path) -> None:
     missing = tmp_path / "missing.md"
     directory = tmp_path / "dir"

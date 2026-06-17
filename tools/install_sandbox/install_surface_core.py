@@ -82,6 +82,13 @@ class GeneratedFileDecision:
 
 
 @dataclass(frozen=True)
+class GeneratedArtifactCopyPlan:
+    root_name: str
+    source_relative: Path
+    destination_relative: Path
+
+
+@dataclass(frozen=True)
 class StateEntryPlan:
     root_name: str
     relative: Path
@@ -359,6 +366,14 @@ def decide_generated_file_observation(observation: GeneratedFileObservation) -> 
         observation=observation,
         is_relevant=relevant,
         is_ignored=observation.excluded_path,
+    )
+
+
+def generated_artifact_copy_plan(root_name: str, source_relative: Path) -> GeneratedArtifactCopyPlan:
+    return GeneratedArtifactCopyPlan(
+        root_name=root_name,
+        source_relative=source_relative,
+        destination_relative=Path(root_name) / source_relative,
     )
 
 

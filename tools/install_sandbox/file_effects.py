@@ -15,6 +15,7 @@ try:
         GeneratedFileDecision,
         command_hook_present,
         decide_generated_file_observation,
+        generated_artifact_copy_plan,
         expected_kind_status,
         expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
@@ -71,6 +72,7 @@ except ImportError:
         GeneratedFileDecision,
         command_hook_present,
         decide_generated_file_observation,
+        generated_artifact_copy_plan,
         expected_kind_status,
         expected_manifest_relatives as core_expected_manifest_relatives,
         expected_generated_relative_keys,
@@ -533,7 +535,6 @@ class FileEffectOracle:
         for root_name, root in self.roots.items():
             if not root.exists():
                 continue
-            target = out / root_name
             for path in self.pruned_file_walk(root):
                 rel = path.relative_to(root)
                 if not self.generated_file_decision(
@@ -545,7 +546,8 @@ class FileEffectOracle:
                     expected_keys=expected_keys,
                 ).should_include:
                     continue
-                dest = target / rel
+                plan = generated_artifact_copy_plan(root_name, rel)
+                dest = out / plan.destination_relative
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, dest)
 

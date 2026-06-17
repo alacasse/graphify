@@ -420,22 +420,24 @@ def test_install_surface_core_decides_file_fingerprint_from_observed_facts() -> 
     assert isinstance(fingerprint["sha256"], str)
 
 
-# Compatibility wrappers below this point still read paths for current callers;
-# preferred core tests should target observation-shaped helpers above.
-
-
-def test_file_fingerprint_path_reading_compatibility_wrapper_matches_observation_decision(tmp_path: Path) -> None:
+def test_file_effect_oracle_file_fingerprint_observes_paths_and_delegates_to_core(tmp_path: Path) -> None:
     marker = "## graphify"
     text_expectation = platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True)
+    oracle = file_effects.FileEffectOracle(
+        roots={},
+        packaged_reference_resolution=lambda _platform: resolution("available"),
+        expected_graphify_version=lambda: "test-version",
+        manifest_prune_dirs=set(),
+    )
 
     missing = tmp_path / "missing.md"
-    assert install_surface_core.file_fingerprint(missing) == install_surface_core.file_fingerprint_from_observation(
+    assert oracle.file_fingerprint(missing) == install_surface_core.file_fingerprint_from_observation(
         install_surface_core.FileFingerprintObservation(exists=False)
     )
 
     directory = tmp_path / "notes-dir"
     directory.mkdir()
-    assert install_surface_core.file_fingerprint(directory) == install_surface_core.file_fingerprint_from_observation(
+    assert oracle.file_fingerprint(directory) == install_surface_core.file_fingerprint_from_observation(
         install_surface_core.FileFingerprintObservation(exists=True, kind="dir")
     )
 
@@ -444,7 +446,7 @@ def test_file_fingerprint_path_reading_compatibility_wrapper_matches_observation
     path.write_text(text, encoding="utf-8")
     data = text.encode("utf-8")
 
-    assert install_surface_core.file_fingerprint(path, marker, text_expectation) == install_surface_core.file_fingerprint_from_observation(
+    assert oracle.file_fingerprint(path, marker, text_expectation) == install_surface_core.file_fingerprint_from_observation(
         install_surface_core.FileFingerprintObservation(
             exists=True,
             kind="file",
@@ -865,17 +867,21 @@ def test_install_surface_core_decides_installed_status_from_observed_facts() -> 
     assert invalid_json_status.detail == "invalid_json=Expecting value"
 
 
-# Compatibility wrappers below this point still read paths for current callers;
-# preferred core tests should target observation-shaped helpers above.
-
-
-def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) -> None:
+def test_install_surface_core_decides_kind_status_from_observed_facts() -> None:
     surface = InstallSurface("project", "installed.txt")
-    (roots["project"] / "installed.txt").write_text("installed\n", encoding="utf-8")
+    observed_path = Path("/observed/installed.txt")
 
-    status = install_surface_core.install_surface_kind_status(surface, roots)
+    status = install_surface_core.install_surface_kind_status_from_observation(
+        surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=observed_path,
+            exists=True,
+            is_file=True,
+            is_dir=False,
+        ),
+    )
 
-    assert status.path == roots["project"] / "installed.txt"
+    assert status.path == observed_path
     assert status.ok is True
     assert status.detail == "file"
 
@@ -926,39 +932,35 @@ def test_installed_surface_status_observation_helper_preserves_paths_and_details
     )
 
 
-def test_marker_status_path_reading_compatibility_wrappers_preserve_details(roots, monkeypatch) -> None:
+def test_marker_status_observation_helpers_preserve_details() -> None:
     json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
-    json_path = roots["project"] / "settings.json"
 
-    json_path.write_text("{", encoding="utf-8")
-    json_status = install_surface_core.json_marker_status(json_path, json_surface)
-    assert json_status[0] is False
-    assert json_status[1] == "invalid_json=Expecting property name enclosed in double quotes"
+    assert install_surface_core.json_marker_status_from_observation(
+        json_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=Path("/observed/settings.json"),
+            exists=True,
+            is_file=True,
+            json_error_detail="invalid_json=Expecting property name enclosed in double quotes",
+        ),
+    ) == (False, "invalid_json=Expecting property name enclosed in double quotes")
 
-    original_read_text = Path.read_text
-
-    def raise_json_read_error(path: Path, *args, **kwargs):
-        if path == json_path:
-            raise OSError("permission denied")
-        return original_read_text(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", raise_json_read_error)
-    assert install_surface_core.json_marker_status(json_path, json_surface) == (
-        False,
-        "json_read_failed=permission denied",
-    )
-    monkeypatch.setattr(Path, "read_text", original_read_text)
+    assert install_surface_core.json_marker_status_from_observation(
+        json_surface,
+        install_surface_core.InstallSurfaceObservation(
+            path=Path("/observed/settings.json"),
+            exists=True,
+            is_file=True,
+            json_error_detail="json_read_failed=permission denied",
+        ),
+    ) == (False, "json_read_failed=permission denied")
 
     text_surface = section("project", "notes.md", preserve_user_content=True)
-    text_path = roots["project"] / "notes.md"
-    text_path.write_text(
-        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\nfirst\n\n{platform_specs.GRAPHIFY_MARKER}\nsecond\n",
-        encoding="utf-8",
-    )
+    text = f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\nfirst\n\n{platform_specs.GRAPHIFY_MARKER}\nsecond\n"
 
-    assert install_surface_core.text_marker_status(text_path, text_surface) == install_surface_core.text_marker_status_from_text(
-        text_path.read_text(encoding="utf-8", errors="replace"),
-        text_surface,
+    assert install_surface_core.text_marker_status_from_text(text, text_surface) == (
+        False,
+        "marker_count=2; user_content_missing; stale_replaced=True",
     )
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -747,70 +746,3 @@ def file_fingerprint_from_observation(
         if expectation.repair_stale_graphify_section:
             item["stale_graphify_present"] = STALE_GRAPHIFY_SENTINEL in text
     return item
-
-
-# Path-reading compatibility wrappers.
-#
-# Preferred Installer Core helpers above make decisions from explicit
-# observations. These names are retained for current callers that still pass
-# paths or roots and expect this module to perform the filesystem read.
-
-
-def expected_kind_status(path: Path, kind: str) -> tuple[bool, str]:
-    observation = InstallSurfaceObservation(
-        path=path,
-        exists=path.exists(),
-        is_file=path.is_file(),
-        is_dir=path.is_dir(),
-    )
-    return expected_kind_status_from_observation(observation, kind)
-
-
-def install_surface_kind_status(surface: InstallSurface, roots: Mapping[str, Path]) -> InstallSurfaceStatus:
-    path = resolve_install_surface_path(surface, roots)
-    observation = InstallSurfaceObservation(
-        path=path,
-        exists=path.exists(),
-        is_file=path.is_file(),
-        is_dir=path.is_dir(),
-    )
-    return install_surface_kind_status_from_observation(surface, observation)
-
-
-def json_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return json_marker_status_from_observation(
-            surface,
-            InstallSurfaceObservation(path=path, exists=True, is_file=True, json_error_detail=f"invalid_json={exc.msg}"),
-        )
-    except OSError as exc:
-        return json_marker_status_from_observation(
-            surface,
-            InstallSurfaceObservation(path=path, exists=True, is_file=True, json_error_detail=f"json_read_failed={exc}"),
-        )
-    return json_marker_status_from_observation(
-        surface,
-        InstallSurfaceObservation(path=path, exists=True, is_file=True, json_data=data, json_loaded=True),
-    )
-
-
-def text_marker_status(path: Path, surface: InstallSurface) -> tuple[bool, str]:
-    return text_marker_status_from_text(path.read_text(encoding="utf-8", errors="replace"), surface)
-
-
-def file_fingerprint(path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
-    if not path.exists():
-        observation = FileFingerprintObservation(exists=False)
-    elif path.is_dir():
-        observation = FileFingerprintObservation(exists=True, kind="dir")
-    else:
-        data = path.read_bytes()
-        observation = FileFingerprintObservation(
-            exists=True,
-            kind="file",
-            data=data,
-            text=data.decode("utf-8", errors="replace") if marker else None,
-        )
-    return file_fingerprint_from_observation(observation, marker, text_expectation)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -9,33 +8,49 @@ from pathlib import Path
 from typing import Callable, Iterable, Literal
 
 try:
-    from .expected_effects import is_json_effect, is_skill_effect, is_text_section_effect
+    from .expected_effects import is_skill_effect, is_text_section_effect
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
+        STALE_GRAPHIFY_SENTINEL,
+        USER_SENTINEL,
+        command_hook_present,
         expected_kind_status,
+        hooks_by_event,
         install_surface_kind_status,
+        installed_surface_status,
+        json_expectation_status,
+        json_marker_status,
+        json_value_contains_marker,
+        plugin_config_present,
         resolve_install_root,
         resolve_install_surface_path,
+        text_marker_status,
     )
-    from .json_helpers import object_dict, object_dicts, object_list
     from .platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:
-    from expected_effects import is_json_effect, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
+    from expected_effects import is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
+        STALE_GRAPHIFY_SENTINEL,
+        USER_SENTINEL,
+        command_hook_present,
         expected_kind_status,
+        hooks_by_event,
         install_surface_kind_status,
+        installed_surface_status,
+        json_expectation_status,
+        json_marker_status,
+        json_value_contains_marker,
+        plugin_config_present,
         resolve_install_root,
         resolve_install_surface_path,
+        text_marker_status,
     )
-    from json_helpers import object_dict, object_dicts, object_list
     from platform_specs import InstallSurface, JsonExpectation, JsonHookExpectation, JsonPluginExpectation, Scenario, SkillSidecarExpectation, TextExpectation
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 
 
-USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"
-STALE_GRAPHIFY_SENTINEL = "STALE_GRAPHIFY_OWNED_CONTENT_SHOULD_BE_REPLACED"
 GENERATED_COPY_EXCLUDES = (
     ".local",
     ".cache",
@@ -109,60 +124,6 @@ class ReferenceSidecarExpectation:
         refs_ok = not missing and not extra
         refs_detail = f"status={self.status}; actual_names={actual_names}; expected_names={expected_names}; missing={missing}; extra={extra}"
         return refs_ok, refs_detail
-
-
-def json_value_contains_marker(value: object, marker: str) -> bool:
-    if isinstance(value, dict):
-        return any(marker in str(key) or json_value_contains_marker(item, marker) for key, item in value.items())
-    if isinstance(value, list):
-        return any(json_value_contains_marker(item, marker) for item in value)
-    if isinstance(value, str):
-        return marker in value
-    return False
-
-
-def command_hook_present(entry: object, expectation: JsonHookExpectation) -> bool:
-    entry_data = object_dict(entry)
-    if entry_data.get("matcher") != expectation.matcher:
-        return False
-    for hook in object_dicts(entry_data.get("hooks")):
-        if hook.get("type") != "command":
-            continue
-        command = hook.get("command")
-        if isinstance(command, str) and all(fragment in command for fragment in expectation.required_fragments):
-            return True
-    return False
-
-
-def hooks_by_event(data: object, event_name: str) -> list[object]:
-    hooks = object_dict(object_dict(data).get("hooks"))
-    return object_list(hooks.get(event_name))
-
-
-def plugin_config_present(data: object, expectation: JsonPluginExpectation) -> bool:
-    plugins = object_list(object_dict(data).get("plugin"))
-    for plugin in plugins:
-        if not isinstance(plugin, str):
-            continue
-        if plugin == expectation.expected_entry:
-            return True
-        if expectation.allow_file_uri and plugin.startswith("file://") and plugin.endswith(expectation.expected_entry):
-            return True
-    return False
-
-
-def json_expectation_status(data: object, expectation: JsonExpectation) -> tuple[bool, str]:
-    states: list[tuple[str, bool]] = []
-    for hook in expectation.hooks:
-        entries = hooks_by_event(data, hook.event)
-        states.append((hook.detail_name, any(command_hook_present(entry, hook) for entry in entries)))
-    if expectation.plugin is not None:
-        states.append((expectation.plugin.detail_name, plugin_config_present(data, expectation.plugin)))
-    ok = all(present for _, present in states)
-    detail = f"valid_json=true; schema={expectation.schema_name}"
-    for name, present in states:
-        detail += f"; {name}={present}"
-    return ok, detail
 
 
 @dataclass(frozen=True)
@@ -365,44 +326,14 @@ class FileEffectOracle:
 
     # JSON/text marker validation
     def json_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            return False, f"invalid_json={exc.msg}"
-        except OSError as exc:
-            return False, f"json_read_failed={exc}"
-        if entry.json_expectation is not None:
-            return json_expectation_status(data, entry.json_expectation)
-        marker = entry.marker or ""
-        marker_present = bool(marker) and json_value_contains_marker(data, marker)
-        return marker_present, f"valid_json=true; schema=generic_marker; marker_present={marker_present}"
+        return json_marker_status(path, entry)
 
     def text_marker_status(self, path: Path, entry: InstallSurface) -> tuple[bool, str]:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        marker_count = text.count(entry.marker or "")
-        ok = marker_count == 1
-        detail = f"marker_count={marker_count}"
-        if USER_SENTINEL in text:
-            detail += "; user_content_preserved"
-        elif self.should_seed_user_content(entry):
-            ok = False
-            detail += "; user_content_missing"
-        if self.should_seed_stale_graphify_section(entry):
-            stale_replaced = STALE_GRAPHIFY_SENTINEL not in text
-            ok = ok and stale_replaced
-            detail += f"; stale_replaced={stale_replaced}"
-        return ok, detail
+        return text_marker_status(path, entry)
 
     def expected_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        status = install_surface_kind_status(entry, self.roots)
-        path = status.path
-        ok = status.ok
-        detail = status.detail
-        if not ok or not entry.marker:
-            return ok, detail
-        if is_json_effect(entry):
-            return self.json_marker_status(path, entry)
-        return self.text_marker_status(path, entry)
+        status = installed_surface_status(entry, self.roots)
+        return status.ok, status.detail
 
     # Install/uninstall assertions
     def assert_expected_files(self, scenario: Scenario) -> list[dict[str, object]]:

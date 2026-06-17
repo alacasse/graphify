@@ -249,6 +249,31 @@ def test_install_surface_core_resolves_kind_status_from_declared_roots(roots) ->
     assert status.detail == "file"
 
 
+def test_install_surface_core_resolves_installed_marker_status(roots) -> None:
+    text_surface = section("project", "notes.md", preserve_user_content=True)
+    text_path = roots["project"] / "notes.md"
+    text_path.write_text(
+        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+        encoding="utf-8",
+    )
+
+    text_status = install_surface_core.installed_surface_status(text_surface, roots)
+
+    assert text_status.path == text_path
+    assert text_status.ok is True
+    assert text_status.detail == "marker_count=1; user_content_preserved; stale_replaced=True"
+
+    json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
+    json_path = roots["project"] / "settings.json"
+    json_path.write_text(json.dumps({"hooks": [{"command": "graphify query"}]}), encoding="utf-8")
+
+    json_status = install_surface_core.installed_surface_status(json_surface, roots)
+
+    assert json_status.path == json_path
+    assert json_status.ok is True
+    assert json_status.detail == "valid_json=true; schema=generic_marker; marker_present=True"
+
+
 def test_text_marker_status_preserves_user_content_and_replaces_stale_section(oracle, roots) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"

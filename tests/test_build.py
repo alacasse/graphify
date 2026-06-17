@@ -93,6 +93,29 @@ def test_legacy_edge_from_to_canonicalized():
     assert G.number_of_edges() == 1
 
 
+def test_legacy_edge_type_and_classification_canonicalized(capsys):
+    """Legacy semantic edge fields are renamed before schema validation."""
+    ext = {
+        "nodes": [
+            {"id": "n1", "label": "A", "file_type": "code", "source_file": "a.py"},
+            {"id": "n2", "label": "B", "file_type": "code", "source_file": "b.py"},
+        ],
+        "edges": [
+            {"source": "n1", "target": "n2", "type": "uses", "evidence_type": "EXTRACTED"},
+        ],
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+    G = build_from_json(ext)
+    err = capsys.readouterr().err
+    data = G.edges["n1", "n2"]
+    assert "missing required field 'relation'" not in err
+    assert "missing required field 'source_file'" not in err
+    assert data["relation"] == "uses"
+    assert data["confidence"] == "EXTRACTED"
+    assert data["source_file"] == "a.py"
+
+
 def test_source_file_backslash_normalized():
     """Windows backslash paths and POSIX paths for the same file must produce one node."""
     extraction = {

@@ -175,6 +175,21 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
         if ft and ft not in {"code", "document", "paper", "image", "rationale", "concept"}:
             node["file_type"] = _FILE_TYPE_SYNONYMS.get(ft, "concept")
 
+    nodes_by_id = {node.get("id"): node for node in extraction.get("nodes", []) if isinstance(node, dict)}
+    for edge in extraction.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        if "relation" not in edge and "type" in edge:
+            edge["relation"] = edge.pop("type")
+        if "confidence" not in edge and "classification" in edge:
+            edge["confidence"] = edge.pop("classification")
+        if "confidence" not in edge and "evidence_type" in edge:
+            edge["confidence"] = edge.pop("evidence_type")
+        if "source_file" not in edge:
+            source_node = nodes_by_id.get(edge.get("source"))
+            target_node = nodes_by_id.get(edge.get("target"))
+            edge["source_file"] = (source_node or {}).get("source_file") or (target_node or {}).get("source_file") or ""
+
     errors = validate_extraction(extraction)
     # Dangling edges (stdlib/external imports) are expected - only warn about real schema errors.
     real_errors = [e for e in errors if "does not match any node id" not in e]

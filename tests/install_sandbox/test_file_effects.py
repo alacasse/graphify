@@ -1018,11 +1018,16 @@ def test_malformed_packaged_reference_statuses_fail_with_resolver_detail(oracle,
 
 def test_reference_resolution_status_controls_manifest_generated_keys_and_state(oracle, roots) -> None:
     skill_entry = expected_skill("project", ".claude/skills/graphify/SKILL.md")
+    ordinary_entry = InstallSurface("project", "AGENTS.md")
     available = scenario("claude", skill_entry)
     empty = scenario("empty", expected_skill("project", ".empty/graphify/SKILL.md"))
     absent = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
+    ordinary = scenario("unit", ordinary_entry)
 
     available_manifest = oracle.expected_manifest_relatives(available, "project")
+    ordinary_manifest = oracle.expected_manifest_relatives(ordinary, "project")
+    assert ordinary_manifest == {Path("AGENTS.md")}
+    assert oracle.expected_manifest_relatives(ordinary, "home") == set()
     assert oracle.skill_version_relative(skill_entry) == Path(".claude/skills/graphify/.graphify_version")
     assert oracle.skill_references_relative(skill_entry) == Path(".claude/skills/graphify/references")
     assert oracle.skill_references_tmp_relative(skill_entry) == Path(".claude/skills/graphify/references.tmp")
@@ -1318,6 +1323,70 @@ def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> No
     assert not (roots["project"] / ".aider/graphify/references").exists()
 
 
+@pytest.mark.parametrize("platform", ["claude", "empty", "missing", "not_directory"])
+def test_stale_sidecar_seed_targets_reference_directory_expectations(
+    oracle: file_effects.FileEffectOracle,
+    roots: dict[str, Path],
+    platform: str,
+) -> None:
+    skill_relative = (
+        ".claude/skills/graphify/SKILL.md"
+        if platform == "claude"
+        else f".{platform}/graphify/SKILL.md"
+    )
+    skill_dir = Path(skill_relative).parent
+    entry = expected_skill("project", skill_relative)
+
+    seeded = oracle.seed_stale_skill_sidecars(scenario(platform, entry))
+
+    assert seeded == [
+        {
+            "path": str(roots["project"] / skill_dir / "references/stale-sandbox-fragment.md"),
+            "ok": True,
+            "detail": "seeded_stale_reference_fragment",
+            "root": "project",
+            "relative": (skill_dir / "references/stale-sandbox-fragment.md").as_posix(),
+        },
+        {
+            "path": str(roots["project"] / skill_dir / "references.tmp/partial.md"),
+            "ok": True,
+            "detail": "seeded_staged_reference_fragment",
+            "root": "project",
+            "relative": (skill_dir / "references.tmp/partial.md").as_posix(),
+        },
+    ]
+    assert (
+        (roots["project"] / skill_dir / "references/stale-sandbox-fragment.md").read_text(
+            encoding="utf-8"
+        )
+        == "stale sandbox reference fragment\n"
+    )
+    assert (
+        (roots["project"] / skill_dir / "references.tmp/partial.md").read_text(
+            encoding="utf-8"
+        )
+        == "partial staged reference fragment\n"
+    )
+
+
+@pytest.mark.parametrize("platform", ["aider", "no_eligible"])
+def test_stale_sidecar_seed_skips_absent_reference_expectations(
+    oracle: file_effects.FileEffectOracle,
+    roots: dict[str, Path],
+    platform: str,
+) -> None:
+    skill_relative = f".{platform}/graphify/SKILL.md"
+    skill_dir = Path(skill_relative).parent
+
+    seeded = oracle.seed_stale_skill_sidecars(
+        scenario(platform, expected_skill("project", skill_relative))
+    )
+
+    assert seeded == []
+    assert not (roots["project"] / skill_dir / "references").exists()
+    assert not (roots["project"] / skill_dir / "references.tmp").exists()
+
+
 def test_seeded_stale_section_must_be_replaced(oracle, roots) -> None:
     test_scenario = scenario("unit", section("project", "random-notes.txt", preserve_user_content=True))
 
@@ -1368,6 +1437,43 @@ def test_legacy_expected_path_with_text_policy_dispatches_as_text_section(oracle
     oracle.seed_user_owned_content(test_scenario)
 
     assert (roots["project"] / "notes.txt").read_text(encoding="utf-8") == f"# User Notes\n\n{file_effects.USER_SENTINEL}\n"
+
+
+def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(oracle, roots) -> None:
+    stale_section = section("project", "stale-notes.md", preserve_user_content=True)
+    legacy_text_policy = ExpectedPath(
+        "project",
+        "legacy-notes.txt",
+        text_expectation=platform_specs.TextExpectation(preserve_user_content=True),
+    )
+    no_preserve_text_section = section("project", "no-preserve.md")
+    plain_surface = ExpectedPath("project", "plain.txt")
+    json_surface = ExpectedPath("project", "settings.json", content_kind="json", marker="graphify")
+    skill_surface = expected_skill("project", ".unit/graphify/SKILL.md")
+    test_scenario = scenario(
+        "unit",
+        stale_section,
+        legacy_text_policy,
+        no_preserve_text_section,
+        plain_surface,
+        json_surface,
+        skill_surface,
+    )
+
+    oracle.seed_user_owned_content(test_scenario)
+
+    assert (roots["project"] / "stale-notes.md").read_text(encoding="utf-8") == (
+        f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n\n"
+        "## User Section\nThis section should survive Graphify install and uninstall.\n"
+    )
+    assert (roots["project"] / "legacy-notes.txt").read_text(encoding="utf-8") == (
+        f"# User Notes\n\n{file_effects.USER_SENTINEL}\n"
+    )
+    assert not (roots["project"] / "no-preserve.md").exists()
+    assert not (roots["project"] / "plain.txt").exists()
+    assert not (roots["project"] / "settings.json").exists()
+    assert not (roots["project"] / ".unit/graphify/SKILL.md").exists()
 
 
 def test_uninstall_requires_seeded_user_content_to_survive(oracle, roots) -> None:
@@ -1592,6 +1698,44 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
             "root": "project",
             "relative": "leftover/graphify.md",
         },
+    ]
+
+
+def test_scenario_file_effects_adapter_preserves_setup_method_shapes(oracle) -> None:
+    class RecordingOracle(file_effects.FileEffectOracle):
+        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+            super().__init__(
+                roots=wrapped.roots,
+                packaged_reference_resolution=wrapped.packaged_reference_resolution,
+                expected_graphify_version=wrapped.expected_graphify_version,
+                manifest_prune_dirs=wrapped.manifest_prune_dirs,
+            )
+            object.__setattr__(self, "calls", [])
+
+        def seed_user_owned_content(self, scenario_arg):
+            self.calls.append(("seed_user_owned_content", scenario_arg.platform))
+
+        def seed_stale_skill_sidecars(self, scenario_arg):
+            self.calls.append(("seed_stale_skill_sidecars", scenario_arg.platform))
+            return [{"ok": True, "detail": "seeded_stale_reference_fragment"}]
+
+    def write_manifest(*args, **kwargs) -> None:
+        raise AssertionError("not used")
+
+    def equivalence_check(scenario_arg, env, artifact_dir):
+        raise AssertionError("not used")
+
+    recording_oracle = RecordingOracle(oracle)
+    adapter = file_effects.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
+    setup_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md"))
+
+    assert adapter.seed_scenario_inputs(setup_scenario) is None
+    assert adapter.seed_stale_sidecar_repair(setup_scenario) == [
+        {"ok": True, "detail": "seeded_stale_reference_fragment"}
+    ]
+    assert recording_oracle.calls == [
+        ("seed_user_owned_content", "unit"),
+        ("seed_stale_skill_sidecars", "unit"),
     ]
 
 

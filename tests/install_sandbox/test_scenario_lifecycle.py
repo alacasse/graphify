@@ -10,7 +10,7 @@ from tools.install_sandbox.platform_specs import (
     DEFAULT_SCENARIO_REGISTRY,
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
-    ExpectedPath,
+    InstallSurface,
     Scenario,
     SelectedUniversalUninstallScenario,
     UniversalUninstallScenarioSpec,
@@ -40,6 +40,11 @@ STANDARD_ARTIFACT_FILENAMES = {
 }
 
 
+# Lifecycle tests depend on the ScenarioFileEffects protocol. Direct Installer
+# Core decisions live in test_install_surface_core.py; the concrete adapter
+# boundary lives in test_file_effects.py.
+
+
 def make_scenario(platform: str = "codex", scope: str = "project", *, uninstall: bool = True) -> Scenario:
     return Scenario(
         platform=platform,
@@ -47,7 +52,7 @@ def make_scenario(platform: str = "codex", scope: str = "project", *, uninstall:
         install_command=("graphify", "install", "--platform", platform),
         uninstall_command=("graphify", "uninstall", "--platform", platform) if uninstall else None,
         cwd_root="project" if scope == "project" else "user_cwd",
-        expected=(ExpectedPath("project" if scope == "project" else "home", f"{platform}-{scope}.md"),),
+        expected=(InstallSurface("project" if scope == "project" else "home", f"{platform}-{scope}.md"),),
     )
 
 
@@ -229,7 +234,7 @@ class HookFactory:
             self.command_artifact_dirs.append(path)
             return {"command": "graphify install", "transcript_path": "transcript.txt", "artifact_dir": str(path)}
 
-        class FakeScenarioFileEffects:
+        class ScenarioFileEffectsDouble:
             def seed_scenario_inputs(_, scenario):
                 self.calls.append(f"seed:{scenario.platform}")
 
@@ -292,7 +297,7 @@ class HookFactory:
         )
         file_effects = overrides.pop(
             "file_effects",
-            FakeScenarioFileEffects(),
+            ScenarioFileEffectsDouble(),
         )
         commands = overrides.pop("commands", scenario_lifecycle.CommandExecutor(overrides.pop("run_capture", self.run_capture)))
         artifacts = overrides.pop(
@@ -333,7 +338,7 @@ def command_artifact_dir(result: dict[str, object]) -> str:
     return str(cast(dict[str, object], result["command_artifact"])["artifact_dir"])
 
 
-def test_file_effects_interface_omits_oracle_leaf_helpers() -> None:
+def test_scenario_file_effects_protocol_omits_oracle_and_core_leaf_helpers() -> None:
     lifecycle_methods = set(scenario_lifecycle.ScenarioFileEffects.__dict__)
 
     assert not {

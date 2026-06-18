@@ -14,7 +14,7 @@ from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, S
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
 # Adapter ownership lives here. Direct Installer Core decisions belong in
-# test_install_surface_core.py; core value objects appear here only as oracle
+# test_install_surface_core*.py; core value objects appear here only as oracle
 # and ScenarioFileEffectsAdapter collaborators.
 
 
@@ -218,7 +218,7 @@ def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
 
 def test_file_effects_tests_import_core_only_as_adapter_collaborator_module() -> None:
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
-    core_test_module = Path(__file__).with_name("test_install_surface_core.py")
+    core_test_modules = tuple(Path(__file__).parent.glob("test_install_surface_core*.py"))
 
     imported_core_helpers = {
         alias.name
@@ -227,11 +227,11 @@ def test_file_effects_tests_import_core_only_as_adapter_collaborator_module() ->
         for alias in node.names
     }
 
-    assert core_test_module.exists(), "direct Installer Core behavior tests belong in test_install_surface_core.py"
+    assert core_test_modules, "direct Installer Core behavior tests belong in test_install_surface_core*.py"
     assert imported_core_helpers == set(), (
         "Keep test_file_effects.py adapter-owned; use module-qualified "
         "install_surface_core collaborators here and put direct core behavior tests "
-        "in test_install_surface_core.py."
+        "in test_install_surface_core*.py."
     )
 
 

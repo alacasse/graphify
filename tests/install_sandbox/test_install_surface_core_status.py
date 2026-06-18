@@ -6,6 +6,9 @@ from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface
 
+# Status-decision ownership lives here. Sidecar, state-plan, and generated-file
+# Installer Core decisions live in the sibling test_install_surface_core_* modules.
+
 
 def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
     return InstallSurface(

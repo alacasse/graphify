@@ -41,8 +41,8 @@ STANDARD_ARTIFACT_FILENAMES = {
 
 
 # Lifecycle tests depend on the ScenarioFileEffects protocol. Direct Installer
-# Core decisions live in test_install_surface_core.py; the concrete adapter
-# boundary lives in test_file_effects.py.
+# Core decisions live in test_install_surface_core*.py topic modules; the
+# concrete adapter boundary lives in test_file_effects.py.
 
 
 def make_scenario(platform: str = "codex", scope: str = "project", *, uninstall: bool = True) -> Scenario:

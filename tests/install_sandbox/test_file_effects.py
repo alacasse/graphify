@@ -648,7 +648,7 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         "is_relevant_generated_file",
         "copy_generated_files",
     }
-    removable_pure_pass_throughs = {
+    removed_sidecar_path_pass_throughs = {
         "is_skill_expected",
         "skill_sidecar_expectation",
         "skill_dir_for_entry",
@@ -660,6 +660,8 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         "reference_sidecar_expectation",
         "skill_reference_pointers",
         "progressive_skill_entries",
+    }
+    removable_pure_pass_throughs = {
         "expected_manifest_relatives",
         "should_seed_user_content",
         "should_seed_stale_graphify_section",
@@ -679,6 +681,7 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
     }
 
     assert adapter_methods.isdisjoint(removable_pure_pass_throughs)
+    assert oracle_methods.isdisjoint(removed_sidecar_path_pass_throughs)
     assert oracle_methods == adapter_methods | removable_pure_pass_throughs
 
 
@@ -780,15 +783,21 @@ def test_install_surface_core_derives_expected_manifest_relatives_for_root() -> 
     ],
 )
 def test_expected_skill_sidecar_relatives_follow_packaged_reference_status(
-    oracle: file_effects.FileEffectOracle,
     platform: str,
     expected_relatives: set[str],
 ) -> None:
     relative = ".claude/skills/graphify/SKILL.md" if platform == "claude" else f".{platform}/graphify/SKILL.md"
     entry = expected_skill("project", relative)
-    test_scenario = scenario(platform, entry)
+    resolutions = {
+        "claude": resolution("available", ("query.md", "update.md"), "claude refs"),
+        "empty": resolution("empty", detail="empty refs"),
+        "aider": resolution("intentionally_absent", detail="absent refs"),
+        "no_eligible": resolution("no_eligible_bundle", detail="no eligible refs"),
+        "missing": resolution("missing", detail="missing /package/refs"),
+        "not_directory": resolution("not_directory", detail="not_directory /package/refs"),
+    }
 
-    assert oracle.expected_skill_sidecar_relatives(test_scenario, entry) == {Path(relative) for relative in expected_relatives}
+    assert install_surface_core.expected_skill_sidecar_relatives(entry, resolutions[platform]) == {Path(relative) for relative in expected_relatives}
 
 
 def test_assertion_detects_missing_file(oracle) -> None:

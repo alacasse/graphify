@@ -32,6 +32,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "install_surface_generated.py",
         "install_surface_sidecars.py",
         "install_surface_state.py",
+        "install_surface_statuses.py",
         "json_helpers.py",
         "spec_loader.py",
         "status.py",

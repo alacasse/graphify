@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
+from tools.install_sandbox import install_surface_statuses
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface
 
@@ -23,10 +24,10 @@ def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARK
     )
 
 
-def json_status_from_loaded_data(surface: InstallSurface, data: object) -> install_surface_core.InstallSurfaceStatus:
-    return install_surface_core.installed_surface_status_from_observation(
+def json_status_from_loaded_data(surface: InstallSurface, data: object) -> install_surface_statuses.InstallSurfaceStatus:
+    return install_surface_statuses.installed_surface_status_from_observation(
         surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=Path(f"/observed/{surface.relative}"),
             exists=True,
             is_file=True,
@@ -36,32 +37,42 @@ def json_status_from_loaded_data(surface: InstallSurface, data: object) -> insta
     )
 
 
-def registered_json_status(platform: str, scope: str, relative: str, data: object) -> install_surface_core.InstallSurfaceStatus:
+def registered_json_status(platform: str, scope: str, relative: str, data: object) -> install_surface_statuses.InstallSurfaceStatus:
     test_scenario = platform_specs.DEFAULT_SCENARIO_REGISTRY.make_scenario(platform, scope)
     assert test_scenario is not None
     entry = next(item for item in test_scenario.expected if item.relative == relative)
     return json_status_from_loaded_data(entry, data)
 
 
+def test_install_surface_core_re_exports_status_helpers_for_compatibility() -> None:
+    assert install_surface_core.InstallSurfaceStatus is install_surface_statuses.InstallSurfaceStatus
+    assert install_surface_core.InstallSurfaceObservation is install_surface_statuses.InstallSurfaceObservation
+    assert install_surface_core.UninstallSurfaceObservation is install_surface_statuses.UninstallSurfaceObservation
+    assert install_surface_core.FileFingerprintObservation is install_surface_statuses.FileFingerprintObservation
+    assert install_surface_core.installed_surface_status_from_observation is install_surface_statuses.installed_surface_status_from_observation
+    assert install_surface_core.uninstalled_surface_status_from_observation is install_surface_statuses.uninstalled_surface_status_from_observation
+    assert install_surface_core.file_fingerprint_from_observation is install_surface_statuses.file_fingerprint_from_observation
+
+
 def test_install_surface_core_decides_installed_status_from_observed_facts() -> None:
     missing = InstallSurface("project", "missing.txt")
-    missing_observation = install_surface_core.InstallSurfaceObservation(
+    missing_observation = install_surface_statuses.InstallSurfaceObservation(
         path=Path("/observed/missing.txt"),
         exists=False,
     )
 
-    missing_status = install_surface_core.installed_surface_status_from_observation(missing, missing_observation)
+    missing_status = install_surface_statuses.installed_surface_status_from_observation(missing, missing_observation)
 
-    assert missing_status == install_surface_core.InstallSurfaceStatus(
+    assert missing_status == install_surface_statuses.InstallSurfaceStatus(
         Path("/observed/missing.txt"),
         ok=False,
         detail="missing",
     )
 
     wrong_kind = InstallSurface("project", "wrong-kind", kind="dir")
-    wrong_kind_status = install_surface_core.installed_surface_status_from_observation(
+    wrong_kind_status = install_surface_statuses.installed_surface_status_from_observation(
         wrong_kind,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=Path("/observed/wrong-kind"),
             exists=True,
             is_file=True,
@@ -73,13 +84,13 @@ def test_install_surface_core_decides_installed_status_from_observed_facts() -> 
     assert wrong_kind_status.detail == "expected_directory_but_not_directory"
 
     text_surface = section("project", "notes.md", preserve_user_content=True)
-    text_status = install_surface_core.installed_surface_status_from_observation(
+    text_status = install_surface_statuses.installed_surface_status_from_observation(
         text_surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=Path("/observed/notes.md"),
             exists=True,
             is_file=True,
-            text=f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
         ),
     )
 
@@ -92,9 +103,9 @@ def test_install_surface_core_decides_installed_status_from_observed_facts() -> 
     assert json_status.ok is True
     assert json_status.detail == "valid_json=true; schema=generic_marker; marker_present=True"
 
-    invalid_json_status = install_surface_core.installed_surface_status_from_observation(
+    invalid_json_status = install_surface_statuses.installed_surface_status_from_observation(
         json_surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=Path("/observed/settings.json"),
             exists=True,
             is_file=True,
@@ -110,9 +121,9 @@ def test_install_surface_core_decides_kind_status_from_observed_facts() -> None:
     surface = InstallSurface("project", "installed.txt")
     observed_path = Path("/observed/installed.txt")
 
-    status = install_surface_core.install_surface_kind_status_from_observation(
+    status = install_surface_statuses.install_surface_kind_status_from_observation(
         surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=observed_path,
             exists=True,
             is_file=True,
@@ -129,9 +140,9 @@ def test_installed_surface_status_observation_helper_preserves_paths_and_details
     missing = InstallSurface("project", "missing.txt")
     missing_path = Path("/observed/missing.txt")
 
-    assert install_surface_core.installed_surface_status_from_observation(
+    assert install_surface_statuses.installed_surface_status_from_observation(
         missing,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=missing_path,
             exists=False,
             is_file=False,
@@ -141,11 +152,11 @@ def test_installed_surface_status_observation_helper_preserves_paths_and_details
 
     text_surface = section("project", "notes.md", preserve_user_content=True)
     text_path = Path("/observed/notes.md")
-    text = f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    text = f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
 
-    assert install_surface_core.installed_surface_status_from_observation(
+    assert install_surface_statuses.installed_surface_status_from_observation(
         text_surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=text_path,
             exists=True,
             is_file=True,
@@ -158,9 +169,9 @@ def test_installed_surface_status_observation_helper_preserves_paths_and_details
     json_path = Path("/observed/settings.json")
     json_data = {"hooks": [{"command": "graphify query"}]}
 
-    assert install_surface_core.installed_surface_status_from_observation(
+    assert install_surface_statuses.installed_surface_status_from_observation(
         json_surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=json_path,
             exists=True,
             is_file=True,
@@ -174,9 +185,9 @@ def test_installed_surface_status_observation_helper_preserves_paths_and_details
 def test_json_marker_status_observation_helpers_preserve_details() -> None:
     json_surface = InstallSurface("project", "settings.json", content_kind="json", marker="graphify")
 
-    assert install_surface_core.json_marker_status_from_observation(
+    assert install_surface_statuses.json_marker_status_from_observation(
         json_surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=Path("/observed/settings.json"),
             exists=True,
             is_file=True,
@@ -184,9 +195,9 @@ def test_json_marker_status_observation_helpers_preserve_details() -> None:
         ),
     ) == (False, "invalid_json=Expecting property name enclosed in double quotes")
 
-    assert install_surface_core.json_marker_status_from_observation(
+    assert install_surface_statuses.json_marker_status_from_observation(
         json_surface,
-        install_surface_core.InstallSurfaceObservation(
+        install_surface_statuses.InstallSurfaceObservation(
             path=Path("/observed/settings.json"),
             exists=True,
             is_file=True,
@@ -198,18 +209,18 @@ def test_json_marker_status_observation_helpers_preserve_details() -> None:
 def test_text_marker_status_from_already_read_text_preserves_details() -> None:
     text_surface = section("project", "notes.md", preserve_user_content=True)
 
-    assert install_surface_core.text_marker_status_from_text(
-        f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+    assert install_surface_statuses.text_marker_status_from_text(
+        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
         text_surface,
     ) == (True, "marker_count=1; user_content_preserved; stale_replaced=True")
 
-    assert install_surface_core.text_marker_status_from_text(
+    assert install_surface_statuses.text_marker_status_from_text(
         f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\nfirst\n\n{platform_specs.GRAPHIFY_MARKER}\nsecond\n",
         text_surface,
     ) == (False, "marker_count=2; user_content_missing; stale_replaced=True")
 
-    assert install_surface_core.text_marker_status_from_text(
-        f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_core.STALE_GRAPHIFY_SENTINEL}\n",
+    assert install_surface_statuses.text_marker_status_from_text(
+        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n",
         text_surface,
     ) == (False, "marker_count=1; user_content_preserved; stale_replaced=False")
 
@@ -255,23 +266,23 @@ def test_registered_json_expectation_status_from_loaded_json_facts() -> None:
 def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -> None:
     plain = InstallSurface("project", "plain.txt")
 
-    removed_status = install_surface_core.uninstalled_surface_status_from_observation(
+    removed_status = install_surface_statuses.uninstalled_surface_status_from_observation(
         plain,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=Path("/observed/plain.txt"),
             exists=False,
         ),
     )
 
-    assert removed_status == install_surface_core.InstallSurfaceStatus(
+    assert removed_status == install_surface_statuses.InstallSurfaceStatus(
         Path("/observed/plain.txt"),
         ok=True,
         detail="removed",
     )
 
-    still_exists_status = install_surface_core.uninstalled_surface_status_from_observation(
+    still_exists_status = install_surface_statuses.uninstalled_surface_status_from_observation(
         plain,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=Path("/observed/plain.txt"),
             exists=True,
             is_file=True,
@@ -283,35 +294,35 @@ def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -
     assert still_exists_status.detail == "still_exists"
 
     preserved_text = section("project", "notes.md", preserve_user_content=True)
-    preserved_status = install_surface_core.uninstalled_surface_status_from_observation(
+    preserved_status = install_surface_statuses.uninstalled_surface_status_from_observation(
         preserved_text,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=Path("/observed/notes.md"),
             exists=True,
             is_file=True,
-            text=f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n## User Section\n",
+            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n## User Section\n",
         ),
     )
 
     assert preserved_status.ok is True
     assert preserved_status.detail == "graphify_removed=True; user_content_preserved=True"
 
-    stale_status = install_surface_core.uninstalled_surface_status_from_observation(
+    stale_status = install_surface_statuses.uninstalled_surface_status_from_observation(
         preserved_text,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=Path("/observed/notes.md"),
             exists=True,
             is_file=True,
-            text=f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_core.STALE_GRAPHIFY_SENTINEL}\n",
+            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n",
         ),
     )
 
     assert stale_status.ok is False
     assert stale_status.detail == "graphify_removed=False; user_content_preserved=True"
 
-    missing_user_content_status = install_surface_core.uninstalled_surface_status_from_observation(
+    missing_user_content_status = install_surface_statuses.uninstalled_surface_status_from_observation(
         preserved_text,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=Path("/observed/notes.md"),
             exists=False,
         ),
@@ -320,9 +331,9 @@ def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -
     assert missing_user_content_status.ok is False
     assert missing_user_content_status.detail == "user_content_file_missing"
 
-    read_error_status = install_surface_core.uninstalled_surface_status_from_observation(
+    read_error_status = install_surface_statuses.uninstalled_surface_status_from_observation(
         preserved_text,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=Path("/observed/notes.md"),
             exists=True,
             is_file=True,
@@ -338,9 +349,9 @@ def test_uninstalled_surface_status_observation_helper_preserves_paths_and_detai
     plain = InstallSurface("project", "plain.txt")
     plain_path = Path("/observed/plain.txt")
 
-    assert install_surface_core.uninstalled_surface_status_from_observation(
+    assert install_surface_statuses.uninstalled_surface_status_from_observation(
         plain,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=plain_path,
             exists=False,
             is_file=False,
@@ -350,11 +361,11 @@ def test_uninstalled_surface_status_observation_helper_preserves_paths_and_detai
 
     text_section = section("project", "notes.md", preserve_user_content=True)
     notes_path = Path("/observed/notes.md")
-    preserved_text = f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n## User Section\n"
+    preserved_text = f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n## User Section\n"
 
-    assert install_surface_core.uninstalled_surface_status_from_observation(
+    assert install_surface_statuses.uninstalled_surface_status_from_observation(
         text_section,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=notes_path,
             exists=True,
             is_file=True,
@@ -363,11 +374,11 @@ def test_uninstalled_surface_status_observation_helper_preserves_paths_and_detai
         ),
     )
 
-    stale_text = f"# Notes\n\n{install_surface_core.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_core.STALE_GRAPHIFY_SENTINEL}\n"
+    stale_text = f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n"
 
-    assert install_surface_core.uninstalled_surface_status_from_observation(
+    assert install_surface_statuses.uninstalled_surface_status_from_observation(
         text_section,
-        install_surface_core.UninstallSurfaceObservation(
+        install_surface_statuses.UninstallSurfaceObservation(
             path=notes_path,
             exists=True,
             is_file=True,

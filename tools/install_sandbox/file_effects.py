@@ -10,21 +10,12 @@ try:
     from .expected_effects import is_json_effect, is_skill_effect
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
-        STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL as _USER_SENTINEL,
-        FileFingerprintObservation,
-        InstallSurfaceObservation,
-        UninstallSurfaceObservation,
         expected_manifest_relatives as core_expected_manifest_relatives,
-        file_fingerprint_from_observation,
         idempotency_state_changes,
-        install_surface_kind_status_from_observation,
-        installed_surface_status_from_observation,
         planned_state_entries,
         resolve_install_root,
         resolve_install_surface_path,
         stale_sidecar_seed_plans,
-        uninstalled_surface_status_from_observation,
         user_content_seed_plans,
     )
     from .install_surface_generated import (
@@ -50,27 +41,29 @@ try:
         uninstalled_skill_sidecar_status,
     )
     from .install_surface_state import expected_generated_relative_keys
+    from .install_surface_statuses import (
+        FileFingerprintObservation,
+        InstallSurfaceObservation,
+        UninstallSurfaceObservation,
+        file_fingerprint_from_observation,
+        install_surface_kind_status_from_observation,
+        installed_surface_status_from_observation,
+        uninstalled_surface_status_from_observation,
+    )
+    from .install_surface_state import STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL
+    from .install_surface_state import USER_SENTINEL as _USER_SENTINEL
     from .platform_specs import InstallSurface, Scenario, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
     from expected_effects import is_json_effect, is_skill_effect  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
-        STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL as _USER_SENTINEL,
-        FileFingerprintObservation,
-        InstallSurfaceObservation,
-        UninstallSurfaceObservation,
         expected_manifest_relatives as core_expected_manifest_relatives,
-        file_fingerprint_from_observation,
         idempotency_state_changes,
-        install_surface_kind_status_from_observation,
-        installed_surface_status_from_observation,
         planned_state_entries,
         resolve_install_root,
         resolve_install_surface_path,
         stale_sidecar_seed_plans,
-        uninstalled_surface_status_from_observation,
         user_content_seed_plans,
     )
     from install_surface_generated import (  # type: ignore[no-redef]
@@ -96,6 +89,17 @@ except ImportError:
         uninstalled_skill_sidecar_status,
     )
     from install_surface_state import expected_generated_relative_keys  # type: ignore[no-redef]
+    from install_surface_state import STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL  # type: ignore[no-redef]
+    from install_surface_state import USER_SENTINEL as _USER_SENTINEL  # type: ignore[no-redef]
+    from install_surface_statuses import (  # type: ignore[no-redef]
+        FileFingerprintObservation,
+        InstallSurfaceObservation,
+        UninstallSurfaceObservation,
+        file_fingerprint_from_observation,
+        install_surface_kind_status_from_observation,
+        installed_surface_status_from_observation,
+        uninstalled_surface_status_from_observation,
+    )
     from platform_specs import InstallSurface, Scenario, TextExpectation
     from reference_resolution import PackagedReferenceResolution
 

@@ -44,6 +44,7 @@ COPY install_surface_core.py /runner/install_surface_core.py
 COPY install_surface_generated.py /runner/install_surface_generated.py
 COPY install_surface_sidecars.py /runner/install_surface_sidecars.py
 COPY install_surface_state.py /runner/install_surface_state.py
+COPY install_surface_statuses.py /runner/install_surface_statuses.py
 COPY json_helpers.py /runner/json_helpers.py
 COPY platform_specs.py /runner/platform_specs.py
 COPY spec_loader.py /runner/spec_loader.py

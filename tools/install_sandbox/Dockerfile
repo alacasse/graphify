@@ -41,6 +41,7 @@ COPY file_effects.py /runner/file_effects.py
 COPY file_walk.py /runner/file_walk.py
 COPY harness_specs.py /runner/harness_specs.py
 COPY install_surface_core.py /runner/install_surface_core.py
+COPY install_surface_generated.py /runner/install_surface_generated.py
 COPY install_surface_sidecars.py /runner/install_surface_sidecars.py
 COPY install_surface_state.py /runner/install_surface_state.py
 COPY json_helpers.py /runner/json_helpers.py

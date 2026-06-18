@@ -15,24 +15,25 @@ try:
         FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
-        GeneratedFileDecision,
-        decide_generated_file_observation,
-        generated_artifact_copy_plan,
         expected_manifest_relatives as core_expected_manifest_relatives,
-        expected_generated_relative_keys,
         file_fingerprint_from_observation,
-        generated_file_observation,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
-        is_excluded_generated_path,
         installed_surface_status_from_observation,
         planned_state_entries,
         resolve_install_root,
         resolve_install_surface_path,
         stale_sidecar_seed_plans,
-        text_mentions_expected_generated_marker,
         uninstalled_surface_status_from_observation,
         user_content_seed_plans,
+    )
+    from .install_surface_generated import (
+        GeneratedFileDecision,
+        decide_generated_file_observation,
+        generated_artifact_copy_plan,
+        generated_file_observation,
+        is_excluded_generated_path,
+        text_mentions_expected_generated_marker,
     )
     from .install_surface_sidecars import (
         expected_skill_sidecar_relatives,
@@ -48,6 +49,7 @@ try:
         skill_version_relative,
         uninstalled_skill_sidecar_status,
     )
+    from .install_surface_state import expected_generated_relative_keys
     from .platform_specs import InstallSurface, Scenario, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
@@ -59,24 +61,25 @@ except ImportError:
         FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
-        GeneratedFileDecision,
-        decide_generated_file_observation,
-        generated_artifact_copy_plan,
         expected_manifest_relatives as core_expected_manifest_relatives,
-        expected_generated_relative_keys,
         file_fingerprint_from_observation,
-        generated_file_observation,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
-        is_excluded_generated_path,
         installed_surface_status_from_observation,
         planned_state_entries,
         resolve_install_root,
         resolve_install_surface_path,
         stale_sidecar_seed_plans,
-        text_mentions_expected_generated_marker,
         uninstalled_surface_status_from_observation,
         user_content_seed_plans,
+    )
+    from install_surface_generated import (  # type: ignore[no-redef]
+        GeneratedFileDecision,
+        decide_generated_file_observation,
+        generated_artifact_copy_plan,
+        generated_file_observation,
+        is_excluded_generated_path,
+        text_mentions_expected_generated_marker,
     )
     from install_surface_sidecars import (  # type: ignore[no-redef]
         expected_skill_sidecar_relatives,
@@ -92,6 +95,7 @@ except ImportError:
         skill_version_relative,
         uninstalled_skill_sidecar_status,
     )
+    from install_surface_state import expected_generated_relative_keys  # type: ignore[no-redef]
     from platform_specs import InstallSurface, Scenario, TextExpectation
     from reference_resolution import PackagedReferenceResolution
 

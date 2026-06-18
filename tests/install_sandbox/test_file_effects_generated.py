@@ -6,6 +6,7 @@ import pytest
 
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import install_surface_core
+from tools.install_sandbox import install_surface_generated
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
@@ -323,7 +324,7 @@ def test_copy_generated_files_keeps_walking_decisions_and_copying_in_oracle(orac
                     "expected_keys": expected_keys,
                 }
             )
-            observation = install_surface_core.GeneratedFileObservation(
+            observation = install_surface_generated.GeneratedFileObservation(
                 root_name=root_name,
                 relative=relative,
                 suffix=path.suffix,
@@ -335,7 +336,7 @@ def test_copy_generated_files_keeps_walking_decisions_and_copying_in_oracle(orac
                 relative_substring_match=False,
                 small_text_candidate=False,
             )
-            return install_surface_core.GeneratedFileDecision(
+            return install_surface_generated.GeneratedFileDecision(
                 observation,
                 is_relevant=relative == Path("nested/keep.txt"),
                 is_ignored=False,

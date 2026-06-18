@@ -55,6 +55,7 @@ COPY spec_loader.py /runner/spec_loader.py
 COPY specs /runner/specs
 COPY reference_resolution.py /runner/reference_resolution.py
 COPY reports.py /runner/reports.py
+COPY scenario_file_effects_adapter.py /runner/scenario_file_effects_adapter.py
 COPY scenario_lifecycle.py /runner/scenario_lifecycle.py
 COPY source_snapshot.py /runner/source_snapshot.py
 COPY status.py /runner/status.py

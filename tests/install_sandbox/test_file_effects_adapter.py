@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import file_effects
+from tools.install_sandbox import scenario_file_effects_adapter
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
@@ -121,6 +122,11 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
             "relative": "leftover/graphify.md",
         },
     ]
+
+
+def test_scenario_file_effects_adapter_owned_by_adapter_module() -> None:
+    assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
+    assert file_effects.check_record is scenario_file_effects_adapter.check_record
 
 
 def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(oracle) -> None:

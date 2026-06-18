@@ -8,6 +8,7 @@ from tools.install_sandbox import file_effect_sidecars
 from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import install_surface_core
+from tools.install_sandbox import scenario_file_effects_adapter
 
 # File-effects boundary guards live here. Oracle leaf behavior is split across
 # topic modules, and ScenarioFileEffectsAdapter coverage lives in
@@ -17,6 +18,8 @@ from tools.install_sandbox import install_surface_core
 def test_file_effects_preserves_moved_compatibility_imports() -> None:
     assert file_effects.is_skill_effect is expected_effects.is_skill_effect
     assert file_effects.core_expected_manifest_relatives is file_effect_state.expected_manifest_relatives
+    assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
+    assert file_effects.check_record is scenario_file_effects_adapter.check_record
 
 
 def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:

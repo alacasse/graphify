@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
+from tools.install_sandbox import install_surface_state
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
@@ -29,11 +30,11 @@ def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARK
     )
 
 
-def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:
+def test_install_surface_state_derives_ordered_idempotency_state_plan() -> None:
     notes = section("project", "notes.md", preserve_user_content=True)
     skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
 
-    plan = install_surface_core.planned_state_entries(
+    plan = install_surface_state.planned_state_entries(
         (notes, skill),
         resolution("available", ("query.md",)),
         installed_skill_reference_relatives={
@@ -63,7 +64,7 @@ def test_install_surface_core_derives_ordered_idempotency_state_plan() -> None:
     assert plan[2].text_expectation is None
 
 
-def test_install_surface_core_derives_ordered_idempotency_state_changes() -> None:
+def test_install_surface_state_derives_ordered_idempotency_state_changes() -> None:
     before = {
         "project/changed.md": {"exists": True, "sha256": "before"},
         "project/removed.md": {"exists": True, "sha256": "removed"},
@@ -75,17 +76,17 @@ def test_install_surface_core_derives_ordered_idempotency_state_changes() -> Non
         "project/stable.md": {"exists": True, "sha256": "same"},
     }
 
-    changes = install_surface_core.idempotency_state_changes(before, after)
+    changes = install_surface_state.idempotency_state_changes(before, after)
 
     assert changes == (
-        install_surface_core.IdempotencyStateChange("project/added.md", stable=False),
-        install_surface_core.IdempotencyStateChange("project/changed.md", stable=False),
-        install_surface_core.IdempotencyStateChange("project/removed.md", stable=False),
-        install_surface_core.IdempotencyStateChange("project/stable.md", stable=True),
+        install_surface_state.IdempotencyStateChange("project/added.md", stable=False),
+        install_surface_state.IdempotencyStateChange("project/changed.md", stable=False),
+        install_surface_state.IdempotencyStateChange("project/removed.md", stable=False),
+        install_surface_state.IdempotencyStateChange("project/stable.md", stable=True),
     )
 
 
-def test_install_surface_core_derives_user_content_seed_plans() -> None:
+def test_install_surface_state_derives_user_content_seed_plans() -> None:
     stale_section = section("project", "stale-notes.md", preserve_user_content=True)
     legacy_text_policy = ExpectedPath(
         "home",
@@ -96,7 +97,7 @@ def test_install_surface_core_derives_user_content_seed_plans() -> None:
     plain_surface = ExpectedPath("project", "plain.txt")
     json_surface = ExpectedPath("project", "settings.json", content_kind="json", marker="graphify")
 
-    plans = install_surface_core.user_content_seed_plans(
+    plans = install_surface_state.user_content_seed_plans(
         (
             stale_section,
             legacy_text_policy,
@@ -107,63 +108,100 @@ def test_install_surface_core_derives_user_content_seed_plans() -> None:
     )
 
     assert plans == (
-        install_surface_core.UserContentSeedPlan(
+        install_surface_state.UserContentSeedPlan(
             root_name="project",
             relative=Path("stale-notes.md"),
             text=(
-                f"# User Notes\n\n{install_surface_core.USER_SENTINEL}\n\n"
-                f"{platform_specs.GRAPHIFY_MARKER}\n{install_surface_core.STALE_GRAPHIFY_SENTINEL}\n\n"
+                f"# User Notes\n\n{install_surface_state.USER_SENTINEL}\n\n"
+                f"{platform_specs.GRAPHIFY_MARKER}\n{install_surface_state.STALE_GRAPHIFY_SENTINEL}\n\n"
                 "## User Section\nThis section should survive Graphify install and uninstall.\n"
             ),
         ),
-        install_surface_core.UserContentSeedPlan(
+        install_surface_state.UserContentSeedPlan(
             root_name="home",
             relative=Path("legacy-notes.txt"),
-            text=f"# User Notes\n\n{install_surface_core.USER_SENTINEL}\n",
+            text=f"# User Notes\n\n{install_surface_state.USER_SENTINEL}\n",
         ),
     )
 
 
-def test_install_surface_core_derives_stale_sidecar_seed_plans() -> None:
+def test_install_surface_state_derives_stale_sidecar_seed_plans() -> None:
     skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
     plain_surface = ExpectedPath("project", "AGENTS.md")
 
-    plans = install_surface_core.stale_sidecar_seed_plans(
+    plans = install_surface_state.stale_sidecar_seed_plans(
         (plain_surface, skill),
         resolution("available", ("query.md",)),
     )
 
     assert plans == (
-        install_surface_core.StaleSidecarSeedPlan(
+        install_surface_state.StaleSidecarSeedPlan(
             root_name="home",
             relative=Path(".codex/skills/graphify/references/stale-sandbox-fragment.md"),
             text="stale sandbox reference fragment\n",
             kind="stale_reference_fragment",
         ),
-        install_surface_core.StaleSidecarSeedPlan(
+        install_surface_state.StaleSidecarSeedPlan(
             root_name="home",
             relative=Path(".codex/skills/graphify/references.tmp/partial.md"),
             text="partial staged reference fragment\n",
             kind="staged_reference_fragment",
         ),
     )
-    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("empty")) == plans
-    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("missing")) == plans
-    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("not_directory")) == plans
-    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("intentionally_absent")) == ()
-    assert install_surface_core.stale_sidecar_seed_plans((skill,), resolution("no_eligible_bundle")) == ()
-    assert install_surface_core.stale_sidecar_seed_plans((plain_surface,), resolution("available", ("query.md",))) == ()
+    assert install_surface_state.stale_sidecar_seed_plans((skill,), resolution("empty")) == plans
+    assert install_surface_state.stale_sidecar_seed_plans((skill,), resolution("missing")) == plans
+    assert install_surface_state.stale_sidecar_seed_plans((skill,), resolution("not_directory")) == plans
+    assert install_surface_state.stale_sidecar_seed_plans((skill,), resolution("intentionally_absent")) == ()
+    assert install_surface_state.stale_sidecar_seed_plans((skill,), resolution("no_eligible_bundle")) == ()
+    assert install_surface_state.stale_sidecar_seed_plans((plain_surface,), resolution("available", ("query.md",))) == ()
 
 
 def test_expected_generated_keys_reuse_generated_state_plan() -> None:
     notes = section("project", "notes.md", preserve_user_content=True)
     skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
 
-    plan = install_surface_core.planned_state_entries(
+    plan = install_surface_state.planned_state_entries(
         (notes, skill),
         resolution("available", ("query.md",)),
     )
 
-    assert install_surface_core.expected_generated_relative_keys((notes, skill), resolution("available", ("query.md",))) == {
+    assert install_surface_state.expected_generated_relative_keys((notes, skill), resolution("available", ("query.md",))) == {
         (entry.root_name, entry.relative.as_posix()) for entry in plan
     }
+
+
+def test_install_surface_state_derives_expected_manifest_relatives_for_root() -> None:
+    project_notes = InstallSurface("project", "AGENTS.md")
+    project_skill = expected_skill("project", ".claude/skills/graphify/SKILL.md")
+    home_skill = expected_skill("home", ".codex/skills/graphify/SKILL.md")
+
+    assert install_surface_state.expected_manifest_relatives(
+        (project_notes, project_skill, home_skill),
+        resolution("available", ("query.md", "update.md")),
+        "project",
+    ) == {
+        Path("AGENTS.md"),
+        Path(".claude/skills/graphify/SKILL.md"),
+        Path(".claude/skills/graphify/.graphify_version"),
+        Path(".claude/skills/graphify/references.tmp"),
+        Path(".claude/skills/graphify/references"),
+        Path(".claude/skills/graphify/references/query.md"),
+        Path(".claude/skills/graphify/references/update.md"),
+    }
+    assert install_surface_state.expected_manifest_relatives(
+        (project_notes, project_skill, home_skill),
+        resolution("intentionally_absent"),
+        "home",
+    ) == {
+        Path(".codex/skills/graphify/SKILL.md"),
+        Path(".codex/skills/graphify/.graphify_version"),
+        Path(".codex/skills/graphify/references.tmp"),
+    }
+
+
+def test_install_surface_core_reexports_state_planning_names_for_compatibility() -> None:
+    assert install_surface_core.planned_state_entries is install_surface_state.planned_state_entries
+    assert install_surface_core.IdempotencyStateChange is install_surface_state.IdempotencyStateChange
+    assert install_surface_core.user_content_seed_plans is install_surface_state.user_content_seed_plans
+    assert install_surface_core.stale_sidecar_seed_plans is install_surface_state.stale_sidecar_seed_plans
+    assert install_surface_core.expected_manifest_relatives is install_surface_state.expected_manifest_relatives

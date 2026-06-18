@@ -598,7 +598,7 @@ def test_expected_generated_keys_reuse_generated_state_plan() -> None:
     }
 
 
-def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -> None:
+def test_install_surface_core_derives_skill_sidecar_relative_paths_from_declared_names() -> None:
     default_entry = expected_skill("project", ".aider/graphify/SKILL.md")
     custom_entry = expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md")
 
@@ -612,15 +612,74 @@ def test_skill_sidecar_relative_derivation_uses_declared_sidecar_names(oracle) -
     assert install_surface_core.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
     assert install_surface_core.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
 
-    assert oracle.skill_relative_dir(default_entry) == Path(".aider/graphify")
-    assert oracle.skill_version_relative(default_entry) == Path(".aider/graphify/.graphify_version")
-    assert oracle.skill_references_relative(default_entry) == Path(".aider/graphify/references")
-    assert oracle.skill_references_tmp_relative(default_entry) == Path(".aider/graphify/references.tmp")
 
-    assert oracle.skill_relative_dir(custom_entry) == Path(".custom/graphify")
-    assert oracle.skill_version_relative(custom_entry) == Path(".custom/graphify/.graphify_version")
-    assert oracle.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
-    assert oracle.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
+def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_throughs() -> None:
+    adapter_methods = {
+        "root_path",
+        "expected_path",
+        "skill_assertion_record",
+        "installed_skill_reference_relatives",
+        "tracked_skill_sidecar_relatives",
+        "installed_reference_names",
+        "check_skill_version",
+        "check_references_tmp_absent",
+        "check_packaged_references",
+        "check_skill_reference_pointers",
+        "assert_installed_skill_sidecar",
+        "assert_installed_skill_sidecars",
+        "seed_stale_skill_sidecars",
+        "seed_user_owned_content",
+        "installed_surface_observation",
+        "expected_entry_status",
+        "assert_expected_files",
+        "uninstalled_surface_observation",
+        "uninstalled_entry_status",
+        "uninstalled_skill_sidecar_checks",
+        "assert_uninstalled",
+        "pruned_file_walk",
+        "assert_no_unexpected_graphify_files",
+        "assert_scope_boundaries",
+        "file_fingerprint",
+        "scenario_file_state",
+        "generated_file_size",
+        "is_small_text_candidate",
+        "file_mentions_expected_generated_marker",
+        "generated_file_decision",
+        "is_relevant_generated_file",
+        "copy_generated_files",
+    }
+    removable_pure_pass_throughs = {
+        "is_skill_expected",
+        "skill_sidecar_expectation",
+        "skill_dir_for_entry",
+        "skill_relative_dir",
+        "skill_version_relative",
+        "skill_references_relative",
+        "skill_references_tmp_relative",
+        "expected_skill_sidecar_relatives",
+        "reference_sidecar_expectation",
+        "skill_reference_pointers",
+        "progressive_skill_entries",
+        "expected_manifest_relatives",
+        "should_seed_user_content",
+        "should_seed_stale_graphify_section",
+        "seeded_text",
+        "graphify_section_removed",
+        "expected_generated_relative_keys",
+        "expected_generated_relative_keys_for_scenarios",
+        "should_exclude_generated_path",
+        "is_expected_generated_key",
+        "is_skill_sidecar_relative",
+    }
+
+    oracle_methods = {
+        name
+        for name, value in vars(file_effects.FileEffectOracle).items()
+        if callable(value) and not name.startswith("_")
+    }
+
+    assert adapter_methods.isdisjoint(removable_pure_pass_throughs)
+    assert oracle_methods == adapter_methods | removable_pure_pass_throughs
 
 
 def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_resolved_references() -> None:
@@ -1834,15 +1893,18 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
     empty = scenario("empty", expected_skill("project", ".empty/graphify/SKILL.md"))
     absent = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
     ordinary = scenario("unit", ordinary_entry)
+    available_resolution = resolution("available", ("query.md", "update.md"), "claude refs")
+    empty_resolution = resolution("empty", detail="empty refs")
+    absent_resolution = resolution("intentionally_absent", detail="absent refs")
 
-    available_manifest = oracle.expected_manifest_relatives(available, "project")
-    ordinary_manifest = oracle.expected_manifest_relatives(ordinary, "project")
+    available_manifest = install_surface_core.expected_manifest_relatives(available.expected, available_resolution, "project")
+    ordinary_manifest = install_surface_core.expected_manifest_relatives(ordinary.expected, resolution("intentionally_absent"), "project")
     assert ordinary_manifest == {Path("AGENTS.md")}
-    assert oracle.expected_manifest_relatives(ordinary, "home") == set()
-    assert oracle.skill_version_relative(skill_entry) == Path(".claude/skills/graphify/.graphify_version")
-    assert oracle.skill_references_relative(skill_entry) == Path(".claude/skills/graphify/references")
-    assert oracle.skill_references_tmp_relative(skill_entry) == Path(".claude/skills/graphify/references.tmp")
-    assert oracle.expected_skill_sidecar_relatives(available, skill_entry) == {
+    assert install_surface_core.expected_manifest_relatives(ordinary.expected, resolution("intentionally_absent"), "home") == set()
+    assert install_surface_core.skill_version_relative(skill_entry) == Path(".claude/skills/graphify/.graphify_version")
+    assert install_surface_core.skill_references_relative(skill_entry) == Path(".claude/skills/graphify/references")
+    assert install_surface_core.skill_references_tmp_relative(skill_entry) == Path(".claude/skills/graphify/references.tmp")
+    assert install_surface_core.expected_skill_sidecar_relatives(skill_entry, available_resolution) == {
         Path(".claude/skills/graphify/.graphify_version"),
         Path(".claude/skills/graphify/references.tmp"),
         Path(".claude/skills/graphify/references"),
@@ -1851,25 +1913,25 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
     }
     assert Path(".claude/skills/graphify/references") in available_manifest
     assert Path(".claude/skills/graphify/references/query.md") in available_manifest
-    assert ("project", ".claude/skills/graphify/references/update.md") in oracle.expected_generated_relative_keys(available)
+    assert ("project", ".claude/skills/graphify/references/update.md") in install_surface_core.expected_generated_relative_keys(available.expected, available_resolution)
     assert "project/.claude/skills/graphify/references/query.md" in oracle.scenario_file_state(available)
 
-    empty_manifest = oracle.expected_manifest_relatives(empty, "project")
+    empty_manifest = install_surface_core.expected_manifest_relatives(empty.expected, empty_resolution, "project")
     empty_entry = empty.expected[0]
-    assert oracle.expected_skill_sidecar_relatives(empty, empty_entry) == {
+    assert install_surface_core.expected_skill_sidecar_relatives(empty_entry, empty_resolution) == {
         Path(".empty/graphify/.graphify_version"),
         Path(".empty/graphify/references.tmp"),
         Path(".empty/graphify/references"),
     }
     assert Path(".empty/graphify/references") in empty_manifest
     assert not any(path.name.endswith(".md") and "references" in path.parts for path in empty_manifest)
-    assert ("project", ".empty/graphify/references") in oracle.expected_generated_relative_keys(empty)
+    assert ("project", ".empty/graphify/references") in install_surface_core.expected_generated_relative_keys(empty.expected, empty_resolution)
     assert "project/.empty/graphify/references" in oracle.scenario_file_state(empty)
 
-    absent_manifest = oracle.expected_manifest_relatives(absent, "project")
-    absent_generated_keys = oracle.expected_generated_relative_keys(absent)
+    absent_manifest = install_surface_core.expected_manifest_relatives(absent.expected, absent_resolution, "project")
+    absent_generated_keys = install_surface_core.expected_generated_relative_keys(absent.expected, absent_resolution)
     absent_entry = absent.expected[0]
-    assert oracle.expected_skill_sidecar_relatives(absent, absent_entry) == {
+    assert install_surface_core.expected_skill_sidecar_relatives(absent_entry, absent_resolution) == {
         Path(".aider/graphify/.graphify_version"),
         Path(".aider/graphify/references.tmp"),
     }
@@ -1990,6 +2052,14 @@ def test_sidecar_generated_keys_and_idempotency_state_follow_packaged_reference_
 ) -> None:
     test_scenario = scenario(platform, expected_skill("project", skill_relative))
     skill = write_skill(roots["project"], skill_relative, version="9.9.9")
+    platform_resolution = {
+        "claude": resolution("available", ("query.md", "update.md"), "claude refs"),
+        "empty": resolution("empty", detail="empty refs"),
+        "aider": resolution("intentionally_absent", detail="absent refs"),
+        "no_eligible": resolution("no_eligible_bundle", detail="no eligible refs"),
+        "missing": resolution("missing", detail="missing /package/refs"),
+        "not_directory": resolution("not_directory", detail="not_directory /package/refs"),
+    }[platform]
     if platform in {"claude", "empty"}:
         refs = skill.parent / "references"
         refs.mkdir()
@@ -1997,7 +2067,7 @@ def test_sidecar_generated_keys_and_idempotency_state_follow_packaged_reference_
             (refs / "query.md").write_text("# query\n", encoding="utf-8")
             (refs / "update.md").write_text("# update\n", encoding="utf-8")
 
-    assert oracle.expected_generated_relative_keys(test_scenario) == {("project", relative) for relative in generated_relatives}
+    assert install_surface_core.expected_generated_relative_keys(test_scenario.expected, platform_resolution) == {("project", relative) for relative in generated_relatives}
     assert set(oracle.scenario_file_state(test_scenario)) == {f"project/{relative}" for relative in state_relatives}
 
 
@@ -2108,16 +2178,16 @@ def test_uninstall_skill_sidecar_checks_require_version_references_and_tmp_remov
     }
 
 
-def test_is_skill_sidecar_relative_matches_version_and_nested_reference_paths(oracle) -> None:
+def test_install_surface_core_matches_skill_sidecar_version_and_nested_reference_paths() -> None:
     test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
 
-    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/.graphify_version")) is True
-    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references/query.md")) is True
-    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references/nested/query.md")) is True
-    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references.tmp/partial.md")) is True
-    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/references.tmp/nested/partial.md")) is True
-    assert oracle.is_skill_sidecar_relative(test_scenario, "project", Path(".aider/graphify/notes.md")) is False
-    assert oracle.is_skill_sidecar_relative(test_scenario, "home", Path(".aider/graphify/.graphify_version")) is False
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/.graphify_version")) is True
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references/query.md")) is True
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references/nested/query.md")) is True
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references.tmp/partial.md")) is True
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references.tmp/nested/partial.md")) is True
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/notes.md")) is False
+    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "home", Path(".aider/graphify/.graphify_version")) is False
 
 
 def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> None:

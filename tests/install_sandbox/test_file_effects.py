@@ -3,13 +3,20 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tools.install_sandbox import expected_effects
 from tools.install_sandbox import file_effect_sidecars
+from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import install_surface_core
 
 # File-effects boundary guards live here. Oracle leaf behavior is split across
 # topic modules, and ScenarioFileEffectsAdapter coverage lives in
 # test_file_effects_adapter.py.
+
+
+def test_file_effects_preserves_moved_compatibility_imports() -> None:
+    assert file_effects.is_skill_effect is expected_effects.is_skill_effect
+    assert file_effects.core_expected_manifest_relatives is file_effect_state.expected_manifest_relatives
 
 
 def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
@@ -135,6 +142,7 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     }
     tree = ast.parse(Path(file_effects.__file__).read_text(encoding="utf-8"))
     sidecar_tree = ast.parse(Path(file_effect_sidecars.__file__).read_text(encoding="utf-8"))
+    state_tree = ast.parse(Path(file_effect_state.__file__).read_text(encoding="utf-8"))
 
     def dotted_name(node: ast.AST) -> str | None:
         if isinstance(node, ast.Name):
@@ -155,6 +163,12 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     imported_from_state = {
         alias.name
         for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_state")
+        for alias in node.names
+    }
+    state_module_imported_from_state = {
+        alias.name
+        for node in ast.walk(state_tree)
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_state")
         for alias in node.names
     }
@@ -221,7 +235,8 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     assert not wildcard_core_imports
     assert imported_from_core.isdisjoint(legacy_wrappers)
     assert imported_from_core.isdisjoint(topic_owned_helpers)
-    assert topic_owned_helpers <= imported_from_state
+    assert imported_from_state.isdisjoint(topic_owned_helpers)
+    assert topic_owned_helpers <= state_module_imported_from_state
     assert "stale_sidecar_seed_plans" in sidecar_imported_from_state
     assert not module_imports
     assert not imported_core_modules

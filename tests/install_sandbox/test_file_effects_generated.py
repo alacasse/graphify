@@ -6,6 +6,7 @@ import pytest
 
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import file_effect_generated_artifacts
+from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import install_surface_generated
 from tools.install_sandbox import platform_specs
@@ -173,6 +174,19 @@ def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(or
     assert not (roots["project"] / "plain.txt").exists()
     assert not (roots["project"] / "settings.json").exists()
     assert not (roots["project"] / ".unit/graphify/SKILL.md").exists()
+
+
+def test_file_effect_state_seeds_user_owned_content(roots) -> None:
+    stale_section = section("project", "stale-notes.md", preserve_user_content=True)
+    test_scenario = scenario("unit", stale_section)
+
+    file_effect_state.seed_user_owned_content(test_scenario, roots.__getitem__)
+
+    assert (roots["project"] / "stale-notes.md").read_text(encoding="utf-8") == (
+        f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n\n"
+        "## User Section\nThis section should survive Graphify install and uninstall.\n"
+    )
 
 
 def test_uninstall_requires_seeded_user_content_to_survive(oracle, roots) -> None:

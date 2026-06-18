@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import file_effects
+from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import file_effect_surfaces
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import platform_specs
@@ -583,6 +584,36 @@ def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(orac
     }
 
 
+def test_file_effect_state_captures_planned_state_entries(roots) -> None:
+    surface = section("project", "virtual-notes.md", preserve_user_content=True)
+    test_scenario = scenario("unit", surface)
+    calls: list[tuple[Path, str | None, platform_specs.TextExpectation | None]] = []
+
+    def file_fingerprint(
+        observed_path: Path,
+        marker: str | None = None,
+        text_expectation: platform_specs.TextExpectation | None = None,
+    ) -> dict[str, object]:
+        calls.append((observed_path, marker, text_expectation))
+        return {"observed": observed_path.name, "marker": marker}
+
+    state = file_effect_state.scenario_file_state(
+        test_scenario,
+        lambda platform: resolution("intentionally_absent", detail=f"{platform} refs"),
+        roots.__getitem__,
+        lambda entry: set(),
+        file_fingerprint,
+    )
+
+    assert calls == [(roots["project"] / "virtual-notes.md", platform_specs.GRAPHIFY_MARKER, surface.text_expectation)]
+    assert state == {
+        "project/virtual-notes.md": {
+            "observed": "virtual-notes.md",
+            "marker": platform_specs.GRAPHIFY_MARKER,
+        }
+    }
+
+
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:
     skill = platform_specs.SkillEffect("project", ".unit/graphify/SKILL.md")
     hooks = platform_specs.JsonHooksEffect(
@@ -648,9 +679,10 @@ def test_idempotency_state_detects_content_change() -> None:
         "project/notes.md": {"exists": True, "sha256": "same"},
     }
 
-    checks = file_effects.assert_idempotent_state(before, after)
+    checks = file_effect_state.assert_idempotent_state(before, after)
     assert checks == [
         {"path": "project/AGENTS.md", "ok": False, "detail": "changed_after_repeat_install"},
         {"path": "project/notes.md", "ok": True, "detail": "unchanged_after_repeat_install"},
     ]
+    assert file_effects.assert_idempotent_state(before, after) == checks
     assert file_effects.assert_idempotent_state(before, before)[0]["ok"] is True

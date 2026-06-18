@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 try:
-    from .expected_effects import is_skill_effect
+    from . import expected_effects
     from . import file_effect_generated_artifacts
     from . import file_effect_sidecars
+    from . import file_effect_state
     from . import file_effect_surfaces
     from .install_surface_core import (
         resolve_install_root,
@@ -21,21 +22,13 @@ try:
         is_excluded_generated_path as _is_excluded_generated_path,
         text_mentions_expected_generated_marker as _text_mentions_expected_generated_marker,
     )
-    from .install_surface_state import (
-        STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL as _USER_SENTINEL,
-        expected_generated_relative_keys,
-        expected_manifest_relatives as core_expected_manifest_relatives,
-        idempotency_state_changes,
-        planned_state_entries,
-        user_content_seed_plans,
-    )
     from .platform_specs import InstallSurface, Scenario, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
-    from expected_effects import is_skill_effect  # type: ignore[no-redef]
+    import expected_effects  # type: ignore[no-redef]
     import file_effect_generated_artifacts  # type: ignore[no-redef]
     import file_effect_sidecars  # type: ignore[no-redef]
+    import file_effect_state  # type: ignore[no-redef]
     import file_effect_surfaces  # type: ignore[no-redef]
     from install_surface_core import (  # type: ignore[no-redef]
         resolve_install_root,
@@ -49,21 +42,12 @@ except ImportError:
         is_excluded_generated_path as _is_excluded_generated_path,
         text_mentions_expected_generated_marker as _text_mentions_expected_generated_marker,
     )
-    from install_surface_state import (  # type: ignore[no-redef]
-        STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL as _USER_SENTINEL,
-        expected_generated_relative_keys,
-        expected_manifest_relatives as core_expected_manifest_relatives,
-        idempotency_state_changes,
-        planned_state_entries,
-        user_content_seed_plans,
-    )
     from platform_specs import InstallSurface, Scenario, TextExpectation
     from reference_resolution import PackagedReferenceResolution
 
 
-STALE_GRAPHIFY_SENTINEL = _STALE_GRAPHIFY_SENTINEL
-USER_SENTINEL = _USER_SENTINEL
+STALE_GRAPHIFY_SENTINEL = file_effect_state.STALE_GRAPHIFY_SENTINEL
+USER_SENTINEL = file_effect_state.USER_SENTINEL
 
 GENERATED_COPY_EXCLUDES = file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES
 pruned_file_walk = file_effect_generated_artifacts.pruned_file_walk
@@ -90,6 +74,14 @@ skill_version_status = file_effect_sidecars.skill_version_status
 skill_version_relative = file_effect_sidecars.skill_version_relative
 stale_sidecar_seed_plans = file_effect_sidecars.stale_sidecar_seed_plans
 uninstalled_skill_sidecar_status = file_effect_sidecars.uninstalled_skill_sidecar_status
+
+expected_manifest_relatives = file_effect_state.expected_manifest_relatives
+core_expected_manifest_relatives = file_effect_state.expected_manifest_relatives
+expected_generated_relative_keys = file_effect_state.expected_generated_relative_keys
+idempotency_state_changes = file_effect_state.idempotency_state_changes
+planned_state_entries = file_effect_state.planned_state_entries
+user_content_seed_plans = file_effect_state.user_content_seed_plans
+is_skill_effect = expected_effects.is_skill_effect
 
 FileFingerprintObservation = file_effect_surfaces.FileFingerprintObservation
 InstallSurfaceObservation = file_effect_surfaces.InstallSurfaceObservation
@@ -189,17 +181,14 @@ class FileEffectOracle:
         )
 
     def expected_manifest_relatives(self, scenario: Scenario, root_name: str) -> set[Path]:
-        return core_expected_manifest_relatives(
+        return file_effect_state.expected_manifest_relatives(
             scenario.expected,
             self.packaged_reference_resolution(scenario.platform),
             root_name,
         )
 
     def seed_user_owned_content(self, scenario: Scenario) -> None:
-        for plan in user_content_seed_plans(scenario.expected):
-            path = self.root_path(plan.root_name) / plan.relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(plan.text, encoding="utf-8")
+        return file_effect_state.seed_user_owned_content(scenario, self.root_path)
 
     def installed_surface_observation(self, entry: InstallSurface) -> InstallSurfaceObservation:
         return file_effect_surfaces.installed_surface_observation(entry, self.roots)
@@ -264,24 +253,13 @@ class FileEffectOracle:
 
     # Idempotency state
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:
-        state: dict[str, dict[str, object]] = {}
-        installed_reference_relatives = {
-            (entry.root, entry.relative): self.installed_skill_reference_relatives(entry)
-            for entry in scenario.expected
-            if is_skill_effect(entry)
-        }
-        plan = planned_state_entries(
-            scenario.expected,
-            self.packaged_reference_resolution(scenario.platform),
-            installed_skill_reference_relatives=installed_reference_relatives,
+        return file_effect_state.scenario_file_state(
+            scenario,
+            self.packaged_reference_resolution,
+            self.root_path,
+            self.installed_skill_reference_relatives,
+            self.file_fingerprint,
         )
-        for entry in plan:
-            state[entry.key] = self.file_fingerprint(
-                self.root_path(entry.root_name) / entry.relative,
-                entry.marker,
-                entry.text_expectation,
-            )
-        return state
 
     def file_mentions_expected_generated_marker(self, scenario: Scenario, path: Path) -> bool:
         return file_effect_generated_artifacts.file_mentions_expected_generated_marker(scenario, path)
@@ -332,16 +310,7 @@ class FileEffectOracle:
 
 
 def assert_idempotent_state(before: dict[str, dict[str, object]], after: dict[str, dict[str, object]]) -> list[dict[str, object]]:
-    checks: list[dict[str, object]] = []
-    for change in idempotency_state_changes(before, after):
-        checks.append(
-            check_record(
-                change.key,
-                change.stable,
-                "unchanged_after_repeat_install" if change.stable else "changed_after_repeat_install",
-            )
-        )
-    return checks
+    return file_effect_state.assert_idempotent_state(before, after)
 
 
 def _universal_uninstall_adapter_checks(

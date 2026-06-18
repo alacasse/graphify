@@ -39,6 +39,7 @@ COPY command_runner.py /runner/command_runner.py
 COPY expected_effects.py /runner/expected_effects.py
 COPY file_effect_generated_artifacts.py /runner/file_effect_generated_artifacts.py
 COPY file_effect_sidecars.py /runner/file_effect_sidecars.py
+COPY file_effect_state.py /runner/file_effect_state.py
 COPY file_effect_surfaces.py /runner/file_effect_surfaces.py
 COPY file_effects.py /runner/file_effects.py
 COPY file_walk.py /runner/file_walk.py

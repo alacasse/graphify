@@ -28,6 +28,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "expected_effects.py",
         "file_effect_generated_artifacts.py",
         "file_effect_sidecars.py",
+        "file_effect_state.py",
         "file_effect_surfaces.py",
         "file_walk.py",
         "harness_specs.py",

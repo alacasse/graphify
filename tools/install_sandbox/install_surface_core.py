@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Compatibility facade for install-surface topic modules.
+
+Keep product-like install-surface decisions in the topic modules below. This
+module preserves the historical import surface and owns only shared path
+resolution glue that needs root mappings.
+"""
+
 from pathlib import Path
 from typing import Mapping
 
@@ -161,6 +168,81 @@ except ImportError:  # pragma: no cover - direct script import fallback
         stale_sidecar_seed_plans,
         user_content_seed_plans,
     )
+
+
+__all__ = (
+    "FileFingerprintObservation",
+    "GeneratedArtifactCopyPlan",
+    "GeneratedFileDecision",
+    "GeneratedFileExpectationLike",
+    "GeneratedFileObservation",
+    "IdempotencyStateChange",
+    "InstallSurface",
+    "InstallSurfaceObservation",
+    "InstallSurfaceStatus",
+    "PackagedReferenceResolution",
+    "ReferenceResolutionStatus",
+    "ReferenceSidecarExpectation",
+    "ReferenceSidecarMode",
+    "STALE_GRAPHIFY_SENTINEL",
+    "SkillSidecarExpectation",
+    "StaleSidecarSeedKind",
+    "StaleSidecarSeedPlan",
+    "StateEntryPlan",
+    "USER_SENTINEL",
+    "UninstallSurfaceObservation",
+    "UserContentSeedPlan",
+    "command_hook_present",
+    "decide_generated_file_observation",
+    "expected_generated_relative_keys",
+    "expected_kind_status_from_observation",
+    "expected_manifest_relatives",
+    "expected_skill_sidecar_relatives",
+    "expects_stale_graphify_section_repaired",
+    "expects_user_content_preserved",
+    "file_fingerprint_from_observation",
+    "generated_artifact_copy_plan",
+    "generated_file_observation",
+    "graphify_section_removed",
+    "hooks_by_event",
+    "idempotency_state_changes",
+    "install_surface_kind_status_from_observation",
+    "installed_reference_sidecar_status",
+    "installed_surface_status_from_observation",
+    "is_excluded_generated_path",
+    "is_expected_generated_key",
+    "is_relevant_generated_file",
+    "is_skill_effect",
+    "is_skill_sidecar_relative",
+    "is_small_text_candidate",
+    "json_expectation_status",
+    "json_marker_status_from_observation",
+    "json_value_contains_marker",
+    "planned_state_entries",
+    "plugin_config_present",
+    "reference_sidecar_expectation",
+    "references_tmp_absence_status",
+    "resolve_install_root",
+    "resolve_install_surface_path",
+    "seeded_user_content_text",
+    "should_seed_stale_graphify_section",
+    "should_seed_user_content",
+    "skill_dir_for_entry",
+    "skill_reference_pointer_status",
+    "skill_reference_pointers",
+    "skill_references_relative",
+    "skill_references_tmp_relative",
+    "skill_relative_dir",
+    "skill_sidecar_expectation",
+    "skill_version_relative",
+    "skill_version_status",
+    "stale_sidecar_seed_plans",
+    "text_marker_status_from_text",
+    "text_mentions_expected_generated_marker",
+    "uninstalled_skill_sidecar_status",
+    "uninstalled_surface_status_from_observation",
+    "user_content_seed_plans",
+)
 
 
 def resolve_install_root(root: str, roots: Mapping[str, Path]) -> Path:

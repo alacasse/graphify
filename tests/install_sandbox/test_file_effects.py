@@ -11,6 +11,19 @@ from tools.install_sandbox import install_surface_core
 # test_file_effects_adapter.py.
 
 
+def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
+    tree = ast.parse(Path(install_surface_core.__file__).read_text(encoding="utf-8"))
+    function_names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+
+    assert function_names == {
+        "resolve_install_root",
+        "resolve_install_surface_path",
+    }
+    assert class_names == set()
+    assert set(install_surface_core.__all__) >= function_names
+
+
 def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
     adapter_methods = {
         "root_path",
@@ -112,6 +125,14 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
         "uninstalled_surface_status",
         "file_fingerprint",
     }
+    topic_owned_helpers = {
+        "expected_generated_relative_keys",
+        "expected_manifest_relatives",
+        "idempotency_state_changes",
+        "planned_state_entries",
+        "stale_sidecar_seed_plans",
+        "user_content_seed_plans",
+    }
     tree = ast.parse(Path(file_effects.__file__).read_text(encoding="utf-8"))
 
     def dotted_name(node: ast.AST) -> str | None:
@@ -128,6 +149,12 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
         alias.name
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_core")
+        for alias in node.names
+    }
+    imported_from_state = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_state")
         for alias in node.names
     }
     wildcard_core_imports = {
@@ -186,6 +213,8 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
 
     assert not wildcard_core_imports
     assert imported_from_core.isdisjoint(legacy_wrappers)
+    assert imported_from_core.isdisjoint(topic_owned_helpers)
+    assert topic_owned_helpers <= imported_from_state
     assert not module_imports
     assert not imported_core_modules
     assert direct_calls.isdisjoint(legacy_wrappers)

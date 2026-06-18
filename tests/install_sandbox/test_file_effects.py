@@ -613,7 +613,7 @@ def test_install_surface_core_derives_skill_sidecar_relative_paths_from_declared
     assert install_surface_core.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
 
 
-def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_throughs() -> None:
+def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
     adapter_methods = {
         "root_path",
         "expected_path",
@@ -628,6 +628,7 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         "assert_installed_skill_sidecar",
         "assert_installed_skill_sidecars",
         "seed_stale_skill_sidecars",
+        "expected_manifest_relatives",
         "seed_user_owned_content",
         "installed_surface_observation",
         "expected_entry_status",
@@ -647,7 +648,7 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         "is_relevant_generated_file",
         "copy_generated_files",
     }
-    removed_sidecar_path_pass_throughs = {
+    pure_core_pass_through_methods = {
         "is_skill_expected",
         "skill_sidecar_expectation",
         "skill_dir_for_entry",
@@ -659,12 +660,7 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         "reference_sidecar_expectation",
         "skill_reference_pointers",
         "progressive_skill_entries",
-    }
-    removable_pure_pass_throughs = {
-        "expected_manifest_relatives",
         "graphify_section_removed",
-    }
-    removed_seed_generated_pass_throughs = {
         "expected_generated_relative_keys",
         "expected_generated_relative_keys_for_scenarios",
         "is_small_text_candidate",
@@ -682,10 +678,11 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         if callable(value) and not name.startswith("_")
     }
 
-    assert adapter_methods.isdisjoint(removable_pure_pass_throughs)
-    assert oracle_methods.isdisjoint(removed_sidecar_path_pass_throughs)
-    assert oracle_methods.isdisjoint(removed_seed_generated_pass_throughs)
-    assert oracle_methods == adapter_methods | removable_pure_pass_throughs
+    assert oracle_methods.isdisjoint(pure_core_pass_through_methods), (
+        "FileEffectOracle should not grow pure Installer Core pass-through methods; "
+        "call install_surface_core helpers directly instead."
+    )
+    assert oracle_methods == adapter_methods
 
 
 def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_resolved_references() -> None:

@@ -23,7 +23,6 @@ try:
         expected_skill_sidecar_relatives,
         file_fingerprint_from_observation,
         generated_file_observation,
-        graphify_section_removed,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
         is_excluded_generated_path,
@@ -66,7 +65,6 @@ except ImportError:
         expected_skill_sidecar_relatives,
         file_fingerprint_from_observation,
         generated_file_observation,
-        graphify_section_removed,
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
         is_excluded_generated_path,
@@ -345,9 +343,6 @@ class FileEffectOracle:
     def uninstalled_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
         status = uninstalled_surface_status_from_observation(entry, self.uninstalled_surface_observation(entry))
         return status.ok, status.detail
-
-    def graphify_section_removed(self, text: str, entry: InstallSurface) -> bool:
-        return graphify_section_removed(text, entry)
 
     def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
         if not is_skill_effect(entry):

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import install_surface_core
+from tools.install_sandbox import install_surface_sidecars
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
@@ -61,14 +62,14 @@ def expected_skill_with_docs_sidecar(root: str, relative: str) -> InstallSurface
     ],
 )
 def test_reference_sidecar_expectation_owns_expected_relatives(status: str, names: tuple[str, ...], expected_relatives: set[str]) -> None:
-    expectation = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
+    expectation = install_surface_sidecars.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
 
     assert expectation.expected_relatives(Path(".unit/graphify"), platform_specs.SkillSidecarExpectation()) == {Path(relative) for relative in expected_relatives}
 
 
 def test_reference_sidecar_expectation_validates_installed_status_matrix() -> None:
-    absent = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("intentionally_absent", detail="absent refs"))
-    ok, detail = install_surface_core.installed_reference_sidecar_status(
+    absent = install_surface_sidecars.ReferenceSidecarExpectation.from_resolution(resolution("intentionally_absent", detail="absent refs"))
+    ok, detail = install_surface_sidecars.installed_reference_sidecar_status(
         absent,
         references_exists=False,
         references_is_dir=False,
@@ -77,7 +78,7 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
     assert ok is True
     assert detail == "intentionally_absent; references_absent; absent refs"
 
-    ok, detail = install_surface_core.installed_reference_sidecar_status(
+    ok, detail = install_surface_sidecars.installed_reference_sidecar_status(
         absent,
         references_exists=True,
         references_is_dir=True,
@@ -86,8 +87,8 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
     assert ok is False
     assert detail == "intentionally_absent; references_present; absent refs"
 
-    source_error = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("missing", detail="missing /package/refs"))
-    ok, detail = install_surface_core.installed_reference_sidecar_status(
+    source_error = install_surface_sidecars.ReferenceSidecarExpectation.from_resolution(resolution("missing", detail="missing /package/refs"))
+    ok, detail = install_surface_sidecars.installed_reference_sidecar_status(
         source_error,
         references_exists=True,
         references_is_dir=True,
@@ -96,8 +97,8 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
     assert ok is False
     assert detail == "missing; missing /package/refs"
 
-    expected = install_surface_core.ReferenceSidecarExpectation.from_resolution(resolution("available", ("query.md",), "available refs"))
-    ok, detail = install_surface_core.installed_reference_sidecar_status(
+    expected = install_surface_sidecars.ReferenceSidecarExpectation.from_resolution(resolution("available", ("query.md",), "available refs"))
+    ok, detail = install_surface_sidecars.installed_reference_sidecar_status(
         expected,
         references_exists=True,
         references_is_dir=True,
@@ -106,7 +107,7 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
     assert ok is False
     assert "missing=['query.md']" in detail
 
-    ok, detail = install_surface_core.installed_reference_sidecar_status(
+    ok, detail = install_surface_sidecars.installed_reference_sidecar_status(
         expected,
         references_exists=True,
         references_is_dir=True,
@@ -119,49 +120,49 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
 def test_install_surface_core_evaluates_skill_sidecar_status_decisions() -> None:
     sidecar = platform_specs.SkillSidecarExpectation()
 
-    assert install_surface_core.skill_version_status(None, "9.9.9") == (False, "missing; expected=9.9.9")
-    assert install_surface_core.skill_version_status("9.9.9\n", "9.9.9") == (True, "actual=9.9.9; expected=9.9.9")
-    assert install_surface_core.references_tmp_absence_status(False) == (True, "absent")
-    assert install_surface_core.references_tmp_absence_status(True) == (False, "present")
-    assert install_surface_core.skill_reference_pointer_status(
+    assert install_surface_sidecars.skill_version_status(None, "9.9.9") == (False, "missing; expected=9.9.9")
+    assert install_surface_sidecars.skill_version_status("9.9.9\n", "9.9.9") == (True, "actual=9.9.9; expected=9.9.9")
+    assert install_surface_sidecars.references_tmp_absence_status(False) == (True, "absent")
+    assert install_surface_sidecars.references_tmp_absence_status(True) == (False, "present")
+    assert install_surface_sidecars.skill_reference_pointer_status(
         sidecar,
         "See references/query.md and references/update.md",
         references_is_dir=True,
         installed_names=("query.md",),
     ) == (False, "pointers=['query.md', 'update.md']; missing=['update.md']")
-    assert install_surface_core.skill_reference_pointer_status(
+    assert install_surface_sidecars.skill_reference_pointer_status(
         sidecar,
         "See references/query.md",
         references_is_dir=False,
         installed_names=(),
     ) == (False, "references_missing; skill_mentions_references=true; pointers=['query.md']")
-    assert install_surface_core.skill_reference_pointer_status(sidecar, "No pointers here", references_is_dir=False, installed_names=()) == (
+    assert install_surface_sidecars.skill_reference_pointer_status(sidecar, "No pointers here", references_is_dir=False, installed_names=()) == (
         True,
         "no_reference_pointers",
     )
-    assert install_surface_core.uninstalled_skill_sidecar_status(False) == (True, "removed")
-    assert install_surface_core.uninstalled_skill_sidecar_status(True) == (False, "sidecar_still_exists")
+    assert install_surface_sidecars.uninstalled_skill_sidecar_status(False) == (True, "removed")
+    assert install_surface_sidecars.uninstalled_skill_sidecar_status(True) == (False, "sidecar_still_exists")
 
 
 def test_install_surface_core_derives_skill_sidecar_relative_paths_from_declared_names() -> None:
     default_entry = expected_skill("project", ".aider/graphify/SKILL.md")
     custom_entry = expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md")
 
-    assert install_surface_core.skill_relative_dir(default_entry) == Path(".aider/graphify")
-    assert install_surface_core.skill_version_relative(default_entry) == Path(".aider/graphify/.graphify_version")
-    assert install_surface_core.skill_references_relative(default_entry) == Path(".aider/graphify/references")
-    assert install_surface_core.skill_references_tmp_relative(default_entry) == Path(".aider/graphify/references.tmp")
+    assert install_surface_sidecars.skill_relative_dir(default_entry) == Path(".aider/graphify")
+    assert install_surface_sidecars.skill_version_relative(default_entry) == Path(".aider/graphify/.graphify_version")
+    assert install_surface_sidecars.skill_references_relative(default_entry) == Path(".aider/graphify/references")
+    assert install_surface_sidecars.skill_references_tmp_relative(default_entry) == Path(".aider/graphify/references.tmp")
 
-    assert install_surface_core.skill_relative_dir(custom_entry) == Path(".custom/graphify")
-    assert install_surface_core.skill_version_relative(custom_entry) == Path(".custom/graphify/.graphify_version")
-    assert install_surface_core.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
-    assert install_surface_core.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
+    assert install_surface_sidecars.skill_relative_dir(custom_entry) == Path(".custom/graphify")
+    assert install_surface_sidecars.skill_version_relative(custom_entry) == Path(".custom/graphify/.graphify_version")
+    assert install_surface_sidecars.skill_references_relative(custom_entry) == Path(".custom/graphify/docs")
+    assert install_surface_sidecars.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
 
 
 def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_resolved_references() -> None:
     entry = expected_skill("project", ".claude/skills/graphify/SKILL.md")
 
-    assert install_surface_core.expected_skill_sidecar_relatives(entry, resolution("available", ("query.md", "update.md"))) == {
+    assert install_surface_sidecars.expected_skill_sidecar_relatives(entry, resolution("available", ("query.md", "update.md"))) == {
         Path(".claude/skills/graphify/.graphify_version"),
         Path(".claude/skills/graphify/references.tmp"),
         Path(".claude/skills/graphify/references"),
@@ -170,7 +171,15 @@ def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_reso
     }
 
     with pytest.raises(AssertionError, match="expected path has no skill sidecar expectation: project/notes.md"):
-        install_surface_core.skill_sidecar_expectation(InstallSurface("project", "notes.md"))
+        install_surface_sidecars.skill_sidecar_expectation(InstallSurface("project", "notes.md"))
+
+
+def test_install_surface_core_re_exports_sidecar_helpers_for_compatibility() -> None:
+    assert install_surface_core.ReferenceSidecarExpectation is install_surface_sidecars.ReferenceSidecarExpectation
+    assert install_surface_core.skill_sidecar_expectation is install_surface_sidecars.skill_sidecar_expectation
+    assert install_surface_core.skill_version_status is install_surface_sidecars.skill_version_status
+    assert install_surface_core.expected_skill_sidecar_relatives is install_surface_sidecars.expected_skill_sidecar_relatives
+    assert install_surface_core.uninstalled_skill_sidecar_status is install_surface_sidecars.uninstalled_skill_sidecar_status
 
 
 def test_install_surface_core_derives_expected_manifest_relatives_for_root() -> None:
@@ -270,7 +279,7 @@ def test_expected_skill_sidecar_relatives_follow_packaged_reference_status(
         "not_directory": resolution("not_directory", detail="not_directory /package/refs"),
     }
 
-    assert install_surface_core.expected_skill_sidecar_relatives(entry, resolutions[platform]) == {Path(relative) for relative in expected_relatives}
+    assert install_surface_sidecars.expected_skill_sidecar_relatives(entry, resolutions[platform]) == {Path(relative) for relative in expected_relatives}
 
 
 def test_install_surface_core_matches_skill_sidecar_version_and_nested_reference_paths() -> None:

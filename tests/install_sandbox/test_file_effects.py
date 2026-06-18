@@ -642,7 +642,6 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
         "file_fingerprint",
         "scenario_file_state",
         "generated_file_size",
-        "is_small_text_candidate",
         "file_mentions_expected_generated_marker",
         "generated_file_decision",
         "is_relevant_generated_file",
@@ -663,15 +662,18 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
     }
     removable_pure_pass_throughs = {
         "expected_manifest_relatives",
-        "should_seed_user_content",
-        "should_seed_stale_graphify_section",
-        "seeded_text",
         "graphify_section_removed",
+    }
+    removed_seed_generated_pass_throughs = {
         "expected_generated_relative_keys",
         "expected_generated_relative_keys_for_scenarios",
-        "should_exclude_generated_path",
+        "is_small_text_candidate",
         "is_expected_generated_key",
         "is_skill_sidecar_relative",
+        "seeded_text",
+        "should_exclude_generated_path",
+        "should_seed_stale_graphify_section",
+        "should_seed_user_content",
     }
 
     oracle_methods = {
@@ -682,6 +684,7 @@ def test_file_effect_oracle_boundary_identifies_adapter_methods_and_pure_pass_th
 
     assert adapter_methods.isdisjoint(removable_pure_pass_throughs)
     assert oracle_methods.isdisjoint(removed_sidecar_path_pass_throughs)
+    assert oracle_methods.isdisjoint(removed_seed_generated_pass_throughs)
     assert oracle_methods == adapter_methods | removable_pure_pass_throughs
 
 
@@ -2723,11 +2726,6 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
                 manifest_prune_dirs=wrapped.manifest_prune_dirs,
             )
 
-        def expected_generated_relative_keys_for_scenarios(self, scenarios):
-            items = list(scenarios)
-            calls.append(("expected_generated_relative_keys_for_scenarios", tuple(item.platform for item in items)))
-            return {("project", "first.md"), ("home", "second.md")}
-
         def assert_uninstalled(self, scenario_arg):
             calls.append(("assert_uninstalled", scenario_arg.platform))
             if scenario_arg.platform == "first":
@@ -2769,7 +2767,6 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
         {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
     ]
     assert calls == [
-        ("expected_generated_relative_keys_for_scenarios", ("first", "second")),
         ("assert_uninstalled", "first"),
         ("assert_uninstalled", "second"),
         (
@@ -2826,11 +2823,6 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
         def assert_uninstalled(self, scenario_arg):
             calls.append(("assert_uninstalled", scenario_arg.platform))
             return [{"path": f"uninstalled-{scenario_arg.platform}", "ok": True, "detail": "removed"}]
-
-        def expected_generated_relative_keys_for_scenarios(self, scenarios):
-            items = list(scenarios)
-            calls.append(("expected_generated_relative_keys_for_scenarios", tuple(item.platform for item in items)))
-            return {("project", "expected-generated.md")}
 
     def write_manifest(path, roots_arg, **kwargs) -> None:
         calls.append(("write_manifest", path, roots_arg, kwargs))
@@ -2908,14 +2900,13 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
         ("assert_uninstalled", "unit"),
         ("assert_no_unexpected_graphify_files", "unit", "uninstall", None),
         ("equivalence_check", "unit", {"HOME": str(roots["home"])}, artifact_dir),
-        ("expected_generated_relative_keys_for_scenarios", ("first", "second")),
         ("assert_uninstalled", "first"),
         ("assert_uninstalled", "second"),
         (
             "assert_no_unexpected_graphify_files",
             "unit",
             "universal_uninstall",
-            {("project", "expected-generated.md")},
+            {("project", "first.md"), ("home", "second.md")},
         ),
     ]
 
@@ -2958,7 +2949,7 @@ def test_scenario_file_effects_adapter_preserves_setup_method_shapes(oracle) -> 
     ]
 
 
-def test_universal_uninstall_aggregates_expected_keys_through_oracle(oracle, roots) -> None:
+def test_universal_uninstall_derives_expected_keys_through_installer_core(oracle) -> None:
     def write_manifest(*args, **kwargs) -> None:
         raise AssertionError("not used")
 
@@ -2973,12 +2964,14 @@ def test_universal_uninstall_aggregates_expected_keys_through_oracle(oracle, roo
                 expected_graphify_version=wrapped.expected_graphify_version,
                 manifest_prune_dirs=wrapped.manifest_prune_dirs,
             )
-            object.__setattr__(self, "aggregate_calls", [])
+            object.__setattr__(self, "unexpected_calls", [])
 
-        def expected_generated_relative_keys_for_scenarios(self, scenarios):
-            items = list(scenarios)
-            self.aggregate_calls.append([item.platform for item in items])
-            return super().expected_generated_relative_keys_for_scenarios(items)
+        def assert_uninstalled(self, scenario_arg):
+            return []
+
+        def assert_no_unexpected_graphify_files(self, scenario_arg, *, phase, expected_keys=None):
+            self.unexpected_calls.append((scenario_arg.platform, phase, expected_keys))
+            return []
 
     recording_oracle = RecordingOracle(oracle)
     adapter = file_effects.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
@@ -2987,9 +2980,13 @@ def test_universal_uninstall_aggregates_expected_keys_through_oracle(oracle, roo
         scenario("first", ExpectedPath("project", "first.md")),
         scenario("second", ExpectedPath("home", ".second/graphify/SKILL.md")),
     )
-    (roots["project"] / "leftover/graphify.md").parent.mkdir(parents=True)
-    (roots["project"] / "leftover/graphify.md").write_text("generated by graphify\n", encoding="utf-8")
 
     adapter.universal_uninstall_checks(runner, installed, [])
 
-    assert recording_oracle.aggregate_calls == [["first", "second"]]
+    assert recording_oracle.unexpected_calls == [
+        (
+            "unit",
+            "universal_uninstall",
+            {("project", "first.md"), ("home", ".second/graphify/SKILL.md")},
+        )
+    ]

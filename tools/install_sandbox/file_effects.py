@@ -27,9 +27,6 @@ try:
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
         is_excluded_generated_path,
-        is_expected_generated_key,
-        is_skill_sidecar_relative,
-        is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status_from_observation,
         planned_state_entries,
@@ -44,9 +41,6 @@ try:
         skill_sidecar_expectation,
         skill_version_status,
         skill_version_relative,
-        seeded_user_content_text,
-        should_seed_stale_graphify_section,
-        should_seed_user_content,
         stale_sidecar_seed_plans,
         text_mentions_expected_generated_marker,
         uninstalled_skill_sidecar_status,
@@ -76,9 +70,6 @@ except ImportError:
         idempotency_state_changes,
         install_surface_kind_status_from_observation,
         is_excluded_generated_path,
-        is_expected_generated_key,
-        is_skill_sidecar_relative,
-        is_small_text_candidate,
         installed_reference_sidecar_status,
         installed_surface_status_from_observation,
         planned_state_entries,
@@ -93,9 +84,6 @@ except ImportError:
         skill_sidecar_expectation,
         skill_version_status,
         skill_version_relative,
-        seeded_user_content_text,
-        should_seed_stale_graphify_section,
-        should_seed_user_content,
         stale_sidecar_seed_plans,
         text_mentions_expected_generated_marker,
         uninstalled_skill_sidecar_status,
@@ -256,16 +244,6 @@ class FileEffectOracle:
             root_name,
         )
 
-    # User content seeding
-    def should_seed_user_content(self, entry: InstallSurface) -> bool:
-        return should_seed_user_content(entry)
-
-    def should_seed_stale_graphify_section(self, entry: InstallSurface) -> bool:
-        return should_seed_stale_graphify_section(entry)
-
-    def seeded_text(self, entry: InstallSurface) -> str:
-        return seeded_user_content_text(entry)
-
     def seed_user_owned_content(self, scenario: Scenario) -> None:
         for plan in user_content_seed_plans(scenario.expected):
             path = self.root_path(plan.root_name) / plan.relative
@@ -400,15 +378,6 @@ class FileEffectOracle:
             checks.extend(self.uninstalled_skill_sidecar_checks(entry))
         return checks
 
-    def expected_generated_relative_keys(self, scenario: Scenario) -> set[tuple[str, str]]:
-        return expected_generated_relative_keys(scenario.expected, self.packaged_reference_resolution(scenario.platform))
-
-    def expected_generated_relative_keys_for_scenarios(self, scenarios: Iterable[Scenario]) -> set[tuple[str, str]]:
-        keys: set[tuple[str, str]] = set()
-        for scenario in scenarios:
-            keys.update(self.expected_generated_relative_keys(scenario))
-        return keys
-
     # Generated-file discovery/copying
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
         yield from pruned_file_walk(base, self.manifest_prune_dirs)
@@ -420,7 +389,14 @@ class FileEffectOracle:
         phase: str,
         expected_keys: set[tuple[str, str]] | None = None,
     ) -> list[dict[str, object]]:
-        expected = self.expected_generated_relative_keys(scenario) if expected_keys is None else expected_keys
+        expected = (
+            expected_generated_relative_keys(
+                scenario.expected,
+                self.packaged_reference_resolution(scenario.platform),
+            )
+            if expected_keys is None
+            else expected_keys
+        )
         checks: list[dict[str, object]] = []
         for root_name, root in self.roots.items():
             if not root.exists():
@@ -496,19 +472,6 @@ class FileEffectOracle:
             )
         return state
 
-    def should_exclude_generated_path(self, relative: Path) -> bool:
-        return is_excluded_generated_path(relative, GENERATED_COPY_EXCLUDES)
-
-    def is_expected_generated_key(self, scenario: Scenario, root_name: str, relative: Path) -> bool:
-        return is_expected_generated_key(scenario.expected, root_name, relative)
-
-    def is_skill_sidecar_relative(self, scenario: Scenario, root_name: str, relative: Path) -> bool:
-        return is_skill_sidecar_relative(scenario.expected, root_name, relative)
-
-    def is_small_text_candidate(self, scenario: Scenario, path: Path) -> bool:
-        size = self.generated_file_size(path)
-        return size is not None and is_small_text_candidate(scenario.generated_file_expectation, file_size=size, suffix=path.suffix)
-
     def file_mentions_expected_generated_marker(self, scenario: Scenario, path: Path) -> bool:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -532,7 +495,7 @@ class FileEffectOracle:
         apply_excludes: bool,
         expected_keys: set[tuple[str, str]] | None = None,
     ) -> GeneratedFileDecision:
-        excluded_path = apply_excludes and self.should_exclude_generated_path(relative)
+        excluded_path = apply_excludes and is_excluded_generated_path(relative, GENERATED_COPY_EXCLUDES)
         size = None if excluded_path else self.generated_file_size(path)
         observation = generated_file_observation(
             scenario.generated_file_expectation,
@@ -564,7 +527,10 @@ class FileEffectOracle:
         out = artifact_dir / "generated-files"
         if out.exists():
             shutil.rmtree(out)
-        expected_keys = self.expected_generated_relative_keys(scenario)
+        expected_keys = expected_generated_relative_keys(
+            scenario.expected,
+            self.packaged_reference_resolution(scenario.platform),
+        )
         for root_name, root in self.roots.items():
             if not root.exists():
                 continue
@@ -659,7 +625,14 @@ class ScenarioFileEffectsAdapter:
         install_checks: list[dict[str, object]],
     ) -> list[dict[str, object]]:
         scenarios = list(installed_scenarios)
-        expected_keys = self.oracle.expected_generated_relative_keys_for_scenarios(scenarios)
+        expected_keys: set[tuple[str, str]] = set()
+        for scenario in scenarios:
+            expected_keys.update(
+                expected_generated_relative_keys(
+                    scenario.expected,
+                    self.oracle.packaged_reference_resolution(scenario.platform),
+                )
+            )
         uninstall_checks: list[dict[str, object]] = []
         for scenario in scenarios:
             uninstall_checks.extend(self.oracle.assert_uninstalled(scenario))

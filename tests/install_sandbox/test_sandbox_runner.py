@@ -26,6 +26,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
     for module in (
         "agent_summary.py",
         "expected_effects.py",
+        "file_effect_generated_artifacts.py",
         "file_effect_sidecars.py",
         "file_effect_surfaces.py",
         "file_walk.py",

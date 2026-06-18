@@ -1,26 +1,25 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
 try:
     from .expected_effects import is_skill_effect
+    from . import file_effect_generated_artifacts
     from . import file_effect_sidecars
     from . import file_effect_surfaces
-    from .file_walk import pruned_file_walk
     from .install_surface_core import (
         resolve_install_root,
         resolve_install_surface_path,
     )
     from .install_surface_generated import (
         GeneratedFileDecision,
-        decide_generated_file_observation,
-        generated_artifact_copy_plan,
-        generated_file_observation,
-        is_excluded_generated_path,
-        text_mentions_expected_generated_marker,
+        decide_generated_file_observation as _decide_generated_file_observation,
+        generated_artifact_copy_plan as _generated_artifact_copy_plan,
+        generated_file_observation as _generated_file_observation,
+        is_excluded_generated_path as _is_excluded_generated_path,
+        text_mentions_expected_generated_marker as _text_mentions_expected_generated_marker,
     )
     from .install_surface_state import (
         STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
@@ -35,20 +34,20 @@ try:
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
     from expected_effects import is_skill_effect  # type: ignore[no-redef]
+    import file_effect_generated_artifacts  # type: ignore[no-redef]
     import file_effect_sidecars  # type: ignore[no-redef]
     import file_effect_surfaces  # type: ignore[no-redef]
-    from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
         resolve_install_root,
         resolve_install_surface_path,
     )
     from install_surface_generated import (  # type: ignore[no-redef]
         GeneratedFileDecision,
-        decide_generated_file_observation,
-        generated_artifact_copy_plan,
-        generated_file_observation,
-        is_excluded_generated_path,
-        text_mentions_expected_generated_marker,
+        decide_generated_file_observation as _decide_generated_file_observation,
+        generated_artifact_copy_plan as _generated_artifact_copy_plan,
+        generated_file_observation as _generated_file_observation,
+        is_excluded_generated_path as _is_excluded_generated_path,
+        text_mentions_expected_generated_marker as _text_mentions_expected_generated_marker,
     )
     from install_surface_state import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
@@ -66,12 +65,13 @@ except ImportError:
 STALE_GRAPHIFY_SENTINEL = _STALE_GRAPHIFY_SENTINEL
 USER_SENTINEL = _USER_SENTINEL
 
-GENERATED_COPY_EXCLUDES = (
-    ".local",
-    ".cache",
-    "__pycache__",
-    ".pytest_cache",
-)
+GENERATED_COPY_EXCLUDES = file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES
+pruned_file_walk = file_effect_generated_artifacts.pruned_file_walk
+decide_generated_file_observation = _decide_generated_file_observation
+generated_artifact_copy_plan = _generated_artifact_copy_plan
+generated_file_observation = _generated_file_observation
+is_excluded_generated_path = _is_excluded_generated_path
+text_mentions_expected_generated_marker = _text_mentions_expected_generated_marker
 
 STALE_SIDECAR_SEED_DETAILS = file_effect_sidecars.STALE_SIDECAR_SEED_DETAILS
 
@@ -237,7 +237,7 @@ class FileEffectOracle:
 
     # Generated-file discovery/copying
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
-        yield from pruned_file_walk(base, self.manifest_prune_dirs)
+        yield from file_effect_generated_artifacts.pruned_file_walk(base, self.manifest_prune_dirs)
 
     def assert_no_unexpected_graphify_files(
         self,
@@ -246,45 +246,15 @@ class FileEffectOracle:
         phase: str,
         expected_keys: set[tuple[str, str]] | None = None,
     ) -> list[dict[str, object]]:
-        expected = (
-            expected_generated_relative_keys(
-                scenario.expected,
-                self.packaged_reference_resolution(scenario.platform),
-            )
-            if expected_keys is None
-            else expected_keys
+        return file_effect_generated_artifacts.assert_no_unexpected_graphify_files(
+            scenario,
+            self.roots,
+            self.packaged_reference_resolution,
+            phase=phase,
+            expected_keys=expected_keys,
+            pruned_file_walk_for=self.pruned_file_walk,
+            generated_file_decision_for=self.generated_file_decision,
         )
-        checks: list[dict[str, object]] = []
-        for root_name, root in self.roots.items():
-            if not root.exists():
-                continue
-            for path in self.pruned_file_walk(root):
-                relative = path.relative_to(root)
-                rel = relative.as_posix()
-                decision = self.generated_file_decision(
-                    scenario,
-                    root_name,
-                    relative,
-                    path,
-                    apply_excludes=True,
-                    expected_keys=expected,
-                )
-                if decision.observation.expected_key:
-                    continue
-                if not decision.should_include:
-                    continue
-                checks.append(
-                    check_record(
-                        path,
-                        False,
-                        f"unexpected_graphify_related_file_after_{phase}",
-                        root=root_name,
-                        relative=rel,
-                    )
-                )
-        if not checks:
-            checks.append(check_record("unexpected-graphify-files", True, f"none_after_{phase}"))
-        return checks
 
     def assert_scope_boundaries(self, scenario: Scenario) -> list[dict[str, object]]:
         return file_effect_surfaces.assert_scope_boundaries(scenario, self.roots)
@@ -314,17 +284,10 @@ class FileEffectOracle:
         return state
 
     def file_mentions_expected_generated_marker(self, scenario: Scenario, path: Path) -> bool:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return False
-        return text_mentions_expected_generated_marker(scenario.generated_file_expectation, text)
+        return file_effect_generated_artifacts.file_mentions_expected_generated_marker(scenario, path)
 
     def generated_file_size(self, path: Path) -> int | None:
-        try:
-            return path.stat().st_size
-        except OSError:
-            return None
+        return file_effect_generated_artifacts.generated_file_size(path)
 
     def generated_file_decision(
         self,
@@ -336,60 +299,36 @@ class FileEffectOracle:
         apply_excludes: bool,
         expected_keys: set[tuple[str, str]] | None = None,
     ) -> GeneratedFileDecision:
-        excluded_path = apply_excludes and is_excluded_generated_path(relative, GENERATED_COPY_EXCLUDES)
-        size = None if excluded_path else self.generated_file_size(path)
-        observation = generated_file_observation(
-            scenario.generated_file_expectation,
-            scenario.expected,
+        return file_effect_generated_artifacts.generated_file_decision(
+            scenario,
             root_name,
             relative,
-            file_size=size,
-            mentions_expected_marker=False,
-            excluded_path=excluded_path,
+            path,
+            apply_excludes=apply_excludes,
+            generated_copy_excludes=GENERATED_COPY_EXCLUDES,
             expected_keys=expected_keys,
+            size_for_path=self.generated_file_size,
+            marker_match_for_path=self.file_mentions_expected_generated_marker,
         )
-        if observation.needs_text_marker_match:
-            observation = generated_file_observation(
-                scenario.generated_file_expectation,
-                scenario.expected,
-                root_name,
-                relative,
-                file_size=size,
-                mentions_expected_marker=self.file_mentions_expected_generated_marker(scenario, path),
-                excluded_path=excluded_path,
-                expected_keys=expected_keys,
-            )
-        return decide_generated_file_observation(observation)
 
     def is_relevant_generated_file(self, scenario: Scenario, root_name: str, relative: Path, path: Path) -> bool:
-        return self.generated_file_decision(scenario, root_name, relative, path, apply_excludes=False).is_relevant
+        return file_effect_generated_artifacts.is_relevant_generated_file(
+            scenario,
+            root_name,
+            relative,
+            path,
+            self.generated_file_decision,
+        )
 
     def copy_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
-        out = artifact_dir / "generated-files"
-        if out.exists():
-            shutil.rmtree(out)
-        expected_keys = expected_generated_relative_keys(
-            scenario.expected,
-            self.packaged_reference_resolution(scenario.platform),
+        file_effect_generated_artifacts.copy_generated_files(
+            scenario,
+            self.roots,
+            self.packaged_reference_resolution,
+            artifact_dir,
+            pruned_file_walk_for=self.pruned_file_walk,
+            generated_file_decision_for=self.generated_file_decision,
         )
-        for root_name, root in self.roots.items():
-            if not root.exists():
-                continue
-            for path in self.pruned_file_walk(root):
-                rel = path.relative_to(root)
-                if not self.generated_file_decision(
-                    scenario,
-                    root_name,
-                    rel,
-                    path,
-                    apply_excludes=True,
-                    expected_keys=expected_keys,
-                ).should_include:
-                    continue
-                plan = generated_artifact_copy_plan(root_name, rel)
-                dest = out / plan.destination_relative
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, dest)
 
 
 def assert_idempotent_state(before: dict[str, dict[str, object]], after: dict[str, dict[str, object]]) -> list[dict[str, object]]:

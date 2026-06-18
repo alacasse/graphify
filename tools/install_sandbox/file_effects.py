@@ -8,6 +8,7 @@ from typing import Callable, Iterable
 
 try:
     from .expected_effects import is_json_effect, is_skill_effect
+    from . import file_effect_sidecars
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
         resolve_install_root,
@@ -21,20 +22,6 @@ try:
         is_excluded_generated_path,
         text_mentions_expected_generated_marker,
     )
-    from .install_surface_sidecars import (
-        expected_skill_sidecar_relatives,
-        installed_reference_sidecar_status,
-        reference_sidecar_expectation,
-        references_tmp_absence_status,
-        skill_dir_for_entry,
-        skill_reference_pointer_status,
-        skill_references_relative,
-        skill_references_tmp_relative,
-        skill_sidecar_expectation,
-        skill_version_status,
-        skill_version_relative,
-        uninstalled_skill_sidecar_status,
-    )
     from .install_surface_state import (
         STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL as _USER_SENTINEL,
@@ -42,7 +29,6 @@ try:
         expected_manifest_relatives as core_expected_manifest_relatives,
         idempotency_state_changes,
         planned_state_entries,
-        stale_sidecar_seed_plans,
         user_content_seed_plans,
     )
     from .install_surface_statuses import (
@@ -58,6 +44,7 @@ try:
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
     from expected_effects import is_json_effect, is_skill_effect  # type: ignore[no-redef]
+    import file_effect_sidecars  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
         resolve_install_root,
@@ -71,20 +58,6 @@ except ImportError:
         is_excluded_generated_path,
         text_mentions_expected_generated_marker,
     )
-    from install_surface_sidecars import (  # type: ignore[no-redef]
-        expected_skill_sidecar_relatives,
-        installed_reference_sidecar_status,
-        reference_sidecar_expectation,
-        references_tmp_absence_status,
-        skill_dir_for_entry,
-        skill_reference_pointer_status,
-        skill_references_relative,
-        skill_references_tmp_relative,
-        skill_sidecar_expectation,
-        skill_version_status,
-        skill_version_relative,
-        uninstalled_skill_sidecar_status,
-    )
     from install_surface_state import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL as _STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL as _USER_SENTINEL,
@@ -92,7 +65,6 @@ except ImportError:
         expected_manifest_relatives as core_expected_manifest_relatives,
         idempotency_state_changes,
         planned_state_entries,
-        stale_sidecar_seed_plans,
         user_content_seed_plans,
     )
     from install_surface_statuses import (  # type: ignore[no-redef]
@@ -118,10 +90,23 @@ GENERATED_COPY_EXCLUDES = (
     ".pytest_cache",
 )
 
-STALE_SIDECAR_SEED_DETAILS = {
-    "stale_reference_fragment": "seeded_stale_reference_fragment",
-    "staged_reference_fragment": "seeded_staged_reference_fragment",
-}
+STALE_SIDECAR_SEED_DETAILS = file_effect_sidecars.STALE_SIDECAR_SEED_DETAILS
+
+# Compatibility import surface: sidecar behavior lives in file_effect_sidecars and
+# installer-core topic modules, but older callers imported these names here.
+expected_skill_sidecar_relatives = file_effect_sidecars.expected_skill_sidecar_relatives
+installed_reference_sidecar_status = file_effect_sidecars.installed_reference_sidecar_status
+reference_sidecar_expectation = file_effect_sidecars.reference_sidecar_expectation
+references_tmp_absence_status = file_effect_sidecars.references_tmp_absence_status
+skill_dir_for_entry = file_effect_sidecars.skill_dir_for_entry
+skill_reference_pointer_status = file_effect_sidecars.skill_reference_pointer_status
+skill_references_relative = file_effect_sidecars.skill_references_relative
+skill_references_tmp_relative = file_effect_sidecars.skill_references_tmp_relative
+skill_sidecar_expectation = file_effect_sidecars.skill_sidecar_expectation
+skill_version_status = file_effect_sidecars.skill_version_status
+skill_version_relative = file_effect_sidecars.skill_version_relative
+stale_sidecar_seed_plans = file_effect_sidecars.stale_sidecar_seed_plans
+uninstalled_skill_sidecar_status = file_effect_sidecars.uninstalled_skill_sidecar_status
 
 
 def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = None, relative: str | Path | None = None, **extra: object) -> dict[str, object]:
@@ -149,107 +134,67 @@ class FileEffectOracle:
         return resolve_install_surface_path(entry, self.roots)
 
     def skill_assertion_record(self, entry: InstallSurface, relative: Path, ok: bool, detail: str) -> dict[str, object]:
-        return check_record(self.root_path(entry.root) / relative, ok, detail, root=entry.root, relative=relative)
+        return file_effect_sidecars.skill_assertion_record(entry, self.roots, relative, ok, detail)
 
     def installed_skill_reference_relatives(self, entry: InstallSurface) -> set[Path]:
-        refs_dir = skill_dir_for_entry(entry, self.roots) / skill_sidecar_expectation(entry).references_dir
-        refs_relative = skill_references_relative(entry)
-        if not refs_dir.is_dir():
-            return set()
-        return {refs_relative / path.name for path in refs_dir.glob("*.md") if path.is_file()}
+        return file_effect_sidecars.installed_skill_reference_relatives(entry, self.roots)
 
     def tracked_skill_sidecar_relatives(self, scenario: Scenario, entry: InstallSurface) -> set[Path]:
-        return expected_skill_sidecar_relatives(entry, self.packaged_reference_resolution(scenario.platform)) | self.installed_skill_reference_relatives(entry)
+        return file_effect_sidecars.tracked_skill_sidecar_relatives(
+            scenario,
+            entry,
+            self.roots,
+            self.packaged_reference_resolution,
+        )
 
     def installed_reference_names(self, refs_dir: Path) -> list[str]:
-        if not refs_dir.is_dir():
-            return []
-        return sorted(path.name for path in refs_dir.glob("*.md") if path.is_file())
+        return file_effect_sidecars.installed_reference_names(refs_dir)
 
     # Skill sidecar checks
     def check_skill_version(self, entry: InstallSurface) -> dict[str, object]:
-        skill_dir = skill_dir_for_entry(entry, self.roots)
-        version_path = skill_dir / skill_sidecar_expectation(entry).version_name
-        version_relative = skill_version_relative(entry)
-        expected_version = self.expected_graphify_version()
-        version_text = version_path.read_text(encoding="utf-8", errors="replace") if version_path.exists() else None
-        version_ok, version_detail = skill_version_status(version_text, expected_version)
-        return self.skill_assertion_record(entry, version_relative, version_ok, version_detail)
+        return file_effect_sidecars.check_skill_version(entry, self.roots, self.expected_graphify_version)
 
     def check_references_tmp_absent(self, entry: InstallSurface) -> dict[str, object]:
-        skill_dir = skill_dir_for_entry(entry, self.roots)
-        refs_tmp = skill_dir / skill_sidecar_expectation(entry).references_tmp_dir
-        tmp_ok, tmp_detail = references_tmp_absence_status(refs_tmp.exists())
-        return self.skill_assertion_record(
-            entry,
-            skill_references_tmp_relative(entry),
-            tmp_ok,
-            tmp_detail,
-        )
+        return file_effect_sidecars.check_references_tmp_absent(entry, self.roots)
 
     def check_packaged_references(self, scenario: Scenario, entry: InstallSurface) -> dict[str, object]:
-        skill_dir = skill_dir_for_entry(entry, self.roots)
-        refs_dir = skill_dir / skill_sidecar_expectation(entry).references_dir
-        refs_relative = skill_references_relative(entry)
-        expectation = reference_sidecar_expectation(self.packaged_reference_resolution(scenario.platform))
-        refs_ok, refs_detail = installed_reference_sidecar_status(
-            expectation,
-            references_exists=refs_dir.exists(),
-            references_is_dir=refs_dir.is_dir(),
-            installed_names=self.installed_reference_names(refs_dir),
+        return file_effect_sidecars.check_packaged_references(
+            scenario,
+            entry,
+            self.roots,
+            self.packaged_reference_resolution,
         )
-        return self.skill_assertion_record(entry, refs_relative, refs_ok, refs_detail)
 
     def check_skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> dict[str, object]:
-        sidecar = skill_sidecar_expectation(entry)
-        refs_dir = skill_dir_for_entry(entry, self.roots) / sidecar.references_dir
-        pointer_ok, pointer_detail = skill_reference_pointer_status(
-            sidecar,
+        return file_effect_sidecars.check_skill_reference_pointers(
+            entry,
+            self.roots,
             skill_text,
-            references_is_dir=refs_dir.is_dir(),
-            installed_names=self.installed_reference_names(refs_dir),
         )
-        return self.skill_assertion_record(entry, Path(entry.relative), pointer_ok, pointer_detail)
 
     def assert_installed_skill_sidecar(self, scenario: Scenario, entry: InstallSurface) -> list[dict[str, object]]:
-        if not is_skill_effect(entry):
-            return []
-
-        skill_path = self.expected_path(entry)
-        skill_text = skill_path.read_text(encoding="utf-8", errors="replace") if skill_path.is_file() else ""
-        return [
-            self.check_skill_version(entry),
-            self.check_references_tmp_absent(entry),
-            self.check_packaged_references(scenario, entry),
-            self.check_skill_reference_pointers(entry, skill_text),
-        ]
+        return file_effect_sidecars.assert_installed_skill_sidecar(
+            scenario,
+            entry,
+            self.roots,
+            self.packaged_reference_resolution,
+            self.expected_graphify_version,
+        )
 
     def assert_installed_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]:
-        checks: list[dict[str, object]] = []
-        for entry in scenario.expected:
-            checks.extend(self.assert_installed_skill_sidecar(scenario, entry))
-        return checks
+        return file_effect_sidecars.assert_installed_skill_sidecars(
+            scenario,
+            self.roots,
+            self.packaged_reference_resolution,
+            self.expected_graphify_version,
+        )
 
     def seed_stale_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]:
-        seeded: list[dict[str, object]] = []
-        plans = stale_sidecar_seed_plans(
-            scenario.expected,
-            self.packaged_reference_resolution(scenario.platform),
+        return file_effect_sidecars.seed_stale_skill_sidecars(
+            scenario,
+            self.roots,
+            self.packaged_reference_resolution,
         )
-        for plan in plans:
-            path = self.root_path(plan.root_name) / plan.relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(plan.text, encoding="utf-8")
-            seeded.append(
-                check_record(
-                    path,
-                    True,
-                    STALE_SIDECAR_SEED_DETAILS[plan.kind],
-                    root=plan.root_name,
-                    relative=plan.relative,
-                )
-            )
-        return seeded
 
     def expected_manifest_relatives(self, scenario: Scenario, root_name: str) -> set[Path]:
         return core_expected_manifest_relatives(
@@ -361,22 +306,7 @@ class FileEffectOracle:
         return status.ok, status.detail
 
     def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
-        if not is_skill_effect(entry):
-            return []
-        checks: list[dict[str, object]] = []
-        for relative in (skill_version_relative(entry), skill_references_relative(entry), skill_references_tmp_relative(entry)):
-            sidecar_path = self.root_path(entry.root) / relative
-            sidecar_ok, sidecar_detail = uninstalled_skill_sidecar_status(sidecar_path.exists())
-            checks.append(
-                check_record(
-                    sidecar_path,
-                    sidecar_ok,
-                    sidecar_detail,
-                    root=entry.root,
-                    relative=relative,
-                )
-            )
-        return checks
+        return file_effect_sidecars.uninstalled_skill_sidecar_checks(entry, self.roots)
 
     def assert_uninstalled(self, scenario: Scenario) -> list[dict[str, object]]:
         checks: list[dict[str, object]] = []

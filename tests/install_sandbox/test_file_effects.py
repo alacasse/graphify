@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tools.install_sandbox import file_effect_sidecars
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import install_surface_core
 
@@ -130,10 +131,10 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
         "expected_manifest_relatives",
         "idempotency_state_changes",
         "planned_state_entries",
-        "stale_sidecar_seed_plans",
         "user_content_seed_plans",
     }
     tree = ast.parse(Path(file_effects.__file__).read_text(encoding="utf-8"))
+    sidecar_tree = ast.parse(Path(file_effect_sidecars.__file__).read_text(encoding="utf-8"))
 
     def dotted_name(node: ast.AST) -> str | None:
         if isinstance(node, ast.Name):
@@ -154,6 +155,12 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     imported_from_state = {
         alias.name
         for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_state")
+        for alias in node.names
+    }
+    sidecar_imported_from_state = {
+        alias.name
+        for node in ast.walk(sidecar_tree)
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_state")
         for alias in node.names
     }
@@ -215,6 +222,7 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     assert imported_from_core.isdisjoint(legacy_wrappers)
     assert imported_from_core.isdisjoint(topic_owned_helpers)
     assert topic_owned_helpers <= imported_from_state
+    assert "stale_sidecar_seed_plans" in sidecar_imported_from_state
     assert not module_imports
     assert not imported_core_modules
     assert direct_calls.isdisjoint(legacy_wrappers)

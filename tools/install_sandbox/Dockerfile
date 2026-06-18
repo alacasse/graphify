@@ -37,6 +37,7 @@ COPY sandbox_runner.py /runner/sandbox_runner.py
 COPY agent_summary.py /runner/agent_summary.py
 COPY command_runner.py /runner/command_runner.py
 COPY expected_effects.py /runner/expected_effects.py
+COPY file_effect_sidecars.py /runner/file_effect_sidecars.py
 COPY file_effects.py /runner/file_effects.py
 COPY file_walk.py /runner/file_walk.py
 COPY harness_specs.py /runner/harness_specs.py

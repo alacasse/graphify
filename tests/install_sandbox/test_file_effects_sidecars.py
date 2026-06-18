@@ -6,12 +6,34 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import file_effects
+from tools.install_sandbox import file_effect_sidecars
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
 # Sandbox sidecar records live here. Direct sidecar status and path-planning
 # decisions remain in test_install_surface_core_sidecars.py.
+
+
+def test_file_effects_reexports_sidecar_compatibility_surface() -> None:
+    compatibility_names = (
+        "expected_skill_sidecar_relatives",
+        "installed_reference_sidecar_status",
+        "reference_sidecar_expectation",
+        "references_tmp_absence_status",
+        "skill_dir_for_entry",
+        "skill_reference_pointer_status",
+        "skill_references_relative",
+        "skill_references_tmp_relative",
+        "skill_sidecar_expectation",
+        "skill_version_status",
+        "skill_version_relative",
+        "stale_sidecar_seed_plans",
+        "uninstalled_skill_sidecar_status",
+    )
+
+    for name in compatibility_names:
+        assert getattr(file_effects, name) is getattr(file_effect_sidecars, name)
 
 
 @pytest.fixture
@@ -172,6 +194,27 @@ def test_installed_skill_sidecar_records_render_sandbox_check_shape(oracle, root
         "root": "project",
         "relative": ".claude/skills/graphify/SKILL.md",
     }
+
+
+def test_sidecar_topic_module_renders_installed_skill_records(oracle, roots) -> None:
+    test_scenario = scenario("claude", expected_skill("project", ".claude/skills/graphify/SKILL.md"))
+    skill = write_skill(
+        roots["project"],
+        ".claude/skills/graphify/SKILL.md",
+        body="See references/query.md and references/update.md for details.\n",
+        version="9.9.9",
+    )
+    refs = skill.parent / "references"
+    refs.mkdir()
+    (refs / "query.md").write_text("# query\n", encoding="utf-8")
+    (refs / "update.md").write_text("# update\n", encoding="utf-8")
+
+    assert file_effect_sidecars.assert_installed_skill_sidecars(
+        test_scenario,
+        roots,
+        oracle.packaged_reference_resolution,
+        oracle.expected_graphify_version,
+    ) == oracle.assert_installed_skill_sidecars(test_scenario)
 
 
 def test_skill_assertion_detects_missing_references_sidecar_from_body_pointer(oracle, roots) -> None:

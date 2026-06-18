@@ -27,6 +27,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "agent_summary.py",
         "expected_effects.py",
         "file_effect_sidecars.py",
+        "file_effect_surfaces.py",
         "file_walk.py",
         "harness_specs.py",
         "install_surface_core.py",

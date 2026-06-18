@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
 try:
-    from .expected_effects import is_json_effect, is_skill_effect
+    from .expected_effects import is_skill_effect
     from . import file_effect_sidecars
+    from . import file_effect_surfaces
     from .file_walk import pruned_file_walk
     from .install_surface_core import (
         resolve_install_root,
@@ -31,20 +31,12 @@ try:
         planned_state_entries,
         user_content_seed_plans,
     )
-    from .install_surface_statuses import (
-        FileFingerprintObservation,
-        InstallSurfaceObservation,
-        UninstallSurfaceObservation,
-        file_fingerprint_from_observation,
-        install_surface_kind_status_from_observation,
-        installed_surface_status_from_observation,
-        uninstalled_surface_status_from_observation,
-    )
     from .platform_specs import InstallSurface, Scenario, TextExpectation
     from .reference_resolution import PackagedReferenceResolution
 except ImportError:
-    from expected_effects import is_json_effect, is_skill_effect  # type: ignore[no-redef]
+    from expected_effects import is_skill_effect  # type: ignore[no-redef]
     import file_effect_sidecars  # type: ignore[no-redef]
+    import file_effect_surfaces  # type: ignore[no-redef]
     from file_walk import pruned_file_walk
     from install_surface_core import (  # type: ignore[no-redef]
         resolve_install_root,
@@ -66,15 +58,6 @@ except ImportError:
         idempotency_state_changes,
         planned_state_entries,
         user_content_seed_plans,
-    )
-    from install_surface_statuses import (  # type: ignore[no-redef]
-        FileFingerprintObservation,
-        InstallSurfaceObservation,
-        UninstallSurfaceObservation,
-        file_fingerprint_from_observation,
-        install_surface_kind_status_from_observation,
-        installed_surface_status_from_observation,
-        uninstalled_surface_status_from_observation,
     )
     from platform_specs import InstallSurface, Scenario, TextExpectation
     from reference_resolution import PackagedReferenceResolution
@@ -107,6 +90,15 @@ skill_version_status = file_effect_sidecars.skill_version_status
 skill_version_relative = file_effect_sidecars.skill_version_relative
 stale_sidecar_seed_plans = file_effect_sidecars.stale_sidecar_seed_plans
 uninstalled_skill_sidecar_status = file_effect_sidecars.uninstalled_skill_sidecar_status
+
+FileFingerprintObservation = file_effect_surfaces.FileFingerprintObservation
+InstallSurfaceObservation = file_effect_surfaces.InstallSurfaceObservation
+UninstallSurfaceObservation = file_effect_surfaces.UninstallSurfaceObservation
+file_fingerprint_from_observation = file_effect_surfaces.file_fingerprint_from_observation
+install_surface_kind_status_from_observation = file_effect_surfaces.install_surface_kind_status_from_observation
+installed_surface_status_from_observation = file_effect_surfaces.installed_surface_status_from_observation
+is_json_effect = file_effect_surfaces.is_json_effect
+uninstalled_surface_status_from_observation = file_effect_surfaces.uninstalled_surface_status_from_observation
 
 
 def check_record(path: Path | str, ok: bool, detail: str, *, root: str | None = None, relative: str | Path | None = None, **extra: object) -> dict[str, object]:
@@ -210,114 +202,38 @@ class FileEffectOracle:
             path.write_text(plan.text, encoding="utf-8")
 
     def installed_surface_observation(self, entry: InstallSurface) -> InstallSurfaceObservation:
-        path = self.expected_path(entry)
-        base = InstallSurfaceObservation(
-            path=path,
-            exists=path.exists(),
-            is_file=path.is_file(),
-            is_dir=path.is_dir(),
-        )
-        status = install_surface_kind_status_from_observation(entry, base)
-        if not status.ok or not entry.marker:
-            return base
-        if is_json_effect(entry):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                return InstallSurfaceObservation(
-                    path=path,
-                    exists=base.exists,
-                    is_file=base.is_file,
-                    is_dir=base.is_dir,
-                    json_error_detail=f"invalid_json={exc.msg}",
-                )
-            except OSError as exc:
-                return InstallSurfaceObservation(
-                    path=path,
-                    exists=base.exists,
-                    is_file=base.is_file,
-                    is_dir=base.is_dir,
-                    json_error_detail=f"json_read_failed={exc}",
-                )
-            return InstallSurfaceObservation(
-                path=path,
-                exists=base.exists,
-                is_file=base.is_file,
-                is_dir=base.is_dir,
-                json_data=data,
-                json_loaded=True,
-            )
-        return InstallSurfaceObservation(
-            path=path,
-            exists=base.exists,
-            is_file=base.is_file,
-            is_dir=base.is_dir,
-            text=path.read_text(encoding="utf-8", errors="replace"),
-        )
+        return file_effect_surfaces.installed_surface_observation(entry, self.roots)
 
     def expected_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        status = installed_surface_status_from_observation(entry, self.installed_surface_observation(entry))
-        return status.ok, status.detail
+        observation = self.installed_surface_observation(entry)
+        return file_effect_surfaces.expected_entry_status_from_observation(entry, observation)
 
     # Install/uninstall assertions
     def assert_expected_files(self, scenario: Scenario) -> list[dict[str, object]]:
-        checks: list[dict[str, object]] = []
-        for entry in scenario.expected:
-            path = self.expected_path(entry)
-            ok, detail = self.expected_entry_status(entry)
-            checks.append(check_record(path, ok, detail, root=entry.root, relative=entry.relative))
-            checks.extend(self.assert_installed_skill_sidecar(scenario, entry))
-        return checks
+        return file_effect_surfaces.assert_expected_files(
+            scenario,
+            self.roots,
+            self.assert_installed_skill_sidecar,
+            self.expected_entry_status,
+        )
 
     def uninstalled_surface_observation(self, entry: InstallSurface) -> UninstallSurfaceObservation:
-        path = self.expected_path(entry)
-        base = UninstallSurfaceObservation(
-            path=path,
-            exists=path.exists(),
-            is_file=path.is_file(),
-            is_dir=path.is_dir(),
-        )
-        text_expectation = entry.text_expectation
-        if entry.marker and text_expectation.require_user_content_on_uninstall:
-            if not (base.exists and base.is_file):
-                return base
-        elif not (entry.marker and text_expectation.remove_graphify_section_on_uninstall and base.exists):
-            return base
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            return UninstallSurfaceObservation(
-                path=path,
-                exists=base.exists,
-                is_file=base.is_file,
-                is_dir=base.is_dir,
-                text_error_detail=f"text_read_failed={exc}",
-            )
-        return UninstallSurfaceObservation(
-            path=path,
-            exists=base.exists,
-            is_file=base.is_file,
-            is_dir=base.is_dir,
-            text=text,
-        )
+        return file_effect_surfaces.uninstalled_surface_observation(entry, self.roots)
 
     def uninstalled_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        status = uninstalled_surface_status_from_observation(entry, self.uninstalled_surface_observation(entry))
-        return status.ok, status.detail
+        observation = self.uninstalled_surface_observation(entry)
+        return file_effect_surfaces.uninstalled_entry_status_from_observation(entry, observation)
 
     def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
         return file_effect_sidecars.uninstalled_skill_sidecar_checks(entry, self.roots)
 
     def assert_uninstalled(self, scenario: Scenario) -> list[dict[str, object]]:
-        checks: list[dict[str, object]] = []
-        for entry in scenario.expected:
-            path = self.expected_path(entry)
-            if not entry.remove_on_uninstall:
-                continue
-            ok, detail = self.uninstalled_entry_status(entry)
-            checks.append(check_record(path, ok, detail, root=entry.root, relative=entry.relative))
-            checks.extend(self.uninstalled_skill_sidecar_checks(entry))
-        return checks
+        return file_effect_surfaces.assert_uninstalled(
+            scenario,
+            self.roots,
+            self.uninstalled_skill_sidecar_checks,
+            self.uninstalled_entry_status,
+        )
 
     # Generated-file discovery/copying
     def pruned_file_walk(self, base: Path) -> Iterable[Path]:
@@ -371,26 +287,10 @@ class FileEffectOracle:
         return checks
 
     def assert_scope_boundaries(self, scenario: Scenario) -> list[dict[str, object]]:
-        checks: list[dict[str, object]] = []
-        for entry in scenario.expected:
-            allowed = not scenario.allowed_roots or entry.root in scenario.allowed_roots
-            checks.append(check_record(self.expected_path(entry), allowed, "allowed_root" if allowed else "unexpected_root"))
-        return checks
+        return file_effect_surfaces.assert_scope_boundaries(scenario, self.roots)
 
     def file_fingerprint(self, path: Path, marker: str | None = None, text_expectation: TextExpectation | None = None) -> dict[str, object]:
-        if not path.exists():
-            observation = FileFingerprintObservation(exists=False)
-        elif path.is_dir():
-            observation = FileFingerprintObservation(exists=True, kind="dir")
-        else:
-            data = path.read_bytes()
-            observation = FileFingerprintObservation(
-                exists=True,
-                kind="file",
-                data=data,
-                text=data.decode("utf-8", errors="replace") if marker else None,
-            )
-        return file_fingerprint_from_observation(observation, marker, text_expectation)
+        return file_effect_surfaces.file_fingerprint(path, marker, text_expectation)
 
     # Idempotency state
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:

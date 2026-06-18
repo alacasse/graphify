@@ -13,6 +13,10 @@ from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
+# Adapter ownership lives here. Direct Installer Core decisions belong in
+# test_install_surface_core.py; core value objects appear here only as oracle
+# and ScenarioFileEffectsAdapter collaborators.
+
 
 @pytest.fixture
 def roots(tmp_path) -> dict[str, Path]:
@@ -210,6 +214,25 @@ def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
         "call install_surface_core helpers directly instead."
     )
     assert oracle_methods == adapter_methods
+
+
+def test_file_effects_tests_import_core_only_as_adapter_collaborator_module() -> None:
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    core_test_module = Path(__file__).with_name("test_install_surface_core.py")
+
+    imported_core_helpers = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_core")
+        for alias in node.names
+    }
+
+    assert core_test_module.exists(), "direct Installer Core behavior tests belong in test_install_surface_core.py"
+    assert imported_core_helpers == set(), (
+        "Keep test_file_effects.py adapter-owned; use module-qualified "
+        "install_surface_core collaborators here and put direct core behavior tests "
+        "in test_install_surface_core.py."
+    )
 
 
 def test_assertion_detects_missing_file(oracle) -> None:
@@ -954,75 +977,12 @@ def test_malformed_packaged_reference_statuses_fail_with_resolver_detail(oracle,
         assert "/package/refs" in str(refs_check["detail"])
 
 
-def test_reference_resolution_status_controls_manifest_generated_keys_and_state(oracle, roots) -> None:
-    skill_entry = expected_skill("project", ".claude/skills/graphify/SKILL.md")
-    ordinary_entry = InstallSurface("project", "AGENTS.md")
-    available = scenario("claude", skill_entry)
-    empty = scenario("empty", expected_skill("project", ".empty/graphify/SKILL.md"))
-    absent = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
-    ordinary = scenario("unit", ordinary_entry)
-    available_resolution = resolution("available", ("query.md", "update.md"), "claude refs")
-    empty_resolution = resolution("empty", detail="empty refs")
-    absent_resolution = resolution("intentionally_absent", detail="absent refs")
-
-    available_manifest = install_surface_core.expected_manifest_relatives(available.expected, available_resolution, "project")
-    ordinary_manifest = install_surface_core.expected_manifest_relatives(ordinary.expected, resolution("intentionally_absent"), "project")
-    assert ordinary_manifest == {Path("AGENTS.md")}
-    assert install_surface_core.expected_manifest_relatives(ordinary.expected, resolution("intentionally_absent"), "home") == set()
-    assert install_surface_core.skill_version_relative(skill_entry) == Path(".claude/skills/graphify/.graphify_version")
-    assert install_surface_core.skill_references_relative(skill_entry) == Path(".claude/skills/graphify/references")
-    assert install_surface_core.skill_references_tmp_relative(skill_entry) == Path(".claude/skills/graphify/references.tmp")
-    assert install_surface_core.expected_skill_sidecar_relatives(skill_entry, available_resolution) == {
-        Path(".claude/skills/graphify/.graphify_version"),
-        Path(".claude/skills/graphify/references.tmp"),
-        Path(".claude/skills/graphify/references"),
-        Path(".claude/skills/graphify/references/query.md"),
-        Path(".claude/skills/graphify/references/update.md"),
-    }
-    assert Path(".claude/skills/graphify/references") in available_manifest
-    assert Path(".claude/skills/graphify/references/query.md") in available_manifest
-    assert ("project", ".claude/skills/graphify/references/update.md") in install_surface_core.expected_generated_relative_keys(available.expected, available_resolution)
-    assert "project/.claude/skills/graphify/references/query.md" in oracle.scenario_file_state(available)
-
-    empty_manifest = install_surface_core.expected_manifest_relatives(empty.expected, empty_resolution, "project")
-    empty_entry = empty.expected[0]
-    assert install_surface_core.expected_skill_sidecar_relatives(empty_entry, empty_resolution) == {
-        Path(".empty/graphify/.graphify_version"),
-        Path(".empty/graphify/references.tmp"),
-        Path(".empty/graphify/references"),
-    }
-    assert Path(".empty/graphify/references") in empty_manifest
-    assert not any(path.name.endswith(".md") and "references" in path.parts for path in empty_manifest)
-    assert ("project", ".empty/graphify/references") in install_surface_core.expected_generated_relative_keys(empty.expected, empty_resolution)
-    assert "project/.empty/graphify/references" in oracle.scenario_file_state(empty)
-
-    absent_manifest = install_surface_core.expected_manifest_relatives(absent.expected, absent_resolution, "project")
-    absent_generated_keys = install_surface_core.expected_generated_relative_keys(absent.expected, absent_resolution)
-    absent_entry = absent.expected[0]
-    assert install_surface_core.expected_skill_sidecar_relatives(absent_entry, absent_resolution) == {
-        Path(".aider/graphify/.graphify_version"),
-        Path(".aider/graphify/references.tmp"),
-    }
-    assert Path(".aider/graphify/references") not in absent_manifest
-    assert ("project", ".aider/graphify/references") not in absent_generated_keys
-    assert not any(key[1].startswith(".aider/graphify/references/") for key in absent_generated_keys)
-    assert "project/.aider/graphify/references" not in oracle.scenario_file_state(absent)
-
-
 @pytest.mark.parametrize(
-    ("platform", "skill_relative", "generated_relatives", "state_relatives"),
+    ("platform", "skill_relative", "state_relatives"),
     [
         (
             "claude",
             ".claude/skills/graphify/SKILL.md",
-            {
-                ".claude/skills/graphify/SKILL.md",
-                ".claude/skills/graphify/.graphify_version",
-                ".claude/skills/graphify/references.tmp",
-                ".claude/skills/graphify/references",
-                ".claude/skills/graphify/references/query.md",
-                ".claude/skills/graphify/references/update.md",
-            },
             {
                 ".claude/skills/graphify/SKILL.md",
                 ".claude/skills/graphify/.graphify_version",
@@ -1041,21 +1001,10 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
                 ".empty/graphify/references.tmp",
                 ".empty/graphify/references",
             },
-            {
-                ".empty/graphify/SKILL.md",
-                ".empty/graphify/.graphify_version",
-                ".empty/graphify/references.tmp",
-                ".empty/graphify/references",
-            },
         ),
         (
             "aider",
             ".aider/graphify/SKILL.md",
-            {
-                ".aider/graphify/SKILL.md",
-                ".aider/graphify/.graphify_version",
-                ".aider/graphify/references.tmp",
-            },
             {
                 ".aider/graphify/SKILL.md",
                 ".aider/graphify/.graphify_version",
@@ -1070,21 +1019,10 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
                 ".no_eligible/graphify/.graphify_version",
                 ".no_eligible/graphify/references.tmp",
             },
-            {
-                ".no_eligible/graphify/SKILL.md",
-                ".no_eligible/graphify/.graphify_version",
-                ".no_eligible/graphify/references.tmp",
-            },
         ),
         (
             "missing",
             ".missing/graphify/SKILL.md",
-            {
-                ".missing/graphify/SKILL.md",
-                ".missing/graphify/.graphify_version",
-                ".missing/graphify/references.tmp",
-                ".missing/graphify/references",
-            },
             {
                 ".missing/graphify/SKILL.md",
                 ".missing/graphify/.graphify_version",
@@ -1101,33 +1039,18 @@ def test_reference_resolution_status_controls_manifest_generated_keys_and_state(
                 ".not_directory/graphify/references.tmp",
                 ".not_directory/graphify/references",
             },
-            {
-                ".not_directory/graphify/SKILL.md",
-                ".not_directory/graphify/.graphify_version",
-                ".not_directory/graphify/references.tmp",
-                ".not_directory/graphify/references",
-            },
         ),
     ],
 )
-def test_sidecar_generated_keys_and_idempotency_state_follow_packaged_reference_status(
+def test_sidecar_idempotency_state_tracks_packaged_reference_status(
     oracle: file_effects.FileEffectOracle,
     roots: dict[str, Path],
     platform: str,
     skill_relative: str,
-    generated_relatives: set[str],
     state_relatives: set[str],
 ) -> None:
     test_scenario = scenario(platform, expected_skill("project", skill_relative))
     skill = write_skill(roots["project"], skill_relative, version="9.9.9")
-    platform_resolution = {
-        "claude": resolution("available", ("query.md", "update.md"), "claude refs"),
-        "empty": resolution("empty", detail="empty refs"),
-        "aider": resolution("intentionally_absent", detail="absent refs"),
-        "no_eligible": resolution("no_eligible_bundle", detail="no eligible refs"),
-        "missing": resolution("missing", detail="missing /package/refs"),
-        "not_directory": resolution("not_directory", detail="not_directory /package/refs"),
-    }[platform]
     if platform in {"claude", "empty"}:
         refs = skill.parent / "references"
         refs.mkdir()
@@ -1135,7 +1058,6 @@ def test_sidecar_generated_keys_and_idempotency_state_follow_packaged_reference_
             (refs / "query.md").write_text("# query\n", encoding="utf-8")
             (refs / "update.md").write_text("# update\n", encoding="utf-8")
 
-    assert install_surface_core.expected_generated_relative_keys(test_scenario.expected, platform_resolution) == {("project", relative) for relative in generated_relatives}
     assert set(oracle.scenario_file_state(test_scenario)) == {f"project/{relative}" for relative in state_relatives}
 
 

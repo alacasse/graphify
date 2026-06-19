@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import scenario_lifecycle
+from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_support
 
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     STANDARD_ARTIFACT_FILENAMES,
@@ -20,7 +20,7 @@ from tests.install_sandbox.scenario_lifecycle_test_support import (
 
 
 def test_scenario_file_effects_protocol_omits_oracle_and_core_leaf_helpers() -> None:
-    lifecycle_methods = set(scenario_lifecycle.ScenarioFileEffects.__dict__)
+    lifecycle_methods = set(scenario_lifecycle_support.ScenarioFileEffects.__dict__)
 
     assert not {
         "assert_expected_files",
@@ -31,6 +31,15 @@ def test_scenario_file_effects_protocol_omits_oracle_and_core_leaf_helpers() -> 
         "expected_generated_relative_keys",
         "check_record",
     } & lifecycle_methods
+
+
+def test_scenario_lifecycle_facade_preserves_support_imports() -> None:
+    assert scenario_lifecycle.ScenarioFileEffects is scenario_lifecycle_support.ScenarioFileEffects
+    assert scenario_lifecycle.ScenarioLifecycleHooks is scenario_lifecycle_support.ScenarioLifecycleHooks
+    assert scenario_lifecycle.SandboxPaths is scenario_lifecycle_support.SandboxPaths
+    assert scenario_lifecycle.CommandExecutor is scenario_lifecycle_support.CommandExecutor
+    assert scenario_lifecycle.ScenarioArtifacts is scenario_lifecycle_support.ScenarioArtifacts
+    assert scenario_lifecycle.MatrixRunnerOverrides is scenario_lifecycle_support.MatrixRunnerOverrides
 
 
 def test_run_scenario_skips_followups_when_initial_install_fails(tmp_path) -> None:

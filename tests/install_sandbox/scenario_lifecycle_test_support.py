@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
-from tools.install_sandbox import scenario_lifecycle, validation_plan
+from tools.install_sandbox import scenario_lifecycle_support, validation_plan
 from tools.install_sandbox.platform_specs import (
     DEFAULT_SCENARIO_REGISTRY,
     DisposableArtifactScenarioSpec,
@@ -55,7 +55,7 @@ def make_validation_plan(
     platforms: tuple[str, ...] = ("codex",),
     scope: str = "project",
     standard_scenarios: tuple[Scenario, ...] = (),
-    universal_uninstall: tuple[scenario_lifecycle.SelectedUniversalUninstallScenario, ...] = (),
+    universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...] = (),
     disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...] = (),
 ) -> validation_plan.ValidationPlan:
     coverage_records = tuple(
@@ -175,7 +175,7 @@ class HookFactory:
         returncode = self.command_results.pop(0) if self.command_results else 0
         return self.completed(command_tuple, returncode)
 
-    def hooks(self, **overrides) -> scenario_lifecycle.ScenarioLifecycleHooks:
+    def hooks(self, **overrides) -> scenario_lifecycle_support.ScenarioLifecycleHooks:
         def write_file_manifest(path, roots, **kwargs):
             self.calls.append(f"manifest:{Path(path).name}")
             self.manifest_records.append({"filename": Path(path).name, "path": Path(path), "kwargs": dict(kwargs)})
@@ -279,7 +279,7 @@ class HookFactory:
 
         paths = overrides.pop(
             "paths",
-            scenario_lifecycle.SandboxPaths(
+            scenario_lifecycle_support.SandboxPaths(
                 output=self.output,
                 roots=self.roots,
                 project=self.project,
@@ -293,10 +293,10 @@ class HookFactory:
             "file_effects",
             ScenarioFileEffectsDouble(),
         )
-        commands = overrides.pop("commands", scenario_lifecycle.CommandExecutor(overrides.pop("run_capture", self.run_capture)))
+        commands = overrides.pop("commands", scenario_lifecycle_support.CommandExecutor(overrides.pop("run_capture", self.run_capture)))
         artifacts = overrides.pop(
             "artifacts",
-            scenario_lifecycle.ScenarioArtifacts(
+            scenario_lifecycle_support.ScenarioArtifacts(
                 risk_report=lambda scenario, passed: {"statuses": ["graphify_install_verified" if passed else "graphify_install_failed"]},
                 command_artifact_summary=command_artifact_summary,
                 combined_status=lambda passed: "graphify_install_verified" if passed else "graphify_install_failed",
@@ -305,7 +305,7 @@ class HookFactory:
         )
         matrix_overrides = overrides.pop(
             "matrix_overrides",
-            scenario_lifecycle.MatrixRunnerOverrides(
+            scenario_lifecycle_support.MatrixRunnerOverrides(
                 run_scenario=overrides.pop("run_scenario_func", None),
                 run_universal_uninstall_scenario=overrides.pop("run_universal_uninstall_scenario_func", None),
                 run_purge_scenario=overrides.pop("run_purge_scenario_func", None),
@@ -314,7 +314,7 @@ class HookFactory:
         )
         values = dict(paths=paths, file_effects=file_effects, commands=commands, artifacts=artifacts, matrix_overrides=matrix_overrides)
         values.update(overrides)
-        return scenario_lifecycle.ScenarioLifecycleHooks(**values)
+        return scenario_lifecycle_support.ScenarioLifecycleHooks(**values)
 
 
 def assert_preserved_result_shape(result: dict[str, object]) -> None:

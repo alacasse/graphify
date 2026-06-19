@@ -40,6 +40,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "install_surface_state.py",
         "install_surface_statuses.py",
         "json_helpers.py",
+        "platform_specs.py",
         "scenario_file_effects_adapter.py",
         "scenario_lifecycle_disposable.py",
         "scenario_lifecycle_plan.py",
@@ -51,6 +52,13 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "validation_plan.py",
     ):
         assert f"COPY {module} /runner/{module}" in dockerfile
+    for future_platform_specs_owner in (
+        "install_target_models.py",
+        "install_target_catalog.py",
+        "install_target_defaults.py",
+    ):
+        if Path("tools/install_sandbox", future_platform_specs_owner).exists():
+            assert f"COPY {future_platform_specs_owner} /runner/{future_platform_specs_owner}" in dockerfile
     assert "COPY file_effects.py /runner/file_effects.py" not in dockerfile
     assert "COPY specs /runner/specs" in dockerfile
 

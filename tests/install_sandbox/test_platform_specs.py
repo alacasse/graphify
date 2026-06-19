@@ -45,6 +45,75 @@ def test_install_target_aliases_are_identity_aliases() -> None:
     assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
 
 
+def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None:
+    legacy_platform_names = {
+        "PlatformSpec",
+        "ScenarioRegistry",
+        "platform_spec",
+        "platform_scenarios",
+        "ALL_PLATFORMS",
+        "SANDBOX_PLATFORM_SPECS",
+        "DEFAULT_SCENARIO_REGISTRY",
+    }
+    install_target_names = {
+        "InstallTargetSpec",
+        "InstallTargetCatalog",
+        "default_install_target_catalog",
+        "install_target_specs",
+        "install_target_spec",
+        "install_target_scenarios",
+    }
+
+    for name in legacy_platform_names | install_target_names:
+        assert hasattr(platform_specs, name), name
+    for name in ("platform_names", "target_names", "selected_platforms", "selected_targets", "platform_scenarios", "target_scenarios"):
+        assert hasattr(REGISTRY, name), name
+    assert platform_specs.DEFAULT_SCENARIO_REGISTRY is REGISTRY
+    assert platform_specs.SANDBOX_PLATFORM_SPECS is REGISTRY.specs
+    assert platform_specs.ALL_PLATFORMS == REGISTRY.platform_names
+    assert platform_specs.platform_spec("codex") is REGISTRY.platform_spec("codex")
+    assert platform_specs.platform_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
+
+
+def test_install_target_fact_dataclasses_keep_facade_identity() -> None:
+    model_names = (
+        "GeneratedFileExpectation",
+        "InstallCommandVariant",
+        "TargetRuntimeValidationSpec",
+        "UniversalUninstallScenarioSpec",
+        "SelectedUniversalUninstallScenario",
+        "DisposableSeedFile",
+        "DisposableArtifactScenarioSpec",
+        "Scenario",
+        "ScopeSpec",
+        "ReferenceBundle",
+        "PlatformSpec",
+        "InstallTargetSpec",
+    )
+
+    for name in model_names:
+        exported = getattr(platform_specs, name)
+        assert getattr(platform_specs, name) is exported
+
+    scope = platform_specs.ScopeSpec(
+        install_command=("tool", "install"),
+        uninstall_command=("tool", "uninstall"),
+        cwd_root="project",
+        expected=(platform_specs.InstallSurface("project", "graphify.txt"),),
+    )
+    spec = platform_specs.InstallTargetSpec(name="facade-target", scopes={"project": scope})
+    registry = platform_specs.InstallTargetCatalog({"facade-target": spec})
+    scenario = registry.make_scenario("facade-target", "project")
+
+    assert type(scope) is platform_specs.ScopeSpec
+    assert type(spec) is platform_specs.PlatformSpec
+    assert platform_specs.InstallTargetSpec is platform_specs.PlatformSpec
+    assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
+    assert scenario is not None
+    assert type(scenario) is platform_specs.Scenario
+    assert scenario.expected[0].__class__ is platform_specs.InstallSurface
+
+
 def test_install_target_accessors_match_legacy_platform_accessors() -> None:
     assert REGISTRY.target_names == REGISTRY.platform_names == platform_specs.ALL_PLATFORMS
     assert REGISTRY.target_spec("codex") is REGISTRY.platform_spec("codex")
@@ -111,6 +180,43 @@ def test_install_target_helpers_use_existing_default_registry_cache(monkeypatch:
         "project",
     )
     assert "DEFAULT_INSTALL_TARGET_CATALOG" not in platform_specs._LAZY_DEFAULT_NAMES
+
+
+def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+    registry = platform_specs.ScenarioRegistry(
+        {
+            "cached-target": platform_specs.PlatformSpec(
+                name="cached-target",
+                scopes={
+                    "project": platform_specs.ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(platform_specs.InstallSurface("project", "cached.txt"),),
+                    )
+                },
+            )
+        }
+    )
+
+    def load_default_registry():
+        nonlocal calls
+        calls += 1
+        return registry
+
+    monkeypatch.setattr(platform_specs, "_DEFAULT_SCENARIO_REGISTRY", None)
+    monkeypatch.setitem(platform_specs.__dict__, "_import_load_default_registry", lambda: load_default_registry)
+    for name in platform_specs._LAZY_DEFAULT_NAMES:
+        monkeypatch.delitem(platform_specs.__dict__, name, raising=False)
+
+    assert platform_specs.default_install_target_catalog() is registry
+    assert platform_specs.install_target_specs() is registry.specs
+    assert platform_specs.install_target_spec("cached-target") is registry.target_spec("cached-target")
+    assert platform_specs.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
+    assert platform_specs.__getattr__("SANDBOX_PLATFORM_SPECS") is registry.specs
+    assert platform_specs.__getattr__("ALL_PLATFORMS") == ["cached-target"]
+    assert calls == 1
 
 
 def test_expected_path_manifest_logic() -> None:
@@ -552,6 +658,93 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
     assert selected[0].spec.command == ("tool", "remove", "all")
     assert selected[0].spec.cwd_root == "user_cwd"
     assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha"]
+
+
+def test_catalog_facade_boundary_preserves_selection_and_synthetic_behavior() -> None:
+    installable_scope = platform_specs.ScopeSpec(
+        install_command=("tool", "install"),
+        uninstall_command=("tool", "uninstall"),
+        cwd_root="project",
+        expected=(platform_specs.InstallSurface("project", "installed.txt"),),
+    )
+    universal = platform_specs.UniversalUninstallScenarioSpec(
+        scenario_id="uninstall-combo",
+        platform_label="declared-combo",
+        scope="project",
+        command=("tool", "remove", "all"),
+        cwd_root="project",
+        eligible_platform_scope="project",
+        minimum_installed_scenarios=2,
+    )
+    disposable = platform_specs.DisposableArtifactScenarioSpec(
+        scenario_id="purge-cache",
+        platform_label="cleanup",
+        scope="project",
+        command=("tool", "purge"),
+        cwd_root="project",
+        artifact_subdir="purge",
+        disposable_path_root="project",
+        disposable_path_relative="cache",
+        seed_files=(),
+        scope_eligibility=("project",),
+        risk_note="synthetic disposable policy",
+    )
+    registry = platform_specs.InstallTargetCatalog(
+        {
+            "alpha": platform_specs.InstallTargetSpec(
+                name="alpha",
+                scopes={"project": installable_scope},
+                universal_uninstall_scopes=("project",),
+            ),
+            "beta": platform_specs.InstallTargetSpec(
+                name="beta",
+                scopes={"project": installable_scope},
+                universal_uninstall_scopes=("project",),
+            ),
+            "unsupported": platform_specs.InstallTargetSpec(
+                name="unsupported",
+                unsupported_scopes={"project": "project install is not supported"},
+            ),
+        },
+        universal_uninstall_specs=(universal,),
+        disposable_artifact_specs=(disposable,),
+    )
+
+    assert registry.selected_targets(all_platforms=True, target_name=None) == ["alpha", "beta", "unsupported"]
+    assert registry.selected_platforms(all_platforms=False, platform_name="alpha") == ["alpha"]
+    assert [(scenario.platform, scenario.scope) for scenario in registry.target_scenarios("alpha", "project")] == [
+        ("alpha", "project")
+    ]
+    assert registry.platform_scenarios("alpha", "project") == registry.target_scenarios("alpha", "project")
+    assert registry.coverage_records(["alpha", "unsupported"], "project") == [
+        {
+            "platform": "alpha",
+            "scope": "project",
+            "status": "runnable",
+            "scenario_id": "alpha-project",
+            "install_command": ["tool", "install"],
+            "uninstall_command": ["tool", "uninstall"],
+            "generic_direct_equivalence": {
+                "status": "not_applicable",
+                "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
+            },
+            "risk_notes": [],
+        },
+        {
+            "platform": "unsupported",
+            "scope": "project",
+            "status": "unsupported",
+            "reason": "project install is not supported",
+        },
+    ]
+    selected = registry.universal_uninstall_scenarios(["alpha", "beta", "unsupported"], "project")
+    assert len(selected) == 1
+    assert selected[0].spec is universal
+    assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
+    assert registry.disposable_artifact_scenarios("project") == [disposable]
+    registry.validate_roots({"project"})
+    with pytest.raises(RuntimeError, match=r"unknown sandbox root declaration\(s\): project"):
+        registry.validate_roots({"home"})
 
 
 def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:

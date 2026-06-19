@@ -3,12 +3,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tools.install_sandbox import expected_effects
-from tools.install_sandbox import file_effect_generated_artifacts
 from tools.install_sandbox import file_effect_oracle
 from tools.install_sandbox import file_effect_sidecars
 from tools.install_sandbox import file_effect_state
-from tools.install_sandbox import file_effect_surfaces
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import scenario_file_effects_adapter
@@ -20,69 +17,78 @@ from tools.install_sandbox import scenario_file_effects_adapter
 
 
 FACADE_COMPATIBILITY_IMPORTS = {
-    "sidecar": {
-        "expected_skill_sidecar_relatives": file_effect_sidecars.expected_skill_sidecar_relatives,
-        "installed_reference_sidecar_status": file_effect_sidecars.installed_reference_sidecar_status,
-        "reference_sidecar_expectation": file_effect_sidecars.reference_sidecar_expectation,
-        "references_tmp_absence_status": file_effect_sidecars.references_tmp_absence_status,
-        "skill_dir_for_entry": file_effect_sidecars.skill_dir_for_entry,
-        "skill_reference_pointer_status": file_effect_sidecars.skill_reference_pointer_status,
-        "skill_references_relative": file_effect_sidecars.skill_references_relative,
-        "skill_references_tmp_relative": file_effect_sidecars.skill_references_tmp_relative,
-        "skill_sidecar_expectation": file_effect_sidecars.skill_sidecar_expectation,
-        "skill_version_status": file_effect_sidecars.skill_version_status,
-        "skill_version_relative": file_effect_sidecars.skill_version_relative,
-        "stale_sidecar_seed_plans": file_effect_sidecars.stale_sidecar_seed_plans,
-        "uninstalled_skill_sidecar_status": file_effect_sidecars.uninstalled_skill_sidecar_status,
-    },
-    "surface": {
-        "FileFingerprintObservation": file_effect_surfaces.FileFingerprintObservation,
-        "InstallSurfaceObservation": file_effect_surfaces.InstallSurfaceObservation,
-        "UninstallSurfaceObservation": file_effect_surfaces.UninstallSurfaceObservation,
-        "file_fingerprint_from_observation": file_effect_surfaces.file_fingerprint_from_observation,
-        "install_surface_kind_status_from_observation": file_effect_surfaces.install_surface_kind_status_from_observation,
-        "installed_surface_status_from_observation": file_effect_surfaces.installed_surface_status_from_observation,
-        "is_json_effect": file_effect_surfaces.is_json_effect,
-        "uninstalled_surface_status_from_observation": file_effect_surfaces.uninstalled_surface_status_from_observation,
-    },
-    "generated": {
-        "GENERATED_COPY_EXCLUDES": file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES,
-        "pruned_file_walk": file_effect_generated_artifacts.pruned_file_walk,
-    },
-    "state": {
-        "STALE_GRAPHIFY_SENTINEL": file_effect_state.STALE_GRAPHIFY_SENTINEL,
-        "USER_SENTINEL": file_effect_state.USER_SENTINEL,
-        "core_expected_manifest_relatives": file_effect_state.expected_manifest_relatives,
-        "expected_manifest_relatives": file_effect_state.expected_manifest_relatives,
-        "expected_generated_relative_keys": file_effect_state.expected_generated_relative_keys,
-        "idempotency_state_changes": file_effect_state.idempotency_state_changes,
-        "planned_state_entries": file_effect_state.planned_state_entries,
-        "user_content_seed_plans": file_effect_state.user_content_seed_plans,
-    },
-    "lifecycle_adapter": {
-        "ScenarioFileEffectsAdapter": scenario_file_effects_adapter.ScenarioFileEffectsAdapter,
-        "check_record": scenario_file_effects_adapter.check_record,
-    },
-    "oracle": {
-        "FileEffectOracle": file_effect_oracle.FileEffectOracle,
-        "assert_idempotent_state": file_effect_oracle.assert_idempotent_state,
-    },
+    "ScenarioFileEffectsAdapter": scenario_file_effects_adapter.ScenarioFileEffectsAdapter,
+    "check_record": scenario_file_effects_adapter.check_record,
+    "FileEffectOracle": file_effect_oracle.FileEffectOracle,
+    "assert_idempotent_state": file_effect_oracle.assert_idempotent_state,
+}
+
+BROAD_TOPIC_ALIASES = {
+    "FileFingerprintObservation",
+    "GENERATED_COPY_EXCLUDES",
+    "InstallSurfaceObservation",
+    "STALE_GRAPHIFY_SENTINEL",
+    "STALE_SIDECAR_SEED_DETAILS",
+    "USER_SENTINEL",
+    "UninstallSurfaceObservation",
+    "core_expected_manifest_relatives",
+    "decide_generated_file_observation",
+    "expected_generated_relative_keys",
+    "expected_manifest_relatives",
+    "expected_skill_sidecar_relatives",
+    "file_fingerprint_from_observation",
+    "generated_artifact_copy_plan",
+    "generated_file_observation",
+    "idempotency_state_changes",
+    "install_surface_kind_status_from_observation",
+    "installed_reference_sidecar_status",
+    "installed_surface_status_from_observation",
+    "is_excluded_generated_path",
+    "is_json_effect",
+    "is_skill_effect",
+    "planned_state_entries",
+    "pruned_file_walk",
+    "reference_sidecar_expectation",
+    "references_tmp_absence_status",
+    "skill_dir_for_entry",
+    "skill_reference_pointer_status",
+    "skill_references_relative",
+    "skill_references_tmp_relative",
+    "skill_sidecar_expectation",
+    "skill_version_relative",
+    "skill_version_status",
+    "stale_sidecar_seed_plans",
+    "text_mentions_expected_generated_marker",
+    "uninstalled_skill_sidecar_status",
+    "uninstalled_surface_status_from_observation",
+    "user_content_seed_plans",
 }
 
 
 def test_file_effects_preserves_moved_compatibility_imports() -> None:
-    assert file_effects.is_skill_effect is expected_effects.is_skill_effect
-    assert file_effects.core_expected_manifest_relatives is file_effect_state.expected_manifest_relatives
     assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
     assert file_effects.check_record is scenario_file_effects_adapter.check_record
     assert file_effects.FileEffectOracle is file_effect_oracle.FileEffectOracle
     assert file_effects.assert_idempotent_state is file_effect_oracle.assert_idempotent_state
 
 
-def test_file_effects_is_compatibility_facade_over_topic_modules() -> None:
-    for owner_group in FACADE_COMPATIBILITY_IMPORTS.values():
-        for compatibility_name, owner_object in owner_group.items():
-            assert getattr(file_effects, compatibility_name) is owner_object
+def test_file_effects_exposes_only_explicit_compatibility_facade() -> None:
+    assert set(file_effects.__all__) == set(FACADE_COMPATIBILITY_IMPORTS)
+    for compatibility_name, owner_object in FACADE_COMPATIBILITY_IMPORTS.items():
+        assert getattr(file_effects, compatibility_name) is owner_object
+
+
+def test_file_effects_rejects_broad_topic_aliases() -> None:
+    public_names = {
+        name
+        for name in vars(file_effects)
+        if not name.startswith("_") and name != "annotations"
+    }
+
+    assert public_names == set(file_effects.__all__)
+    assert public_names.isdisjoint(BROAD_TOPIC_ALIASES)
+    for alias in BROAD_TOPIC_ALIASES:
+        assert not hasattr(file_effects, alias)
 
 
 def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> None:
@@ -96,13 +102,8 @@ def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> No
     for filename in topic_owner_tests.values():
         assert (Path(__file__).parent / filename).exists()
 
-    compatibility_names = {
-        name
-        for owner_group in FACADE_COMPATIBILITY_IMPORTS.values()
-        for name in owner_group
-    }
-    assert "assert_idempotent_state" in compatibility_names
-    assert "FileEffectOracle" in compatibility_names
+    assert "assert_idempotent_state" in FACADE_COMPATIBILITY_IMPORTS
+    assert "FileEffectOracle" in FACADE_COMPATIBILITY_IMPORTS
 
 
 def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 
 from tools.install_sandbox import scenario_lifecycle
+from tools.install_sandbox import scenario_lifecycle_support
+from tools.install_sandbox import scenario_lifecycle_universal
 from tools.install_sandbox.platform_specs import UniversalUninstallScenarioSpec
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     HookFactory,
@@ -20,7 +22,7 @@ def test_universal_uninstall_scenario_writes_assertions_and_risk_artifacts(tmp_p
     scenarios = (make_scenario("first", "project"), make_scenario("second", "project"))
     selected = make_universal_uninstall_selection(scenarios)
 
-    result = scenario_lifecycle.run_universal_uninstall_scenario(selected, env={}, hooks=hooks)
+    result = scenario_lifecycle_universal.run_universal_uninstall_scenario(selected, env={}, hooks=hooks)
     artifact_dir = factory.output / "scenarios" / "universal-uninstall-project"
     assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
     risks = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
@@ -79,7 +81,7 @@ def test_universal_uninstall_scenario_derives_failure_from_installs_uninstall_an
 
     factory = HookFactory(tmp_path / "install-fails")
     factory.command_results = [1, 0, 0]
-    result = scenario_lifecycle.run_universal_uninstall_scenario(selected, env={}, hooks=factory.hooks())
+    result = scenario_lifecycle_universal.run_universal_uninstall_scenario(selected, env={}, hooks=factory.hooks())
     assertions = json.loads((factory.output / "scenarios" / "universal-uninstall-project" / "assertions.json").read_text(encoding="utf-8"))
     assert result["passed"] is False
     assert assertions["passed"] is False
@@ -87,7 +89,7 @@ def test_universal_uninstall_scenario_derives_failure_from_installs_uninstall_an
 
     factory = HookFactory(tmp_path / "uninstall-fails")
     factory.command_results = [0, 0, 1]
-    result = scenario_lifecycle.run_universal_uninstall_scenario(selected, env={}, hooks=factory.hooks())
+    result = scenario_lifecycle_universal.run_universal_uninstall_scenario(selected, env={}, hooks=factory.hooks())
     assertions = json.loads((factory.output / "scenarios" / "universal-uninstall-project" / "assertions.json").read_text(encoding="utf-8"))
     assert result["passed"] is False
     assert assertions["passed"] is False
@@ -96,7 +98,7 @@ def test_universal_uninstall_scenario_derives_failure_from_installs_uninstall_an
     factory = HookFactory(tmp_path / "checks-fail")
     factory.command_results = [0, 0, 0]
     factory.universal_check_ok = False
-    result = scenario_lifecycle.run_universal_uninstall_scenario(selected, env={}, hooks=factory.hooks())
+    result = scenario_lifecycle_universal.run_universal_uninstall_scenario(selected, env={}, hooks=factory.hooks())
     assertions = json.loads((factory.output / "scenarios" / "universal-uninstall-project" / "assertions.json").read_text(encoding="utf-8"))
     assert result["passed"] is False
     assert assertions["passed"] is False
@@ -119,7 +121,7 @@ def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_ri
         risk_note="declared lifecycle risk",
     )
 
-    result = scenario_lifecycle.run_universal_uninstall_scenario(
+    result = scenario_lifecycle_universal.run_universal_uninstall_scenario(
         selected,
         env={},
         hooks=factory.hooks(),
@@ -165,10 +167,10 @@ def test_run_universal_uninstall_scenario_preserves_legacy_scope_wrapper(tmp_pat
             calls.append(("run",))
             return {"id": spec.scenario_id, "passed": True}
 
-    monkeypatch.setattr(scenario_lifecycle, "universal_uninstall_spec_for_scope", select_spec)
-    monkeypatch.setattr(scenario_lifecycle, "UniversalUninstallLifecycle", FakeUniversalUninstallLifecycle)
+    monkeypatch.setattr(scenario_lifecycle_universal, "universal_uninstall_spec_for_scope", select_spec)
+    monkeypatch.setattr(scenario_lifecycle_universal, "UniversalUninstallLifecycle", FakeUniversalUninstallLifecycle)
 
-    result = scenario_lifecycle.run_universal_uninstall_scenario("workspace", scenarios, env, hooks=hooks)
+    result = scenario_lifecycle_universal.run_universal_uninstall_scenario("workspace", scenarios, env, hooks=hooks)
 
     assert result == {"id": "legacy-workspace-sweep", "passed": True}
     assert calls == [
@@ -176,3 +178,10 @@ def test_run_universal_uninstall_scenario_preserves_legacy_scope_wrapper(tmp_pat
         ("lifecycle", spec, scenarios, env, hooks),
         ("run",),
     ]
+
+
+def test_scenario_lifecycle_facade_re_exports_universal_uninstall_names() -> None:
+    assert scenario_lifecycle.UniversalUninstallOutcome is scenario_lifecycle_support.UniversalUninstallOutcome
+    assert scenario_lifecycle.UniversalUninstallLifecycle is scenario_lifecycle_universal.UniversalUninstallLifecycle
+    assert scenario_lifecycle.universal_uninstall_spec_for_scope is scenario_lifecycle_universal.universal_uninstall_spec_for_scope
+    assert scenario_lifecycle.run_universal_uninstall_scenario is scenario_lifecycle_universal.run_universal_uninstall_scenario

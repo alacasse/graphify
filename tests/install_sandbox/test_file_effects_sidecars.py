@@ -5,35 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import file_effects
+from tools.install_sandbox import file_effect_generated_artifacts
+from tools.install_sandbox import file_effect_oracle
 from tools.install_sandbox import file_effect_sidecars
+from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
 # Sandbox sidecar records live here. Direct sidecar status and path-planning
 # decisions remain in test_install_surface_core_sidecars.py.
-
-
-def test_file_effects_reexports_sidecar_compatibility_surface() -> None:
-    compatibility_names = (
-        "expected_skill_sidecar_relatives",
-        "installed_reference_sidecar_status",
-        "reference_sidecar_expectation",
-        "references_tmp_absence_status",
-        "skill_dir_for_entry",
-        "skill_reference_pointer_status",
-        "skill_references_relative",
-        "skill_references_tmp_relative",
-        "skill_sidecar_expectation",
-        "skill_version_status",
-        "skill_version_relative",
-        "stale_sidecar_seed_plans",
-        "uninstalled_skill_sidecar_status",
-    )
-
-    for name in compatibility_names:
-        assert getattr(file_effects, name) is getattr(file_effect_sidecars, name)
 
 
 @pytest.fixture
@@ -49,7 +30,7 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 
 
 @pytest.fixture
-def oracle(roots) -> file_effects.FileEffectOracle:
+def oracle(roots) -> file_effect_oracle.FileEffectOracle:
     def packaged_reference_resolution(platform: str) -> PackagedReferenceResolution:
         if platform == "claude":
             return resolution("available", ("query.md", "update.md"), "claude refs")
@@ -63,11 +44,11 @@ def oracle(roots) -> file_effects.FileEffectOracle:
             return resolution("not_directory", detail="not_directory /package/refs")
         return resolution("intentionally_absent", detail="absent refs")
 
-    return file_effects.FileEffectOracle(
+    return file_effect_oracle.FileEffectOracle(
         roots=roots,
         packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=lambda: "9.9.9",
-        manifest_prune_dirs=set(file_effects.GENERATED_COPY_EXCLUDES),
+        manifest_prune_dirs=set(file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES),
     )
 
 
@@ -433,7 +414,7 @@ def test_malformed_packaged_reference_statuses_fail_with_resolver_detail(oracle,
     ],
 )
 def test_sidecar_idempotency_state_tracks_packaged_reference_status(
-    oracle: file_effects.FileEffectOracle,
+    oracle: file_effect_oracle.FileEffectOracle,
     roots: dict[str, Path],
     platform: str,
     skill_relative: str,
@@ -462,7 +443,7 @@ def test_scenario_file_state_pins_expected_surface_and_tracked_sidecar_fingerpri
     expected_notes = section("project", "notes.md", preserve_user_content=True)
     skill_entry = expected_skill("home", ".codex/skills/graphify/SKILL.md")
     test_scenario = scenario("claude", expected_notes, skill_entry)
-    notes_text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\ninstalled\n"
+    notes_text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\ninstalled\n"
     skill_text = "See references/query.md.\n"
     version_text = "9.9.9"
     query_text = "# query\n"
@@ -574,7 +555,7 @@ def test_stale_sidecar_seed_only_targets_progressive_skills(oracle, roots) -> No
 
 @pytest.mark.parametrize("platform", ["claude", "empty", "missing", "not_directory"])
 def test_stale_sidecar_seed_targets_reference_directory_expectations(
-    oracle: file_effects.FileEffectOracle,
+    oracle: file_effect_oracle.FileEffectOracle,
     roots: dict[str, Path],
     platform: str,
 ) -> None:
@@ -620,7 +601,7 @@ def test_stale_sidecar_seed_targets_reference_directory_expectations(
 
 @pytest.mark.parametrize("platform", ["aider", "no_eligible"])
 def test_stale_sidecar_seed_skips_absent_reference_expectations(
-    oracle: file_effects.FileEffectOracle,
+    oracle: file_effect_oracle.FileEffectOracle,
     roots: dict[str, Path],
     platform: str,
 ) -> None:

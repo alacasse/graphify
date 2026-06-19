@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import file_effects
+from tools.install_sandbox import file_effect_generated_artifacts
+from tools.install_sandbox import file_effect_oracle
 from tools.install_sandbox import scenario_file_effects_adapter
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
@@ -26,7 +27,7 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 
 
 @pytest.fixture
-def oracle(roots) -> file_effects.FileEffectOracle:
+def oracle(roots) -> file_effect_oracle.FileEffectOracle:
     def packaged_reference_resolution(platform: str) -> PackagedReferenceResolution:
         if platform == "claude":
             return resolution("available", ("query.md", "update.md"), "claude refs")
@@ -40,11 +41,11 @@ def oracle(roots) -> file_effects.FileEffectOracle:
             return resolution("not_directory", detail="not_directory /package/refs")
         return resolution("intentionally_absent", detail="absent refs")
 
-    return file_effects.FileEffectOracle(
+    return file_effect_oracle.FileEffectOracle(
         roots=roots,
         packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=lambda: "9.9.9",
-        manifest_prune_dirs=set(file_effects.GENERATED_COPY_EXCLUDES),
+        manifest_prune_dirs=set(file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES),
     )
 
 
@@ -66,7 +67,7 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
     def equivalence_check(scenario_arg, env, artifact_dir):
         raise AssertionError("not used")
 
-    adapter = file_effects.ScenarioFileEffectsAdapter(oracle, write_manifest, equivalence_check)
+    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(oracle, write_manifest, equivalence_check)
     repeat_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md"))
     before = {
         "project/AGENTS.md": {"exists": True, "sha256": "a"},
@@ -124,16 +125,11 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
     ]
 
 
-def test_scenario_file_effects_adapter_owned_by_adapter_module() -> None:
-    assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
-    assert file_effects.check_record is scenario_file_effects_adapter.check_record
-
-
 def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(oracle) -> None:
     calls: list[tuple[object, ...]] = []
 
-    class RecordingOracle(file_effects.FileEffectOracle):
-        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+    class RecordingOracle(file_effect_oracle.FileEffectOracle):
+        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
             super().__init__(
                 roots=wrapped.roots,
                 packaged_reference_resolution=wrapped.packaged_reference_resolution,
@@ -163,7 +159,7 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
     def equivalence_check(scenario_arg, env, artifact_dir):
         raise AssertionError("not used")
 
-    adapter = file_effects.ScenarioFileEffectsAdapter(RecordingOracle(oracle), write_manifest, equivalence_check)
+    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(RecordingOracle(oracle), write_manifest, equivalence_check)
     runner = scenario("runner", ExpectedPath("project", "runner.md"))
     first = scenario("first", ExpectedPath("project", "first.md"))
     second = scenario("second", ExpectedPath("home", "second.md"))
@@ -196,8 +192,8 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
 def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots, tmp_path) -> None:
     calls: list[tuple[object, ...]] = []
 
-    class RecordingOracle(file_effects.FileEffectOracle):
-        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+    class RecordingOracle(file_effect_oracle.FileEffectOracle):
+        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
             super().__init__(
                 roots=wrapped.roots,
                 packaged_reference_resolution=wrapped.packaged_reference_resolution,
@@ -247,7 +243,7 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
         return [{"path": "equivalence", "ok": True, "detail": "equivalent"}]
 
     recording_oracle = RecordingOracle(oracle)
-    adapter = file_effects.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
+    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
     adapter_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md"))
     artifact_dir = tmp_path / "artifact"
     manifest_path = tmp_path / "manifest.json"
@@ -327,8 +323,8 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
 
 
 def test_scenario_file_effects_adapter_preserves_setup_method_shapes(oracle) -> None:
-    class RecordingOracle(file_effects.FileEffectOracle):
-        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+    class RecordingOracle(file_effect_oracle.FileEffectOracle):
+        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
             super().__init__(
                 roots=wrapped.roots,
                 packaged_reference_resolution=wrapped.packaged_reference_resolution,
@@ -351,7 +347,7 @@ def test_scenario_file_effects_adapter_preserves_setup_method_shapes(oracle) -> 
         raise AssertionError("not used")
 
     recording_oracle = RecordingOracle(oracle)
-    adapter = file_effects.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
+    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
     setup_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md"))
 
     assert adapter.seed_scenario_inputs(setup_scenario) is None

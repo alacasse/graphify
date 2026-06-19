@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import file_effects
+from tools.install_sandbox import file_effect_generated_artifacts
+from tools.install_sandbox import file_effect_oracle
 from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import file_effect_surfaces
 from tools.install_sandbox import install_surface_core
@@ -28,7 +29,7 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 
 
 @pytest.fixture
-def oracle(roots) -> file_effects.FileEffectOracle:
+def oracle(roots) -> file_effect_oracle.FileEffectOracle:
     def packaged_reference_resolution(platform: str) -> PackagedReferenceResolution:
         if platform == "claude":
             return resolution("available", ("query.md", "update.md"), "claude refs")
@@ -42,11 +43,11 @@ def oracle(roots) -> file_effects.FileEffectOracle:
             return resolution("not_directory", detail="not_directory /package/refs")
         return resolution("intentionally_absent", detail="absent refs")
 
-    return file_effects.FileEffectOracle(
+    return file_effect_oracle.FileEffectOracle(
         roots=roots,
         packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=lambda: "9.9.9",
-        manifest_prune_dirs=set(file_effects.GENERATED_COPY_EXCLUDES),
+        manifest_prune_dirs=set(file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES),
     )
 
 
@@ -101,7 +102,7 @@ def test_file_effect_surfaces_file_fingerprint_observes_paths_and_delegates_to_c
         install_surface_core.FileFingerprintObservation(exists=True, kind="dir")
     )
 
-    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{marker}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
+    text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{marker}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n"
     path = tmp_path / "notes.md"
     path.write_text(text, encoding="utf-8")
     data = text.encode("utf-8")
@@ -184,7 +185,7 @@ def test_install_surface_kind_status_contracts(oracle, roots) -> None:
 def test_assert_expected_files_uses_surface_module_installed_surface_observation(oracle, roots, monkeypatch) -> None:
     surface = section("project", "virtual-notes.md", preserve_user_content=True)
     path = roots["project"] / "virtual-notes.md"
-    observed_text = f"{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
     observed = install_surface_core.InstallSurfaceObservation(
         path=path,
         exists=True,
@@ -218,7 +219,7 @@ def test_assert_expected_files_uses_surface_module_installed_surface_observation
 def test_oracle_installed_surface_observation_override_affects_status_and_assertions(oracle, roots, monkeypatch) -> None:
     surface = section("project", "virtual-notes.md", preserve_user_content=True)
     path = roots["project"] / "virtual-notes.md"
-    observed_text = f"{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
     observed = install_surface_core.InstallSurfaceObservation(
         path=path,
         exists=True,
@@ -228,14 +229,14 @@ def test_oracle_installed_surface_observation_override_affects_status_and_assert
     calls: list[InstallSurface] = []
 
     def installed_surface_observation(
-        self: file_effects.FileEffectOracle,
+        self: file_effect_oracle.FileEffectOracle,
         entry: InstallSurface,
     ) -> install_surface_core.InstallSurfaceObservation:
         assert self is oracle
         calls.append(entry)
         return observed
 
-    monkeypatch.setattr(file_effects.FileEffectOracle, "installed_surface_observation", installed_surface_observation)
+    monkeypatch.setattr(file_effect_oracle.FileEffectOracle, "installed_surface_observation", installed_surface_observation)
 
     assert oracle.expected_entry_status(surface) == (True, "marker_count=1; user_content_preserved; stale_replaced=True")
     checks = oracle.assert_expected_files(scenario("unit", surface))
@@ -256,7 +257,7 @@ def test_oracle_installed_surface_observation_override_affects_status_and_assert
 def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
-    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
     path.write_text(text, encoding="utf-8")
     captured: dict[str, object] = {}
 
@@ -293,8 +294,8 @@ def test_oracle_renders_installed_surface_observations_as_assertion_records(orac
     )
     (roots["project"] / "wrong-kind").write_text("not a directory\n", encoding="utf-8")
     (roots["project"] / "notes.md").write_text(
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     (roots["project"] / "hooks.json").write_text(
@@ -361,11 +362,11 @@ def test_uninstall_surface_status_contracts(oracle, roots) -> None:
 
     text_section = section("project", "notes.md", preserve_user_content=True)
     notes_path = roots["project"] / "notes.md"
-    notes_path.write_text(f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n", encoding="utf-8")
+    notes_path.write_text(f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n## User Section\n", encoding="utf-8")
     assert oracle.uninstalled_entry_status(text_section) == (True, "graphify_removed=True; user_content_preserved=True")
 
     notes_path.write_text(
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
@@ -378,7 +379,7 @@ def test_assert_uninstalled_uses_surface_module_uninstalled_surface_observation(
         path=path,
         exists=True,
         is_file=True,
-        text=f"{file_effects.USER_SENTINEL}\n\n## User Section\n",
+        text=f"{file_effect_state.USER_SENTINEL}\n\n## User Section\n",
     )
     calls: list[InstallSurface] = []
 
@@ -411,19 +412,19 @@ def test_oracle_uninstalled_surface_observation_override_affects_status_and_asse
         path=path,
         exists=True,
         is_file=True,
-        text=f"{file_effects.USER_SENTINEL}\n\n## User Section\n",
+        text=f"{file_effect_state.USER_SENTINEL}\n\n## User Section\n",
     )
     calls: list[InstallSurface] = []
 
     def uninstalled_surface_observation(
-        self: file_effects.FileEffectOracle,
+        self: file_effect_oracle.FileEffectOracle,
         entry: InstallSurface,
     ) -> install_surface_core.UninstallSurfaceObservation:
         assert self is oracle
         calls.append(entry)
         return observed
 
-    monkeypatch.setattr(file_effects.FileEffectOracle, "uninstalled_surface_observation", uninstalled_surface_observation)
+    monkeypatch.setattr(file_effect_oracle.FileEffectOracle, "uninstalled_surface_observation", uninstalled_surface_observation)
 
     assert oracle.uninstalled_entry_status(surface) == (True, "graphify_removed=True; user_content_preserved=True")
     checks = oracle.assert_uninstalled(scenario("unit", surface))
@@ -444,7 +445,7 @@ def test_oracle_uninstalled_surface_observation_override_affects_status_and_asse
 def test_oracle_routes_uninstalled_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
-    text = f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n"
+    text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n## User Section\n"
     path.write_text(text, encoding="utf-8")
     captured: dict[str, object] = {}
 
@@ -477,12 +478,12 @@ def test_oracle_renders_uninstalled_surface_observations_as_assertion_records(or
     kept = InstallSurface("project", "kept.txt", remove_on_uninstall=False)
     (roots["project"] / "plain.txt").write_text("still installed\n", encoding="utf-8")
     (roots["project"] / "notes.md").write_text(
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     (roots["project"] / "repaired.md").write_text(
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n## User Section\n",
+        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n## User Section\n",
         encoding="utf-8",
     )
     (roots["project"] / "kept.txt").write_text("outside uninstall scope\n", encoding="utf-8")
@@ -533,8 +534,8 @@ def test_oracle_captures_fingerprint_observations_without_assertion_record_shape
     text_surface = section("project", "notes.md", preserve_user_content=True)
     (roots["project"] / "installed-dir").mkdir()
     notes_text = (
-        f"# Notes\n\n{file_effects.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n"
+        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n"
     )
     (roots["project"] / "notes.md").write_text(notes_text, encoding="utf-8")
     test_scenario = scenario("unit", missing, directory, text_surface)
@@ -562,7 +563,7 @@ def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(orac
     calls: list[tuple[Path, str | None, platform_specs.TextExpectation | None]] = []
 
     def file_fingerprint(
-        self: file_effects.FileEffectOracle,
+        self: file_effect_oracle.FileEffectOracle,
         observed_path: Path,
         marker: str | None = None,
         text_expectation: platform_specs.TextExpectation | None = None,
@@ -570,7 +571,7 @@ def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(orac
         calls.append((observed_path, marker, text_expectation))
         return {"observed": observed_path.name, "marker": marker}
 
-    monkeypatch.setattr(file_effects.FileEffectOracle, "file_fingerprint", file_fingerprint)
+    monkeypatch.setattr(file_effect_oracle.FileEffectOracle, "file_fingerprint", file_fingerprint)
 
     state = oracle.scenario_file_state(scenario("unit", surface))
 

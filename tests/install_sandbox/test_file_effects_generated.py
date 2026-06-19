@@ -4,12 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import file_effects
 from tools.install_sandbox import file_effect_generated_artifacts
+from tools.install_sandbox import file_effect_oracle
 from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import install_surface_generated
 from tools.install_sandbox import platform_specs
+from tools.install_sandbox import scenario_file_effects_adapter
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
@@ -30,14 +31,8 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
     return PackagedReferenceResolution(status, expected_names=names, detail=detail)
 
 
-def test_file_effects_exports_generated_artifact_pruned_file_walk() -> None:
-    from tools.install_sandbox.file_effects import pruned_file_walk
-
-    assert pruned_file_walk is file_effect_generated_artifacts.pruned_file_walk
-
-
 @pytest.fixture
-def oracle(roots) -> file_effects.FileEffectOracle:
+def oracle(roots) -> file_effect_oracle.FileEffectOracle:
     def packaged_reference_resolution(platform: str) -> PackagedReferenceResolution:
         if platform == "claude":
             return resolution("available", ("query.md", "update.md"), "claude refs")
@@ -51,11 +46,11 @@ def oracle(roots) -> file_effects.FileEffectOracle:
             return resolution("not_directory", detail="not_directory /package/refs")
         return resolution("intentionally_absent", detail="absent refs")
 
-    return file_effects.FileEffectOracle(
+    return file_effect_oracle.FileEffectOracle(
         roots=roots,
         packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=lambda: "9.9.9",
-        manifest_prune_dirs=set(file_effects.GENERATED_COPY_EXCLUDES),
+        manifest_prune_dirs=set(file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES),
     )
 
 
@@ -92,11 +87,11 @@ def test_seeded_stale_section_must_be_replaced(oracle, roots) -> None:
 
     oracle.seed_user_owned_content(test_scenario)
     seeded = roots["project"] / "random-notes.txt"
-    assert file_effects.USER_SENTINEL in seeded.read_text(encoding="utf-8")
-    assert file_effects.STALE_GRAPHIFY_SENTINEL in seeded.read_text(encoding="utf-8")
+    assert file_effect_state.USER_SENTINEL in seeded.read_text(encoding="utf-8")
+    assert file_effect_state.STALE_GRAPHIFY_SENTINEL in seeded.read_text(encoding="utf-8")
     assert oracle.assert_expected_files(test_scenario)[0]["ok"] is False
 
-    seeded.write_text(f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n", encoding="utf-8")
+    seeded.write_text(f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n", encoding="utf-8")
     assert oracle.assert_expected_files(test_scenario)[0]["ok"] is True
 
 
@@ -111,11 +106,11 @@ def test_text_policy_is_declared_not_inferred_from_known_file_names(oracle, root
     assert (roots["project"] / "not-a-platform-file.txt").exists()
 
     (roots["project"] / "AGENTS.md").write_text(
-        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     (roots["project"] / "not-a-platform-file.txt").write_text(
-        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
 
@@ -136,7 +131,7 @@ def test_legacy_expected_path_with_text_policy_dispatches_as_text_section(oracle
 
     oracle.seed_user_owned_content(test_scenario)
 
-    assert (roots["project"] / "notes.txt").read_text(encoding="utf-8") == f"# User Notes\n\n{file_effects.USER_SENTINEL}\n"
+    assert (roots["project"] / "notes.txt").read_text(encoding="utf-8") == f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n"
 
 
 def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(oracle, roots) -> None:
@@ -163,12 +158,12 @@ def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(or
     oracle.seed_user_owned_content(test_scenario)
 
     assert (roots["project"] / "stale-notes.md").read_text(encoding="utf-8") == (
-        f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n\n"
+        f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n\n"
         "## User Section\nThis section should survive Graphify install and uninstall.\n"
     )
     assert (roots["project"] / "legacy-notes.txt").read_text(encoding="utf-8") == (
-        f"# User Notes\n\n{file_effects.USER_SENTINEL}\n"
+        f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n"
     )
     assert not (roots["project"] / "no-preserve.md").exists()
     assert not (roots["project"] / "plain.txt").exists()
@@ -183,8 +178,8 @@ def test_file_effect_state_seeds_user_owned_content(roots) -> None:
     file_effect_state.seed_user_owned_content(test_scenario, roots.__getitem__)
 
     assert (roots["project"] / "stale-notes.md").read_text(encoding="utf-8") == (
-        f"# User Notes\n\n{file_effects.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effects.STALE_GRAPHIFY_SENTINEL}\n\n"
+        f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
+        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n\n"
         "## User Section\nThis section should survive Graphify install and uninstall.\n"
     )
 
@@ -334,8 +329,8 @@ def test_copy_generated_files_keeps_walking_decisions_and_copying_in_oracle(orac
 
     monkeypatch.setattr(file_effect_generated_artifacts.shutil, "copy2", copy2)
 
-    class RecordingCopyOracle(file_effects.FileEffectOracle):
-        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+    class RecordingCopyOracle(file_effect_oracle.FileEffectOracle):
+        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
             super().__init__(
                 roots=wrapped.roots,
                 packaged_reference_resolution=wrapped.packaged_reference_resolution,
@@ -431,8 +426,8 @@ def test_universal_uninstall_derives_expected_keys_through_installer_core(oracle
     def equivalence_check(scenario_arg, env, artifact_dir):
         raise AssertionError("not used")
 
-    class RecordingOracle(file_effects.FileEffectOracle):
-        def __init__(self, wrapped: file_effects.FileEffectOracle) -> None:
+    class RecordingOracle(file_effect_oracle.FileEffectOracle):
+        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
             super().__init__(
                 roots=wrapped.roots,
                 packaged_reference_resolution=wrapped.packaged_reference_resolution,
@@ -449,7 +444,7 @@ def test_universal_uninstall_derives_expected_keys_through_installer_core(oracle
             return []
 
     recording_oracle = RecordingOracle(oracle)
-    adapter = file_effects.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
+    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
     runner = scenario("unit", ExpectedPath("project", "runner.md"))
     installed = (
         scenario("first", ExpectedPath("project", "first.md")),

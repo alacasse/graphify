@@ -129,7 +129,12 @@ def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
         [
             sys.executable,
             "-c",
-            "from tools.install_sandbox.spec_loader import load_registry_from_yaml; print(load_registry_from_yaml.__name__)",
+            (
+                "import sys; "
+                "from tools.install_sandbox.spec_loader import load_registry_from_yaml; "
+                "print(load_registry_from_yaml.__name__); "
+                "print('tools.install_sandbox.platform_specs' in sys.modules)"
+            ),
         ],
         check=False,
         capture_output=True,
@@ -137,7 +142,7 @@ def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "load_registry_from_yaml"
+    assert result.stdout.splitlines() == ["load_registry_from_yaml", "False"]
 
 
 def test_default_registry_discovers_product_yaml_files_in_filename_order() -> None:

@@ -3,20 +3,50 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from .expected_effects import effect_type_name
-    from . import platform_specs as specs
-    from .platform_specs import InstallTargetCatalog, InstallTargetSpec
+    from .expected_effects import (
+        ExpectedPath,
+        JsonExpectation,
+        JsonHookExpectation,
+        JsonPluginExpectation,
+        SkillSidecarExpectation,
+        TextExpectation,
+        effect_type_name,
+    )
+    from .install_target_catalog import InstallTargetCatalog
+    from .install_target_models import (
+        GeneratedFileExpectation,
+        InstallCommandVariant,
+        InstallTargetSpec,
+        ReferenceBundle,
+        ScopeSpec,
+        TargetRuntimeValidationSpec,
+    )
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import effect_type_name  # type: ignore[no-redef]
-    import platform_specs as specs  # type: ignore[no-redef]
-    from platform_specs import InstallTargetCatalog, InstallTargetSpec  # type: ignore[no-redef]
+    from expected_effects import (  # type: ignore[no-redef]
+        ExpectedPath,
+        JsonExpectation,
+        JsonHookExpectation,
+        JsonPluginExpectation,
+        SkillSidecarExpectation,
+        TextExpectation,
+        effect_type_name,
+    )
+    from install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
+    from install_target_models import (  # type: ignore[no-redef]
+        GeneratedFileExpectation,
+        InstallCommandVariant,
+        InstallTargetSpec,
+        ReferenceBundle,
+        ScopeSpec,
+        TargetRuntimeValidationSpec,
+    )
 
 
 def _command(command: tuple[str, ...] | None) -> list[str] | None:
     return None if command is None else list(command)
 
 
-def _text_expectation(expectation: specs.TextExpectation) -> dict[str, object]:
+def _text_expectation(expectation: TextExpectation) -> dict[str, object]:
     return {
         "preserve_user_content": expectation.preserve_user_content,
         "repair_stale_graphify_section": expectation.repair_stale_graphify_section,
@@ -25,7 +55,7 @@ def _text_expectation(expectation: specs.TextExpectation) -> dict[str, object]:
     }
 
 
-def _json_hook(expectation: specs.JsonHookExpectation) -> dict[str, object]:
+def _json_hook(expectation: JsonHookExpectation) -> dict[str, object]:
     return {
         "event": expectation.event,
         "matcher": expectation.matcher,
@@ -34,7 +64,7 @@ def _json_hook(expectation: specs.JsonHookExpectation) -> dict[str, object]:
     }
 
 
-def _json_plugin(expectation: specs.JsonPluginExpectation) -> dict[str, object]:
+def _json_plugin(expectation: JsonPluginExpectation) -> dict[str, object]:
     return {
         "expected_entry": expectation.expected_entry,
         "allow_file_uri": expectation.allow_file_uri,
@@ -42,7 +72,7 @@ def _json_plugin(expectation: specs.JsonPluginExpectation) -> dict[str, object]:
     }
 
 
-def _json_expectation(expectation: specs.JsonExpectation | None) -> dict[str, object] | None:
+def _json_expectation(expectation: JsonExpectation | None) -> dict[str, object] | None:
     if expectation is None:
         return None
     return {
@@ -52,7 +82,7 @@ def _json_expectation(expectation: specs.JsonExpectation | None) -> dict[str, ob
     }
 
 
-def _skill_sidecar(expectation: specs.SkillSidecarExpectation | None) -> dict[str, object] | None:
+def _skill_sidecar(expectation: SkillSidecarExpectation | None) -> dict[str, object] | None:
     if expectation is None:
         return None
     return {
@@ -63,7 +93,7 @@ def _skill_sidecar(expectation: specs.SkillSidecarExpectation | None) -> dict[st
     }
 
 
-def _generated_file_expectation(expectation: specs.GeneratedFileExpectation) -> dict[str, object]:
+def _generated_file_expectation(expectation: GeneratedFileExpectation) -> dict[str, object]:
     return {
         "relative_substrings": list(expectation.relative_substrings),
         "text_suffixes": list(expectation.text_suffixes),
@@ -73,7 +103,7 @@ def _generated_file_expectation(expectation: specs.GeneratedFileExpectation) -> 
     }
 
 
-def _expected_path(path: specs.ExpectedPath) -> dict[str, object]:
+def _expected_path(path: ExpectedPath) -> dict[str, object]:
     return {
         "effect_type": effect_type_name(path),
         "root": path.root,
@@ -88,11 +118,11 @@ def _expected_path(path: specs.ExpectedPath) -> dict[str, object]:
     }
 
 
-def _install_variant(variant: specs.InstallCommandVariant) -> dict[str, object]:
+def _install_variant(variant: InstallCommandVariant) -> dict[str, object]:
     return {"label": variant.label, "command": list(variant.command)}
 
 
-def _scope_spec(scope: specs.ScopeSpec) -> dict[str, object]:
+def _scope_spec(scope: ScopeSpec) -> dict[str, object]:
     return {
         "install_command": list(scope.install_command),
         "uninstall_command": _command(scope.uninstall_command),
@@ -106,11 +136,11 @@ def _scope_spec(scope: specs.ScopeSpec) -> dict[str, object]:
     }
 
 
-def _reference_bundle(bundle: specs.ReferenceBundle) -> dict[str, object]:
+def _reference_bundle(bundle: ReferenceBundle) -> dict[str, object]:
     return {"name": bundle.name, "required_package_relative": bundle.required_package_relative}
 
 
-def _runtime_validation(validation: specs.TargetRuntimeValidationSpec) -> dict[str, object]:
+def _runtime_validation(validation: TargetRuntimeValidationSpec) -> dict[str, object]:
     return {
         "section_title": validation.section_title,
         "status": validation.status,

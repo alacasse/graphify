@@ -14,13 +14,65 @@ else:
     _YAML_IMPORT_ERROR = None
 
 try:
-    from . import platform_specs as model
-    from .platform_specs import InstallTargetCatalog, InstallTargetSpec
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+    from .install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario
+    from .install_target_models import (
+        GRAPHIFY_MARKER,
+        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+        MIXED_SCOPE_PROJECT_WIRING_NOTE,
+        PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+        SIMULATED_LINUX_LAYOUT_NOTE,
+        DisposableArtifactScenarioSpec,
+        DisposableSeedFile,
+        FileEffect,
+        GeneratedFileExpectation,
+        InstallCommandVariant,
+        InstallSurface,
+        InstallTargetSpec,
+        JsonExpectation,
+        JsonHookExpectation,
+        JsonHooksEffect,
+        JsonPluginEffect,
+        JsonPluginExpectation,
+        PlatformSpec,
+        ReferenceBundle,
+        ScopeSpec,
+        SkillEffect,
+        TargetRuntimeValidationSpec,
+        TextExpectation,
+        TextSectionEffect,
+        UniversalUninstallScenarioSpec,
+    )
 except ImportError:  # pragma: no cover - direct script import fallback
-    import platform_specs as model  # type: ignore[no-redef]
-    from platform_specs import InstallTargetCatalog, InstallTargetSpec  # type: ignore[no-redef]
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
+    from install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario  # type: ignore[no-redef]
+    from install_target_models import (  # type: ignore[no-redef]
+        GRAPHIFY_MARKER,
+        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+        MIXED_SCOPE_PROJECT_WIRING_NOTE,
+        PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+        SIMULATED_LINUX_LAYOUT_NOTE,
+        DisposableArtifactScenarioSpec,
+        DisposableSeedFile,
+        FileEffect,
+        GeneratedFileExpectation,
+        InstallCommandVariant,
+        InstallSurface,
+        InstallTargetSpec,
+        JsonExpectation,
+        JsonHookExpectation,
+        JsonHooksEffect,
+        JsonPluginEffect,
+        JsonPluginExpectation,
+        PlatformSpec,
+        ReferenceBundle,
+        ScopeSpec,
+        SkillEffect,
+        TargetRuntimeValidationSpec,
+        TextExpectation,
+        TextSectionEffect,
+        UniversalUninstallScenarioSpec,
+    )
 
 
 SCHEMA_VERSION = 1
@@ -38,10 +90,10 @@ _USER_OWNED_TEXT_SECTION_RELATIVES = {
 }
 _CLAUDE_HOME_INSTRUCTION_RELATIVE = ".claude/CLAUDE.md"
 _KNOWN_SCOPE_RISK_NOTES = {
-    model.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
-    model.MIXED_SCOPE_PROJECT_WIRING_NOTE,
-    model.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
-    model.SIMULATED_LINUX_LAYOUT_NOTE,
+    PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+    MIXED_SCOPE_PROJECT_WIRING_NOTE,
+    MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+    SIMULATED_LINUX_LAYOUT_NOTE,
 }
 
 
@@ -163,14 +215,14 @@ def _hook_detail_name(hook: Mapping[str, Any], hook_count: int, context: str) ->
     return f"{stem}_hook_present"
 
 
-def _json_hooks(effect: Mapping[str, Any], context: str) -> tuple[model.JsonHookExpectation, ...]:
+def _json_hooks(effect: Mapping[str, Any], context: str) -> tuple[JsonHookExpectation, ...]:
     hooks = _sequence(effect.get("hooks"), f"{context}.hooks")
-    parsed: list[model.JsonHookExpectation] = []
+    parsed: list[JsonHookExpectation] = []
     for index, hook_value in enumerate(hooks):
         hook = _mapping(hook_value, f"{context}.hooks[{index}]")
         fragments = hook.get("required_fragments", ["graphify"])
         parsed.append(
-            model.JsonHookExpectation(
+            JsonHookExpectation(
                 event=_string(hook.get("event"), f"{context}.hooks[{index}].event"),
                 matcher=_string(hook.get("matcher"), f"{context}.hooks[{index}].matcher"),
                 detail_name=_hook_detail_name(hook, len(hooks), f"{context}.hooks[{index}]"),
@@ -219,38 +271,38 @@ def _text_section_removes_on_uninstall(root: str, relative: str, declared_remove
     return True
 
 
-def _expected_path(effect_value: object, context: str, *, expected_values: list[Any] | None = None) -> model.InstallSurface:
+def _expected_path(effect_value: object, context: str, *, expected_values: list[Any] | None = None) -> InstallSurface:
     effect = _mapping(effect_value, context)
     root, relative, declared_remove_on_uninstall = _effect_common(effect, context)
     kind = _effect_kind(effect, relative, context)
 
     if kind == "skill":
-        path = model.SkillEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
+        path = SkillEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
     elif kind == "text_section":
-        marker = _string(effect.get("marker", model.GRAPHIFY_MARKER), f"{context}.marker")
+        marker = _string(effect.get("marker", GRAPHIFY_MARKER), f"{context}.marker")
         preserve_user_content = _bool(effect.get("preserve_user_content", _text_section_preserves_user_content(root, relative)), f"{context}.preserve_user_content")
         remove_on_uninstall = _text_section_removes_on_uninstall(
             root,
             relative,
             _bool(effect.get("remove_on_uninstall"), f"{context}.remove_on_uninstall") if "remove_on_uninstall" in effect else None,
         )
-        path = model.TextSectionEffect(
+        path = TextSectionEffect(
             root,
             relative,
             marker=marker,
             remove_on_uninstall=remove_on_uninstall,
-            text_expectation=model.TextExpectation(
+            text_expectation=TextExpectation(
                 preserve_user_content=preserve_user_content,
-                repair_stale_graphify_section=_bool(effect.get("repair_stale_graphify_section", marker == model.GRAPHIFY_MARKER), f"{context}.repair_stale_graphify_section"),
+                repair_stale_graphify_section=_bool(effect.get("repair_stale_graphify_section", marker == GRAPHIFY_MARKER), f"{context}.repair_stale_graphify_section"),
                 require_user_content_on_uninstall=preserve_user_content,
             ),
         )
     elif kind == "json_hooks":
-        path = model.JsonHooksEffect(
+        path = JsonHooksEffect(
             root,
             relative,
             remove_on_uninstall=declared_remove_on_uninstall,
-            json_expectation=model.JsonExpectation(
+            json_expectation=JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
                 hooks=_json_hooks(effect, context),
             ),
@@ -258,41 +310,41 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
     elif kind == "json_plugin":
         if expected_values is None:
             _fail(context, "json_plugin derivation requires scope expected context")
-        path = model.JsonPluginEffect(
+        path = JsonPluginEffect(
             root,
             relative,
             remove_on_uninstall=declared_remove_on_uninstall,
-            json_expectation=model.JsonExpectation(
+            json_expectation=JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
-                plugin=model.JsonPluginExpectation(
+                plugin=JsonPluginExpectation(
                     expected_entry=_paired_plugin_relative(effect, expected_values, context),
                     allow_file_uri=_bool(effect.get("allow_file_uri", False), f"{context}.allow_file_uri"),
                 ),
             ),
         )
     else:
-        path = model.FileEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
+        path = FileEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)
 
     return path
 
 
-def _install_variants(value: object, context: str) -> tuple[model.InstallCommandVariant, ...]:
+def _install_variants(value: object, context: str) -> tuple[InstallCommandVariant, ...]:
     variants = _sequence(value, context)
     labels: set[str] = set()
-    parsed: list[model.InstallCommandVariant] = []
+    parsed: list[InstallCommandVariant] = []
     for index, variant_value in enumerate(variants):
         variant = _mapping(variant_value, f"{context}[{index}]")
         label = _string(variant.get("label"), f"{context}[{index}].label")
         if label in labels:
             _fail(f"{context}[{index}].label", f"duplicate install variant label: {label}")
         labels.add(label)
-        parsed.append(model.InstallCommandVariant(label, _command(variant.get("command"), f"{context}[{index}].command")))
+        parsed.append(InstallCommandVariant(label, _command(variant.get("command"), f"{context}[{index}].command")))
     return tuple(parsed)
 
 
-def _generated_file_expectation(value: object, context: str) -> model.GeneratedFileExpectation:
+def _generated_file_expectation(value: object, context: str) -> GeneratedFileExpectation:
     data = _mapping(value, context)
-    return model.GeneratedFileExpectation(
+    return GeneratedFileExpectation(
         relative_substrings=_string_list(data.get("relative_substrings", ["graphify"]), f"{context}.relative_substrings"),
         text_suffixes=_string_list(data.get("text_suffixes", [".json", ".js", ".md", ".mdc", ".txt", ""]), f"{context}.text_suffixes"),
         content_markers=_string_list(data.get("content_markers", ["graphify"]), f"{context}.content_markers"),
@@ -305,15 +357,15 @@ def _dedupe(items: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for item in items if item))
 
 
-def _scope_locality(scope_name: str, expected: tuple[model.InstallSurface, ...]) -> tuple[str | None, tuple[str, ...]]:
+def _scope_locality(scope_name: str, expected: tuple[InstallSurface, ...]) -> tuple[str | None, tuple[str, ...]]:
     roots = {entry.root for entry in expected}
     if scope_name == "project":
         if roots <= {"project"}:
             return None, ("project",)
-        return model.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
+        return MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
     if roots <= {"home"}:
         return None, ("home",)
-    return model.MIXED_SCOPE_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
+    return MIXED_SCOPE_PROJECT_WIRING_NOTE, _WIDENED_SCOPE_ROOTS
 
 
 def _scope_risk_notes(
@@ -325,11 +377,11 @@ def _scope_risk_notes(
 ) -> tuple[str, ...]:
     notes: tuple[str, ...] = explicit_notes
     if lacks_user_uninstall:
-        notes = (model.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, *notes)
+        notes = (PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, *notes)
     if locality_note is not None:
         notes = (locality_note, *notes)
     if simulated_linux_layout:
-        notes = (*notes, model.SIMULATED_LINUX_LAYOUT_NOTE)
+        notes = (*notes, SIMULATED_LINUX_LAYOUT_NOTE)
     return _dedupe(notes)
 
 
@@ -343,7 +395,7 @@ def _direct_project_install_command(platform_name: str) -> tuple[str, ...]:
     return ("graphify", platform_name, "install", "--project")
 
 
-def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> model.ScopeSpec:
+def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> ScopeSpec:
     data = _mapping(value, context)
     if scope_name not in _SCOPE_NAMES:
         _fail(context, f"invalid platform scope: {scope_name}")
@@ -382,7 +434,7 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
     elif scope_name == "project" and (install_command is None or install_command == _generic_install_command(platform_name, scope_name)):
         equivalent_install_command = _direct_project_install_command(platform_name)
 
-    scope = model._scenario(  # type: ignore[attr-defined]
+    scope = _scenario(
         platform_name,
         scope_name,
         expected,
@@ -405,21 +457,21 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
     return scope
 
 
-def _reference_bundle(value: object, context: str) -> model.ReferenceBundle:
+def _reference_bundle(value: object, context: str) -> ReferenceBundle:
     if isinstance(value, str):
-        return model.ReferenceBundle(value)
+        return ReferenceBundle(value)
     data = _mapping(value, context)
     required = data.get("required_package_relative")
-    return model.ReferenceBundle(
+    return ReferenceBundle(
         _string(data.get("name"), f"{context}.name"),
         required_package_relative=None if required is None else _string(required, f"{context}.required_package_relative"),
     )
 
 
-def _runtime_validation(value: object, context: str) -> model.TargetRuntimeValidationSpec:
+def _runtime_validation(value: object, context: str) -> TargetRuntimeValidationSpec:
     data = _mapping(value, context)
     evidence = data.get("evidence_path")
-    return model.TargetRuntimeValidationSpec(
+    return TargetRuntimeValidationSpec(
         section_title=_string(data.get("section_title"), f"{context}.section_title"),
         status=_string(data.get("status"), f"{context}.status"),
         strategy=_string(data.get("strategy"), f"{context}.strategy"),
@@ -429,7 +481,7 @@ def _runtime_validation(value: object, context: str) -> model.TargetRuntimeValid
     )
 
 
-def _platform_runtime_validations(data: Mapping[str, Any], context: str) -> tuple[model.TargetRuntimeValidationSpec, ...]:
+def _platform_runtime_validations(data: Mapping[str, Any], context: str) -> tuple[TargetRuntimeValidationSpec, ...]:
     return tuple(
         _runtime_validation(validation, f"{context}.target_runtime_validation[{index}]")
         for index, validation in enumerate(_sequence(data.get("target_runtime_validation", []), f"{context}.target_runtime_validation"))
@@ -482,7 +534,7 @@ def _platform_spec(
         _reference_bundle(bundle, f"{context}.reference_bundles[{index}]")
         for index, bundle in enumerate(_sequence(data.get("reference_bundles", []), f"{context}.reference_bundles"))
     )
-    return model.PlatformSpec(
+    return PlatformSpec(
         name=name,
         user_skill=user_skill,
         project_skill=project_skill,
@@ -496,10 +548,10 @@ def _platform_spec(
     )
 
 
-def _universal_uninstall(value: object, context: str) -> model.UniversalUninstallScenarioSpec:
+def _universal_uninstall(value: object, context: str) -> UniversalUninstallScenarioSpec:
     if isinstance(value, str):
         if value == "user":
-            return model.UniversalUninstallScenarioSpec(
+            return UniversalUninstallScenarioSpec(
                 scenario_id="universal-uninstall-user",
                 platform_label="multiple",
                 scope="user",
@@ -508,7 +560,7 @@ def _universal_uninstall(value: object, context: str) -> model.UniversalUninstal
                 eligible_platform_scope="user",
             )
         if value == "project":
-            return model.UniversalUninstallScenarioSpec(
+            return UniversalUninstallScenarioSpec(
                 scenario_id="universal-uninstall-project",
                 platform_label="multiple",
                 scope="project",
@@ -520,7 +572,7 @@ def _universal_uninstall(value: object, context: str) -> model.UniversalUninstal
     data = _mapping(value, context)
     cwd_root = _string(data.get("cwd_root"), f"{context}.cwd_root")
     _validate_cwd_root(cwd_root, f"{context}.cwd_root")
-    return model.UniversalUninstallScenarioSpec(
+    return UniversalUninstallScenarioSpec(
         scenario_id=_string(data.get("scenario_id"), f"{context}.scenario_id"),
         platform_label=_string(data.get("platform_label"), f"{context}.platform_label"),
         scope=_string(data.get("scope"), f"{context}.scope"),
@@ -533,14 +585,14 @@ def _universal_uninstall(value: object, context: str) -> model.UniversalUninstal
     )
 
 
-def _disposable_seed(value: object, context: str) -> model.DisposableSeedFile:
+def _disposable_seed(value: object, context: str) -> DisposableSeedFile:
     data = _mapping(value, context)
     relative = _string(data.get("relative"), f"{context}.relative")
     _validate_relative(relative, f"{context}.relative")
-    return model.DisposableSeedFile(relative, _string(data.get("content"), f"{context}.content"))
+    return DisposableSeedFile(relative, _string(data.get("content"), f"{context}.content"))
 
 
-def _disposable_artifact(value: object, context: str) -> model.DisposableArtifactScenarioSpec:
+def _disposable_artifact(value: object, context: str) -> DisposableArtifactScenarioSpec:
     data = _mapping(value, context)
     cwd_root = _string(data.get("cwd_root"), f"{context}.cwd_root")
     _validate_cwd_root(cwd_root, f"{context}.cwd_root")
@@ -548,7 +600,7 @@ def _disposable_artifact(value: object, context: str) -> model.DisposableArtifac
     _validate_expected_root(disposable_path_root, f"{context}.disposable_path_root")
     disposable_path_relative = _string(data.get("disposable_path_relative"), f"{context}.disposable_path_relative")
     _validate_relative(disposable_path_relative, f"{context}.disposable_path_relative")
-    return model.DisposableArtifactScenarioSpec(
+    return DisposableArtifactScenarioSpec(
         scenario_id=_string(data.get("scenario_id"), f"{context}.scenario_id"),
         platform_label=_string(data.get("platform_label"), f"{context}.platform_label"),
         scope=_string(data.get("scope"), f"{context}.scope"),
@@ -596,7 +648,7 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallT
         )
     else:
         disposable = ()
-    loaded = model.ScenarioRegistry(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
+    loaded = ScenarioRegistry(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
     loaded.validate_roots({root.name for root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots})
     return loaded
 

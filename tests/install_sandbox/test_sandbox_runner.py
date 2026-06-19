@@ -27,6 +27,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "agent_summary.py",
         "expected_effects.py",
         "file_effect_generated_artifacts.py",
+        "file_effect_oracle.py",
         "file_effect_sidecars.py",
         "file_effect_state.py",
         "file_effect_surfaces.py",

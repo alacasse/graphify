@@ -5,6 +5,7 @@ from pathlib import Path
 
 from tools.install_sandbox import expected_effects
 from tools.install_sandbox import file_effect_generated_artifacts
+from tools.install_sandbox import file_effect_oracle
 from tools.install_sandbox import file_effect_sidecars
 from tools.install_sandbox import file_effect_state
 from tools.install_sandbox import file_effect_surfaces
@@ -62,12 +63,9 @@ FACADE_COMPATIBILITY_IMPORTS = {
         "ScenarioFileEffectsAdapter": scenario_file_effects_adapter.ScenarioFileEffectsAdapter,
         "check_record": scenario_file_effects_adapter.check_record,
     },
-}
-
-
-FACADE_COMPATIBILITY_WRAPPERS = {
-    "state": {
-        "assert_idempotent_state": file_effect_state.assert_idempotent_state,
+    "oracle": {
+        "FileEffectOracle": file_effect_oracle.FileEffectOracle,
+        "assert_idempotent_state": file_effect_oracle.assert_idempotent_state,
     },
 }
 
@@ -77,28 +75,14 @@ def test_file_effects_preserves_moved_compatibility_imports() -> None:
     assert file_effects.core_expected_manifest_relatives is file_effect_state.expected_manifest_relatives
     assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
     assert file_effects.check_record is scenario_file_effects_adapter.check_record
+    assert file_effects.FileEffectOracle is file_effect_oracle.FileEffectOracle
+    assert file_effects.assert_idempotent_state is file_effect_oracle.assert_idempotent_state
 
 
 def test_file_effects_is_compatibility_facade_over_topic_modules() -> None:
     for owner_group in FACADE_COMPATIBILITY_IMPORTS.values():
         for compatibility_name, owner_object in owner_group.items():
             assert getattr(file_effects, compatibility_name) is owner_object
-
-
-def test_file_effects_is_compatibility_facade_over_topic_wrapper_modules(monkeypatch) -> None:
-    calls = []
-
-    def replacement_assert_idempotent_state(before, after):
-        calls.append((before, after))
-        return [{"ok": True, "detail": "delegated"}]
-
-    monkeypatch.setattr(file_effect_state, "assert_idempotent_state", replacement_assert_idempotent_state)
-
-    before = {"project/AGENTS.md": {"exists": True}}
-    after = {"project/AGENTS.md": {"exists": True}}
-
-    assert file_effects.assert_idempotent_state(before, after) == [{"ok": True, "detail": "delegated"}]
-    assert calls == [(before, after)]
 
 
 def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> None:
@@ -116,13 +100,9 @@ def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> No
         name
         for owner_group in FACADE_COMPATIBILITY_IMPORTS.values()
         for name in owner_group
-    } | {
-        name
-        for owner_group in FACADE_COMPATIBILITY_WRAPPERS.values()
-        for name in owner_group
     }
     assert "assert_idempotent_state" in compatibility_names
-    assert compatibility_names.isdisjoint({"FileEffectOracle"})
+    assert "FileEffectOracle" in compatibility_names
 
 
 def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
@@ -197,9 +177,11 @@ def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
         "should_seed_user_content",
     }
 
+    assert file_effects.FileEffectOracle is file_effect_oracle.FileEffectOracle
+
     oracle_methods = {
         name
-        for name, value in vars(file_effects.FileEffectOracle).items()
+        for name, value in vars(file_effect_oracle.FileEffectOracle).items()
         if callable(value) and not name.startswith("_")
     }
 

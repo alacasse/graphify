@@ -38,6 +38,7 @@ COPY agent_summary.py /runner/agent_summary.py
 COPY command_runner.py /runner/command_runner.py
 COPY expected_effects.py /runner/expected_effects.py
 COPY file_effect_generated_artifacts.py /runner/file_effect_generated_artifacts.py
+COPY file_effect_oracle.py /runner/file_effect_oracle.py
 COPY file_effect_sidecars.py /runner/file_effect_sidecars.py
 COPY file_effect_state.py /runner/file_effect_state.py
 COPY file_effect_surfaces.py /runner/file_effect_surfaces.py

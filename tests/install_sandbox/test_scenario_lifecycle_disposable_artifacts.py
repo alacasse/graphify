@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import scenario_lifecycle
+from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_disposable
 from tools.install_sandbox.platform_specs import DisposableArtifactScenarioSpec, DisposableSeedFile
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     HookFactory,
@@ -28,7 +28,7 @@ def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp
             graphify_out.rmdir()
         return result
 
-    result = scenario_lifecycle.run_disposable_artifact_scenario(spec, {}, hooks=factory.hooks(run_capture=purge_run_capture))
+    result = scenario_lifecycle_disposable.run_disposable_artifact_scenario(spec, {}, hooks=factory.hooks(run_capture=purge_run_capture))
     purge_scenario_id = spec.scenario_id
     artifact_dir = factory.output / "scenarios" / purge_scenario_id
     assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
@@ -82,7 +82,7 @@ def test_purge_scenario_derives_failure_from_command_exit_and_removal(tmp_path) 
         graphify_out.rmdir()
         return result
 
-    result = scenario_lifecycle.run_disposable_artifact_scenario(spec, {}, hooks=factory.hooks(run_capture=failing_purge_removes_graph))
+    result = scenario_lifecycle_disposable.run_disposable_artifact_scenario(spec, {}, hooks=factory.hooks(run_capture=failing_purge_removes_graph))
     assertions = json.loads((factory.output / "scenarios" / spec.scenario_id / "assertions.json").read_text(encoding="utf-8"))
     assert result["passed"] is False
     assert assertions["passed"] is False
@@ -91,7 +91,7 @@ def test_purge_scenario_derives_failure_from_command_exit_and_removal(tmp_path) 
 
     factory = HookFactory(tmp_path / "graph-remains")
     factory.command_results = [0]
-    result = scenario_lifecycle.run_disposable_artifact_scenario(spec, {}, hooks=factory.hooks())
+    result = scenario_lifecycle_disposable.run_disposable_artifact_scenario(spec, {}, hooks=factory.hooks())
     assertions = json.loads((factory.output / "scenarios" / spec.scenario_id / "assertions.json").read_text(encoding="utf-8"))
     assert result["passed"] is False
     assert assertions["passed"] is False
@@ -126,7 +126,7 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
         disposable_path.rmdir()
         return result
 
-    result = scenario_lifecycle.run_disposable_artifact_scenario(
+    result = scenario_lifecycle_disposable.run_disposable_artifact_scenario(
         spec,
         {},
         hooks=factory.hooks(run_capture=discard_run_capture),
@@ -185,10 +185,10 @@ def test_run_purge_scenario_preserves_legacy_wrapper(tmp_path, monkeypatch) -> N
             calls.append(("run",))
             return {"id": first.scenario_id, "passed": True}
 
-    monkeypatch.setattr(scenario_lifecycle, "disposable_artifact_scenarios", disposable_specs)
-    monkeypatch.setattr(scenario_lifecycle, "DisposableArtifactLifecycle", FakeDisposableArtifactLifecycle)
+    monkeypatch.setattr(scenario_lifecycle_disposable, "disposable_artifact_scenarios", disposable_specs)
+    monkeypatch.setattr(scenario_lifecycle_disposable, "DisposableArtifactLifecycle", FakeDisposableArtifactLifecycle)
 
-    result = scenario_lifecycle.run_purge_scenario(env, hooks=hooks)
+    result = scenario_lifecycle_disposable.run_purge_scenario(env, hooks=hooks)
 
     assert result == {"id": "purge-disposable-graphify-out", "passed": True}
     assert calls == [
@@ -196,3 +196,10 @@ def test_run_purge_scenario_preserves_legacy_wrapper(tmp_path, monkeypatch) -> N
         ("lifecycle", first, env, hooks),
         ("run",),
     ]
+
+
+def test_scenario_lifecycle_keeps_disposable_compatibility_imports() -> None:
+    assert scenario_lifecycle.DisposableArtifactLifecycle is scenario_lifecycle_disposable.DisposableArtifactLifecycle
+    assert scenario_lifecycle.run_purge_scenario is scenario_lifecycle_disposable.run_purge_scenario
+    assert scenario_lifecycle.run_disposable_artifact_scenario is scenario_lifecycle_disposable.run_disposable_artifact_scenario
+    assert scenario_lifecycle.disposable_artifact_scenarios is scenario_lifecycle_disposable.disposable_artifact_scenarios

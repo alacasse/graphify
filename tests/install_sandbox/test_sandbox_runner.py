@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import command_runner, reports, sandbox_runner, scenario_lifecycle, source_snapshot, status
+from tools.install_sandbox import command_runner, reports, sandbox_runner, scenario_lifecycle_plan, source_snapshot, status
 from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
 
 
@@ -42,6 +42,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "json_helpers.py",
         "scenario_file_effects_adapter.py",
         "scenario_lifecycle_disposable.py",
+        "scenario_lifecycle_plan.py",
         "scenario_lifecycle_support.py",
         "scenario_lifecycle_standard.py",
         "scenario_lifecycle_universal.py",
@@ -65,11 +66,14 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
             module_imports.update(alias.name for alias in node.names)
 
     assert "file_effects" not in module_imports
+    assert "scenario_lifecycle" not in module_imports
     assert {
         "file_effect_generated_artifacts",
         "file_effect_oracle",
         "file_effect_state",
         "scenario_file_effects_adapter",
+        "scenario_lifecycle_plan",
+        "scenario_lifecycle_support",
     } <= module_imports
 
 
@@ -168,7 +172,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         build_plan,
     )
     monkeypatch.setattr(
-        scenario_lifecycle,
+        scenario_lifecycle_plan,
         "run_validation_plan",
         lambda plan_arg, env, hooks, fail_fast_scenarios=False: calls.append(f"validation-plan:{plan_arg.requested_scope}:{fail_fast_scenarios}")
         or [
@@ -262,7 +266,7 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
     plan = Plan()
     monkeypatch.setattr(sandbox_runner.validation_plan, "build_validation_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr(
-        scenario_lifecycle,
+        scenario_lifecycle_plan,
         "run_validation_plan",
         lambda *args, **kwargs: [
             {

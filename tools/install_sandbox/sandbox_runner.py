@@ -23,7 +23,8 @@ try:
     from . import reference_resolution
     from . import reports
     from . import scenario_file_effects_adapter
-    from . import scenario_lifecycle
+    from . import scenario_lifecycle_plan
+    from . import scenario_lifecycle_support
     from . import source_snapshot
     from . import validation_plan
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
@@ -42,7 +43,8 @@ except ImportError:
     import reference_resolution
     import reports
     import scenario_file_effects_adapter  # type: ignore[no-redef]
-    import scenario_lifecycle
+    import scenario_lifecycle_plan
+    import scenario_lifecycle_support
     import source_snapshot
     import validation_plan
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
@@ -76,8 +78,8 @@ GENERATED_COPY_EXCLUDES = file_effect_generated_artifacts.GENERATED_COPY_EXCLUDE
 MANIFEST_PRUNE_DIRS = set(GENERATED_COPY_EXCLUDES) | {".mypy_cache", ".ruff_cache", "node_modules"}
 
 
-ScenarioRunContext = scenario_lifecycle.ScenarioRunContext
-StandardScenarioStages = scenario_lifecycle.StandardScenarioStages
+ScenarioRunContext = scenario_lifecycle_support.ScenarioRunContext
+StandardScenarioStages = scenario_lifecycle_support.StandardScenarioStages
 
 
 ROOTS = ROOT_REGISTRY.scenario_roots(RUNTIME_ROOTS)
@@ -362,10 +364,10 @@ def scenario_lifecycle_hooks(
     run_scenario_func=None,
     run_universal_uninstall_scenario_func=None,
     run_purge_scenario_func=None,
-) -> scenario_lifecycle.ScenarioLifecycleHooks:
+) -> scenario_lifecycle_support.ScenarioLifecycleHooks:
     oracle = file_effect_oracle()
-    return scenario_lifecycle.ScenarioLifecycleHooks(
-        paths=scenario_lifecycle.SandboxPaths(
+    return scenario_lifecycle_support.ScenarioLifecycleHooks(
+        paths=scenario_lifecycle_support.SandboxPaths(
             output=OUTPUT,
             roots=ROOTS,
             project=PROJECT,
@@ -379,15 +381,15 @@ def scenario_lifecycle_hooks(
             write_file_manifest=write_file_manifest,
             run_equivalence_check=run_equivalence_check,
         ),
-        commands=scenario_lifecycle.CommandExecutor(command_runner.run_capture),
-        artifacts=scenario_lifecycle.ScenarioArtifacts(
+        commands=scenario_lifecycle_support.CommandExecutor(command_runner.run_capture),
+        artifacts=scenario_lifecycle_support.ScenarioArtifacts(
             risk_report=risk_report,
             command_artifact_summary=lambda artifact_dir: reports.command_artifact_summary(artifact_dir, output_root=OUTPUT),
             combined_status=combined_status,
             known_status_values=known_status_values,
         ),
         scenario_registry=SCENARIO_REGISTRY,
-        matrix_overrides=scenario_lifecycle.MatrixRunnerOverrides(
+        matrix_overrides=scenario_lifecycle_support.MatrixRunnerOverrides(
             run_scenario=run_scenario_func,
             run_universal_uninstall_scenario=run_universal_uninstall_scenario_func,
             run_purge_scenario=run_purge_scenario_func,
@@ -436,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         scope=args.scope,
     )
 
-    results = scenario_lifecycle.run_validation_plan(plan, env, hooks, fail_fast_scenarios=args.fail_fast_scenarios)
+    results = scenario_lifecycle_plan.run_validation_plan(plan, env, hooks, fail_fast_scenarios=args.fail_fast_scenarios)
     passed = sum(1 for result in results if result["passed"])
     failed = len(results) - passed
 

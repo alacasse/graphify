@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.install_sandbox import scenario_lifecycle
+from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_plan
 from tools.install_sandbox.platform_specs import (
     DEFAULT_SCENARIO_REGISTRY,
     DisposableArtifactScenarioSpec,
@@ -15,6 +15,14 @@ from tests.install_sandbox.scenario_lifecycle_test_support import (
     make_universal_uninstall_selection,
     make_validation_plan,
 )
+
+
+def test_scenario_lifecycle_facade_preserves_validation_plan_imports() -> None:
+    assert scenario_lifecycle.run_validation_plan is scenario_lifecycle_plan.run_validation_plan
+    assert scenario_lifecycle.run_matrix_scenarios is scenario_lifecycle_plan.run_matrix_scenarios
+    assert scenario_lifecycle._positional_parameter_count is scenario_lifecycle_plan._positional_parameter_count
+    assert scenario_lifecycle._run_universal_override is scenario_lifecycle_plan._run_universal_override
+    assert scenario_lifecycle._run_purge_override is scenario_lifecycle_plan._run_purge_override
 
 
 def test_run_matrix_scenarios_delegates_to_planner_and_runs_plan_once(tmp_path, monkeypatch) -> None:
@@ -32,10 +40,10 @@ def test_run_matrix_scenarios_delegates_to_planner_and_runs_plan_once(tmp_path, 
         calls.append(("run", plan_arg, env_arg, hooks_arg, fail_fast_scenarios))
         return [{"id": "sentinel", "passed": True}]
 
-    monkeypatch.setattr(scenario_lifecycle.validation_plan, "build_validation_plan", build_plan)
-    monkeypatch.setattr(scenario_lifecycle, "run_validation_plan", run_plan)
+    monkeypatch.setattr(scenario_lifecycle_plan.validation_plan, "build_validation_plan", build_plan)
+    monkeypatch.setattr(scenario_lifecycle_plan, "run_validation_plan", run_plan)
 
-    results = scenario_lifecycle.run_matrix_scenarios(
+    results = scenario_lifecycle_plan.run_matrix_scenarios(
         ["first", "second"],
         "project",
         env,
@@ -93,7 +101,7 @@ def test_run_validation_plan_preserves_matrix_runner_overrides(tmp_path) -> None
             "passed": True,
         }
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         env,
         hooks=factory.hooks(
@@ -166,7 +174,7 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
     def unexpected_synthetic(*args, **kwargs):
         raise AssertionError("synthetic scenarios should not run after a Graphify install failure")
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         {},
         hooks=factory.hooks(
@@ -196,7 +204,7 @@ def test_run_validation_plan_fail_fast_stops_first_graphify_failure(tmp_path) ->
         calls.append(item.platform)
         return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": False}
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         {},
         hooks=factory.hooks(
@@ -272,7 +280,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         calls.append("purge")
         return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": False}
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         {},
         hooks=factory.hooks(
@@ -336,7 +344,7 @@ def test_run_validation_plan_preserves_legacy_matrix_runner_override_shapes(tmp_
         calls.append("purge")
         return {"id": disposable_spec.scenario_id, "platform": disposable_spec.platform_label, "scope": disposable_spec.scope, "passed": True}
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         {},
         hooks=factory.hooks(
@@ -375,7 +383,7 @@ def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_pat
         universal_uninstall=(scenario_lifecycle.SelectedUniversalUninstallScenario(universal_spec, (scenario,)),),
     )
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         {},
         hooks=factory.hooks(
@@ -424,7 +432,7 @@ def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_br
         calls.append(f"disposable:{spec.scenario_id}")
         return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
 
-    results = scenario_lifecycle.run_validation_plan(
+    results = scenario_lifecycle_plan.run_validation_plan(
         plan,
         {},
         hooks=factory.hooks(

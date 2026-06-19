@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tools.install_sandbox import platform_specs, spec_loader
+from tools.install_sandbox import install_target_catalog, platform_specs, spec_loader
 from tools.install_sandbox.spec_normalize import normalize_registry
 from tools.install_sandbox.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data, load_registry_from_dir
 
@@ -119,9 +119,18 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
     registry = load_default_registry()
 
     assert isinstance(registry, platform_specs.ScenarioRegistry)
+    assert isinstance(registry, install_target_catalog.ScenarioRegistry)
+    assert type(registry) is install_target_catalog.InstallTargetCatalog
+    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
     assert registry.specs
     assert registry.universal_uninstall_specs == ()
     assert registry.disposable_artifact_specs == ()
+
+
+def test_spec_loader_uses_catalog_import_surface() -> None:
+    assert spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
+    assert spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
+    assert spec_loader._scenario is install_target_catalog._scenario
 
 
 def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:

@@ -56,6 +56,9 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "install_target_models.py",
         "install_target_catalog.py",
         "install_target_defaults.py",
+        "install_target_scenarios.py",
+        "install_target_selection.py",
+        "install_target_harness_policy.py",
     ):
         if Path("tools/install_sandbox", future_platform_specs_owner).exists():
             assert f"COPY {future_platform_specs_owner} /runner/{future_platform_specs_owner}" in dockerfile

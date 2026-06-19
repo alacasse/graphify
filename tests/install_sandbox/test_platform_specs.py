@@ -48,6 +48,58 @@ def test_install_target_aliases_are_identity_aliases() -> None:
     assert platform_specs.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
 
 
+def test_install_target_catalog_keeps_legacy_import_surface() -> None:
+    expected_names = {
+        "ScenarioRegistry",
+        "InstallTargetCatalog",
+        "_dedupe_notes",
+        "_generic_install_command",
+        "_generic_uninstall_command",
+        "_direct_project_install",
+        "_declared_install_variants",
+        "_skill",
+        "_scenario",
+    }
+
+    for name in expected_names:
+        assert hasattr(install_target_catalog, name), name
+        assert getattr(platform_specs, name) is getattr(install_target_catalog, name)
+    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
+
+
+def test_scenario_construction_helper_keeps_scope_spec_contract() -> None:
+    scope = install_target_catalog._scenario(
+        "owner-target",
+        "project",
+        (
+            platform_specs.InstallSurface("project", "owner-target.txt"),
+            platform_specs.InstallSurface("home", ".owner/skills/graphify/SKILL.md"),
+        ),
+        risk_notes=(platform_specs.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
+        equivalent_install_command=("graphify", "owner-target", "install", "--project"),
+    )
+
+    assert isinstance(scope, platform_specs.ScopeSpec)
+    assert scope.install_command == ("graphify", "install", "--project", "--platform", "owner-target")
+    assert scope.uninstall_command == ("graphify", "uninstall", "--project", "--platform", "owner-target")
+    assert scope.cwd_root == "project"
+    assert scope.allowed_roots == ("home", "project", "user_cwd")
+    assert [entry.relative for entry in scope.expected] == [
+        "owner-target.txt",
+        ".owner/skills/graphify/SKILL.md",
+    ]
+    assert scope.install_variants == (
+        platform_specs.InstallCommandVariant(
+            "generic",
+            ("graphify", "install", "--project", "--platform", "owner-target"),
+        ),
+        platform_specs.InstallCommandVariant(
+            "direct",
+            ("graphify", "owner-target", "install", "--project"),
+        ),
+    )
+
+
 def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
     helper_names = (
         "default_install_target_catalog",

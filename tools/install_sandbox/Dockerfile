@@ -53,6 +53,7 @@ COPY install_target_catalog.py /runner/install_target_catalog.py
 COPY install_target_defaults.py /runner/install_target_defaults.py
 COPY install_target_models.py /runner/install_target_models.py
 COPY install_target_scenarios.py /runner/install_target_scenarios.py
+COPY install_target_selection.py /runner/install_target_selection.py
 COPY json_helpers.py /runner/json_helpers.py
 COPY platform_specs.py /runner/platform_specs.py
 COPY spec_loader.py /runner/spec_loader.py

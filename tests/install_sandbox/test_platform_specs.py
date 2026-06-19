@@ -4,10 +4,10 @@ import pytest
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import install_target_catalog, install_target_defaults, install_target_models, install_target_scenarios, platform_specs
+from tools.install_sandbox import install_target_catalog, install_target_defaults, platform_specs
 
+from install_target_test_support import REGISTRY, entry_id, scenario_entries
 
-REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
 USER_OWNED_TEXT_SECTION_RELATIVES = {
     ".claude/CLAUDE.md",
     ".github/copilot-instructions.md",
@@ -17,56 +17,12 @@ USER_OWNED_TEXT_SECTION_RELATIVES = {
 }
 
 
-def _scenario_entries() -> list[tuple[str, str, platform_specs.Scenario, platform_specs.ExpectedPath]]:
-    entries: list[tuple[str, str, platform_specs.Scenario, platform_specs.ExpectedPath]] = []
-    for platform_name in platform_specs.ALL_PLATFORMS:
-        for scope in ("user", "project"):
-            scenario = REGISTRY.make_scenario(platform_name, scope)
-            if scenario is None:
-                continue
-            entries.extend((platform_name, scope, scenario, entry) for entry in scenario.expected)
-    return entries
-
-
-def _entry_id(platform_name: str, scope: str, entry: platform_specs.ExpectedPath) -> tuple[str, str, str, str]:
-    return platform_name, scope, entry.root, entry.relative
-
-
 def test_scenario_id() -> None:
     assert REGISTRY.scenario_id("trae-cn", "project") == "trae-cn-project"
     assert REGISTRY.scenario_id("Bad Platform!", "User Scope") == "bad-platform-user-scope"
     assert REGISTRY.scenario_id("...", "___") == "scenario"
     assert REGISTRY.universal_uninstall_scenario_id("project") == "universal-uninstall-project"
     assert REGISTRY.purge_disposable_graphify_out_scenario_id() == "purge-disposable-graphify-out"
-
-
-def test_install_target_aliases_are_identity_aliases() -> None:
-    assert platform_specs.InstallTargetSpec is platform_specs.PlatformSpec
-    assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
-    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
-    assert platform_specs.ScenarioRegistry is install_target_catalog.ScenarioRegistry
-    assert platform_specs.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
-
-
-def test_install_target_catalog_keeps_legacy_import_surface() -> None:
-    expected_names = {
-        "ScenarioRegistry",
-        "InstallTargetCatalog",
-        "_dedupe_notes",
-        "_generic_install_command",
-        "_generic_uninstall_command",
-        "_direct_project_install",
-        "_declared_install_variants",
-        "_skill",
-        "_scenario",
-    }
-
-    for name in expected_names:
-        assert hasattr(install_target_catalog, name), name
-        assert getattr(platform_specs, name) is getattr(install_target_catalog, name)
-        if name.startswith("_"):
-            assert getattr(install_target_catalog, name) is getattr(install_target_scenarios, name)
-    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
 
 
 def test_scenario_construction_helper_keeps_scope_spec_contract() -> None:
@@ -118,75 +74,6 @@ def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
     for name in helper_names:
         assert getattr(platform_specs, name) is getattr(install_target_defaults, name)
     assert platform_specs._LAZY_DEFAULT_NAMES is install_target_defaults._LAZY_DEFAULT_NAMES
-
-
-def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None:
-    legacy_platform_names = {
-        "PlatformSpec",
-        "ScenarioRegistry",
-        "platform_spec",
-        "platform_scenarios",
-        "ALL_PLATFORMS",
-        "SANDBOX_PLATFORM_SPECS",
-        "DEFAULT_SCENARIO_REGISTRY",
-    }
-    install_target_names = {
-        "InstallTargetSpec",
-        "InstallTargetCatalog",
-        "default_install_target_catalog",
-        "install_target_specs",
-        "install_target_spec",
-        "install_target_scenarios",
-    }
-
-    for name in legacy_platform_names | install_target_names:
-        assert hasattr(platform_specs, name), name
-    for name in ("platform_names", "target_names", "selected_platforms", "selected_targets", "platform_scenarios", "target_scenarios"):
-        assert hasattr(REGISTRY, name), name
-    assert platform_specs.DEFAULT_SCENARIO_REGISTRY is REGISTRY
-    assert platform_specs.SANDBOX_PLATFORM_SPECS is REGISTRY.specs
-    assert platform_specs.ALL_PLATFORMS == REGISTRY.platform_names
-    assert platform_specs.platform_spec("codex") is REGISTRY.platform_spec("codex")
-    assert platform_specs.platform_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
-
-
-def test_install_target_fact_dataclasses_keep_facade_identity() -> None:
-    model_names = (
-        "GeneratedFileExpectation",
-        "InstallCommandVariant",
-        "TargetRuntimeValidationSpec",
-        "UniversalUninstallScenarioSpec",
-        "SelectedUniversalUninstallScenario",
-        "DisposableSeedFile",
-        "DisposableArtifactScenarioSpec",
-        "Scenario",
-        "ScopeSpec",
-        "ReferenceBundle",
-        "PlatformSpec",
-        "InstallTargetSpec",
-    )
-
-    for name in model_names:
-        exported = getattr(platform_specs, name)
-        assert getattr(install_target_models, name) is exported
-
-    scope = platform_specs.ScopeSpec(
-        install_command=("tool", "install"),
-        uninstall_command=("tool", "uninstall"),
-        cwd_root="project",
-        expected=(platform_specs.InstallSurface("project", "graphify.txt"),),
-    )
-    spec = platform_specs.InstallTargetSpec(name="facade-target", scopes={"project": scope})
-    registry = platform_specs.InstallTargetCatalog({"facade-target": spec})
-    scenario = registry.make_scenario("facade-target", "project")
-
-    assert type(scope) is platform_specs.ScopeSpec
-    assert type(spec) is platform_specs.PlatformSpec
-    assert platform_specs.InstallTargetSpec is platform_specs.PlatformSpec
-    assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
-    assert scenario is not None
-    assert type(scenario) is platform_specs.Scenario
-    assert scenario.expected[0].__class__ is platform_specs.InstallSurface
 
 
 def test_install_target_accessors_match_legacy_platform_accessors() -> None:
@@ -295,6 +182,9 @@ def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pyte
     assert platform_specs.__getattr__("ALL_PLATFORMS") == ["cached-target"]
     assert install_target_defaults.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
     assert calls == 1
+    for name in install_target_defaults._LAZY_DEFAULT_NAMES:
+        platform_specs.__dict__.pop(name, None)
+        install_target_defaults.__dict__.pop(name, None)
 
 
 def test_expected_path_manifest_logic() -> None:
@@ -316,7 +206,7 @@ def test_expected_path_manifest_logic() -> None:
 
 
 def test_json_effects_declare_behavior_expectations() -> None:
-    for platform_name, scope, scenario, entry in _scenario_entries():
+    for platform_name, scope, scenario, entry in scenario_entries():
         if entry.content_kind != "json":
             continue
 
@@ -337,7 +227,7 @@ def test_json_effects_declare_behavior_expectations() -> None:
 
 
 def test_json_schema_names_follow_file_surface_conventions() -> None:
-    for platform_name, scope, _, entry in _scenario_entries():
+    for platform_name, scope, _, entry in scenario_entries():
         if entry.content_kind != "json":
             continue
 
@@ -353,7 +243,7 @@ def test_json_schema_names_follow_file_surface_conventions() -> None:
 
 
 def test_text_section_user_content_policy_follows_instruction_file_conventions() -> None:
-    for platform_name, scope, _, entry in _scenario_entries():
+    for platform_name, scope, _, entry in scenario_entries():
         if entry.content_kind != "text" or entry.marker is None:
             continue
 
@@ -363,7 +253,7 @@ def test_text_section_user_content_policy_follows_instruction_file_conventions()
 
 
 def test_text_section_repair_policy_matches_marker_ownership() -> None:
-    for platform_name, scope, _, entry in _scenario_entries():
+    for platform_name, scope, _, entry in scenario_entries():
         if entry.content_kind != "text" or entry.marker is None:
             continue
 
@@ -374,8 +264,8 @@ def test_text_section_repair_policy_matches_marker_ownership() -> None:
 
 def test_claude_instruction_docs_use_legacy_hash_marker_and_removal_policy() -> None:
     claude_instruction_entries = {
-        _entry_id(platform_name, scope, entry): entry
-        for platform_name, scope, _, entry in _scenario_entries()
+        entry_id(platform_name, scope, entry): entry
+        for platform_name, scope, _, entry in scenario_entries()
         if entry.relative == ".claude/CLAUDE.md"
     }
 
@@ -393,8 +283,8 @@ def test_claude_instruction_docs_use_legacy_hash_marker_and_removal_policy() -> 
 
 def test_kiro_steering_doc_uses_product_native_graphify_marker() -> None:
     kiro_marker_entries = {
-        _entry_id(platform_name, scope, entry): entry
-        for platform_name, scope, _, entry in _scenario_entries()
+        entry_id(platform_name, scope, entry): entry
+        for platform_name, scope, _, entry in scenario_entries()
         if entry.marker == "graphify:"
     }
 
@@ -408,8 +298,8 @@ def test_kiro_steering_doc_uses_product_native_graphify_marker() -> None:
 
 def test_only_home_claude_instruction_docs_are_left_after_uninstall() -> None:
     non_removable_entries = {
-        _entry_id(platform_name, scope, entry)
-        for platform_name, scope, _, entry in _scenario_entries()
+        entry_id(platform_name, scope, entry)
+        for platform_name, scope, _, entry in scenario_entries()
         if not entry.remove_on_uninstall
     }
 
@@ -488,7 +378,7 @@ def test_simulated_runtime_products_declare_linux_layout_limits() -> None:
 
 
 def test_skill_sidecar_policy_is_declared_on_skill_entries() -> None:
-    for platform_name, scope, _, entry in _scenario_entries():
+    for platform_name, scope, _, entry in scenario_entries():
         if entry.relative.endswith("SKILL.md"):
             assert entry.skill_sidecar_expectation is not None, f"{platform_name}/{scope}/{entry.relative}"
 

@@ -4,15 +4,72 @@ import ast
 from pathlib import Path
 
 from tools.install_sandbox import expected_effects
+from tools.install_sandbox import file_effect_generated_artifacts
 from tools.install_sandbox import file_effect_sidecars
 from tools.install_sandbox import file_effect_state
+from tools.install_sandbox import file_effect_surfaces
 from tools.install_sandbox import file_effects
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import scenario_file_effects_adapter
 
-# File-effects boundary guards live here. Oracle leaf behavior is split across
-# topic modules, and ScenarioFileEffectsAdapter coverage lives in
+# File-effects facade and oracle boundary guards live here. Behavior assertions
+# stay with topic-owner tests such as test_file_effects_sidecars.py,
+# test_file_effects_generated.py, test_file_effects_observations.py, and
 # test_file_effects_adapter.py.
+
+
+FACADE_COMPATIBILITY_IMPORTS = {
+    "sidecar": {
+        "expected_skill_sidecar_relatives": file_effect_sidecars.expected_skill_sidecar_relatives,
+        "installed_reference_sidecar_status": file_effect_sidecars.installed_reference_sidecar_status,
+        "reference_sidecar_expectation": file_effect_sidecars.reference_sidecar_expectation,
+        "references_tmp_absence_status": file_effect_sidecars.references_tmp_absence_status,
+        "skill_dir_for_entry": file_effect_sidecars.skill_dir_for_entry,
+        "skill_reference_pointer_status": file_effect_sidecars.skill_reference_pointer_status,
+        "skill_references_relative": file_effect_sidecars.skill_references_relative,
+        "skill_references_tmp_relative": file_effect_sidecars.skill_references_tmp_relative,
+        "skill_sidecar_expectation": file_effect_sidecars.skill_sidecar_expectation,
+        "skill_version_status": file_effect_sidecars.skill_version_status,
+        "skill_version_relative": file_effect_sidecars.skill_version_relative,
+        "stale_sidecar_seed_plans": file_effect_sidecars.stale_sidecar_seed_plans,
+        "uninstalled_skill_sidecar_status": file_effect_sidecars.uninstalled_skill_sidecar_status,
+    },
+    "surface": {
+        "FileFingerprintObservation": file_effect_surfaces.FileFingerprintObservation,
+        "InstallSurfaceObservation": file_effect_surfaces.InstallSurfaceObservation,
+        "UninstallSurfaceObservation": file_effect_surfaces.UninstallSurfaceObservation,
+        "file_fingerprint_from_observation": file_effect_surfaces.file_fingerprint_from_observation,
+        "install_surface_kind_status_from_observation": file_effect_surfaces.install_surface_kind_status_from_observation,
+        "installed_surface_status_from_observation": file_effect_surfaces.installed_surface_status_from_observation,
+        "is_json_effect": file_effect_surfaces.is_json_effect,
+        "uninstalled_surface_status_from_observation": file_effect_surfaces.uninstalled_surface_status_from_observation,
+    },
+    "generated": {
+        "GENERATED_COPY_EXCLUDES": file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES,
+        "pruned_file_walk": file_effect_generated_artifacts.pruned_file_walk,
+    },
+    "state": {
+        "STALE_GRAPHIFY_SENTINEL": file_effect_state.STALE_GRAPHIFY_SENTINEL,
+        "USER_SENTINEL": file_effect_state.USER_SENTINEL,
+        "core_expected_manifest_relatives": file_effect_state.expected_manifest_relatives,
+        "expected_manifest_relatives": file_effect_state.expected_manifest_relatives,
+        "expected_generated_relative_keys": file_effect_state.expected_generated_relative_keys,
+        "idempotency_state_changes": file_effect_state.idempotency_state_changes,
+        "planned_state_entries": file_effect_state.planned_state_entries,
+        "user_content_seed_plans": file_effect_state.user_content_seed_plans,
+    },
+    "lifecycle_adapter": {
+        "ScenarioFileEffectsAdapter": scenario_file_effects_adapter.ScenarioFileEffectsAdapter,
+        "check_record": scenario_file_effects_adapter.check_record,
+    },
+}
+
+
+FACADE_COMPATIBILITY_WRAPPERS = {
+    "state": {
+        "assert_idempotent_state": file_effect_state.assert_idempotent_state,
+    },
+}
 
 
 def test_file_effects_preserves_moved_compatibility_imports() -> None:
@@ -20,6 +77,52 @@ def test_file_effects_preserves_moved_compatibility_imports() -> None:
     assert file_effects.core_expected_manifest_relatives is file_effect_state.expected_manifest_relatives
     assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
     assert file_effects.check_record is scenario_file_effects_adapter.check_record
+
+
+def test_file_effects_is_compatibility_facade_over_topic_modules() -> None:
+    for owner_group in FACADE_COMPATIBILITY_IMPORTS.values():
+        for compatibility_name, owner_object in owner_group.items():
+            assert getattr(file_effects, compatibility_name) is owner_object
+
+
+def test_file_effects_is_compatibility_facade_over_topic_wrapper_modules(monkeypatch) -> None:
+    calls = []
+
+    def replacement_assert_idempotent_state(before, after):
+        calls.append((before, after))
+        return [{"ok": True, "detail": "delegated"}]
+
+    monkeypatch.setattr(file_effect_state, "assert_idempotent_state", replacement_assert_idempotent_state)
+
+    before = {"project/AGENTS.md": {"exists": True}}
+    after = {"project/AGENTS.md": {"exists": True}}
+
+    assert file_effects.assert_idempotent_state(before, after) == [{"ok": True, "detail": "delegated"}]
+    assert calls == [(before, after)]
+
+
+def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> None:
+    topic_owner_tests = {
+        "sidecar": "test_file_effects_sidecars.py",
+        "surface": "test_file_effects_observations.py",
+        "generated": "test_file_effects_generated.py",
+        "lifecycle_adapter": "test_file_effects_adapter.py",
+    }
+
+    for filename in topic_owner_tests.values():
+        assert (Path(__file__).parent / filename).exists()
+
+    compatibility_names = {
+        name
+        for owner_group in FACADE_COMPATIBILITY_IMPORTS.values()
+        for name in owner_group
+    } | {
+        name
+        for owner_group in FACADE_COMPATIBILITY_WRAPPERS.values()
+        for name in owner_group
+    }
+    assert "assert_idempotent_state" in compatibility_names
+    assert compatibility_names.isdisjoint({"FileEffectOracle"})
 
 
 def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
@@ -36,7 +139,7 @@ def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
 
 
 def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
-    adapter_methods = {
+    oracle_adapter_methods = {
         "root_path",
         "expected_path",
         "skill_assertion_record",
@@ -104,7 +207,7 @@ def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
         "FileEffectOracle should not grow pure Installer Core pass-through methods; "
         "call install_surface_core helpers directly instead."
     )
-    assert oracle_methods == adapter_methods
+    assert oracle_methods == oracle_adapter_methods
 
 
 def test_file_effects_tests_import_core_only_as_adapter_collaborator_module() -> None:

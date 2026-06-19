@@ -684,5 +684,3 @@ def test_idempotency_state_detects_content_change() -> None:
         {"path": "project/AGENTS.md", "ok": False, "detail": "changed_after_repeat_install"},
         {"path": "project/notes.md", "ok": True, "detail": "unchanged_after_repeat_install"},
     ]
-    assert file_effects.assert_idempotent_state(before, after) == checks
-    assert file_effects.assert_idempotent_state(before, before)[0]["ok"] is True

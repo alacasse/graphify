@@ -4,7 +4,7 @@ import pytest
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import platform_specs
+from tools.install_sandbox import install_target_models, platform_specs
 
 
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
@@ -93,7 +93,7 @@ def test_install_target_fact_dataclasses_keep_facade_identity() -> None:
 
     for name in model_names:
         exported = getattr(platform_specs, name)
-        assert getattr(platform_specs, name) is exported
+        assert getattr(install_target_models, name) is exported
 
     scope = platform_specs.ScopeSpec(
         install_command=("tool", "install"),

@@ -4,7 +4,7 @@ import pytest
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import install_target_models, platform_specs
+from tools.install_sandbox import install_target_catalog, install_target_models, platform_specs
 
 
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
@@ -43,6 +43,9 @@ def test_scenario_id() -> None:
 def test_install_target_aliases_are_identity_aliases() -> None:
     assert platform_specs.InstallTargetSpec is platform_specs.PlatformSpec
     assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
+    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
+    assert platform_specs.ScenarioRegistry is install_target_catalog.ScenarioRegistry
+    assert platform_specs.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
 
 
 def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None:

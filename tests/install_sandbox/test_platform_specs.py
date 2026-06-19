@@ -4,7 +4,7 @@ import pytest
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import install_target_catalog, install_target_defaults, install_target_models, platform_specs
+from tools.install_sandbox import install_target_catalog, install_target_defaults, install_target_models, install_target_scenarios, platform_specs
 
 
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
@@ -64,6 +64,8 @@ def test_install_target_catalog_keeps_legacy_import_surface() -> None:
     for name in expected_names:
         assert hasattr(install_target_catalog, name), name
         assert getattr(platform_specs, name) is getattr(install_target_catalog, name)
+        if name.startswith("_"):
+            assert getattr(install_target_catalog, name) is getattr(install_target_scenarios, name)
     assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
 
 

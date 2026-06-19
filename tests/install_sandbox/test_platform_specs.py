@@ -4,7 +4,7 @@ import pytest
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import install_target_catalog, install_target_models, platform_specs
+from tools.install_sandbox import install_target_catalog, install_target_defaults, install_target_models, platform_specs
 
 
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
@@ -46,6 +46,24 @@ def test_install_target_aliases_are_identity_aliases() -> None:
     assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
     assert platform_specs.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert platform_specs.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
+
+
+def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
+    helper_names = (
+        "default_install_target_catalog",
+        "install_target_specs",
+        "install_target_spec",
+        "install_target_scenarios",
+        "platform_spec",
+        "platform_scenarios",
+        "make_scenario",
+        "risk_notes",
+        "validate_roots",
+    )
+
+    for name in helper_names:
+        assert getattr(platform_specs, name) is getattr(install_target_defaults, name)
+    assert platform_specs._LAZY_DEFAULT_NAMES is install_target_defaults._LAZY_DEFAULT_NAMES
 
 
 def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None:
@@ -173,7 +191,7 @@ def test_install_target_helpers_use_existing_default_registry_cache(monkeypatch:
             )
         }
     )
-    monkeypatch.setattr(platform_specs, "_DEFAULT_SCENARIO_REGISTRY", registry)
+    monkeypatch.setattr(install_target_defaults, "_DEFAULT_SCENARIO_REGISTRY", registry)
 
     assert platform_specs.default_install_target_catalog() is registry
     assert platform_specs.install_target_specs() is registry.specs
@@ -183,6 +201,7 @@ def test_install_target_helpers_use_existing_default_registry_cache(monkeypatch:
         "project",
     )
     assert "DEFAULT_INSTALL_TARGET_CATALOG" not in platform_specs._LAZY_DEFAULT_NAMES
+    assert "DEFAULT_INSTALL_TARGET_CATALOG" not in install_target_defaults._LAZY_DEFAULT_NAMES
 
 
 def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,10 +227,11 @@ def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pyte
         calls += 1
         return registry
 
-    monkeypatch.setattr(platform_specs, "_DEFAULT_SCENARIO_REGISTRY", None)
-    monkeypatch.setitem(platform_specs.__dict__, "_import_load_default_registry", lambda: load_default_registry)
-    for name in platform_specs._LAZY_DEFAULT_NAMES:
+    monkeypatch.setattr(install_target_defaults, "_DEFAULT_SCENARIO_REGISTRY", None)
+    monkeypatch.setitem(install_target_defaults.__dict__, "_import_load_default_registry", lambda: load_default_registry)
+    for name in install_target_defaults._LAZY_DEFAULT_NAMES:
         monkeypatch.delitem(platform_specs.__dict__, name, raising=False)
+        monkeypatch.delitem(install_target_defaults.__dict__, name, raising=False)
 
     assert platform_specs.default_install_target_catalog() is registry
     assert platform_specs.install_target_specs() is registry.specs
@@ -219,6 +239,7 @@ def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pyte
     assert platform_specs.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
     assert platform_specs.__getattr__("SANDBOX_PLATFORM_SPECS") is registry.specs
     assert platform_specs.__getattr__("ALL_PLATFORMS") == ["cached-target"]
+    assert install_target_defaults.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
     assert calls == 1
 
 

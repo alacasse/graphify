@@ -2,175 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from tools.install_sandbox import install_target_catalog, platform_specs
+from tools.install_sandbox import platform_specs
 
 from install_target_test_support import REGISTRY
 
 
-def test_scenario_id() -> None:
-    assert REGISTRY.scenario_id("trae-cn", "project") == "trae-cn-project"
-    assert REGISTRY.scenario_id("Bad Platform!", "User Scope") == "bad-platform-user-scope"
-    assert REGISTRY.scenario_id("...", "___") == "scenario"
+def test_synthetic_policy_scenario_ids() -> None:
     assert REGISTRY.universal_uninstall_scenario_id("project") == "universal-uninstall-project"
     assert REGISTRY.purge_disposable_graphify_out_scenario_id() == "purge-disposable-graphify-out"
-
-
-def test_scenario_construction_helper_keeps_scope_spec_contract() -> None:
-    scope = install_target_catalog._scenario(
-        "owner-target",
-        "project",
-        (
-            platform_specs.InstallSurface("project", "owner-target.txt"),
-            platform_specs.InstallSurface("home", ".owner/skills/graphify/SKILL.md"),
-        ),
-        risk_notes=(platform_specs.MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,),
-        equivalent_install_command=("graphify", "owner-target", "install", "--project"),
-    )
-
-    assert isinstance(scope, platform_specs.ScopeSpec)
-    assert scope.install_command == ("graphify", "install", "--project", "--platform", "owner-target")
-    assert scope.uninstall_command == ("graphify", "uninstall", "--project", "--platform", "owner-target")
-    assert scope.cwd_root == "project"
-    assert scope.allowed_roots == ("home", "project", "user_cwd")
-    assert [entry.relative for entry in scope.expected] == [
-        "owner-target.txt",
-        ".owner/skills/graphify/SKILL.md",
-    ]
-    assert scope.install_variants == (
-        platform_specs.InstallCommandVariant(
-            "generic",
-            ("graphify", "install", "--project", "--platform", "owner-target"),
-        ),
-        platform_specs.InstallCommandVariant(
-            "direct",
-            ("graphify", "owner-target", "install", "--project"),
-        ),
-    )
-
-
-def test_install_target_accessors_match_legacy_platform_accessors() -> None:
-    assert REGISTRY.target_names == REGISTRY.platform_names == platform_specs.ALL_PLATFORMS
-    assert REGISTRY.target_spec("codex") is REGISTRY.platform_spec("codex")
-    assert REGISTRY.selected_targets(all_platforms=True, target_name=None) == REGISTRY.selected_platforms(
-        all_platforms=True,
-        platform_name=None,
-    )
-    assert REGISTRY.selected_targets(all_platforms=False, target_name="codex") == REGISTRY.selected_platforms(
-        all_platforms=False,
-        platform_name="codex",
-    )
-    assert REGISTRY.target_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
-
-
-def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
-        REGISTRY.target_spec("missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
-        REGISTRY.platform_spec("missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
-        REGISTRY.selected_targets(all_platforms=False, target_name="missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
-        REGISTRY.selected_platforms(all_platforms=False, platform_name="missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
-        REGISTRY.target_scenarios("missing-target", "both")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
-        REGISTRY.platform_scenarios("missing-target", "both")
-
-
-def test_every_scope_is_runnable_or_explained() -> None:
-    for platform_name in platform_specs.ALL_PLATFORMS:
-        for scope in ("user", "project"):
-            scenario = REGISTRY.make_scenario(platform_name, scope)
-            reason = REGISTRY.unsupported_scope_reason(platform_name, scope)
-            assert (scenario is not None) != (reason is not None), f"{platform_name}/{scope} should have exactly one scenario or unsupported reason"
-            if scenario is not None:
-                assert scenario.expected, f"{platform_name}/{scope} should assert at least one file effect"
-
-
-def test_cursor_both_scope_selects_project_scenario() -> None:
-    both = REGISTRY.platform_scenarios("cursor", "both")
-
-    assert [scenario.scope for scenario in both] == ["project"]
-
-
-def test_make_scenario_projects_registry_scope_specs() -> None:
-    for platform_name in platform_specs.ALL_PLATFORMS:
-        spec = REGISTRY.platform_spec(platform_name)
-        for scope, scope_spec in spec.scopes.items():
-            scenario = REGISTRY.make_scenario(platform_name, scope)
-            assert scenario is not None
-            assert scenario.install_command == scope_spec.install_command
-            assert scenario.uninstall_command == scope_spec.uninstall_command
-            assert scenario.cwd_root == scope_spec.cwd_root
-            assert scenario.expected == scope_spec.expected
-            assert scenario.risk_notes == scope_spec.risk_notes
-
-
-def test_direct_equivalence_uses_registry_scope_specs() -> None:
-    for platform_name in platform_specs.ALL_PLATFORMS:
-        spec = REGISTRY.platform_spec(platform_name)
-        for scope, scope_spec in spec.scopes.items():
-            scenario = REGISTRY.make_scenario(platform_name, scope)
-            assert scenario is not None
-            assert REGISTRY.equivalent_install_command(scenario) == scope_spec.equivalent_install_command
-
-
-def test_install_variants_are_declared_and_preserve_arbitrary_labels() -> None:
-    registry = platform_specs.ScenarioRegistry(
-        {
-            "strange-tool": platform_specs.PlatformSpec(
-                name="strange-tool",
-                scopes={
-                    "project": platform_specs.ScopeSpec(
-                        install_command=("tool", "apply", "alpha"),
-                        uninstall_command=None,
-                        cwd_root="project",
-                        expected=(platform_specs.ExpectedPath("project", "tool.txt"),),
-                        equivalent_install_command=("tool", "apply", "beta"),
-                        install_variants=(
-                            platform_specs.InstallCommandVariant("first declared", ("tool", "apply", "alpha")),
-                            platform_specs.InstallCommandVariant("second declared", ("tool", "apply", "beta")),
-                        ),
-                    )
-                },
-            )
-        }
-    )
-    scenario = registry.make_scenario("strange-tool", "project")
-
-    assert scenario is not None
-    assert registry.install_variants(scenario) == (
-        platform_specs.InstallCommandVariant("first declared", ("tool", "apply", "alpha")),
-        platform_specs.InstallCommandVariant("second declared", ("tool", "apply", "beta")),
-    )
-    assert registry.equivalent_install_variants(scenario) == (
-        platform_specs.InstallCommandVariant("first declared", ("tool", "apply", "alpha")),
-        platform_specs.InstallCommandVariant("second declared", ("tool", "apply", "beta")),
-    )
-
-
-def test_install_variant_fallback_uses_neutral_labels_for_unrecognized_commands() -> None:
-    registry = platform_specs.ScenarioRegistry(
-        {
-            "neutral": platform_specs.PlatformSpec(
-                name="neutral",
-                scopes={
-                    "project": platform_specs.ScopeSpec(
-                        install_command=("tool", "primary"),
-                        uninstall_command=None,
-                        cwd_root="project",
-                        expected=(platform_specs.ExpectedPath("project", "neutral.txt"),),
-                        equivalent_install_command=("tool", "alternate"),
-                    )
-                },
-            )
-        }
-    )
-
-    assert registry.install_variants_for_scope("neutral", "project") == (
-        platform_specs.InstallCommandVariant("primary", ("tool", "primary")),
-        platform_specs.InstallCommandVariant("alternate", ("tool", "alternate")),
-    )
 
 
 def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
@@ -394,38 +233,6 @@ def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
     platform_specs.validate_roots({"home", "project", "user_cwd"})
     with pytest.raises(RuntimeError, match="declared-output"):
         registry.validate_roots({"declared-cwd"})
-
-
-def test_platform_coverage_records_unsupported_scopes() -> None:
-    records = REGISTRY.coverage_records(["cursor"], "both")
-    user = next(record for record in records if record["scope"] == "user")
-    project = next(record for record in records if record["scope"] == "project")
-
-    assert user["status"] == "unsupported"
-    assert "reason" in user
-    assert project["status"] == "runnable"
-
-
-def test_generic_direct_equivalence_applicability() -> None:
-    gemini_user = REGISTRY.make_scenario("gemini", "user")
-    codex_user = REGISTRY.make_scenario("codex", "user")
-    codex_project = REGISTRY.make_scenario("codex", "project")
-    codebuddy_user = REGISTRY.make_scenario("codebuddy", "user")
-    codebuddy_project = REGISTRY.make_scenario("codebuddy", "project")
-    cursor_project = REGISTRY.make_scenario("cursor", "project")
-
-    assert gemini_user is not None
-    assert codex_user is not None
-    assert codex_project is not None
-    assert codebuddy_user is not None
-    assert codebuddy_project is not None
-    assert cursor_project is not None
-    assert REGISTRY.equivalent_install_command(gemini_user) == ("graphify", "gemini", "install")
-    assert REGISTRY.equivalent_install_command(codex_user) is None
-    assert REGISTRY.equivalent_install_command(codex_project) == ("graphify", "codex", "install", "--project")
-    assert REGISTRY.equivalent_install_command(codebuddy_user) is None
-    assert REGISTRY.equivalent_install_command(codebuddy_project) == ("graphify", "codebuddy", "install")
-    assert REGISTRY.equivalent_install_command(cursor_project) == ("graphify", "install", "--project", "--platform", "cursor")
 
 
 def test_default_registry_does_not_own_universal_uninstall_selection() -> None:

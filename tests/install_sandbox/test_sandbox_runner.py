@@ -42,6 +42,7 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "json_helpers.py",
         "scenario_file_effects_adapter.py",
         "scenario_lifecycle_support.py",
+        "scenario_lifecycle_standard.py",
         "spec_loader.py",
         "status.py",
         "validation_plan.py",

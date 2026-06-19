@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_support
+from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_standard, scenario_lifecycle_support
 
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     STANDARD_ARTIFACT_FILENAMES,
@@ -31,6 +31,7 @@ def test_scenario_file_effects_protocol_omits_oracle_and_core_leaf_helpers() -> 
         "expected_generated_relative_keys",
         "check_record",
     } & lifecycle_methods
+    assert not hasattr(scenario_lifecycle_support, "_standard_scenario_command_ok")
 
 
 def test_scenario_lifecycle_facade_preserves_support_imports() -> None:
@@ -42,12 +43,23 @@ def test_scenario_lifecycle_facade_preserves_support_imports() -> None:
     assert scenario_lifecycle.MatrixRunnerOverrides is scenario_lifecycle_support.MatrixRunnerOverrides
 
 
+def test_scenario_lifecycle_facade_preserves_standard_imports() -> None:
+    assert scenario_lifecycle.StandardLifecyclePhase is scenario_lifecycle_standard.StandardLifecyclePhase
+    assert scenario_lifecycle.StandardLifecycleMechanics is scenario_lifecycle_standard.StandardLifecycleMechanics
+    assert scenario_lifecycle.INITIAL_INSTALL_PHASE is scenario_lifecycle_standard.INITIAL_INSTALL_PHASE
+    assert scenario_lifecycle.REPEAT_INSTALL_PHASE is scenario_lifecycle_standard.REPEAT_INSTALL_PHASE
+    assert scenario_lifecycle.STALE_SIDECAR_REPAIR_PHASE is scenario_lifecycle_standard.STALE_SIDECAR_REPAIR_PHASE
+    assert scenario_lifecycle.UNINSTALL_PHASE is scenario_lifecycle_standard.UNINSTALL_PHASE
+    assert scenario_lifecycle.run_scenario is scenario_lifecycle_standard.run_scenario
+    assert scenario_lifecycle.finalize_standard_scenario is scenario_lifecycle_standard.finalize_standard_scenario
+
+
 def test_run_scenario_skips_followups_when_initial_install_fails(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     factory.command_results = [1]
     scenario = make_scenario()
 
-    result = scenario_lifecycle.run_scenario(scenario, {}, hooks=factory.hooks())
+    result = scenario_lifecycle_standard.run_scenario(scenario, {}, hooks=factory.hooks())
     artifact_dir = factory.output / "scenarios" / "codex-project"
     assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
 
@@ -75,7 +87,7 @@ def test_run_scenario_preserves_stage_order_and_records_followups(tmp_path) -> N
     factory.seeded_sidecars = [{"ok": True, "detail": "seeded_stale_reference_fragment"}]
     scenario = make_scenario()
 
-    result = scenario_lifecycle.run_scenario(scenario, {}, hooks=factory.hooks())
+    result = scenario_lifecycle_standard.run_scenario(scenario, {}, hooks=factory.hooks())
     assertions = json.loads((factory.output / "scenarios" / "codex-project" / "assertions.json").read_text(encoding="utf-8"))
 
     assert_preserved_result_shape(result)
@@ -129,7 +141,7 @@ def test_run_scenario_preserves_standard_artifact_filenames(tmp_path) -> None:
     factory.command_results = [0, 0, 0, 0]
     factory.seeded_sidecars = [{"ok": True, "detail": "seeded_stale_reference_fragment"}]
 
-    scenario_lifecycle.run_scenario(make_scenario(), {}, hooks=factory.hooks())
+    scenario_lifecycle_standard.run_scenario(make_scenario(), {}, hooks=factory.hooks())
 
     artifact_dir = factory.output / "scenarios" / "codex-project"
     assert STANDARD_ARTIFACT_FILENAMES <= artifact_names(artifact_dir)

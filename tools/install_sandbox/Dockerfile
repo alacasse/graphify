@@ -58,6 +58,7 @@ COPY reports.py /runner/reports.py
 COPY scenario_file_effects_adapter.py /runner/scenario_file_effects_adapter.py
 COPY scenario_lifecycle.py /runner/scenario_lifecycle.py
 COPY scenario_lifecycle_support.py /runner/scenario_lifecycle_support.py
+COPY scenario_lifecycle_standard.py /runner/scenario_lifecycle_standard.py
 COPY source_snapshot.py /runner/source_snapshot.py
 COPY status.py /runner/status.py
 COPY validation_plan.py /runner/validation_plan.py

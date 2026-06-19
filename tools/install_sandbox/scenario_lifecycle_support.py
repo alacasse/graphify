@@ -64,26 +64,17 @@ class ScenarioResultOutcome(Protocol):
     def risks(self, context: ScenarioRunContext, artifacts: ScenarioArtifacts) -> dict[str, object]: ...
 
 
-def _standard_scenario_command_ok(stages: StandardScenarioStages) -> bool:
-    return (
-        stages.install_1.returncode == 0
-        and stages.install_2 is not None
-        and stages.install_2.returncode == 0
-        and (stages.stale_sidecar_repair_result is None or stages.stale_sidecar_repair_result.returncode == 0)
-        and (stages.uninstall_result is None or stages.uninstall_result.returncode == 0)
-    )
-
-
 @dataclass(frozen=True)
 class StandardScenarioOutcome:
     scenario_name: str
     stages: StandardScenarioStages
     checks: list[dict[str, object]]
+    command_ok: bool
     generic_direct_equivalence: dict[str, object]
 
     @property
     def passed(self) -> bool:
-        return _standard_scenario_command_ok(self.stages) and all(check["ok"] for check in self.checks)
+        return self.command_ok and all(check["ok"] for check in self.checks)
 
     def platform_name(self, context: ScenarioRunContext) -> str:
         return context.scenario.platform
@@ -357,9 +348,10 @@ class ScenarioArtifacts:
         scenario_name: str,
         stages: StandardScenarioStages,
         checks: list[dict[str, object]],
+        command_ok: bool,
         generic_direct_equivalence: dict[str, object],
     ) -> dict[str, object]:
-        return self.recorded_result(context, StandardScenarioOutcome(scenario_name, stages, checks, generic_direct_equivalence))
+        return self.recorded_result(context, StandardScenarioOutcome(scenario_name, stages, checks, command_ok, generic_direct_equivalence))
 
     def universal_uninstall_result(
         self,

@@ -42,7 +42,6 @@ COPY file_effect_oracle.py /runner/file_effect_oracle.py
 COPY file_effect_sidecars.py /runner/file_effect_sidecars.py
 COPY file_effect_state.py /runner/file_effect_state.py
 COPY file_effect_surfaces.py /runner/file_effect_surfaces.py
-COPY file_effects.py /runner/file_effects.py
 COPY file_walk.py /runner/file_walk.py
 COPY harness_specs.py /runner/harness_specs.py
 COPY install_surface_core.py /runner/install_surface_core.py

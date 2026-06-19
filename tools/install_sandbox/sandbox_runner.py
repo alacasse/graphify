@@ -17,9 +17,12 @@ from pathlib import Path
 try:
     from . import agent_summary
     from . import command_runner
-    from . import file_effects
+    from . import file_effect_generated_artifacts
+    from . import file_effect_oracle as file_effect_oracle_module
+    from . import file_effect_state
     from . import reference_resolution
     from . import reports
+    from . import scenario_file_effects_adapter
     from . import scenario_lifecycle
     from . import source_snapshot
     from . import validation_plan
@@ -33,9 +36,12 @@ try:
 except ImportError:
     import agent_summary
     import command_runner
-    import file_effects
+    import file_effect_generated_artifacts  # type: ignore[no-redef]
+    import file_effect_oracle as file_effect_oracle_module  # type: ignore[no-redef]
+    import file_effect_state  # type: ignore[no-redef]
     import reference_resolution
     import reports
+    import scenario_file_effects_adapter  # type: ignore[no-redef]
     import scenario_lifecycle
     import source_snapshot
     import validation_plan
@@ -61,12 +67,12 @@ OUTPUT = RUNTIME_ROOTS["output"]
 HARNESS_VERSION = "2026-06-01.1"
 PACKAGE_NAME = "graphifyy"
 INSTALL_MODE = "normal"
-USER_SENTINEL = file_effects.USER_SENTINEL
-STALE_GRAPHIFY_SENTINEL = file_effects.STALE_GRAPHIFY_SENTINEL
+USER_SENTINEL = file_effect_state.USER_SENTINEL
+STALE_GRAPHIFY_SENTINEL = file_effect_state.STALE_GRAPHIFY_SENTINEL
 COPY_EXCLUDES = (
     *source_snapshot.COPY_EXCLUDES,
 )
-GENERATED_COPY_EXCLUDES = file_effects.GENERATED_COPY_EXCLUDES
+GENERATED_COPY_EXCLUDES = file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES
 MANIFEST_PRUNE_DIRS = set(GENERATED_COPY_EXCLUDES) | {".mypy_cache", ".ruff_cache", "node_modules"}
 
 
@@ -267,8 +273,8 @@ def reset_sandbox_dirs() -> None:
     XDG_CONFIG_HOME.mkdir(parents=True, exist_ok=True)
 
 
-def file_effect_oracle() -> file_effects.FileEffectOracle:
-    return file_effects.FileEffectOracle(
+def file_effect_oracle() -> file_effect_oracle_module.FileEffectOracle:
+    return file_effect_oracle_module.FileEffectOracle(
         roots=ROOTS,
         packaged_reference_resolution=packaged_reference_resolution,
         expected_graphify_version=expected_graphify_version,
@@ -368,7 +374,7 @@ def scenario_lifecycle_hooks(
             root_path=oracle.root_path,
             reset_sandbox_dirs=reset_sandbox_dirs,
         ),
-        file_effects=file_effects.ScenarioFileEffectsAdapter(
+        file_effects=scenario_file_effects_adapter.ScenarioFileEffectsAdapter(
             oracle=oracle,
             write_file_manifest=write_file_manifest,
             run_equivalence_check=run_equivalence_check,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 from pathlib import Path
@@ -45,7 +46,27 @@ def test_dockerfile_copies_direct_runner_imports() -> None:
         "validation_plan.py",
     ):
         assert f"COPY {module} /runner/{module}" in dockerfile
+    assert "COPY file_effects.py /runner/file_effects.py" not in dockerfile
     assert "COPY specs /runner/specs" in dockerfile
+
+
+def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
+    tree = ast.parse(Path(sandbox_runner.__file__).read_text(encoding="utf-8"))
+    module_imports: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            module_imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module_imports.update(alias.name for alias in node.names)
+
+    assert "file_effects" not in module_imports
+    assert {
+        "file_effect_generated_artifacts",
+        "file_effect_oracle",
+        "file_effect_state",
+        "scenario_file_effects_adapter",
+    } <= module_imports
 
 
 def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_path) -> None:

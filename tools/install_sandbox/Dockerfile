@@ -51,6 +51,7 @@ COPY install_surface_state.py /runner/install_surface_state.py
 COPY install_surface_statuses.py /runner/install_surface_statuses.py
 COPY install_target_catalog.py /runner/install_target_catalog.py
 COPY install_target_defaults.py /runner/install_target_defaults.py
+COPY install_target_harness_policy.py /runner/install_target_harness_policy.py
 COPY install_target_models.py /runner/install_target_models.py
 COPY install_target_scenarios.py /runner/install_target_scenarios.py
 COPY install_target_selection.py /runner/install_target_selection.py

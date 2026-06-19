@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
+    from . import install_target_harness_policy as _harness_policy
     from .install_target_models import (
-        SIMULATED_LINUX_LAYOUT_NOTE,
         DisposableArtifactScenarioSpec,
         InstallCommandVariant,
         InstallSurface,
@@ -24,8 +24,8 @@ try:
     )
     from . import install_target_selection as _selection
 except ImportError:  # pragma: no cover - direct script import fallback
+    import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
     from install_target_models import (  # type: ignore[no-redef]
-        SIMULATED_LINUX_LAYOUT_NOTE,
         DisposableArtifactScenarioSpec,
         InstallCommandVariant,
         InstallSurface,
@@ -122,78 +122,39 @@ class ScenarioRegistry:
         return _selection.scenario_id(platform_name, scope)
 
     def universal_uninstall_scenario_id(self, scope: str) -> str:
-        spec = self.universal_uninstall_spec_for_scope(scope)
-        return spec.scenario_id if spec is not None else f"universal-uninstall-{scope}"
+        return _harness_policy.universal_uninstall_scenario_id(self.universal_uninstall_specs, scope)
 
     def purge_disposable_graphify_out_scenario_id(self) -> str:
-        for spec in self.disposable_artifact_specs:
-            if spec.disposable_path_relative == "graphify-out":
-                return spec.scenario_id
-        return "purge-disposable-graphify-out"
+        return _harness_policy.purge_disposable_graphify_out_scenario_id(self.disposable_artifact_specs)
 
     def coverage_records(self, platforms: list[str], scope: str) -> list[dict[str, object]]:
         return _selection.coverage_records(self.specs, platforms, scope)
 
     def universal_uninstall_spec_for_scope(self, scope: str) -> UniversalUninstallScenarioSpec | None:
-        return next((spec for spec in self.universal_uninstall_specs if spec.scope == scope), None)
+        return _harness_policy.universal_uninstall_spec_for_scope(self.universal_uninstall_specs, scope)
 
     def universal_uninstall_scenarios(self, platforms: list[str], scope: str) -> list[SelectedUniversalUninstallScenario]:
-        requested = set(platforms)
-        selected_scopes = set(self.selected_scopes(scope))
-        selected: list[SelectedUniversalUninstallScenario] = []
-        for universal_spec in self.universal_uninstall_specs:
-            if universal_spec.scope not in selected_scopes:
-                continue
-            scenarios = [
-                self.make_scenario(platform_name, universal_spec.eligible_platform_scope)
-                for platform_name, spec in self.specs.items()
-                if platform_name in requested and universal_spec.eligible_platform_scope in spec.universal_uninstall_scopes
-            ]
-            runnable = tuple(scenario for scenario in scenarios if scenario is not None)
-            if len(runnable) >= universal_spec.minimum_installed_scenarios:
-                selected.append(SelectedUniversalUninstallScenario(universal_spec, runnable))
-        return selected
+        return _harness_policy.universal_uninstall_scenarios(self.specs, self.universal_uninstall_specs, platforms, scope)
 
     def universal_uninstall_groups(self, platforms: list[str], scope: str) -> list[tuple[str, list[Scenario]]]:
-        return [(selected.spec.scope, list(selected.installed_scenarios)) for selected in self.universal_uninstall_scenarios(platforms, scope)]
+        return _harness_policy.universal_uninstall_groups(self.specs, self.universal_uninstall_specs, platforms, scope)
 
     def disposable_artifact_scenarios(self, scope: str) -> list[DisposableArtifactScenarioSpec]:
-        return [spec for spec in self.disposable_artifact_specs if scope in spec.scope_eligibility]
+        return _harness_policy.disposable_artifact_scenarios(self.disposable_artifact_specs, scope)
 
     def target_runtime_validation_sections(self) -> list[dict[str, object]]:
-        sections: list[dict[str, object]] = []
-        seen: set[tuple[str, str]] = set()
-        for platform in self.specs.values():
-            for validation in platform.target_runtime_validation:
-                key = (validation.section_title, validation.status)
-                if key in seen:
-                    continue
-                seen.add(key)
-                sections.append(validation.to_manifest())
-        return sections
+        return _harness_policy.target_runtime_validation_sections(self.specs)
 
     def validate_roots(self, declared_roots: set[str]) -> None:
-        unknown: set[str] = set()
-        for platform in self.specs.values():
-            for scope in platform.scopes.values():
-                if scope.cwd_root not in declared_roots:
-                    unknown.add(scope.cwd_root)
-                unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)
-        unknown.update(spec.cwd_root for spec in self.universal_uninstall_specs if spec.cwd_root not in declared_roots)
-        for spec in self.disposable_artifact_specs:
-            if spec.cwd_root not in declared_roots:
-                unknown.add(spec.cwd_root)
-            if spec.disposable_path_root not in declared_roots:
-                unknown.add(spec.disposable_path_root)
-        if unknown:
-            raise RuntimeError(f"unknown sandbox root declaration(s): {', '.join(sorted(unknown))}")
+        _harness_policy.validate_roots(
+            self.specs,
+            self.universal_uninstall_specs,
+            self.disposable_artifact_specs,
+            declared_roots,
+        )
 
     def risk_notes(self, *notes: str, platform_name: str | None = None) -> tuple[str, ...]:
-        ordered = list(notes)
-        spec = self.specs.get(platform_name or "")
-        if spec is not None and spec.simulated_linux_layout:
-            ordered.append(SIMULATED_LINUX_LAYOUT_NOTE)
-        return _dedupe_notes(*ordered)
+        return _harness_policy.risk_notes(self.specs, *notes, platform_name=platform_name)
 
 
 InstallTargetCatalog = ScenarioRegistry

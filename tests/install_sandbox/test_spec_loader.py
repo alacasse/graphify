@@ -18,7 +18,7 @@ FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION = "transitional_sandbox_execution_dat
 FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
-MIGRATED_EFFECTS_SPECS = {
+DEFAULT_EFFECTS_SPECS = {
     "agents",
     "aider",
     "amp",
@@ -326,19 +326,17 @@ def test_default_registry_runnable_scopes_declare_one_effect_vocabulary_key() ->
     assert inventory["expected"] == set()
 
 
-def test_default_registry_effects_migration_inventory_is_explicit() -> None:
+def test_default_registry_all_runnable_scopes_use_effects() -> None:
     inventory = _default_scope_effect_key_inventory()
-    migrated_specs = {scope_id.split(".", maxsplit=1)[0] for scope_id in inventory["effects"]}
-    legacy_specs = {scope_id.split(".", maxsplit=1)[0] for scope_id in inventory["expected"]}
+    effects_specs = {scope_id.split(".", maxsplit=1)[0] for scope_id in inventory["effects"]}
     all_specs = {
         path.stem
         for path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")
         if path.name != "shared.yaml"
     }
 
-    assert migrated_specs == MIGRATED_EFFECTS_SPECS
-    assert legacy_specs == all_specs - MIGRATED_EFFECTS_SPECS
-    assert legacy_specs == set()
+    assert effects_specs == all_specs == DEFAULT_EFFECTS_SPECS
+    assert inventory["expected"] == set()
 
 
 def test_loader_preserves_explicit_no_project_install_equivalence() -> None:
@@ -369,7 +367,7 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
     assert registry.disposable_artifact_specs == ()
 
 
-@pytest.mark.parametrize("spec_name", sorted(MIGRATED_EFFECTS_SPECS))
+@pytest.mark.parametrize("spec_name", sorted(DEFAULT_EFFECTS_SPECS))
 def test_default_registry_migrated_yaml_uses_effects_key_for_runnable_scopes(spec_name: str) -> None:
     data = yaml.safe_load((spec_loader.DEFAULT_REGISTRY_PATH / f"{spec_name}.yaml").read_text(encoding="utf-8"))
 

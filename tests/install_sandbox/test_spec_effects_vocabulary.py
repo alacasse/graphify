@@ -5,7 +5,10 @@ from copy import deepcopy
 import pytest
 import yaml
 
-from tests.install_sandbox.test_spec_loader import _expect_invalid, _valid_data
+from tests.install_sandbox.install_target_test_support import (
+    expect_invalid_registry as _expect_invalid,
+    valid_registry_data as _valid_data,
+)
 from tools.install_sandbox import spec_loader
 from tools.install_sandbox.spec_loader import load_registry_from_data
 from tools.install_sandbox.spec_normalize import normalize_registry

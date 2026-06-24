@@ -52,6 +52,13 @@ def test_install_codex(tmp_path):
     assert (tmp_path / ".codex" / "skills" / "graphify" / "SKILL.md").exists()
 
 
+@pytest.mark.parametrize("platform", ["agents", "skills"])
+def test_install_agents_user_scope_lands_in_agent_skills_not_amp(tmp_path, platform):
+    _install(tmp_path, platform)
+    assert (tmp_path / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (tmp_path / ".config" / "agents" / "skills" / "graphify" / "SKILL.md").exists()
+
+
 def test_install_opencode(tmp_path):
     _install(tmp_path, "opencode")
     assert (
@@ -99,6 +106,22 @@ def test_install_project_codex_writes_skill_and_agents(tmp_path, monkeypatch):
     assert (project / "AGENTS.md").exists()
     assert (project / ".codex" / "hooks.json").exists()
     assert not (home / ".codex" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_install_project_agents_writes_project_skill_only(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(sys, "argv", ["graphify", "install", "--project", "--platform", "agents"])
+    with patch("graphify.__main__.Path.home", return_value=home):
+        main()
+
+    assert (project / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (project / "AGENTS.md").exists()
+    assert not (home / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
 
 
 def test_install_project_codebuddy_writes_project_scope(tmp_path, monkeypatch):
@@ -1043,6 +1066,82 @@ def test_uninstall_all_removes_amp_user_skill(tmp_path, monkeypatch):
         main()
 
     assert not skill.exists()
+
+
+def test_install_platform_agents_is_skill_only(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(sys, "argv", ["graphify", "install", "--platform", "agents"])
+    with patch("graphify.__main__.Path.home", return_value=home):
+        main()
+
+    assert (home / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (home / ".config" / "agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (project / "AGENTS.md").exists()
+    assert not (project / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+@pytest.mark.parametrize("cmd", ["agents", "skills"])
+def test_agents_subcommand_install_writes_user_skill_and_agents_md(tmp_path, monkeypatch, cmd):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(sys, "argv", ["graphify", cmd, "install"])
+    with patch("graphify.__main__.Path.home", return_value=home):
+        main()
+
+    assert (home / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (home / ".config" / "agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert (project / "AGENTS.md").exists()
+    assert not (project / ".agents" / "rules" / "graphify.md").exists()
+    assert not (project / ".agents" / "workflows" / "graphify.md").exists()
+
+
+def test_agents_subcommand_project_install_writes_only_project_skill(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(sys, "argv", ["graphify", "agents", "install", "--project"])
+    with patch("graphify.__main__.Path.home", return_value=home):
+        main()
+
+    assert (project / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not (project / "AGENTS.md").exists()
+    assert not (project / ".agents" / "rules" / "graphify.md").exists()
+    assert not (project / ".agents" / "workflows" / "graphify.md").exists()
+    assert not (home / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_agents_subcommand_uninstall_removes_user_skill_and_agents_md(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    with patch("graphify.__main__.Path.home", return_value=home):
+        monkeypatch.setattr(sys, "argv", ["graphify", "agents", "install"])
+        main()
+        skill = home / ".agents" / "skills" / "graphify" / "SKILL.md"
+        assert skill.exists()
+        assert (project / "AGENTS.md").exists()
+
+        monkeypatch.setattr(sys, "argv", ["graphify", "agents", "uninstall"])
+        main()
+
+    assert not skill.exists()
+    assert not (home / ".agents" / "skills").exists()
+    assert not (project / "AGENTS.md").exists()
 
 
 def test_hermes_skill_destination_windows_uses_localappdata():

@@ -49,6 +49,8 @@ def _expected_artifacts() -> list[Path]:
     assert bodies, "no platform skill bodies found — packaging test mis-wired"
     assert refs, "no skills/*/references/*.md found in repo — packaging test mis-wired"
     assert always, "no always_on/*.md found in repo — packaging test mis-wired"
+    assert PKG / "skill-agents.md" in bodies
+    assert any(ref.match("skills/agents/references/*.md") for ref in refs)
     return bodies + refs + always
 
 

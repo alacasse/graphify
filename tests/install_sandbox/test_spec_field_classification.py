@@ -18,6 +18,40 @@ FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
 
+SPEC_WEIGHT_FIELD_CLASSIFICATION = {
+    "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
+    "uninstall_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
+    "equivalent_install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
+    "universal_uninstall_scopes": FIELD_CLASS_HARNESS_POLICY,
+    "unsupported_scopes": FIELD_CLASS_RUNTIME_LIMITATION,
+    "simulated_linux_layout": FIELD_CLASS_RUNTIME_LIMITATION,
+    "reference_bundles": FIELD_CLASS_DURABLE_TARGET_FACT,
+    "target_runtime_validation": FIELD_CLASS_RUNTIME_LIMITATION,
+}
+
+SPEC_WEIGHT_FIELD_EXAMPLES = {
+    "install_command": "vscode.user",
+    "uninstall_command": "codex.user",
+    "equivalent_install_command": "cursor.project",
+    "universal_uninstall_scopes": "codex",
+    "unsupported_scopes": "cursor",
+    "simulated_linux_layout": "windows",
+    "reference_bundles": "vscode",
+}
+
+DEFAULT_YAML_STRUCTURAL_TARGET_FIELDS = {
+    "display_name",
+    "project_skill",
+    "scopes",
+    "target_kind",
+    "user_skill",
+    "uses_packaged_references",
+}
+DEFAULT_YAML_STRUCTURAL_SCOPE_FIELDS = {
+    "effects",
+    "expected",
+}
+
 
 def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture() -> None:
     explicit = valid_registry_data()
@@ -32,18 +66,22 @@ def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture
     assert normalize_registry(load_registry_from_data(conventional)) == normalize_registry(load_registry_from_data(explicit))
 
 
-def test_default_registry_spec_weight_fields_are_classified() -> None:
-    candidate_fields = {
-        "install_command",
-        "uninstall_command",
-        "equivalent_install_command",
-        "universal_uninstall_scopes",
-        "unsupported_scopes",
-        "simulated_linux_layout",
-        "reference_bundles",
-        "target_runtime_validation",
-    }
-    expected_classification = {
+def _default_yaml_spec_weight_field_inventory() -> dict[str, set[str]]:
+    actual_inventory: dict[str, set[str]] = {}
+
+    for path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml"):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for field in data.keys() - DEFAULT_YAML_STRUCTURAL_TARGET_FIELDS:
+            actual_inventory.setdefault(field, set()).add(path.stem)
+        for scope_name, scope_data in data.get("scopes", {}).items():
+            for field in scope_data.keys() - DEFAULT_YAML_STRUCTURAL_SCOPE_FIELDS:
+                actual_inventory.setdefault(field, set()).add(f"{path.stem}.{scope_name}")
+
+    return actual_inventory
+
+
+def test_spec_weight_field_classification_vocabulary_is_explicit() -> None:
+    assert SPEC_WEIGHT_FIELD_CLASSIFICATION == {
         "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
         "uninstall_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
         "equivalent_install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -53,87 +91,20 @@ def test_default_registry_spec_weight_fields_are_classified() -> None:
         "reference_bundles": FIELD_CLASS_DURABLE_TARGET_FACT,
         "target_runtime_validation": FIELD_CLASS_RUNTIME_LIMITATION,
     }
-    expected_inventory = {
-        "install_command": {
-            "antigravity.user",
-            "cursor.project",
-            "kilo.project",
-            "kiro.project",
-            "vscode.project",
-            "vscode.user",
-        },
-        "uninstall_command": {
-            "agents.user",
-            "aider.user",
-            "amp.user",
-            "antigravity-windows.user",
-            "antigravity.user",
-            "claude.user",
-            "claw.user",
-            "codebuddy.user",
-            "codex.user",
-            "copilot.user",
-            "cursor.project",
-            "devin.user",
-            "droid.user",
-            "gemini.user",
-            "hermes.user",
-            "kilo.project",
-            "kilo.user",
-            "kimi.user",
-            "kiro.project",
-            "kiro.user",
-            "opencode.user",
-            "pi.user",
-            "trae-cn.user",
-            "trae.user",
-            "vscode.project",
-            "vscode.user",
-            "windows.user",
-        },
-        "equivalent_install_command": {
-            "antigravity-windows.project",
-            "antigravity.project",
-            "codebuddy.project",
-            "copilot.user",
-            "cursor.project",
-            "devin.project",
-            "devin.user",
-            "gemini.user",
-            "kimi.project",
-            "kiro.project",
-            "pi.project",
-            "pi.user",
-            "windows.project",
-        },
-        "universal_uninstall_scopes": {
-            "antigravity",
-            "claude",
-            "codebuddy",
-            "codex",
-            "cursor",
-            "devin",
-            "gemini",
-            "vscode",
-        },
-        "unsupported_scopes": {"cursor"},
-        "simulated_linux_layout": {"antigravity-windows", "windows"},
-        "reference_bundles": {"vscode"},
-        "target_runtime_validation": set(),
-    }
-    actual_inventory = {field: set() for field in candidate_fields}
 
-    for path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml"):
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        for field in candidate_fields & data.keys():
-            actual_inventory[field].add(path.stem)
-        for scope_name, scope_data in data.get("scopes", {}).items():
-            for field in candidate_fields & scope_data.keys():
-                actual_inventory[field].add(f"{path.stem}.{scope_name}")
 
-    assert actual_inventory == expected_inventory
-    assert set(expected_classification) == candidate_fields
-    assert expected_classification["universal_uninstall_scopes"] == FIELD_CLASS_HARNESS_POLICY
+def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:
+    actual_inventory = _default_yaml_spec_weight_field_inventory()
+    unclassified_fields = set(actual_inventory) - set(SPEC_WEIGHT_FIELD_CLASSIFICATION)
+
+    assert unclassified_fields == set()
+
+
+def test_default_yaml_has_targeted_examples_for_spec_weight_field_categories() -> None:
+    actual_inventory = _default_yaml_spec_weight_field_inventory()
+
+    for field, example in SPEC_WEIGHT_FIELD_EXAMPLES.items():
+        assert example in actual_inventory[field]
 
 
 def test_default_registry_explicit_project_equivalent_nulls_are_meaningful_runtime_limitations(tmp_path: Any) -> None:

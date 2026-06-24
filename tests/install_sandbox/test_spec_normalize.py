@@ -425,6 +425,101 @@ def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
     ]
 
 
+def test_normalized_simulated_layout_migrated_effects_match_expected_and_policies() -> None:
+    normalized = normalize_default_registry()
+    expected = {
+        "antigravity": {
+            "simulated": False,
+            "user": {
+                "install": ["graphify", "antigravity", "install"],
+                "uninstall": ["graphify", "antigravity", "uninstall"],
+                "equivalent": None,
+                "allowed_roots": ["home", "project", "user_cwd"],
+                "risk_notes": ["mixed_scope_project_wiring"],
+                "surfaces": [
+                    ("skill", "home", ".gemini/config/skills/graphify/SKILL.md"),
+                    ("text_section", "user_cwd", ".agents/rules/graphify.md"),
+                    ("file", "user_cwd", ".agents/workflows/graphify.md"),
+                ],
+            },
+            "project": {
+                "install": ["graphify", "install", "--project", "--platform", "antigravity"],
+                "uninstall": ["graphify", "uninstall", "--project", "--platform", "antigravity"],
+                "equivalent": ["graphify", "antigravity", "install", "--project"],
+                "allowed_roots": ["project"],
+                "risk_notes": [],
+                "surfaces": [
+                    ("skill", "project", ".agents/skills/graphify/SKILL.md"),
+                    ("text_section", "project", ".agents/rules/graphify.md"),
+                    ("file", "project", ".agents/workflows/graphify.md"),
+                ],
+            },
+        },
+        "antigravity-windows": {
+            "simulated": True,
+            "user": {
+                "install": ["graphify", "install", "--platform", "antigravity-windows"],
+                "uninstall": None,
+                "equivalent": None,
+                "allowed_roots": ["home"],
+                "risk_notes": ["public_cli_lacks_user_skill_uninstall", "simulated_linux_file_layout_only"],
+                "surfaces": [("skill", "home", ".gemini/config/skills/graphify/SKILL.md")],
+            },
+            "project": {
+                "install": ["graphify", "install", "--project", "--platform", "antigravity-windows"],
+                "uninstall": ["graphify", "uninstall", "--project", "--platform", "antigravity-windows"],
+                "equivalent": None,
+                "allowed_roots": ["project"],
+                "risk_notes": ["simulated_linux_file_layout_only"],
+                "surfaces": [("skill", "project", ".agents/skills/graphify/SKILL.md")],
+            },
+        },
+        "windows": {
+            "simulated": True,
+            "user": {
+                "install": ["graphify", "install", "--platform", "windows"],
+                "uninstall": None,
+                "equivalent": None,
+                "allowed_roots": ["home"],
+                "risk_notes": ["public_cli_lacks_user_skill_uninstall", "simulated_linux_file_layout_only"],
+                "surfaces": [
+                    ("skill", "home", ".claude/skills/graphify/SKILL.md"),
+                    ("text_section", "home", ".claude/CLAUDE.md"),
+                ],
+            },
+            "project": {
+                "install": ["graphify", "install", "--project", "--platform", "windows"],
+                "uninstall": ["graphify", "uninstall", "--project", "--platform", "windows"],
+                "equivalent": None,
+                "allowed_roots": ["project"],
+                "risk_notes": ["simulated_linux_file_layout_only"],
+                "surfaces": [
+                    ("skill", "project", ".claude/skills/graphify/SKILL.md"),
+                    ("text_section", "project", ".claude/CLAUDE.md"),
+                    ("text_section", "project", "CLAUDE.md"),
+                    ("json_hooks", "project", ".claude/settings.json"),
+                ],
+            },
+        },
+    }
+
+    for platform_name, platform_expected in expected.items():
+        platform = normalized["platforms"][platform_name]
+        assert platform["simulated_linux_layout"] is platform_expected["simulated"]
+        assert platform["target_runtime_validation"] == []
+        for scope_name in ("user", "project"):
+            scope = platform["scopes"][scope_name]
+            scope_expected = platform_expected[scope_name]
+
+            assert scope["effects"] == scope["expected"]
+            assert scope["install_command"] == scope_expected["install"]
+            assert scope["uninstall_command"] == scope_expected["uninstall"]
+            assert scope["equivalent_install_command"] == scope_expected["equivalent"]
+            assert scope["allowed_roots"] == scope_expected["allowed_roots"]
+            assert scope["risk_notes"] == scope_expected["risk_notes"]
+            assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in scope["effects"]] == scope_expected["surfaces"]
+
+
 def test_normalized_registry_includes_high_risk_platform_policies() -> None:
     normalized = normalize_default_registry()
 

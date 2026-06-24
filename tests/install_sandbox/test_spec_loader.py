@@ -22,6 +22,8 @@ MIGRATED_EFFECTS_SPECS = {
     "agents",
     "aider",
     "amp",
+    "antigravity",
+    "antigravity-windows",
     "claw",
     "codebuddy",
     "codex",
@@ -38,6 +40,7 @@ MIGRATED_EFFECTS_SPECS = {
     "pi",
     "trae",
     "trae-cn",
+    "windows",
 }
 
 

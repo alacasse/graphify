@@ -4,11 +4,11 @@ simulated_linux_layout: true
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .gemini/config/skills/graphify/SKILL.md
   project:
     equivalent_install_command: null
-    expected:
+    effects:
     - root: project
       relative: .agents/skills/graphify/SKILL.md

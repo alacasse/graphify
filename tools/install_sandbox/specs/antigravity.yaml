@@ -12,7 +12,7 @@ scopes:
     - graphify
     - antigravity
     - uninstall
-    expected:
+    effects:
     - root: home
       relative: .gemini/config/skills/graphify/SKILL.md
     - kind: text_section
@@ -26,7 +26,7 @@ scopes:
     - antigravity
     - install
     - --project
-    expected:
+    effects:
     - root: project
       relative: .agents/skills/graphify/SKILL.md
     - kind: text_section

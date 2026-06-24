@@ -4,7 +4,7 @@ simulated_linux_layout: true
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .claude/skills/graphify/SKILL.md
     - kind: text_section
@@ -13,7 +13,7 @@ scopes:
       marker: '# graphify'
   project:
     equivalent_install_command: null
-    expected:
+    effects:
     - root: project
       relative: .claude/skills/graphify/SKILL.md
     - kind: text_section

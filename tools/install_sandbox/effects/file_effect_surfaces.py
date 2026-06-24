@@ -6,8 +6,8 @@ from typing import Callable, Mapping
 
 try:
     from ..expected_effects import is_json_effect
-    from ..install_surface_core import resolve_install_surface_path
-    from ..install_surface_statuses import (
+    from ..surfaces.path_resolution import resolve_install_surface_path
+    from ..surfaces.install_surface_statuses import (
         FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,
@@ -19,8 +19,8 @@ try:
     from ..platform_specs import InstallSurface, Scenario, TextExpectation
 except ImportError:  # pragma: no cover - direct script import fallback
     from expected_effects import is_json_effect  # type: ignore[no-redef]
-    from install_surface_core import resolve_install_surface_path  # type: ignore[no-redef]
-    from install_surface_statuses import (  # type: ignore[no-redef]
+    from surfaces.path_resolution import resolve_install_surface_path  # type: ignore[no-redef]
+    from surfaces.install_surface_statuses import (  # type: ignore[no-redef]
         FileFingerprintObservation,
         InstallSurfaceObservation,
         UninstallSurfaceObservation,

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import install_surface_statuses
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface
+from tools.install_sandbox.surfaces import install_surface_statuses
 
 # Status-decision ownership lives here. Sidecar, state-plan, and generated-file
 # Installer Core decisions live in the sibling test_install_surface_core_* modules.

@@ -5,10 +5,11 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import install_surface_sidecars
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.surfaces import install_surface_generated
+from tools.install_sandbox.surfaces import install_surface_sidecars
 
 
 def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test detail") -> PackagedReferenceResolution:
@@ -256,10 +257,10 @@ def test_expected_skill_sidecar_relatives_follow_packaged_reference_status(
 def test_install_surface_core_matches_skill_sidecar_version_and_nested_reference_paths() -> None:
     test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
 
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/.graphify_version")) is True
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references/query.md")) is True
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references/nested/query.md")) is True
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references.tmp/partial.md")) is True
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references.tmp/nested/partial.md")) is True
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/notes.md")) is False
-    assert install_surface_core.is_skill_sidecar_relative(test_scenario.expected, "home", Path(".aider/graphify/.graphify_version")) is False
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/.graphify_version")) is True
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references/query.md")) is True
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references/nested/query.md")) is True
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references.tmp/partial.md")) is True
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/references.tmp/nested/partial.md")) is True
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/notes.md")) is False
+    assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "home", Path(".aider/graphify/.graphify_version")) is False

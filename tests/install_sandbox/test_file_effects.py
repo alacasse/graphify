@@ -35,12 +35,9 @@ def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
     function_names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
     class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
 
-    assert function_names == {
-        "resolve_install_root",
-        "resolve_install_surface_path",
-    }
+    assert function_names == set()
     assert class_names == set()
-    assert set(install_surface_core.__all__) >= function_names
+    assert {"resolve_install_root", "resolve_install_surface_path"} <= set(install_surface_core.__all__)
 
 
 def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:

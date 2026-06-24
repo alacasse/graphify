@@ -9,11 +9,11 @@ try:
     from . import file_effect_sidecars
     from . import file_effect_state
     from . import file_effect_surfaces
-    from ..install_surface_core import (
+    from ..surfaces.path_resolution import (
         resolve_install_root,
         resolve_install_surface_path,
     )
-    from ..install_surface_generated import GeneratedFileDecision
+    from ..surfaces.install_surface_generated import GeneratedFileDecision
     from ..platform_specs import InstallSurface, Scenario, TextExpectation
     from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
@@ -27,11 +27,11 @@ except ImportError:  # pragma: no cover - direct script import fallback
         import file_effect_sidecars  # type: ignore[no-redef]
         import file_effect_state  # type: ignore[no-redef]
         import file_effect_surfaces  # type: ignore[no-redef]
-    from install_surface_core import (  # type: ignore[no-redef]
+    from surfaces.path_resolution import (  # type: ignore[no-redef]
         resolve_install_root,
         resolve_install_surface_path,
     )
-    from install_surface_generated import GeneratedFileDecision  # type: ignore[no-redef]
+    from surfaces.install_surface_generated import GeneratedFileDecision  # type: ignore[no-redef]
     from platform_specs import InstallSurface, Scenario, TextExpectation  # type: ignore[no-redef]
     from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
 

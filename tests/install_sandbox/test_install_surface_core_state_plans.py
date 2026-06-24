@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import install_surface_state
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.surfaces import install_surface_state
 
 
 def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test detail") -> PackagedReferenceResolution:

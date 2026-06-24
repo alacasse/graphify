@@ -5,7 +5,7 @@ from typing import Callable, Mapping
 
 try:
     from ..expected_effects import is_skill_effect
-    from ..install_surface_state import (
+    from ..surfaces.install_surface_state import (
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         expected_generated_relative_keys,
@@ -18,7 +18,7 @@ try:
     from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
     from expected_effects import is_skill_effect  # type: ignore[no-redef]
-    from install_surface_state import (  # type: ignore[no-redef]
+    from surfaces.install_surface_state import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         expected_generated_relative_keys,

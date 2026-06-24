@@ -2,13 +2,9 @@ from __future__ import annotations
 
 """Compatibility facade for install-surface topic modules.
 
-Keep product-like install-surface decisions in the topic modules below. This
-module preserves the historical import surface and owns only shared path
-resolution glue that needs root mappings.
+Keep product-like install-surface decisions in the ``surfaces`` package. This
+module preserves the historical aggregate import surface for existing callers.
 """
-
-from pathlib import Path
-from typing import Mapping
 
 try:
     from .expected_effects import (
@@ -17,7 +13,7 @@ try:
         is_skill_effect,
     )
     from .reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
-    from .install_surface_sidecars import (
+    from .surfaces.install_surface_sidecars import (
         ReferenceSidecarExpectation,
         ReferenceSidecarMode,
         expected_skill_sidecar_relatives,
@@ -35,7 +31,7 @@ try:
         skill_version_status,
         uninstalled_skill_sidecar_status,
     )
-    from .install_surface_generated import (
+    from .surfaces.install_surface_generated import (
         GeneratedArtifactCopyPlan,
         GeneratedFileDecision,
         GeneratedFileExpectationLike,
@@ -50,7 +46,7 @@ try:
         is_small_text_candidate,
         text_mentions_expected_generated_marker,
     )
-    from .install_surface_statuses import (
+    from .surfaces.install_surface_statuses import (
         FileFingerprintObservation,
         InstallSurfaceObservation,
         InstallSurfaceStatus,
@@ -69,7 +65,7 @@ try:
         text_marker_status_from_text,
         uninstalled_surface_status_from_observation,
     )
-    from .install_surface_state import (
+    from .surfaces.install_surface_state import (
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         IdempotencyStateChange,
@@ -89,6 +85,7 @@ try:
         stale_sidecar_seed_plans,
         user_content_seed_plans,
     )
+    from .surfaces.path_resolution import resolve_install_root, resolve_install_surface_path
 except ImportError:  # pragma: no cover - direct script import fallback
     from expected_effects import (  # type: ignore[no-redef]
         InstallSurface,
@@ -96,7 +93,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         is_skill_effect,
     )
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus  # type: ignore[no-redef]
-    from install_surface_sidecars import (  # type: ignore[no-redef]
+    from surfaces.install_surface_sidecars import (  # type: ignore[no-redef]
         ReferenceSidecarExpectation,
         ReferenceSidecarMode,
         expected_skill_sidecar_relatives,
@@ -114,7 +111,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         skill_version_status,
         uninstalled_skill_sidecar_status,
     )
-    from install_surface_generated import (  # type: ignore[no-redef]
+    from surfaces.install_surface_generated import (  # type: ignore[no-redef]
         GeneratedArtifactCopyPlan,
         GeneratedFileDecision,
         GeneratedFileExpectationLike,
@@ -129,7 +126,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         is_small_text_candidate,
         text_mentions_expected_generated_marker,
     )
-    from install_surface_statuses import (  # type: ignore[no-redef]
+    from surfaces.install_surface_statuses import (  # type: ignore[no-redef]
         FileFingerprintObservation,
         InstallSurfaceObservation,
         InstallSurfaceStatus,
@@ -148,7 +145,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         text_marker_status_from_text,
         uninstalled_surface_status_from_observation,
     )
-    from install_surface_state import (  # type: ignore[no-redef]
+    from surfaces.install_surface_state import (  # type: ignore[no-redef]
         STALE_GRAPHIFY_SENTINEL,
         USER_SENTINEL,
         IdempotencyStateChange,
@@ -168,6 +165,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         stale_sidecar_seed_plans,
         user_content_seed_plans,
     )
+    from surfaces.path_resolution import resolve_install_root, resolve_install_surface_path  # type: ignore[no-redef]
 
 
 __all__ = (
@@ -243,14 +241,3 @@ __all__ = (
     "uninstalled_surface_status_from_observation",
     "user_content_seed_plans",
 )
-
-
-def resolve_install_root(root: str, roots: Mapping[str, Path]) -> Path:
-    try:
-        return roots[root]
-    except KeyError as exc:
-        raise AssertionError(f"unknown root: {root}") from exc
-
-
-def resolve_install_surface_path(surface: InstallSurface, roots: Mapping[str, Path]) -> Path:
-    return resolve_install_root(surface.root, roots) / surface.relative

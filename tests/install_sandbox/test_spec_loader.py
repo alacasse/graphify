@@ -18,7 +18,7 @@ FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION = "transitional_sandbox_execution_dat
 FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
-MIGRATED_EFFECTS_SPECS = {"aider", "amp", "gemini", "hermes"}
+MIGRATED_EFFECTS_SPECS = {"aider", "amp", "codebuddy", "codex", "gemini", "hermes"}
 
 
 def _skill(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[str, object]:

@@ -3,11 +3,11 @@ universal_uninstall_scopes:
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .codex/skills/graphify/SKILL.md
   project:
-    expected:
+    effects:
     - root: project
       relative: .codex/skills/graphify/SKILL.md
     - kind: text_section

@@ -6,7 +6,7 @@ scopes:
     uninstall_command:
     - graphify
     - uninstall
-    expected:
+    effects:
     - root: home
       relative: .codebuddy/skills/graphify/SKILL.md
     - kind: text_section
@@ -26,7 +26,7 @@ scopes:
     - graphify
     - codebuddy
     - install
-    expected:
+    effects:
     - root: project
       relative: .codebuddy/skills/graphify/SKILL.md
     - kind: text_section

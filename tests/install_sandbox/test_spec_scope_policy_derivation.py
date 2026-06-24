@@ -3,9 +3,7 @@ from __future__ import annotations
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.spec_loader import load_default_registry, load_registry_from_data
 
-from tests.install_sandbox.install_target_test_support import (
-    valid_registry_data as _valid_data,
-)
+from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
 
 
 def test_default_registry_every_scope_is_runnable_or_explained() -> None:
@@ -34,7 +32,9 @@ def test_default_registry_skill_effects_declare_sidecar_expectation() -> None:
 def test_loader_derives_scope_locality_and_simulated_notes() -> None:
     data = _valid_data()
     data["platforms"]["mini"]["simulated_linux_layout"] = True
-    data["platforms"]["mini"]["scopes"]["user"]["expected"].append({"root": "user_cwd", "relative": "GEMINI.md", "kind": "text_section"})
+    data["platforms"]["mini"]["scopes"]["user"]["expected"].append(
+        {"root": "user_cwd", "relative": "GEMINI.md", "kind": "text_section"}
+    )
 
     user = load_registry_from_data(data).make_scenario("mini", "user")
 

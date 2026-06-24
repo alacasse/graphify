@@ -1,0 +1,12 @@
+user_skill: .agents/skills/graphify/SKILL.md
+project_skill: .agents/skills/graphify/SKILL.md
+scopes:
+  user:
+    uninstall_command: null
+    expected:
+    - root: home
+      relative: .agents/skills/graphify/SKILL.md
+  project:
+    expected:
+    - root: project
+      relative: .agents/skills/graphify/SKILL.md

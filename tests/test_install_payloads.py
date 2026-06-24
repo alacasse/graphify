@@ -1,4 +1,4 @@
-"""Tests for graphify install payloads and host integrations."""
+"""Skill payload and destination edge tests for graphify install."""
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +22,7 @@ def test_codex_skill_uses_graphify_with_existing_graph():
     fast-path block, which jumps straight to the query flow when a graph exists.
     """
     import graphify
+
     skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text()
     assert "Fast path — existing graph" in skill
     assert "skip Steps 1–5 entirely and jump straight to `## For /graphify query`" in skill
@@ -132,8 +133,9 @@ def test_codex_install_does_not_write_claude_md(tmp_path):
 
 def test_hermes_skill_destination_windows_uses_localappdata():
     """#1403: on Windows, Hermes scans %LOCALAPPDATA%\\hermes\\skills, so the global
-    skill must land there — not ~/.hermes/skills (the POSIX path)."""
+    skill must land there -- not ~/.hermes/skills (the POSIX path)."""
     from graphify.__main__ import _platform_skill_destination
+
     with patch("graphify.__main__.platform.system", return_value="Windows"), \
          patch.dict(os.environ, {"LOCALAPPDATA": str(Path("/tmp/AppDataLocal"))}):
         dst = _platform_skill_destination("hermes", project=False)
@@ -143,6 +145,7 @@ def test_hermes_skill_destination_windows_uses_localappdata():
 def test_hermes_skill_destination_posix_uses_home():
     """Non-Windows hermes destination is unchanged (~/.hermes/skills)."""
     from graphify.__main__ import _platform_skill_destination
+
     with patch("graphify.__main__.platform.system", return_value="Linux"):
         dst = _platform_skill_destination("hermes", project=False)
     assert str(dst).endswith(".hermes/skills/graphify/SKILL.md"), dst

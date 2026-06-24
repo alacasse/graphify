@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import file_effect_generated_artifacts
-from tools.install_sandbox import file_effect_oracle
-from tools.install_sandbox import scenario_file_effects_adapter
+from tools.install_sandbox.effects import file_effect_generated_artifacts
+from tools.install_sandbox.effects import file_effect_oracle
+from tools.install_sandbox.effects import scenario_file_effects_adapter
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 

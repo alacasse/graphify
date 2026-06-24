@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import file_effect_generated_artifacts
-from tools.install_sandbox import file_effect_oracle
-from tools.install_sandbox import file_effect_state
-from tools.install_sandbox import file_effect_surfaces
+from tools.install_sandbox.effects import file_effect_generated_artifacts
+from tools.install_sandbox.effects import file_effect_oracle
+from tools.install_sandbox.effects import file_effect_state
+from tools.install_sandbox.effects import file_effect_surfaces
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario

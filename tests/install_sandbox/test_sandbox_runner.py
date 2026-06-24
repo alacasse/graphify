@@ -4,6 +4,7 @@ import ast
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,20 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
         "scenario_lifecycle_plan",
         "scenario_lifecycle_support",
     } <= module_imports
+
+
+def test_sandbox_runner_direct_script_help_works() -> None:
+    result = subprocess.run(
+        [sys.executable, "tools/install_sandbox/sandbox_runner.py", "--help"],
+        check=False,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "--platform" in result.stdout
+    assert "--all" in result.stdout
 
 
 def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_path) -> None:

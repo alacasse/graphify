@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 try:
-    from .file_walk import pruned_file_walk as walk_pruned_files
-    from .install_surface_generated import (
+    from ..file_walk import pruned_file_walk as walk_pruned_files
+    from ..install_surface_generated import (
         GeneratedFileDecision,
         decide_generated_file_observation,
         generated_artifact_copy_plan,
@@ -14,9 +14,9 @@ try:
         is_excluded_generated_path,
         text_mentions_expected_generated_marker,
     )
-    from .install_surface_state import expected_generated_relative_keys
-    from .platform_specs import Scenario
-    from .reference_resolution import PackagedReferenceResolution
+    from ..install_surface_state import expected_generated_relative_keys
+    from ..platform_specs import Scenario
+    from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
     from file_walk import pruned_file_walk as walk_pruned_files  # type: ignore[no-redef]
     from install_surface_generated import (  # type: ignore[no-redef]

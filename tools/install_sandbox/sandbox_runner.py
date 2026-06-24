@@ -17,16 +17,16 @@ from pathlib import Path
 try:
     from . import agent_summary
     from . import command_runner
-    from . import file_effect_generated_artifacts
-    from . import file_effect_oracle as file_effect_oracle_module
-    from . import file_effect_state
     from . import reference_resolution
     from . import reports
-    from . import scenario_file_effects_adapter
     from . import scenario_lifecycle_plan
     from . import scenario_lifecycle_support
     from . import source_snapshot
     from . import validation_plan
+    from .effects import file_effect_generated_artifacts
+    from .effects import file_effect_oracle as file_effect_oracle_module
+    from .effects import file_effect_state
+    from .effects import scenario_file_effects_adapter
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
@@ -37,16 +37,16 @@ try:
 except ImportError:
     import agent_summary
     import command_runner
-    import file_effect_generated_artifacts  # type: ignore[no-redef]
-    import file_effect_oracle as file_effect_oracle_module  # type: ignore[no-redef]
-    import file_effect_state  # type: ignore[no-redef]
     import reference_resolution
     import reports
-    import scenario_file_effects_adapter  # type: ignore[no-redef]
     import scenario_lifecycle_plan
     import scenario_lifecycle_support
     import source_snapshot
     import validation_plan
+    from effects import file_effect_generated_artifacts  # type: ignore[no-redef]
+    from effects import file_effect_oracle as file_effect_oracle_module  # type: ignore[no-redef]
+    from effects import file_effect_state  # type: ignore[no-redef]
+    from effects import scenario_file_effects_adapter  # type: ignore[no-redef]
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from platform_specs import (

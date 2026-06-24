@@ -3,95 +3,19 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tools.install_sandbox import file_effect_oracle
-from tools.install_sandbox import file_effect_sidecars
-from tools.install_sandbox import file_effect_state
-from tools.install_sandbox import file_effects
+from tools.install_sandbox.effects import file_effect_oracle
+from tools.install_sandbox.effects import file_effect_sidecars
+from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import scenario_file_effects_adapter
+from tools.install_sandbox.effects import scenario_file_effects_adapter
 
-# File-effects facade and oracle boundary guards live here. Behavior assertions
+# File-effects package and oracle boundary guards live here. Behavior assertions
 # stay with topic-owner tests such as test_file_effects_sidecars.py,
 # test_file_effects_generated.py, test_file_effects_observations.py, and
 # test_file_effects_adapter.py.
 
 
-FACADE_COMPATIBILITY_IMPORTS = {
-    "ScenarioFileEffectsAdapter": scenario_file_effects_adapter.ScenarioFileEffectsAdapter,
-    "check_record": scenario_file_effects_adapter.check_record,
-    "FileEffectOracle": file_effect_oracle.FileEffectOracle,
-    "assert_idempotent_state": file_effect_oracle.assert_idempotent_state,
-}
-
-BROAD_TOPIC_ALIASES = {
-    "FileFingerprintObservation",
-    "GENERATED_COPY_EXCLUDES",
-    "InstallSurfaceObservation",
-    "STALE_GRAPHIFY_SENTINEL",
-    "STALE_SIDECAR_SEED_DETAILS",
-    "USER_SENTINEL",
-    "UninstallSurfaceObservation",
-    "core_expected_manifest_relatives",
-    "decide_generated_file_observation",
-    "expected_generated_relative_keys",
-    "expected_manifest_relatives",
-    "expected_skill_sidecar_relatives",
-    "file_fingerprint_from_observation",
-    "generated_artifact_copy_plan",
-    "generated_file_observation",
-    "idempotency_state_changes",
-    "install_surface_kind_status_from_observation",
-    "installed_reference_sidecar_status",
-    "installed_surface_status_from_observation",
-    "is_excluded_generated_path",
-    "is_json_effect",
-    "is_skill_effect",
-    "planned_state_entries",
-    "pruned_file_walk",
-    "reference_sidecar_expectation",
-    "references_tmp_absence_status",
-    "skill_dir_for_entry",
-    "skill_reference_pointer_status",
-    "skill_references_relative",
-    "skill_references_tmp_relative",
-    "skill_sidecar_expectation",
-    "skill_version_relative",
-    "skill_version_status",
-    "stale_sidecar_seed_plans",
-    "text_mentions_expected_generated_marker",
-    "uninstalled_skill_sidecar_status",
-    "uninstalled_surface_status_from_observation",
-    "user_content_seed_plans",
-}
-
-
-def test_file_effects_preserves_moved_compatibility_imports() -> None:
-    assert file_effects.ScenarioFileEffectsAdapter is scenario_file_effects_adapter.ScenarioFileEffectsAdapter
-    assert file_effects.check_record is scenario_file_effects_adapter.check_record
-    assert file_effects.FileEffectOracle is file_effect_oracle.FileEffectOracle
-    assert file_effects.assert_idempotent_state is file_effect_oracle.assert_idempotent_state
-
-
-def test_file_effects_exposes_only_explicit_compatibility_facade() -> None:
-    assert set(file_effects.__all__) == set(FACADE_COMPATIBILITY_IMPORTS)
-    for compatibility_name, owner_object in FACADE_COMPATIBILITY_IMPORTS.items():
-        assert getattr(file_effects, compatibility_name) is owner_object
-
-
-def test_file_effects_rejects_broad_topic_aliases() -> None:
-    public_names = {
-        name
-        for name in vars(file_effects)
-        if not name.startswith("_") and name != "annotations"
-    }
-
-    assert public_names == set(file_effects.__all__)
-    assert public_names.isdisjoint(BROAD_TOPIC_ALIASES)
-    for alias in BROAD_TOPIC_ALIASES:
-        assert not hasattr(file_effects, alias)
-
-
-def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> None:
+def test_file_effects_package_tests_do_not_claim_topic_behavior_ownership() -> None:
     topic_owner_tests = {
         "sidecar": "test_file_effects_sidecars.py",
         "surface": "test_file_effects_observations.py",
@@ -102,8 +26,8 @@ def test_file_effects_facade_tests_do_not_claim_topic_behavior_ownership() -> No
     for filename in topic_owner_tests.values():
         assert (Path(__file__).parent / filename).exists()
 
-    assert "assert_idempotent_state" in FACADE_COMPATIBILITY_IMPORTS
-    assert "FileEffectOracle" in FACADE_COMPATIBILITY_IMPORTS
+    assert scenario_file_effects_adapter.ScenarioFileEffectsAdapter.__name__ == "ScenarioFileEffectsAdapter"
+    assert file_effect_oracle.FileEffectOracle.__name__ == "FileEffectOracle"
 
 
 def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
@@ -178,8 +102,6 @@ def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
         "should_seed_user_content",
     }
 
-    assert file_effects.FileEffectOracle is file_effect_oracle.FileEffectOracle
-
     oracle_methods = {
         name
         for name, value in vars(file_effect_oracle.FileEffectOracle).items()
@@ -229,7 +151,7 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
         "planned_state_entries",
         "user_content_seed_plans",
     }
-    tree = ast.parse(Path(file_effects.__file__).read_text(encoding="utf-8"))
+    oracle_tree = ast.parse(Path(file_effect_oracle.__file__).read_text(encoding="utf-8"))
     sidecar_tree = ast.parse(Path(file_effect_sidecars.__file__).read_text(encoding="utf-8"))
     state_tree = ast.parse(Path(file_effect_state.__file__).read_text(encoding="utf-8"))
 
@@ -245,13 +167,13 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
 
     imported_from_core = {
         alias.name
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_core")
         for alias in node.names
     }
     imported_from_state = {
         alias.name
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_state")
         for alias in node.names
     }
@@ -269,21 +191,21 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     }
     wildcard_core_imports = {
         node.module
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("install_surface_core")
         for alias in node.names
         if alias.name == "*"
     }
     module_imports = {
         alias.name
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.Import)
         for alias in node.names
         if any(part == "install_surface_core" for part in alias.name.split("."))
     }
     imported_core_modules = {
         alias.name
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.ImportFrom)
         and (node.module is None or node.module.endswith("install_sandbox"))
         for alias in node.names
@@ -291,13 +213,13 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     }
     core_module_aliases = {
         alias.asname or alias.name.rsplit(".", maxsplit=1)[-1]
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.Import)
         for alias in node.names
         if any(part == "install_surface_core" for part in alias.name.split("."))
     } | {
         alias.asname or alias.name
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.ImportFrom)
         and (node.module is None or node.module.endswith("install_sandbox"))
         for alias in node.names
@@ -305,12 +227,12 @@ def test_file_effects_does_not_import_or_call_path_reading_core_wrappers() -> No
     }
     direct_calls = {
         node.func.id
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     module_qualified_calls = {
         dotted
-        for node in ast.walk(tree)
+        for node in ast.walk(oracle_tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in legacy_wrappers

@@ -6,9 +6,12 @@ from typing import Callable, Iterable, Protocol
 
 try:
     from . import file_effect_state
-    from .platform_specs import Scenario
+    from ..platform_specs import Scenario
 except ImportError:
-    import file_effect_state  # type: ignore[no-redef]
+    try:
+        from effects import file_effect_state  # type: ignore[no-redef]
+    except ImportError:
+        import file_effect_state  # type: ignore[no-redef]
     from platform_specs import Scenario
 
 

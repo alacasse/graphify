@@ -3,7 +3,11 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.install_test_support import install_in_tmp as _install
+from tests.install_test_support import (
+    agents_install as _agents_install,
+    agents_uninstall as _agents_uninstall,
+    install_in_tmp as _install,
+)
 
 
 def test_codex_skill_contains_spawn_agent():
@@ -28,13 +32,6 @@ def test_codex_skill_uses_graphify_with_existing_graph():
     assert "graphify query" in skill
     assert "graphify explain" in skill
     assert "graphify path" in skill
-
-
-def test_codex_agents_install_mentions_dirty_graph_output(tmp_path):
-    _agents_install(tmp_path, "codex")
-    content = (tmp_path / "AGENTS.md").read_text()
-    assert "Dirty graphify-out/ files are expected" in content
-    assert "not a reason to skip graphify" in content
 
 
 def test_opencode_skill_contains_mention():
@@ -198,21 +195,6 @@ def test_codebuddy_uninstall_noop_if_not_installed(tmp_path):
     codebuddy_uninstall(tmp_path)  # should not raise
 
 
-# --- always-on AGENTS.md install/uninstall tests ---
-
-
-def _agents_install(tmp_path, platform):
-    from graphify.__main__ import _agents_install as _install_fn
-
-    _install_fn(tmp_path, platform)
-
-
-def _agents_uninstall(tmp_path, platform=""):
-    from graphify.__main__ import _agents_uninstall as _uninstall_fn
-
-    _uninstall_fn(tmp_path, platform=platform)
-
-
 def _kilo_install(project_dir, home_dir):
     from graphify.__main__ import _kilo_install as _install_fn
 
@@ -225,68 +207,6 @@ def _kilo_uninstall(project_dir, home_dir):
 
     with patch("graphify.__main__.Path.home", return_value=home_dir):
         _uninstall_fn(project_dir)
-
-
-def test_codex_agents_install_writes_agents_md(tmp_path):
-    _agents_install(tmp_path, "codex")
-    agents_md = tmp_path / "AGENTS.md"
-    assert agents_md.exists()
-    assert "graphify" in agents_md.read_text()
-    assert "GRAPH_REPORT.md" in agents_md.read_text()
-
-
-def test_opencode_agents_install_writes_agents_md(tmp_path):
-    _agents_install(tmp_path, "opencode")
-    assert (tmp_path / "AGENTS.md").exists()
-
-
-def test_claw_agents_install_writes_agents_md(tmp_path):
-    _agents_install(tmp_path, "claw")
-    assert (tmp_path / "AGENTS.md").exists()
-
-
-def test_agents_install_idempotent(tmp_path):
-    """Installing twice does not duplicate the section."""
-    _agents_install(tmp_path, "codex")
-    _agents_install(tmp_path, "codex")
-    content = (tmp_path / "AGENTS.md").read_text()
-    assert content.count("## graphify") == 1
-
-
-def test_agents_install_appends_to_existing(tmp_path):
-    """Installs into an existing AGENTS.md without overwriting other content."""
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("# Existing rules\n\nDo not break things.\n")
-    _agents_install(tmp_path, "codex")
-    content = agents_md.read_text()
-    assert "Do not break things." in content
-    assert "## graphify" in content
-
-
-def test_agents_uninstall_removes_section(tmp_path):
-    _agents_install(tmp_path, "codex")
-    _agents_uninstall(tmp_path)
-    agents_md = tmp_path / "AGENTS.md"
-    # File deleted when it only contained graphify section
-    assert not agents_md.exists()
-
-
-def test_agents_uninstall_preserves_other_content(tmp_path):
-    """Uninstall keeps pre-existing content."""
-    agents_md = tmp_path / "AGENTS.md"
-    agents_md.write_text("# Existing rules\n\nDo not break things.\n")
-    _agents_install(tmp_path, "codex")
-    _agents_uninstall(tmp_path)
-    assert agents_md.exists()
-    content = agents_md.read_text()
-    assert "Do not break things." in content
-    assert "## graphify" not in content
-
-
-def test_agents_uninstall_no_op_when_not_installed(tmp_path, capsys):
-    _agents_uninstall(tmp_path)
-    out = capsys.readouterr().out
-    assert "nothing to do" in out
 
 
 # --- OpenCode plugin tests ---
@@ -358,11 +278,6 @@ def test_opencode_agents_uninstall_removes_plugin(tmp_path):
     if config_file.exists():
         config = _json.loads(config_file.read_text())
         assert not any("graphify.js" in p for p in config.get("plugin", []))
-
-
-def test_kilo_agents_install_writes_agents_md(tmp_path):
-    _agents_install(tmp_path, "kilo")
-    assert (tmp_path / "AGENTS.md").exists()
 
 
 def test_kilo_agents_install_writes_plugin(tmp_path):

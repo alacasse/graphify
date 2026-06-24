@@ -3,7 +3,7 @@ project_skill: .opencode/skills/graphify/SKILL.md
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .config/opencode/skills/graphify/SKILL.md
     - root: user_cwd
@@ -13,7 +13,7 @@ scopes:
       relative: .opencode/opencode.json
       schema_name: opencode_config
   project:
-    expected:
+    effects:
     - root: project
       relative: .opencode/skills/graphify/SKILL.md
     - kind: text_section

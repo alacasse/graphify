@@ -237,6 +237,49 @@ def test_normalized_hook_migrated_effects_match_expected_for_runnable_scopes() -
             assert json_effect["json_expectation"]["hooks"] == hooks
 
 
+def test_normalized_plugin_migrated_effects_match_expected_entries() -> None:
+    normalized = normalize_default_registry()
+    expected_plugins = {
+        "kilo": {
+            "project": {
+                "config": ".kilo/kilo.json",
+                "entry": ".kilo/plugins/graphify.js",
+                "schema": "kilo_config",
+                "allow_file_uri": True,
+            },
+        },
+        "opencode": {
+            "user": {
+                "config": ".opencode/opencode.json",
+                "entry": ".opencode/plugins/graphify.js",
+                "schema": "opencode_config",
+                "allow_file_uri": False,
+            },
+            "project": {
+                "config": ".opencode/opencode.json",
+                "entry": ".opencode/plugins/graphify.js",
+                "schema": "opencode_config",
+                "allow_file_uri": False,
+            },
+        },
+    }
+
+    for platform_name, scopes in expected_plugins.items():
+        normalized_scopes = normalized["platforms"][platform_name]["scopes"]
+        for scope_name, plugin in scopes.items():
+            scope = normalized_scopes[scope_name]
+            json_effect = next(
+                entry
+                for entry in scope["effects"]
+                if entry["effect_type"] == "json_plugin" and entry["relative"] == plugin["config"]
+            )
+
+            assert scope["effects"] == scope["expected"]
+            assert json_effect["json_expectation"]["schema_name"] == plugin["schema"]
+            assert json_effect["json_expectation"]["plugin"]["expected_entry"] == plugin["entry"]
+            assert json_effect["json_expectation"]["plugin"]["allow_file_uri"] is plugin["allow_file_uri"]
+
+
 def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
     normalized = normalize_default_registry()
     agents = normalized["platforms"]["agents"]["scopes"]

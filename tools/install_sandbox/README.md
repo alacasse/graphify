@@ -65,7 +65,7 @@ The sandbox validates real Graphify installer behavior today. It installs Graphi
 
 Keep YAML focused on target-local facts. Python derives roots, default installer commands, schema validation, harness policy, runtime limitations, safety checks, and idempotency rules from those facts plus sandbox-owned policy. This keeps the specs shaped for a future shared Installer Core without making that future core part of the current installer.
 
-`expected` remains accepted as legacy-compatible vocabulary. Use `effects` for new or migrated runnable scopes. `gemini.yaml` is the first migrated representative spec and shows the intended direction.
+`expected` remains accepted as legacy-compatible vocabulary. Use `effects` for new or migrated runnable scopes. Migrated examples now cover Gemini's mixed skill/text/hooks shape, simple skill/text installs, JSON hooks, and JSON plugin config; remaining `expected` specs are legacy-compatible backlog.
 
 ## Execution Order
 

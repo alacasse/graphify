@@ -6,7 +6,7 @@ scopes:
     - graphify
     - kilo
     - uninstall
-    expected:
+    effects:
     - root: home
       relative: .config/kilo/skills/graphify/SKILL.md
     - root: home
@@ -20,7 +20,7 @@ scopes:
     - graphify
     - kilo
     - uninstall
-    expected:
+    effects:
     - root: home
       relative: .config/kilo/skills/graphify/SKILL.md
     - root: home

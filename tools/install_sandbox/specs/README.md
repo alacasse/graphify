@@ -8,4 +8,8 @@ The sandbox validates real Graphify installer behavior by running Graphify insta
 
 Keep the YAML as target-local facts. Python derives root selection, defaults, schema validation, harness policy, runtime limitations, generated-file handling, safety checks, and idempotency rules. The shape is intended to be consumable by a future Installer Core, but current PRs should not claim that installer consumption exists until product code uses it.
 
-`gemini.yaml` is the first migrated representative spec.
+The migrated representative set covers Gemini's mixed skill/text/hooks shape,
+simple skill/text installs (`aider.yaml`, `amp.yaml`, `hermes.yaml`), JSON hooks
+(`codex.yaml`, `codebuddy.yaml`), and JSON plugin config (`opencode.yaml`,
+`kilo.yaml`). Remaining `expected` specs are legacy-compatible migration backlog,
+not a different contract.

@@ -149,6 +149,20 @@ def test_normalized_gemini_effects_match_expected_for_both_scopes() -> None:
     ]
 
 
+def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
+    normalized = normalize_default_registry()
+    agents = normalized["platforms"]["agents"]["scopes"]
+
+    assert agents["user"]["effects"] == agents["user"]["expected"]
+    assert agents["project"]["effects"] == agents["project"]["expected"]
+    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in agents["user"]["effects"]] == [
+        ("skill", "home", ".agents/skills/graphify/SKILL.md"),
+    ]
+    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in agents["project"]["effects"]] == [
+        ("skill", "project", ".agents/skills/graphify/SKILL.md"),
+    ]
+
+
 def test_normalized_registry_includes_high_risk_platform_policies() -> None:
     normalized = normalize_default_registry()
 

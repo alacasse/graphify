@@ -149,6 +149,40 @@ def test_normalized_gemini_effects_match_expected_for_both_scopes() -> None:
     ]
 
 
+def test_normalized_simple_migrated_effects_match_expected_for_both_scopes() -> None:
+    normalized = normalize_default_registry()
+    expected_surfaces = {
+        "aider": {
+            "user": [("skill", "home", ".aider/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".aider/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
+        "amp": {
+            "user": [("skill", "home", ".config/agents/skills/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".agents/skills/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
+        "hermes": {
+            "user": [("skill", "home", ".hermes/skills/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".hermes/skills/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
+    }
+
+    for platform_name, scopes in expected_surfaces.items():
+        normalized_scopes = normalized["platforms"][platform_name]["scopes"]
+        for scope_name, surfaces in scopes.items():
+            scope = normalized_scopes[scope_name]
+            assert scope["effects"] == scope["expected"]
+            assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in scope["effects"]] == surfaces
+
+
 def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
     normalized = normalize_default_registry()
     agents = normalized["platforms"]["agents"]["scopes"]

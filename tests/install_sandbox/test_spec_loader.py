@@ -18,7 +18,7 @@ FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION = "transitional_sandbox_execution_dat
 FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
-MIGRATED_EFFECTS_SPECS = {"gemini"}
+MIGRATED_EFFECTS_SPECS = {"aider", "amp", "gemini", "hermes"}
 
 
 def _skill(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[str, object]:
@@ -344,8 +344,9 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
     assert registry.disposable_artifact_specs == ()
 
 
-def test_default_registry_gemini_yaml_uses_effects_key_for_runnable_scopes() -> None:
-    data = yaml.safe_load((spec_loader.DEFAULT_REGISTRY_PATH / "gemini.yaml").read_text(encoding="utf-8"))
+@pytest.mark.parametrize("spec_name", sorted(MIGRATED_EFFECTS_SPECS))
+def test_default_registry_migrated_yaml_uses_effects_key_for_runnable_scopes(spec_name: str) -> None:
+    data = yaml.safe_load((spec_loader.DEFAULT_REGISTRY_PATH / f"{spec_name}.yaml").read_text(encoding="utf-8"))
 
     assert set(data["scopes"]) == {"user", "project"}
     for scope in data["scopes"].values():

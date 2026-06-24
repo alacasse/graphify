@@ -1,11 +1,11 @@
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .hermes/skills/graphify/SKILL.md
   project:
-    expected:
+    effects:
     - root: project
       relative: .hermes/skills/graphify/SKILL.md
     - kind: text_section

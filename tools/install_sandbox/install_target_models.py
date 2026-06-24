@@ -155,6 +155,8 @@ class ReferenceBundle:
 @dataclass(frozen=True)
 class PlatformSpec:
     name: str
+    display_name: str | None = None
+    target_kind: str = "product"
     user_skill: str | None = None
     project_skill: str | None = None
     scopes: dict[str, ScopeSpec] = field(default_factory=dict)

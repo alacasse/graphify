@@ -65,9 +65,12 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     registry = load_registry_from_data(_valid_data())
     user = registry.make_scenario("mini", "user")
     project = registry.make_scenario("mini", "project")
+    spec = registry.platform_spec("mini")
 
     assert isinstance(registry, platform_specs.ScenarioRegistry)
-    assert isinstance(registry.platform_spec("mini"), platform_specs.PlatformSpec)
+    assert isinstance(spec, platform_specs.PlatformSpec)
+    assert spec.display_name is None
+    assert spec.target_kind == "product"
     assert user is not None
     assert user.install_command == ("graphify", "install", "--platform", "mini")
     assert user.uninstall_command is None
@@ -85,6 +88,17 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     assert agents.text_expectation.preserve_user_content
     assert agents.text_expectation.require_user_content_on_uninstall
     assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-project"
+
+
+def test_loader_preserves_explicit_target_metadata() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["display_name"] = "Mini Target"
+    data["platforms"]["mini"]["target_kind"] = "generic_standard"
+
+    spec = load_registry_from_data(data).platform_spec("mini")
+
+    assert spec.display_name == "Mini Target"
+    assert spec.target_kind == "generic_standard"
 
 
 def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture() -> None:

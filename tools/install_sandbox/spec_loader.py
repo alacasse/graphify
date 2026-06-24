@@ -536,6 +536,8 @@ def _platform_spec(
     )
     return PlatformSpec(
         name=name,
+        display_name=None if data.get("display_name") is None else _string(data.get("display_name"), f"{context}.display_name"),
+        target_kind=_string(data.get("target_kind", "product"), f"{context}.target_kind"),
         user_skill=user_skill,
         project_skill=project_skill,
         scopes=scopes,

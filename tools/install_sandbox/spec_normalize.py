@@ -154,6 +154,8 @@ def _runtime_validation(validation: TargetRuntimeValidationSpec) -> dict[str, ob
 def _platform_spec(platform: InstallTargetSpec) -> dict[str, object]:
     return {
         "name": platform.name,
+        "display_name": platform.display_name,
+        "target_kind": platform.target_kind,
         "user_skill": platform.user_skill,
         "project_skill": platform.project_skill,
         "uses_packaged_references": platform.uses_packaged_references,

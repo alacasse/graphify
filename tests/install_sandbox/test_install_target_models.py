@@ -224,6 +224,43 @@ def test_sandbox_registry_defines_all_platforms() -> None:
         assert bool(spec.scopes or spec.unsupported_scopes)
 
 
+def test_agents_target_metadata_and_surfaces_are_generic_standards_facts() -> None:
+    spec = REGISTRY.platform_spec("agents")
+    user = REGISTRY.make_scenario("agents", "user")
+    project = REGISTRY.make_scenario("agents", "project")
+
+    assert spec.display_name == "Agent Skills"
+    assert spec.target_kind == "generic_standard"
+    assert spec.user_skill == ".agents/skills/graphify/SKILL.md"
+    assert spec.project_skill == ".agents/skills/graphify/SKILL.md"
+    assert user is not None
+    assert project is not None
+    assert [(entry.root, entry.relative) for entry in user.expected] == [
+        ("home", ".agents/skills/graphify/SKILL.md")
+    ]
+    assert [(entry.root, entry.relative) for entry in project.expected] == [
+        ("project", ".agents/skills/graphify/SKILL.md")
+    ]
+    agent_relatives = {entry.relative for entry in (*user.expected, *project.expected)}
+    assert "AGENTS.md" not in agent_relatives
+    assert ".codex/hooks.json" not in agent_relatives
+    assert ".agents/rules/graphify.md" not in agent_relatives
+    assert ".agents/workflows/graphify.md" not in agent_relatives
+    assert not spec.simulated_linux_layout
+    assert spec.target_runtime_validation == ()
+
+
+def test_non_agents_targets_default_to_product_kind() -> None:
+    product_target_kinds = {
+        platform_name: REGISTRY.platform_spec(platform_name).target_kind
+        for platform_name in platform_specs.ALL_PLATFORMS
+        if platform_name != "agents"
+    }
+
+    assert product_target_kinds
+    assert set(product_target_kinds.values()) == {"product"}
+
+
 def test_vscode_reference_bundle_guard_is_declarative() -> None:
     platforms_with_reference_bundles = {
         platform_name

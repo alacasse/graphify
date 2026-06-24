@@ -45,6 +45,8 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
 
     assert set(codex_platform) == {
         "name",
+        "display_name",
+        "target_kind",
         "user_skill",
         "project_skill",
         "uses_packaged_references",
@@ -91,6 +93,15 @@ def test_normalized_registry_does_not_emit_install_target_alias_keys() -> None:
                 walk(child)
 
     walk(normalize_default_registry())
+
+
+def test_normalized_registry_includes_target_metadata() -> None:
+    normalized = normalize_default_registry()
+
+    assert normalized["platforms"]["agents"]["display_name"] == "Agent Skills"
+    assert normalized["platforms"]["agents"]["target_kind"] == "generic_standard"
+    assert normalized["platforms"]["codex"]["display_name"] is None
+    assert normalized["platforms"]["codex"]["target_kind"] == "product"
 
 
 def test_normalized_registry_includes_nested_expected_path_policies() -> None:

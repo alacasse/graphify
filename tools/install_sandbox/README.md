@@ -57,6 +57,16 @@ Use precise terminology in reports and artifacts:
 
 Avoid ambiguous labels like `Install Command`, `Target Runtime`, or `Runtime Evidence` when they could imply target-tool validation. Prefer `Graphify Installer Command`, `Graphify File Effects`, `Payload Consistency`, and explicit `not verified by this sandbox` wording.
 
+## Spec Contract
+
+Install target specs live in `specs/`. They declare target-local Graphify install surfaces: the files and configuration entries the current Graphify installer should create, repair, preserve, or remove during sandbox scenarios.
+
+The sandbox validates real Graphify installer behavior today. It installs Graphify in Docker, runs Graphify installer commands, and checks the observed file effects against the loaded target specs. The product installer does not consume these YAML specs yet.
+
+Keep YAML focused on target-local facts. Python derives roots, default installer commands, schema validation, harness policy, runtime limitations, safety checks, and idempotency rules from those facts plus sandbox-owned policy. This keeps the specs shaped for a future shared Installer Core without making that future core part of the current installer.
+
+`expected` remains accepted as legacy-compatible vocabulary. Use `effects` for new or migrated runnable scopes. `gemini.yaml` is the first migrated representative spec and shows the intended direction.
+
 ## Execution Order
 
 The harness should fail immediately when Graphify cannot be installed into the sandbox or the Graphify command infrastructure is broken. Once that precondition passes, Graphify file-effect scenarios should continue across selected platforms/scopes so the run reports all Tier 1 failures instead of hiding later platform regressions.

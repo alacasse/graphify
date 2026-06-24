@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -21,49 +22,18 @@ def test_parse_args_requires_platform_or_all() -> None:
     assert args.fail_fast_scenarios is True
 
 
-def test_dockerfile_copies_direct_runner_imports() -> None:
+def test_dockerfile_uses_package_layout() -> None:
     dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
+    dockerignore = Path("tools/install_sandbox/.dockerignore").read_text(encoding="utf-8").splitlines()
 
-    for module in (
-        "agent_summary.py",
-        "expected_effects.py",
-        "file_effect_generated_artifacts.py",
-        "file_effect_oracle.py",
-        "file_effect_sidecars.py",
-        "file_effect_state.py",
-        "file_effect_surfaces.py",
-        "file_walk.py",
-        "harness_specs.py",
-        "install_surface_core.py",
-        "install_surface_generated.py",
-        "install_surface_sidecars.py",
-        "install_surface_state.py",
-        "install_surface_statuses.py",
-        "json_helpers.py",
-        "platform_specs.py",
-        "scenario_file_effects_adapter.py",
-        "scenario_lifecycle_disposable.py",
-        "scenario_lifecycle_plan.py",
-        "scenario_lifecycle_support.py",
-        "scenario_lifecycle_standard.py",
-        "scenario_lifecycle_universal.py",
-        "spec_loader.py",
-        "status.py",
-        "validation_plan.py",
-    ):
-        assert f"COPY {module} /runner/{module}" in dockerfile
-    for future_platform_specs_owner in (
-        "install_target_models.py",
-        "install_target_catalog.py",
-        "install_target_defaults.py",
-        "install_target_scenarios.py",
-        "install_target_selection.py",
-        "install_target_harness_policy.py",
-    ):
-        if Path("tools/install_sandbox", future_platform_specs_owner).exists():
-            assert f"COPY {future_platform_specs_owner} /runner/{future_platform_specs_owner}" in dockerfile
-    assert "COPY file_effects.py /runner/file_effects.py" not in dockerfile
-    assert "COPY specs /runner/specs" in dockerfile
+    assert "PYTHONPATH=/runner" in dockerfile
+    assert "touch /runner/tools/__init__.py" in dockerfile
+    assert "COPY . /runner/tools/install_sandbox/" in dockerfile
+    assert dockerfile.count("COPY ") == 1
+    assert 'ENTRYPOINT ["python", "-m", "tools.install_sandbox.sandbox_runner"]' in dockerfile
+    assert not re.search(r"(?m)^COPY\s+\S+\.py\s+/runner/\S+\.py\b", dockerfile)
+    assert "COPY specs /runner/specs" not in dockerfile
+    assert {"out/", "__pycache__/", "*.pyc", ".pytest_cache/"}.issubset(set(dockerignore))
 
 
 def test_sandbox_runner_imports_file_effect_owner_modules() -> None:

@@ -128,6 +128,7 @@ def _scope_spec(scope: ScopeSpec) -> dict[str, object]:
         "uninstall_command": _command(scope.uninstall_command),
         "cwd_root": scope.cwd_root,
         "expected": [_expected_path(path) for path in scope.expected],
+        "effects": [_expected_path(path) for path in scope.effects],
         "risk_notes": list(scope.risk_notes),
         "equivalent_install_command": _command(scope.equivalent_install_command),
         "install_variants": [_install_variant(variant) for variant in scope.install_variants],

@@ -62,6 +62,7 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
         "uninstall_command",
         "cwd_root",
         "expected",
+        "effects",
         "risk_notes",
         "equivalent_install_command",
         "install_variants",
@@ -121,6 +122,13 @@ def test_normalized_registry_includes_nested_expected_path_policies() -> None:
     assert hooks["json_expectation"]["hooks"][0]["required_fragments"] == ["graphify", "hook-check"]
     assert skill["effect_type"] == "skill"
     assert skill["skill_sidecar_expectation"]["references_dir"] == "references"
+
+
+def test_normalized_registry_exposes_effects_alias_without_dropping_expected() -> None:
+    normalized = normalize_default_registry()
+    codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
+
+    assert codex_project["effects"] == codex_project["expected"]
 
 
 def test_normalized_registry_includes_high_risk_platform_policies() -> None:

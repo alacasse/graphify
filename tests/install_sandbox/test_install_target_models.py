@@ -30,6 +30,17 @@ def test_expected_path_manifest_logic() -> None:
     assert any(entry.relative == ".codebuddy/settings.json" for entry in codebuddy.expected)
 
 
+def test_effects_alias_preserves_expected_model_compatibility() -> None:
+    scenario = REGISTRY.make_scenario("codex", "project")
+    scope = REGISTRY.platform_spec("codex").scopes["project"]
+
+    assert scenario is not None
+    assert install_target_models.InstallEffect is install_target_models.InstallSurface
+    assert platform_specs.InstallEffect is platform_specs.InstallSurface
+    assert scenario.effects is scenario.expected
+    assert scope.effects is scope.expected
+
+
 def test_json_effects_declare_behavior_expectations() -> None:
     for platform_name, scope, scenario, entry in scenario_entries():
         if entry.content_kind != "json":

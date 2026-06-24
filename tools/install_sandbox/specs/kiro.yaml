@@ -1,7 +1,7 @@
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .kiro/skills/graphify/SKILL.md
   project:
@@ -19,7 +19,7 @@ scopes:
     - --project
     - --platform
     - kiro
-    expected:
+    effects:
     - root: project
       relative: .kiro/skills/graphify/SKILL.md
     - kind: text_section

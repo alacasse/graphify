@@ -22,6 +22,6 @@ scopes:
     - --project
     - --platform
     - cursor
-    expected:
+    effects:
     - root: project
       relative: .cursor/rules/graphify.mdc

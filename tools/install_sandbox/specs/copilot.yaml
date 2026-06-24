@@ -8,10 +8,10 @@ scopes:
     - graphify
     - copilot
     - install
-    expected:
+    effects:
     - root: home
       relative: .copilot/skills/graphify/SKILL.md
   project:
-    expected:
+    effects:
     - root: project
       relative: .copilot/skills/graphify/SKILL.md

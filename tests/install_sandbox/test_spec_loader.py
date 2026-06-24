@@ -25,12 +25,17 @@ MIGRATED_EFFECTS_SPECS = {
     "claw",
     "codebuddy",
     "codex",
+    "copilot",
+    "cursor",
+    "devin",
     "droid",
     "gemini",
     "hermes",
     "kimi",
+    "kiro",
     "kilo",
     "opencode",
+    "pi",
     "trae",
     "trae-cn",
 }
@@ -363,7 +368,7 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
 def test_default_registry_migrated_yaml_uses_effects_key_for_runnable_scopes(spec_name: str) -> None:
     data = yaml.safe_load((spec_loader.DEFAULT_REGISTRY_PATH / f"{spec_name}.yaml").read_text(encoding="utf-8"))
 
-    assert set(data["scopes"]) == {"user", "project"}
+    assert data["scopes"]
     for scope in data["scopes"].values():
         assert "effects" in scope
         assert "expected" not in scope

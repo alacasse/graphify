@@ -10,7 +10,7 @@ scopes:
     - graphify
     - pi
     - install
-    expected:
+    effects:
     - root: home
       relative: .pi/agent/skills/graphify/SKILL.md
   project:
@@ -19,6 +19,6 @@ scopes:
     - pi
     - install
     - --project
-    expected:
+    effects:
     - root: project
       relative: .pi/agent/skills/graphify/SKILL.md

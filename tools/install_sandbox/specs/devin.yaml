@@ -12,7 +12,7 @@ scopes:
     - graphify
     - devin
     - install
-    expected:
+    effects:
     - root: home
       relative: .config/devin/skills/graphify/SKILL.md
   project:
@@ -21,7 +21,7 @@ scopes:
     - devin
     - install
     - --project
-    expected:
+    effects:
     - root: project
       relative: .devin/skills/graphify/SKILL.md
     - root: project

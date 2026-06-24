@@ -5,6 +5,7 @@ from typing import Any
 import yaml
 
 from tools.install_sandbox import platform_specs
+from tools.install_sandbox.spec_loader import SpecLoaderError, load_registry_from_data
 
 
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
@@ -56,6 +57,13 @@ def valid_registry_data() -> dict[str, Any]:
             }
         ],
     }
+
+
+def expect_invalid_registry(data: dict[str, Any], match: str) -> None:
+    import pytest
+
+    with pytest.raises(SpecLoaderError, match=match):
+        load_registry_from_data(data)
 
 
 def write_registry_dir(path: Any, data: dict[str, Any]) -> None:

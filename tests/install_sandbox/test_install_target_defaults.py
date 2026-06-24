@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from tools.install_sandbox import install_target_defaults, platform_specs
+from tools.install_sandbox import platform_specs
+from tools.install_sandbox.targets import install_target_defaults
 
 from install_target_test_support import REGISTRY
 

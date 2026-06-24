@@ -5,10 +5,10 @@ from typing import Iterable
 
 try:
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry
-    from .platform_specs import (
+    from .targets.install_target_catalog import InstallTargetCatalog
+    from .targets.install_target_models import (
         DisposableArtifactScenarioSpec,
         DisposableSeedFile,
-        InstallTargetCatalog,
         Scenario,
         SelectedUniversalUninstallScenario,
         TargetRuntimeValidationSpec,
@@ -16,10 +16,10 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry  # type: ignore[no-redef]
-    from platform_specs import (  # type: ignore[no-redef]
+    from targets.install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
+    from targets.install_target_models import (  # type: ignore[no-redef]
         DisposableArtifactScenarioSpec,
         DisposableSeedFile,
-        InstallTargetCatalog,
         Scenario,
         SelectedUniversalUninstallScenario,
         TargetRuntimeValidationSpec,

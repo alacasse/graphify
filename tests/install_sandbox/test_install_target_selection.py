@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from tools.install_sandbox import install_target_catalog, install_target_models, install_target_selection, platform_specs
+from tools.install_sandbox import platform_specs
+from tools.install_sandbox.targets import install_target_catalog, install_target_models, install_target_selection
 
 from install_target_test_support import REGISTRY, scenario_for
 

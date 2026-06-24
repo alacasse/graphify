@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 try:
-    from .install_target_models import (
+    from .targets.install_target_models import (
         GRAPHIFY_MARKER,
         MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
         MIXED_SCOPE_PROJECT_WIRING_NOTE,
@@ -33,7 +33,7 @@ try:
         TextSectionEffect,
         UniversalUninstallScenarioSpec,
     )
-    from .install_target_catalog import (
+    from .targets.install_target_catalog import (
         InstallTargetCatalog,
         ScenarioRegistry,
         _declared_install_variants,
@@ -44,8 +44,8 @@ try:
         _scenario,
         _skill,
     )
-    from . import install_target_defaults as _install_target_defaults
-    from .install_target_defaults import (
+    from .targets import install_target_defaults as _install_target_defaults
+    from .targets.install_target_defaults import (
         _LAZY_DEFAULT_NAMES,
         default_install_target_catalog,
         direct_install_command,
@@ -71,7 +71,7 @@ try:
         validate_roots,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
-    from install_target_models import (  # type: ignore[no-redef]
+    from targets.install_target_models import (  # type: ignore[no-redef]
         GRAPHIFY_MARKER,
         MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
         MIXED_SCOPE_PROJECT_WIRING_NOTE,
@@ -103,7 +103,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         TextSectionEffect,
         UniversalUninstallScenarioSpec,
     )
-    from install_target_catalog import (  # type: ignore[no-redef]
+    from targets.install_target_catalog import (  # type: ignore[no-redef]
         InstallTargetCatalog,
         ScenarioRegistry,
         _declared_install_variants,
@@ -114,8 +114,8 @@ except ImportError:  # pragma: no cover - direct script import fallback
         _scenario,
         _skill,
     )
-    import install_target_defaults as _install_target_defaults  # type: ignore[no-redef]
-    from install_target_defaults import (  # type: ignore[no-redef]
+    from targets import install_target_defaults as _install_target_defaults  # type: ignore[no-redef]
+    from targets.install_target_defaults import (  # type: ignore[no-redef]
         _LAZY_DEFAULT_NAMES,
         default_install_target_catalog,
         direct_install_command,

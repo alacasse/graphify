@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import install_target_models, platform_specs
+from tools.install_sandbox import platform_specs
+from tools.install_sandbox.targets import install_target_models
 
 from install_target_test_support import REGISTRY, entry_id, scenario_entries
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from tools.install_sandbox import install_target_catalog, install_target_models, install_target_scenarios, platform_specs
+from tools.install_sandbox import platform_specs
+from tools.install_sandbox.targets import install_target_catalog, install_target_models, install_target_scenarios
 
 from install_target_test_support import REGISTRY
 

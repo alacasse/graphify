@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from tools.install_sandbox import (
+from tools.install_sandbox import platform_specs
+from tools.install_sandbox.targets import (
     install_target_catalog,
     install_target_defaults,
     install_target_harness_policy,
     install_target_models,
-    platform_specs,
 )
 
 from install_target_test_support import REGISTRY

@@ -12,8 +12,8 @@ try:
         TextExpectation,
         effect_type_name,
     )
-    from .install_target_catalog import InstallTargetCatalog
-    from .install_target_models import (
+    from .targets.install_target_catalog import InstallTargetCatalog
+    from .targets.install_target_models import (
         GeneratedFileExpectation,
         InstallCommandVariant,
         InstallTargetSpec,
@@ -31,8 +31,8 @@ except ImportError:  # pragma: no cover - direct script import fallback
         TextExpectation,
         effect_type_name,
     )
-    from install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
-    from install_target_models import (  # type: ignore[no-redef]
+    from targets.install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
+    from targets.install_target_models import (  # type: ignore[no-redef]
         GeneratedFileExpectation,
         InstallCommandVariant,
         InstallTargetSpec,

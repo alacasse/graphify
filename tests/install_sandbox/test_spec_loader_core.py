@@ -3,7 +3,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from tools.install_sandbox import install_target_catalog, platform_specs, spec_loader
+from tools.install_sandbox import platform_specs, spec_loader
+from tools.install_sandbox.targets import install_target_catalog
 from tools.install_sandbox.spec_loader import load_default_registry, load_registry_from_data
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data

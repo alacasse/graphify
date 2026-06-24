@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.install_sandbox import install_target_models, install_target_scenarios
+from tools.install_sandbox.targets import install_target_models, install_target_scenarios
 
 
 def test_scenario_construction_helper_keeps_scope_spec_contract() -> None:

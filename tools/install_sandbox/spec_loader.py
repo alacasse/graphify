@@ -15,8 +15,8 @@ else:
 
 try:
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from .install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario
-    from .install_target_models import (
+    from .targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario
+    from .targets.install_target_models import (
         GRAPHIFY_MARKER,
         MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
         MIXED_SCOPE_PROJECT_WIRING_NOTE,
@@ -45,8 +45,8 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
-    from install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario  # type: ignore[no-redef]
-    from install_target_models import (  # type: ignore[no-redef]
+    from targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario  # type: ignore[no-redef]
+    from targets.install_target_models import (  # type: ignore[no-redef]
         GRAPHIFY_MARKER,
         MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
         MIXED_SCOPE_PROJECT_WIRING_NOTE,

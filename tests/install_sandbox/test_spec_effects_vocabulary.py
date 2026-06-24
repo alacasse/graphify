@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 import yaml
@@ -14,39 +15,13 @@ from tools.install_sandbox.spec_loader import load_registry_from_data
 from tools.install_sandbox.spec_normalize import normalize_registry
 
 
-DEFAULT_EFFECTS_SPECS = {
-    "agents",
-    "aider",
-    "amp",
-    "antigravity",
-    "antigravity-windows",
-    "claw",
-    "claude",
-    "codebuddy",
-    "codex",
-    "copilot",
-    "cursor",
-    "devin",
-    "droid",
-    "gemini",
-    "hermes",
-    "kimi",
-    "kiro",
-    "kilo",
-    "opencode",
-    "pi",
-    "trae",
-    "trae-cn",
-    "vscode",
-    "windows",
-}
+def _default_product_spec_paths() -> list[Path]:
+    return sorted(path for path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml") if path.name != "shared.yaml")
 
 
 def _default_scope_effect_key_inventory() -> dict[str, set[str]]:
     inventory = {"expected": set(), "effects": set(), "missing": set(), "mixed": set()}
-    for path in sorted(spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")):
-        if path.name == "shared.yaml":
-            continue
+    for path in _default_product_spec_paths():
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for scope_name, scope_data in data.get("scopes", {}).items():
             scope_id = f"{path.stem}.{scope_name}"
@@ -99,19 +74,15 @@ def test_default_registry_runnable_scopes_declare_one_effect_vocabulary_key() ->
 def test_default_registry_all_runnable_scopes_use_effects() -> None:
     inventory = _default_scope_effect_key_inventory()
     effects_specs = {scope_id.split(".", maxsplit=1)[0] for scope_id in inventory["effects"]}
-    all_specs = {
-        path.stem
-        for path in spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")
-        if path.name != "shared.yaml"
-    }
+    all_specs = {path.stem for path in _default_product_spec_paths()}
 
-    assert effects_specs == all_specs == DEFAULT_EFFECTS_SPECS
+    assert effects_specs == all_specs
     assert inventory["expected"] == set()
 
 
-@pytest.mark.parametrize("spec_name", sorted(DEFAULT_EFFECTS_SPECS))
-def test_default_registry_migrated_yaml_uses_effects_key_for_runnable_scopes(spec_name: str) -> None:
-    data = yaml.safe_load((spec_loader.DEFAULT_REGISTRY_PATH / f"{spec_name}.yaml").read_text(encoding="utf-8"))
+@pytest.mark.parametrize("spec_path", _default_product_spec_paths(), ids=lambda path: path.stem)
+def test_default_registry_migrated_yaml_uses_effects_key_for_runnable_scopes(spec_path: Path) -> None:
+    data = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
 
     assert data["scopes"]
     for scope in data["scopes"].values():

@@ -13,6 +13,8 @@ from tools.install_sandbox import platform_specs
 from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
+from install_target_test_support import expected_entry, scenario_for
+
 # Sandbox sidecar records live here. Direct sidecar status and path-planning
 # decisions remain in test_install_surface_core_sidecars.py.
 
@@ -32,6 +34,8 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 @pytest.fixture
 def oracle(roots) -> file_effect_oracle.FileEffectOracle:
     def packaged_reference_resolution(platform: str) -> PackagedReferenceResolution:
+        if platform == "agents":
+            return resolution("available", ("query.md", "update.md"), "agents refs")
         if platform == "claude":
             return resolution("available", ("query.md", "update.md"), "claude refs")
         if platform == "empty":
@@ -175,6 +179,43 @@ def test_installed_skill_sidecar_records_render_sandbox_check_shape(oracle, root
         "root": "project",
         "relative": ".claude/skills/graphify/SKILL.md",
     }
+
+
+def test_agents_skill_surface_uses_standard_progressive_sidecar_records(oracle, roots) -> None:
+    test_scenario = scenario_for("agents", "project")
+    skill = write_skill(
+        roots["project"],
+        ".agents/skills/graphify/SKILL.md",
+        body="See references/query.md and references/update.md for details.\n",
+        version="9.9.9",
+    )
+    refs = skill.parent / "references"
+    refs.mkdir()
+    (refs / "query.md").write_text("# query\n", encoding="utf-8")
+    (refs / "update.md").write_text("# update\n", encoding="utf-8")
+
+    checks = oracle.assert_expected_files(test_scenario)
+
+    assert check_by_relative(checks, ".agents/skills/graphify/.graphify_version")["detail"] == "actual=9.9.9; expected=9.9.9"
+    assert check_by_relative(checks, ".agents/skills/graphify/references.tmp")["detail"] == "absent"
+    assert "actual_names=['query.md', 'update.md']" in str(check_by_relative(checks, ".agents/skills/graphify/references")["detail"])
+
+
+def test_agents_amp_and_antigravity_keep_distinct_agents_surface_facts() -> None:
+    agents_user = expected_entry("agents", "user", "home", ".agents/skills/graphify/SKILL.md")
+    amp_user = expected_entry("amp", "user", "home", ".config/agents/skills/graphify/SKILL.md")
+    amp_project = expected_entry("amp", "project", "project", ".agents/skills/graphify/SKILL.md")
+    antigravity_project_skill = expected_entry("antigravity", "project", "project", ".agents/skills/graphify/SKILL.md")
+    antigravity_rules = expected_entry("antigravity", "project", "project", ".agents/rules/graphify.md")
+    antigravity_workflow = expected_entry("antigravity", "project", "project", ".agents/workflows/graphify.md")
+
+    assert agents_user.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert amp_user.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert amp_project.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert antigravity_project_skill.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert amp_user.relative != agents_user.relative
+    assert antigravity_rules.skill_sidecar_expectation is None
+    assert antigravity_workflow.skill_sidecar_expectation is None
 
 
 def test_sidecar_topic_module_renders_installed_skill_records(oracle, roots) -> None:

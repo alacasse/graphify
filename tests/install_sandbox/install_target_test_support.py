@@ -6,6 +6,17 @@ from tools.install_sandbox import platform_specs
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
 
 
+def scenario_for(platform_name: str, scope: str) -> platform_specs.Scenario:
+    scenario = REGISTRY.make_scenario(platform_name, scope)
+    assert scenario is not None
+    return scenario
+
+
+def expected_entry(platform_name: str, scope: str, root: str, relative: str) -> platform_specs.ExpectedPath:
+    scenario = scenario_for(platform_name, scope)
+    return next(entry for entry in scenario.expected if entry.root == root and entry.relative == relative)
+
+
 def scenario_entries() -> list[tuple[str, str, platform_specs.Scenario, platform_specs.ExpectedPath]]:
     entries: list[tuple[str, str, platform_specs.Scenario, platform_specs.ExpectedPath]] = []
     for platform_name in platform_specs.ALL_PLATFORMS:

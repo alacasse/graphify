@@ -4,7 +4,7 @@ import pytest
 
 from tools.install_sandbox import install_target_catalog, install_target_models, install_target_selection, platform_specs
 
-from install_target_test_support import REGISTRY
+from install_target_test_support import REGISTRY, scenario_for
 
 
 def test_scenario_id() -> None:
@@ -67,6 +67,42 @@ def test_cursor_both_scope_selects_project_scenario() -> None:
     both = install_target_selection.target_scenarios(REGISTRY.specs, "cursor", "both")
 
     assert [scenario.scope for scenario in both] == ["project"]
+
+
+def test_agents_target_selection_includes_both_scopes_without_skills_alias_target() -> None:
+    selected = install_target_selection.selected_targets(REGISTRY.specs, all_platforms=True, target_name=None)
+    scenarios = install_target_selection.target_scenarios(REGISTRY.specs, "agents", "both")
+
+    assert "agents" in selected
+    assert "skills" not in REGISTRY.specs
+    assert [(scenario.platform, scenario.scope) for scenario in scenarios] == [
+        ("agents", "user"),
+        ("agents", "project"),
+    ]
+    assert [install_target_selection.scenario_id(scenario.platform, scenario.scope) for scenario in scenarios] == [
+        "agents-user",
+        "agents-project",
+    ]
+
+
+def test_agents_command_variants_and_equivalence_are_generic_target_facts() -> None:
+    user = scenario_for("agents", "user")
+    project = scenario_for("agents", "project")
+
+    assert user.install_command == ("graphify", "install", "--platform", "agents")
+    assert install_target_selection.install_variants(REGISTRY.specs, user) == (
+        install_target_models.InstallCommandVariant("generic", ("graphify", "install", "--platform", "agents")),
+    )
+    assert install_target_selection.equivalent_install_command(REGISTRY.specs, user) is None
+    assert project.install_command == ("graphify", "install", "--project", "--platform", "agents")
+    assert install_target_selection.install_variants(REGISTRY.specs, project) == (
+        install_target_models.InstallCommandVariant("generic", ("graphify", "install", "--project", "--platform", "agents")),
+        install_target_models.InstallCommandVariant("direct", ("graphify", "agents", "install", "--project")),
+    )
+    assert install_target_selection.equivalent_install_command(
+        REGISTRY.specs,
+        project,
+    ) == ("graphify", "agents", "install", "--project")
 
 
 def test_make_scenario_projects_registry_scope_specs() -> None:

@@ -34,3 +34,24 @@ def test_scenario_construction_helper_keeps_scope_spec_contract() -> None:
             ("graphify", "owner-target", "install", "--project"),
         ),
     )
+
+
+def test_scenario_construction_helper_labels_agents_project_alias_as_direct_variant() -> None:
+    scope = install_target_scenarios._scenario(
+        "agents",
+        "project",
+        (install_target_models.InstallSurface("project", ".agents/skills/graphify/SKILL.md"),),
+        equivalent_install_command=("graphify", "agents", "install", "--project"),
+    )
+
+    assert scope.install_command == ("graphify", "install", "--project", "--platform", "agents")
+    assert scope.install_variants == (
+        install_target_models.InstallCommandVariant(
+            "generic",
+            ("graphify", "install", "--project", "--platform", "agents"),
+        ),
+        install_target_models.InstallCommandVariant(
+            "direct",
+            ("graphify", "agents", "install", "--project"),
+        ),
+    )

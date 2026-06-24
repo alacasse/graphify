@@ -14,6 +14,8 @@ from tools.install_sandbox import scenario_file_effects_adapter
 from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 
+from install_target_test_support import scenario_for
+
 # Sandbox generated/seeded artifact records live here. Direct generated-file
 # Installer Core decisions remain in test_install_surface_core_generated.py and
 # state-plan decisions remain in test_install_surface_core_state_plans.py.
@@ -262,6 +264,49 @@ def test_generated_artifact_module_renders_unexpected_graphify_file_records(orac
             "relative": "notes/graphify.md",
         }
     ]
+
+
+def test_agents_skill_sidecars_are_relevant_generated_file_effects() -> None:
+    test_scenario = scenario_for("agents", "user")
+
+    assert install_surface_generated.is_skill_sidecar_relative(
+        test_scenario.expected,
+        "home",
+        Path(".agents/skills/graphify/.graphify_version"),
+    )
+    assert install_surface_generated.is_skill_sidecar_relative(
+        test_scenario.expected,
+        "home",
+        Path(".agents/skills/graphify/references/query.md"),
+    )
+    assert install_surface_generated.is_skill_sidecar_relative(
+        test_scenario.expected,
+        "home",
+        Path(".agents/skills/graphify/references.tmp/partial.md"),
+    )
+    assert not install_surface_generated.is_skill_sidecar_relative(
+        test_scenario.expected,
+        "project",
+        Path(".agents/skills/graphify/.graphify_version"),
+    )
+
+
+def test_copy_generated_files_archives_agents_skill_sidecars(oracle, roots, tmp_path) -> None:
+    test_scenario = scenario_for("agents", "project")
+    skill = roots["project"] / ".agents/skills/graphify/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("# graphify skill\n", encoding="utf-8")
+    (skill.parent / ".graphify_version").write_text("9.9.9", encoding="utf-8")
+    refs = skill.parent / "references"
+    refs.mkdir()
+    (refs / "query.md").write_text("# query\n", encoding="utf-8")
+
+    oracle.copy_generated_files(test_scenario, tmp_path)
+
+    generated = tmp_path / "generated-files/project/.agents/skills/graphify"
+    assert (generated / "SKILL.md").exists()
+    assert (generated / ".graphify_version").exists()
+    assert (generated / "references/query.md").exists()
 
 
 def test_copy_generated_files_filters_relevance_and_preserves_root_relative_layout(oracle, roots, tmp_path) -> None:

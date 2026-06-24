@@ -1,6 +1,8 @@
 """Tests for `graphify extract` CLI dispatch path in graphify.__main__."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import graphify.__main__ as mainmod
@@ -121,6 +123,161 @@ def test_extract_succeeds_when_at_least_one_chunk_completes(
     assert (out_dir / "graphify-out" / "graph.json").exists(), (
         "graph.json must be written on the happy path"
     )
+
+
+def test_extract_manifest_stamps_relative_semantic_source_files(
+    monkeypatch, tmp_path
+):
+    """Semantic source_file values are root-relative in LLM output.
+
+    The CLI must still stamp the absolute detected file in manifest.json so a
+    second unchanged extract is a no-op instead of reprocessing the doc.
+    """
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "README.md").write_text("# Notes\nInstaller sandbox ownership.\n")
+    out_dir = tmp_path / "out"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    monkeypatch.setattr(mainmod, "_check_skill_version", lambda _: None)
+
+    calls = []
+
+    def _relative_source_result(paths, **kwargs):
+        calls.append([p.name for p in paths])
+        on_chunk = kwargs.get("on_chunk_done")
+        result = {
+            "nodes": [
+                {
+                    "id": "readme_notes",
+                    "label": "Notes",
+                    "file_type": "document",
+                    "source_file": "README.md",
+                }
+            ],
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 10,
+            "output_tokens": 5,
+        }
+        if on_chunk:
+            on_chunk(0, 1, result)
+        return result
+
+    monkeypatch.setattr(
+        "graphify.llm.extract_corpus_parallel", _relative_source_result
+    )
+
+    monkeypatch.setattr(
+        mainmod.sys,
+        "argv",
+        [
+            "graphify",
+            "extract",
+            str(corpus),
+            "--backend",
+            "claude",
+            "--out",
+            str(out_dir),
+            "--no-cluster",
+        ],
+    )
+    with pytest.raises(SystemExit) as first:
+        mainmod.main()
+    assert first.value.code in (None, 0)
+
+    manifest = json.loads(
+        (out_dir / "graphify-out" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["README.md"]["semantic_hash"], manifest
+
+    monkeypatch.setattr(
+        mainmod.sys,
+        "argv",
+        [
+            "graphify",
+            "extract",
+            str(corpus),
+            "--backend",
+            "claude",
+            "--out",
+            str(out_dir),
+            "--no-cluster",
+        ],
+    )
+    with pytest.raises(SystemExit) as second:
+        mainmod.main()
+    assert second.value.code in (None, 0)
+    assert calls == [["README.md"]]
+
+
+def test_extract_no_cluster_incremental_preserves_unchanged_semantic_nodes(
+    monkeypatch, tmp_path
+):
+    """A raw incremental refresh must not shrink to only changed docs."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.md").write_text("# A\nInitial A.\n")
+    (corpus / "b.md").write_text("# B\nInitial B.\n")
+    out_dir = tmp_path / "out"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-fake-key")
+    monkeypatch.setattr(mainmod, "_check_skill_version", lambda _: None)
+
+    calls = []
+
+    def _result_for_paths(paths, **kwargs):
+        names = sorted(p.name for p in paths)
+        calls.append(names)
+        nodes = [
+            {
+                "id": f"{p.stem}_node",
+                "label": p.stem.upper(),
+                "file_type": "document",
+                "source_file": p.name,
+            }
+            for p in paths
+        ]
+        result = {
+            "nodes": nodes,
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 10,
+            "output_tokens": 5,
+        }
+        on_chunk = kwargs.get("on_chunk_done")
+        if on_chunk:
+            on_chunk(0, 1, result)
+        return result
+
+    monkeypatch.setattr("graphify.llm.extract_corpus_parallel", _result_for_paths)
+
+    def _run_extract():
+        monkeypatch.setattr(
+            mainmod.sys,
+            "argv",
+            [
+                "graphify",
+                "extract",
+                str(corpus),
+                "--backend",
+                "claude",
+                "--out",
+                str(out_dir),
+                "--no-cluster",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            mainmod.main()
+        assert exc_info.value.code in (None, 0)
+
+    _run_extract()
+    (corpus / "a.md").write_text("# A\nChanged A.\n")
+    _run_extract()
+
+    graph = json.loads(
+        (out_dir / "graphify-out" / "graph.json").read_text(encoding="utf-8")
+    )
+    assert sorted(n["source_file"] for n in graph["nodes"]) == ["a.md", "b.md"]
+    assert calls == [["a.md", "b.md"], ["a.md"]]
 
 
 def _code_only_corpus(tmp_path):

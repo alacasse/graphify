@@ -4592,9 +4592,48 @@ def main() -> None:
             e.get("source_file", "") for e in sem_result.get("edges", [])
         }
         _sem_extracted.discard("")
+
+        def _semantic_source_keys(path: str) -> set[str]:
+            """Return path spellings that may appear in semantic source_file.
+
+            LLM extraction prompts ask for root-relative source_file values,
+            while detection carries absolute paths. Treat both as the same
+            source when deciding whether manifest semantic_hash can be stamped.
+            """
+            keys = {path, Path(path).as_posix()}
+            p = Path(path)
+            if p.is_absolute():
+                try:
+                    keys.add(p.relative_to(target).as_posix())
+                except ValueError:
+                    pass
+                try:
+                    keys.add(p.resolve().relative_to(target.resolve()).as_posix())
+                except (OSError, ValueError):
+                    pass
+                try:
+                    keys.add(str(p.resolve()))
+                except OSError:
+                    pass
+            else:
+                keys.add(str(target / p))
+                try:
+                    keys.add(str((target / p).resolve()))
+                except OSError:
+                    pass
+            return keys
+
+        _sem_extracted_keys: set[str] = set()
+        for _source_file in _sem_extracted:
+            _sem_extracted_keys.update(_semantic_source_keys(_source_file))
+
         _sem_types = {"document", "paper", "image"}
         _manifest_files = {
-            ftype: [f for f in flist if ftype not in _sem_types or f in _sem_extracted]
+            ftype: [
+                f for f in flist
+                if ftype not in _sem_types
+                or bool(_semantic_source_keys(f) & _sem_extracted_keys)
+            ]
             for ftype, flist in files_by_type.items()
         }
 
@@ -4626,6 +4665,41 @@ def main() -> None:
                 except Exception as exc:
                     print(f"[graphify extract] warning: could not write manifest: {exc}", file=sys.stderr)
                 sys.exit(0)
+
+            if incremental_mode and graph_json_path.exists():
+                from graphify.security import check_graph_file_size_cap as _check_graph_size
+
+                _replace_source_keys: set[str] = set()
+                for _path in [str(p) for p in code_files + semantic_files] + list(deleted_files):
+                    _replace_source_keys.update(_semantic_source_keys(_path))
+                for _item in (
+                    list(merged.get("nodes", []))
+                    + list(merged.get("edges", []))
+                    + list(merged.get("hyperedges", []))
+                ):
+                    _source_file = _item.get("source_file")
+                    if _source_file:
+                        _replace_source_keys.update(_semantic_source_keys(_source_file))
+
+                _check_graph_size(graph_json_path)
+                _existing = json.loads(graph_json_path.read_text(encoding="utf-8"))
+                _links_key = "links" if "links" in _existing else "edges"
+
+                def _keep_existing(item: dict) -> bool:
+                    _source_file = item.get("source_file")
+                    if not _source_file:
+                        return True
+                    return not (_semantic_source_keys(_source_file) & _replace_source_keys)
+
+                merged["nodes"] = [
+                    n for n in _existing.get("nodes", []) if _keep_existing(n)
+                ] + list(merged.get("nodes", []))
+                merged["edges"] = [
+                    e for e in _existing.get(_links_key, []) if _keep_existing(e)
+                ] + list(merged.get("edges", []))
+                merged["hyperedges"] = [
+                    h for h in _existing.get("hyperedges", []) if _keep_existing(h)
+                ] + list(merged.get("hyperedges", []))
 
             merged["nodes"] = _dedupe_nodes(merged["nodes"])
             merged["edges"] = _dedupe_edges(merged["edges"])

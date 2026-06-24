@@ -196,6 +196,7 @@ def test_platform_coverage_records_unsupported_scopes() -> None:
 
 def test_generic_direct_equivalence_applicability() -> None:
     gemini_user = install_target_selection.make_scenario(REGISTRY.specs, "gemini", "user")
+    gemini_project = install_target_selection.make_scenario(REGISTRY.specs, "gemini", "project")
     codex_user = install_target_selection.make_scenario(REGISTRY.specs, "codex", "user")
     codex_project = install_target_selection.make_scenario(REGISTRY.specs, "codex", "project")
     codebuddy_user = install_target_selection.make_scenario(REGISTRY.specs, "codebuddy", "user")
@@ -208,10 +209,28 @@ def test_generic_direct_equivalence_applicability() -> None:
     assert codebuddy_user is not None
     assert codebuddy_project is not None
     assert cursor_project is not None
+    assert gemini_project is not None
     assert install_target_selection.equivalent_install_command(
         REGISTRY.specs,
         gemini_user,
     ) == ("graphify", "gemini", "install")
+    assert gemini_project.install_command == (
+        "graphify",
+        "install",
+        "--project",
+        "--platform",
+        "gemini",
+    )
+    assert install_target_selection.install_variants(REGISTRY.specs, gemini_project) == (
+        install_target_models.InstallCommandVariant(
+            "generic",
+            ("graphify", "install", "--project", "--platform", "gemini"),
+        ),
+        install_target_models.InstallCommandVariant(
+            "direct",
+            ("graphify", "gemini", "install", "--project"),
+        ),
+    )
     assert install_target_selection.equivalent_install_command(REGISTRY.specs, codex_user) is None
     assert install_target_selection.equivalent_install_command(
         REGISTRY.specs,

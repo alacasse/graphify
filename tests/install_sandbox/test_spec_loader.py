@@ -165,6 +165,15 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
     assert registry.disposable_artifact_specs == ()
 
 
+def test_default_registry_gemini_yaml_uses_effects_key_for_runnable_scopes() -> None:
+    data = yaml.safe_load((spec_loader.DEFAULT_REGISTRY_PATH / "gemini.yaml").read_text(encoding="utf-8"))
+
+    assert set(data["scopes"]) == {"user", "project"}
+    for scope in data["scopes"].values():
+        assert "effects" in scope
+        assert "expected" not in scope
+
+
 def test_spec_loader_uses_catalog_import_surface() -> None:
     assert spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog

@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
-    from . import validation_plan
-    from .platform_specs import Scenario, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec
+    from .. import validation_plan
+    from ..platform_specs import Scenario, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec
     from .scenario_lifecycle_support import (
         ScenarioLifecycleHooks,
         ScenarioRunContext,
@@ -16,7 +16,7 @@ try:
 except ImportError:  # pragma: no cover - direct script import fallback
     import validation_plan  # type: ignore[no-redef]
     from platform_specs import Scenario, SelectedUniversalUninstallScenario, UniversalUninstallScenarioSpec  # type: ignore[no-redef]
-    from scenario_lifecycle_support import (  # type: ignore[no-redef]
+    from .scenario_lifecycle_support import (  # type: ignore[no-redef]
         ScenarioLifecycleHooks,
         ScenarioRunContext,
         UniversalUninstallOutcome,

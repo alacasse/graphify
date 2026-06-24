@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_disposable
+from tools.install_sandbox.lifecycle import scenario_lifecycle_disposable
 from tools.install_sandbox.platform_specs import DisposableArtifactScenarioSpec, DisposableSeedFile
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     HookFactory,
@@ -196,10 +196,3 @@ def test_run_purge_scenario_preserves_legacy_wrapper(tmp_path, monkeypatch) -> N
         ("lifecycle", first, env, hooks),
         ("run",),
     ]
-
-
-def test_scenario_lifecycle_keeps_disposable_compatibility_imports() -> None:
-    assert scenario_lifecycle.DisposableArtifactLifecycle is scenario_lifecycle_disposable.DisposableArtifactLifecycle
-    assert scenario_lifecycle.run_purge_scenario is scenario_lifecycle_disposable.run_purge_scenario
-    assert scenario_lifecycle.run_disposable_artifact_scenario is scenario_lifecycle_disposable.run_disposable_artifact_scenario
-    assert scenario_lifecycle.disposable_artifact_scenarios is scenario_lifecycle_disposable.disposable_artifact_scenarios

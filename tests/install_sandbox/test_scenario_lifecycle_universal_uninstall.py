@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import scenario_lifecycle
-from tools.install_sandbox import scenario_lifecycle_support
-from tools.install_sandbox import scenario_lifecycle_universal
+from tools.install_sandbox.lifecycle import scenario_lifecycle_support, scenario_lifecycle_universal
 from tools.install_sandbox.platform_specs import UniversalUninstallScenarioSpec
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     HookFactory,
@@ -178,10 +176,3 @@ def test_run_universal_uninstall_scenario_preserves_legacy_scope_wrapper(tmp_pat
         ("lifecycle", spec, scenarios, env, hooks),
         ("run",),
     ]
-
-
-def test_scenario_lifecycle_facade_re_exports_universal_uninstall_names() -> None:
-    assert scenario_lifecycle.UniversalUninstallOutcome is scenario_lifecycle_support.UniversalUninstallOutcome
-    assert scenario_lifecycle.UniversalUninstallLifecycle is scenario_lifecycle_universal.UniversalUninstallLifecycle
-    assert scenario_lifecycle.universal_uninstall_spec_for_scope is scenario_lifecycle_universal.universal_uninstall_spec_for_scope
-    assert scenario_lifecycle.run_universal_uninstall_scenario is scenario_lifecycle_universal.run_universal_uninstall_scenario

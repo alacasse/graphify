@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
 try:
-    from .platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry
+    from ..platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry
 except ImportError:  # pragma: no cover - direct script import fallback
     from platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry  # type: ignore[no-redef]
 

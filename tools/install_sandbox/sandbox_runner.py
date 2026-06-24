@@ -19,8 +19,8 @@ try:
     from . import command_runner
     from . import reference_resolution
     from . import reports
-    from . import scenario_lifecycle_plan
-    from . import scenario_lifecycle_support
+    from .lifecycle import scenario_lifecycle_plan
+    from .lifecycle import scenario_lifecycle_support
     from . import source_snapshot
     from . import validation_plan
     from .effects import file_effect_generated_artifacts
@@ -39,8 +39,8 @@ except ImportError:
     import command_runner
     import reference_resolution
     import reports
-    import scenario_lifecycle_plan
-    import scenario_lifecycle_support
+    from lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
+    from lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
     import source_snapshot
     import validation_plan
     from effects import file_effect_generated_artifacts  # type: ignore[no-redef]

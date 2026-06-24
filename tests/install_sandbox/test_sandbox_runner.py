@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import command_runner, reports, sandbox_runner, scenario_lifecycle_plan, source_snapshot, status
+from tools.install_sandbox import command_runner, reports, sandbox_runner, source_snapshot, status
+from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
 
 

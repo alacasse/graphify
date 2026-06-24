@@ -4,8 +4,8 @@ import inspect
 from typing import Callable
 
 try:
-    from . import validation_plan
-    from .platform_specs import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario
+    from .. import validation_plan
+    from ..platform_specs import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario
     from .scenario_lifecycle_disposable import run_disposable_artifact_scenario
     from .scenario_lifecycle_standard import run_scenario
     from .scenario_lifecycle_support import ScenarioLifecycleHooks
@@ -13,10 +13,10 @@ try:
 except ImportError:  # pragma: no cover - direct script import fallback
     import validation_plan  # type: ignore[no-redef]
     from platform_specs import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario  # type: ignore[no-redef]
-    from scenario_lifecycle_disposable import run_disposable_artifact_scenario  # type: ignore[no-redef]
-    from scenario_lifecycle_standard import run_scenario  # type: ignore[no-redef]
-    from scenario_lifecycle_support import ScenarioLifecycleHooks  # type: ignore[no-redef]
-    from scenario_lifecycle_universal import run_universal_uninstall_scenario  # type: ignore[no-redef]
+    from .scenario_lifecycle_disposable import run_disposable_artifact_scenario  # type: ignore[no-redef]
+    from .scenario_lifecycle_standard import run_scenario  # type: ignore[no-redef]
+    from .scenario_lifecycle_support import ScenarioLifecycleHooks  # type: ignore[no-redef]
+    from .scenario_lifecycle_universal import run_universal_uninstall_scenario  # type: ignore[no-redef]
 
 
 def _positional_parameter_count(callback: Callable[..., object]) -> int | None:
@@ -87,13 +87,3 @@ def run_validation_plan(plan: validation_plan.ValidationPlan, env: dict[str, str
         )
         results.append(result)
     return results
-
-
-def run_matrix_scenarios(platforms: list[str], scope: str, env: dict[str, str], *, hooks: ScenarioLifecycleHooks, fail_fast_scenarios: bool = False) -> list[dict[str, object]]:
-    plan = validation_plan.build_validation_plan(
-        hooks.scenario_registry,
-        all_platforms=False,
-        selected_platform_names=platforms,
-        scope=scope,
-    )
-    return run_validation_plan(plan, env, hooks, fail_fast_scenarios=fail_fast_scenarios)

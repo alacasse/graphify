@@ -4,7 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
-from tools.install_sandbox import scenario_lifecycle_support, validation_plan
+from tools.install_sandbox import validation_plan
+from tools.install_sandbox.lifecycle import scenario_lifecycle_support
 from tools.install_sandbox.platform_specs import (
     DEFAULT_SCENARIO_REGISTRY,
     DisposableArtifactScenarioSpec,

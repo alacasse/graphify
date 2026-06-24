@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.install_sandbox import scenario_lifecycle, scenario_lifecycle_standard, scenario_lifecycle_support
+from tools.install_sandbox.lifecycle import scenario_lifecycle_standard, scenario_lifecycle_support
 
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     STANDARD_ARTIFACT_FILENAMES,
@@ -32,26 +32,6 @@ def test_scenario_file_effects_protocol_omits_oracle_and_core_leaf_helpers() -> 
         "check_record",
     } & lifecycle_methods
     assert not hasattr(scenario_lifecycle_support, "_standard_scenario_command_ok")
-
-
-def test_scenario_lifecycle_facade_preserves_support_imports() -> None:
-    assert scenario_lifecycle.ScenarioFileEffects is scenario_lifecycle_support.ScenarioFileEffects
-    assert scenario_lifecycle.ScenarioLifecycleHooks is scenario_lifecycle_support.ScenarioLifecycleHooks
-    assert scenario_lifecycle.SandboxPaths is scenario_lifecycle_support.SandboxPaths
-    assert scenario_lifecycle.CommandExecutor is scenario_lifecycle_support.CommandExecutor
-    assert scenario_lifecycle.ScenarioArtifacts is scenario_lifecycle_support.ScenarioArtifacts
-    assert scenario_lifecycle.MatrixRunnerOverrides is scenario_lifecycle_support.MatrixRunnerOverrides
-
-
-def test_scenario_lifecycle_facade_preserves_standard_imports() -> None:
-    assert scenario_lifecycle.StandardLifecyclePhase is scenario_lifecycle_standard.StandardLifecyclePhase
-    assert scenario_lifecycle.StandardLifecycleMechanics is scenario_lifecycle_standard.StandardLifecycleMechanics
-    assert scenario_lifecycle.INITIAL_INSTALL_PHASE is scenario_lifecycle_standard.INITIAL_INSTALL_PHASE
-    assert scenario_lifecycle.REPEAT_INSTALL_PHASE is scenario_lifecycle_standard.REPEAT_INSTALL_PHASE
-    assert scenario_lifecycle.STALE_SIDECAR_REPAIR_PHASE is scenario_lifecycle_standard.STALE_SIDECAR_REPAIR_PHASE
-    assert scenario_lifecycle.UNINSTALL_PHASE is scenario_lifecycle_standard.UNINSTALL_PHASE
-    assert scenario_lifecycle.run_scenario is scenario_lifecycle_standard.run_scenario
-    assert scenario_lifecycle.finalize_standard_scenario is scenario_lifecycle_standard.finalize_standard_scenario
 
 
 def test_run_scenario_skips_followups_when_initial_install_fails(tmp_path) -> None:

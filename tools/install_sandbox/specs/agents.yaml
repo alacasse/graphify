@@ -5,10 +5,10 @@ project_skill: .agents/skills/graphify/SKILL.md
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .agents/skills/graphify/SKILL.md
   project:
-    expected:
+    effects:
     - root: project
       relative: .agents/skills/graphify/SKILL.md

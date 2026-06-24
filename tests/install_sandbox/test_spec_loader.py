@@ -19,14 +19,20 @@ FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
 MIGRATED_EFFECTS_SPECS = {
+    "agents",
     "aider",
     "amp",
+    "claw",
     "codebuddy",
     "codex",
+    "droid",
     "gemini",
     "hermes",
+    "kimi",
     "kilo",
     "opencode",
+    "trae",
+    "trae-cn",
 }
 
 

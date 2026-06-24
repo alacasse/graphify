@@ -3,11 +3,11 @@ project_skill: .openclaw/skills/graphify/SKILL.md
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .openclaw/skills/graphify/SKILL.md
   project:
-    expected:
+    effects:
     - root: project
       relative: .openclaw/skills/graphify/SKILL.md
     - kind: text_section

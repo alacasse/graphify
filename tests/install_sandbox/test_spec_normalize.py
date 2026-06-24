@@ -173,6 +173,42 @@ def test_normalized_simple_migrated_effects_match_expected_for_both_scopes() -> 
                 ("text_section", "project", "AGENTS.md"),
             ],
         },
+        "agents": {
+            "user": [("skill", "home", ".agents/skills/graphify/SKILL.md")],
+            "project": [("skill", "project", ".agents/skills/graphify/SKILL.md")],
+        },
+        "claw": {
+            "user": [("skill", "home", ".openclaw/skills/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".openclaw/skills/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
+        "droid": {
+            "user": [("skill", "home", ".factory/skills/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".factory/skills/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
+        "kimi": {
+            "user": [("skill", "home", ".kimi/skills/graphify/SKILL.md")],
+            "project": [("skill", "project", ".kimi/skills/graphify/SKILL.md")],
+        },
+        "trae": {
+            "user": [("skill", "home", ".trae/skills/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".trae/skills/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
+        "trae-cn": {
+            "user": [("skill", "home", ".trae-cn/skills/graphify/SKILL.md")],
+            "project": [
+                ("skill", "project", ".trae-cn/skills/graphify/SKILL.md"),
+                ("text_section", "project", "AGENTS.md"),
+            ],
+        },
     }
 
     for platform_name, scopes in expected_surfaces.items():
@@ -282,15 +318,19 @@ def test_normalized_plugin_migrated_effects_match_expected_entries() -> None:
 
 def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
     normalized = normalize_default_registry()
-    agents = normalized["platforms"]["agents"]["scopes"]
+    claude = normalized["platforms"]["claude"]["scopes"]
 
-    assert agents["user"]["effects"] == agents["user"]["expected"]
-    assert agents["project"]["effects"] == agents["project"]["expected"]
-    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in agents["user"]["effects"]] == [
-        ("skill", "home", ".agents/skills/graphify/SKILL.md"),
+    assert claude["user"]["effects"] == claude["user"]["expected"]
+    assert claude["project"]["effects"] == claude["project"]["expected"]
+    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in claude["user"]["effects"]] == [
+        ("skill", "home", ".claude/skills/graphify/SKILL.md"),
+        ("text_section", "home", ".claude/CLAUDE.md"),
     ]
-    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in agents["project"]["effects"]] == [
-        ("skill", "project", ".agents/skills/graphify/SKILL.md"),
+    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in claude["project"]["effects"]] == [
+        ("skill", "project", ".claude/skills/graphify/SKILL.md"),
+        ("text_section", "project", ".claude/CLAUDE.md"),
+        ("text_section", "project", "CLAUDE.md"),
+        ("json_hooks", "project", ".claude/settings.json"),
     ]
 
 

@@ -239,13 +239,22 @@ def _is_plugin_payload(effect: Mapping[str, Any], context: str) -> bool:
     return kind == "file" and root and path.suffix == ".js" and "plugins" in path.parts
 
 
+def _scope_effect_list_context(context: str) -> tuple[str, str]:
+    for key in ("expected", "effects"):
+        token = f".{key}["
+        if token in context:
+            return context.rsplit(token, 1)[0], key
+    return context, "expected"
+
+
 def _paired_plugin_relative(effect: Mapping[str, Any], expected_values: list[Any], context: str) -> str:
     if "plugin_relative" in effect:
         return _string(effect.get("plugin_relative"), f"{context}.plugin_relative")
     root = _string(effect.get("root"), f"{context}.root")
+    scope_context, effects_key = _scope_effect_list_context(context)
     candidates: list[str] = []
     for index, candidate_value in enumerate(expected_values):
-        candidate_context = f"{context.rsplit('.expected[', 1)[0]}.expected[{index}]"
+        candidate_context = f"{scope_context}.{effects_key}[{index}]"
         candidate = _mapping(candidate_value, candidate_context)
         candidate_root = _string(candidate.get("root"), f"{candidate_context}.root")
         if candidate_root != root:
@@ -395,14 +404,26 @@ def _direct_project_install_command(platform_name: str) -> tuple[str, ...]:
     return ("graphify", platform_name, "install", "--project")
 
 
+def _scope_effect_values(data: Mapping[str, Any], context: str) -> tuple[str, list[Any]]:
+    has_expected = "expected" in data
+    has_effects = "effects" in data
+    if has_expected and has_effects:
+        _fail(context, "declare only one of expected or effects")
+    if has_effects:
+        return "effects", _sequence(data.get("effects"), f"{context}.effects")
+    if has_expected:
+        return "expected", _sequence(data.get("expected"), f"{context}.expected")
+    _fail(context, "runnable scope must declare expected or effects")
+
+
 def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> ScopeSpec:
     data = _mapping(value, context)
     if scope_name not in _SCOPE_NAMES:
         _fail(context, f"invalid platform scope: {scope_name}")
-    expected_values = _sequence(data.get("expected"), f"{context}.expected")
+    effect_key, expected_values = _scope_effect_values(data, context)
     if not expected_values:
-        _fail(f"{context}.expected", "runnable scope must declare at least one expected file effect")
-    expected = tuple(_expected_path(effect, f"{context}.expected[{index}]", expected_values=expected_values) for index, effect in enumerate(expected_values))
+        _fail(f"{context}.{effect_key}", f"runnable scope must declare at least one {effect_key} file effect")
+    expected = tuple(_expected_path(effect, f"{context}.{effect_key}[{index}]", expected_values=expected_values) for index, effect in enumerate(expected_values))
     explicit_risk_notes = _string_list(data.get("risk_notes", []), f"{context}.risk_notes")
     for note in explicit_risk_notes:
         if note not in _KNOWN_SCOPE_RISK_NOTES:

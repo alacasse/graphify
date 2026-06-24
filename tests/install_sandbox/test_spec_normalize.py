@@ -407,9 +407,11 @@ def test_normalized_command_migrated_effects_match_expected_and_commands() -> No
     }
 
 
-def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
+def test_normalized_complex_migrated_effects_match_expected_for_claude_and_vscode() -> None:
     normalized = normalize_default_registry()
-    claude = normalized["platforms"]["claude"]["scopes"]
+    claude_platform = normalized["platforms"]["claude"]
+    claude = claude_platform["scopes"]
+    vscode = normalized["platforms"]["vscode"]
 
     assert claude["user"]["effects"] == claude["user"]["expected"]
     assert claude["project"]["effects"] == claude["project"]["expected"]
@@ -423,6 +425,30 @@ def test_normalized_legacy_expected_scope_effects_match_expected() -> None:
         ("text_section", "project", "CLAUDE.md"),
         ("json_hooks", "project", ".claude/settings.json"),
     ]
+    claude_hooks = next(entry for entry in claude["project"]["effects"] if entry["effect_type"] == "json_hooks")
+    assert claude_hooks["json_expectation"]["schema_name"] == "claude_settings"
+    assert claude_hooks["json_expectation"]["hooks"] == [
+        {
+            "event": "PreToolUse",
+            "matcher": "Bash",
+            "detail_name": "bash_hook_present",
+            "required_fragments": ["graphify"],
+        },
+        {
+            "event": "PreToolUse",
+            "matcher": "Read|Glob",
+            "detail_name": "read_glob_hook_present",
+            "required_fragments": ["graphify"],
+        },
+    ]
+    assert claude_platform["universal_uninstall_scopes"] == ["project"]
+    assert vscode["reference_bundles"] == [
+        {"name": "vscode", "required_package_relative": "skill-vscode.md"},
+        {"name": "copilot", "required_package_relative": None},
+    ]
+    assert vscode["uses_packaged_references"] is False
+    assert vscode["scopes"]["user"]["effects"] == vscode["scopes"]["user"]["expected"]
+    assert vscode["scopes"]["project"]["effects"] == vscode["scopes"]["project"]["expected"]
 
 
 def test_normalized_simulated_layout_migrated_effects_match_expected_and_policies() -> None:

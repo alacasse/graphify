@@ -16,7 +16,7 @@ scopes:
     - graphify
     - vscode
     - uninstall
-    expected:
+    effects:
     - root: home
       relative: .copilot/skills/graphify/SKILL.md
     - kind: text_section
@@ -31,7 +31,7 @@ scopes:
     - graphify
     - vscode
     - uninstall
-    expected:
+    effects:
     - root: home
       relative: .copilot/skills/graphify/SKILL.md
     - kind: text_section

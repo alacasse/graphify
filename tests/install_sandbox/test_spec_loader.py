@@ -25,6 +25,7 @@ MIGRATED_EFFECTS_SPECS = {
     "antigravity",
     "antigravity-windows",
     "claw",
+    "claude",
     "codebuddy",
     "codex",
     "copilot",
@@ -40,6 +41,7 @@ MIGRATED_EFFECTS_SPECS = {
     "pi",
     "trae",
     "trae-cn",
+    "vscode",
     "windows",
 }
 
@@ -321,7 +323,7 @@ def test_default_registry_runnable_scopes_declare_one_effect_vocabulary_key() ->
     assert inventory["mixed"] == set()
     assert inventory["missing"] == set()
     assert inventory["effects"]
-    assert inventory["expected"]
+    assert inventory["expected"] == set()
 
 
 def test_default_registry_effects_migration_inventory_is_explicit() -> None:
@@ -336,7 +338,7 @@ def test_default_registry_effects_migration_inventory_is_explicit() -> None:
 
     assert migrated_specs == MIGRATED_EFFECTS_SPECS
     assert legacy_specs == all_specs - MIGRATED_EFFECTS_SPECS
-    assert legacy_specs
+    assert legacy_specs == set()
 
 
 def test_loader_preserves_explicit_no_project_install_equivalence() -> None:

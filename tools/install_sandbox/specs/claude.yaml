@@ -3,7 +3,7 @@ universal_uninstall_scopes:
 scopes:
   user:
     uninstall_command: null
-    expected:
+    effects:
     - root: home
       relative: .claude/skills/graphify/SKILL.md
     - kind: text_section
@@ -11,7 +11,7 @@ scopes:
       relative: .claude/CLAUDE.md
       marker: '# graphify'
   project:
-    expected:
+    effects:
     - root: project
       relative: .claude/skills/graphify/SKILL.md
     - kind: text_section

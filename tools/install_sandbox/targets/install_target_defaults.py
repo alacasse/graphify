@@ -34,9 +34,9 @@ _LAZY_DEFAULT_NAMES = {
 
 def _import_load_default_registry():
     try:
-        from ..spec_loader import load_default_registry
+        from ..registry.spec_loader import load_default_registry
     except ImportError:  # pragma: no cover - direct script import fallback
-        from spec_loader import load_default_registry  # type: ignore[no-redef]
+        from registry.spec_loader import load_default_registry  # type: ignore[no-redef]
     return load_default_registry
 
 

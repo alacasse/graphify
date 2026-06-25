@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 from tools.install_sandbox import platform_specs, spec_loader
+from tools.install_sandbox.registry import spec_loader as registry_spec_loader
 from tools.install_sandbox.targets import install_target_catalog
 from tools.install_sandbox.spec_loader import load_default_registry, load_registry_from_data
 
@@ -74,9 +75,16 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
 
 
 def test_spec_loader_uses_catalog_import_surface() -> None:
+    assert spec_loader.load_registry_from_data is registry_spec_loader.load_registry_from_data
     assert spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
     assert spec_loader._scenario is install_target_catalog._scenario
+
+
+def test_registry_spec_loader_is_owner_import_surface() -> None:
+    assert registry_spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
+    assert registry_spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
+    assert registry_spec_loader._scenario is install_target_catalog._scenario
 
 
 def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:

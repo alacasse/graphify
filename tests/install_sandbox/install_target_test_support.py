@@ -5,8 +5,8 @@ from typing import Any
 import yaml
 
 from tools.install_sandbox import platform_specs
-from tools.install_sandbox.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
-from tools.install_sandbox.spec_normalize import normalize_registry
+from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
+from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
 
 REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY

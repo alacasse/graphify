@@ -3,9 +3,11 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from tools.install_sandbox import platform_specs, spec_loader
+from tools.install_sandbox import spec_loader
 from tools.install_sandbox.registry import spec_loader as registry_spec_loader
+from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.targets import install_target_catalog
+from tools.install_sandbox.targets import install_target_models
 from tools.install_sandbox.spec_loader import load_default_registry, load_registry_from_data
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
@@ -17,8 +19,8 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     project = registry.make_scenario("mini", "project")
     spec = registry.platform_spec("mini")
 
-    assert isinstance(registry, platform_specs.ScenarioRegistry)
-    assert isinstance(spec, platform_specs.PlatformSpec)
+    assert isinstance(registry, install_target_catalog.ScenarioRegistry)
+    assert isinstance(spec, install_target_models.PlatformSpec)
     assert spec.display_name is None
     assert spec.target_kind == "product"
     assert user is not None
@@ -26,15 +28,15 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     assert user.uninstall_command is None
     assert user.cwd_root == "user_cwd"
     assert user.allowed_roots == ("home",)
-    assert isinstance(user.expected[0], platform_specs.SkillEffect)
-    assert user.expected[0].skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert isinstance(user.expected[0], install_surface_models.SkillEffect)
+    assert user.expected[0].skill_sidecar_expectation == install_surface_models.SkillSidecarExpectation()
     assert project is not None
     assert registry.install_variants(project) == (
-        platform_specs.InstallCommandVariant("generic", ("graphify", "install", "--project", "--platform", "mini")),
-        platform_specs.InstallCommandVariant("direct", ("graphify", "mini", "install", "--project")),
+        install_target_models.InstallCommandVariant("generic", ("graphify", "install", "--project", "--platform", "mini")),
+        install_target_models.InstallCommandVariant("direct", ("graphify", "mini", "install", "--project")),
     )
     agents = next(entry for entry in project.expected if entry.relative == "AGENTS.md")
-    assert isinstance(agents, platform_specs.TextSectionEffect)
+    assert isinstance(agents, install_surface_models.TextSectionEffect)
     assert agents.text_expectation.preserve_user_content
     assert agents.text_expectation.require_user_content_on_uninstall
     assert registry.universal_uninstall_specs[0].scenario_id == "universal-uninstall-project"
@@ -65,7 +67,6 @@ def test_loader_preserves_explicit_no_project_install_equivalence() -> None:
 def test_default_registry_loads_and_returns_scenario_registry() -> None:
     registry = load_default_registry()
 
-    assert isinstance(registry, platform_specs.ScenarioRegistry)
     assert isinstance(registry, install_target_catalog.ScenarioRegistry)
     assert type(registry) is install_target_catalog.InstallTargetCatalog
     assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry

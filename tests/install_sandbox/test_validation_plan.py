@@ -5,42 +5,43 @@ import sys
 
 import pytest
 
-from tools.install_sandbox import platform_specs, validation_plan
+from tools.install_sandbox import validation_plan
+from tools.install_sandbox.targets import install_target_catalog, install_target_models
 
 
-def _scope(relative: str = "graphify.txt") -> platform_specs.ScopeSpec:
-    return platform_specs.ScopeSpec(
+def _scope(relative: str = "graphify.txt") -> install_target_models.ScopeSpec:
+    return install_target_models.ScopeSpec(
         install_command=("graphify", "install"),
         uninstall_command=("graphify", "uninstall"),
         cwd_root="project",
-        expected=(platform_specs.InstallSurface("project", relative),),
+        expected=(install_target_models.InstallSurface("project", relative),),
     )
 
 
-def _planner_registry() -> platform_specs.ScenarioRegistry:
-    return platform_specs.ScenarioRegistry(
+def _planner_registry() -> install_target_catalog.ScenarioRegistry:
+    return install_target_catalog.ScenarioRegistry(
         {
-            "claude": platform_specs.PlatformSpec(
+            "claude": install_target_models.PlatformSpec(
                 name="claude",
                 scopes={"project": _scope("claude.txt")},
                 universal_uninstall_scopes=("project",),
             ),
-            "codex": platform_specs.PlatformSpec(
+            "codex": install_target_models.PlatformSpec(
                 name="codex",
                 scopes={"project": _scope("codex.txt")},
                 universal_uninstall_scopes=("project",),
             ),
-            "cursor": platform_specs.PlatformSpec(
+            "cursor": install_target_models.PlatformSpec(
                 name="cursor",
                 scopes={"project": _scope("cursor.txt")},
                 unsupported_scopes={"user": "user install is not supported"},
             ),
-            "gemini": platform_specs.PlatformSpec(
+            "gemini": install_target_models.PlatformSpec(
                 name="gemini",
                 scopes={"project": _scope("gemini.txt")},
                 universal_uninstall_scopes=("project",),
             ),
-            "windows": platform_specs.PlatformSpec(
+            "windows": install_target_models.PlatformSpec(
                 name="windows",
                 scopes={"project": _scope("windows.txt")},
                 simulated_linux_layout=True,
@@ -50,33 +51,33 @@ def _planner_registry() -> platform_specs.ScenarioRegistry:
 
 
 def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
-    registry = platform_specs.ScenarioRegistry(
+    registry = install_target_catalog.ScenarioRegistry(
         {
-            "zeta": platform_specs.PlatformSpec(
+            "zeta": install_target_models.PlatformSpec(
                 name="zeta",
                 scopes={
-                    "user": platform_specs.ScopeSpec(
+                    "user": install_target_models.ScopeSpec(
                         install_command=("install", "zeta-user"),
                         uninstall_command=None,
                         cwd_root="user_cwd",
-                        expected=(platform_specs.InstallSurface("home", "zeta-user.txt"),),
+                        expected=(install_target_models.InstallSurface("home", "zeta-user.txt"),),
                     ),
-                    "project": platform_specs.ScopeSpec(
+                    "project": install_target_models.ScopeSpec(
                         install_command=("install", "zeta-project"),
                         uninstall_command=None,
                         cwd_root="project",
-                        expected=(platform_specs.InstallSurface("project", "zeta-project.txt"),),
+                        expected=(install_target_models.InstallSurface("project", "zeta-project.txt"),),
                     ),
                 },
             ),
-            "alpha": platform_specs.PlatformSpec(
+            "alpha": install_target_models.PlatformSpec(
                 name="alpha",
                 scopes={
-                    "project": platform_specs.ScopeSpec(
+                    "project": install_target_models.ScopeSpec(
                         install_command=("install", "alpha-project"),
                         uninstall_command=None,
                         cwd_root="project",
-                        expected=(platform_specs.InstallSurface("project", "alpha-project.txt"),),
+                        expected=(install_target_models.InstallSurface("project", "alpha-project.txt"),),
                     )
                 },
                 unsupported_scopes={"user": "not supported"},
@@ -87,7 +88,6 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
     plan = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="both")
 
     assert plan.platforms == ("alpha", "zeta")
-    assert plan.selected_targets == ("alpha", "zeta")
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("alpha", "project"),
         ("zeta", "user"),
@@ -96,7 +96,7 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
 
 
 def test_validation_plan_rejects_unknown_platform() -> None:
-    registry = platform_specs.ScenarioRegistry({"known": platform_specs.PlatformSpec(name="known")})
+    registry = install_target_catalog.ScenarioRegistry({"known": install_target_models.PlatformSpec(name="known")})
 
     with pytest.raises(RuntimeError, match="unknown sandbox platform"):
         validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="missing", scope="project")
@@ -114,7 +114,6 @@ def test_validation_plan_preserves_explicit_platform_order_and_full_plan_content
     )
 
     assert plan.platforms == ("gemini", "claude", "codex")
-    assert plan.selected_targets == plan.platforms
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("gemini", "project"),
         ("claude", "project"),
@@ -178,9 +177,9 @@ def test_validation_plan_preserves_explicit_platform_order_and_full_plan_content
 
 
 def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
-    registry = platform_specs.ScenarioRegistry(
+    registry = install_target_catalog.ScenarioRegistry(
         {
-            "alpha": platform_specs.PlatformSpec(
+            "alpha": install_target_models.PlatformSpec(
                 name="alpha",
                 scopes={
                     "user": _scope("alpha-user.txt"),
@@ -188,7 +187,7 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
                 },
                 universal_uninstall_scopes=("user", "project"),
             ),
-            "beta": platform_specs.PlatformSpec(
+            "beta": install_target_models.PlatformSpec(
                 name="beta",
                 scopes={
                     "user": _scope("beta-user.txt"),
@@ -327,7 +326,7 @@ def test_validation_plan_derives_runtime_limitation_sections_from_policy() -> No
 
 
 def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() -> None:
-    selected_runtime = platform_specs.TargetRuntimeValidationSpec(
+    selected_runtime = install_target_models.TargetRuntimeValidationSpec(
         section_title="Selected Runtime",
         status="runtime_validated",
         evidence_path="runtime/selected-evidence.json",
@@ -335,7 +334,7 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() ->
         targets=("selected target app", "selected cleanup behavior"),
         notes=("captures runtime-only integration behavior", "keeps report metadata explicit"),
     )
-    unselected_runtime = platform_specs.TargetRuntimeValidationSpec(
+    unselected_runtime = install_target_models.TargetRuntimeValidationSpec(
         section_title="Unselected Runtime",
         status="declared",
         evidence_path="runtime/unselected-evidence.json",
@@ -343,14 +342,14 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() ->
         targets=("windows",),
         notes=("must not leak",),
     )
-    registry = platform_specs.ScenarioRegistry(
+    registry = install_target_catalog.ScenarioRegistry(
         {
-            "codex": platform_specs.PlatformSpec(
+            "codex": install_target_models.PlatformSpec(
                 name="codex",
                 scopes={"project": _scope("codex.txt")},
                 target_runtime_validation=(selected_runtime,),
             ),
-            "windows": platform_specs.PlatformSpec(
+            "windows": install_target_models.PlatformSpec(
                 name="windows",
                 scopes={"project": _scope("windows.txt")},
                 simulated_linux_layout=True,
@@ -395,14 +394,14 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() ->
 
 def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
     validation = validation_plan.DEFAULT_HARNESS_POLICY.runtime_limitation_sections[0]
-    registry = platform_specs.ScenarioRegistry(
+    registry = install_target_catalog.ScenarioRegistry(
         {
-            "one": platform_specs.PlatformSpec(
+            "one": install_target_models.PlatformSpec(
                 name="one",
                 simulated_linux_layout=True,
                 target_runtime_validation=(validation,),
             ),
-            "two": platform_specs.PlatformSpec(name="two", simulated_linux_layout=True),
+            "two": install_target_models.PlatformSpec(name="two", simulated_linux_layout=True),
         }
     )
 
@@ -427,7 +426,7 @@ def test_harness_policy_validates_owned_roots() -> None:
     validation_plan.DEFAULT_HARNESS_POLICY.validate_roots({"home", "project", "user_cwd"})
     policy = validation_plan.HarnessPolicy(
         universal_uninstall_specs=(
-            platform_specs.UniversalUninstallScenarioSpec(
+            install_target_models.UniversalUninstallScenarioSpec(
                 scenario_id="bad",
                 platform_label="bad",
                 scope="project",

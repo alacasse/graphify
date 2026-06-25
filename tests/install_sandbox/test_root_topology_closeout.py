@@ -57,6 +57,8 @@ def test_root_topology_closeout_keeps_batch_compatibility_facades_importable() -
     owner_install_surface_models = importlib.import_module("tools.install_sandbox.surfaces.install_surface_models")
     root_platform_specs = importlib.import_module("tools.install_sandbox.platform_specs")
     owner_install_target_catalog = importlib.import_module("tools.install_sandbox.targets.install_target_catalog")
+    root_status = importlib.import_module("tools.install_sandbox.status")
+    owner_status = importlib.import_module("tools.install_sandbox.reporting.status")
 
     assert (INSTALL_SANDBOX_ROOT / "agent_summary.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "spec_loader.py").exists()
@@ -64,9 +66,11 @@ def test_root_topology_closeout_keeps_batch_compatibility_facades_importable() -
     assert (INSTALL_SANDBOX_ROOT / "install_surface_core.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "expected_effects.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "platform_specs.py").exists()
+    assert (INSTALL_SANDBOX_ROOT / "status.py").exists()
     assert root_agent_summary.summarize_output is owner_agent_summary.summarize_output
     assert root_spec_loader.load_default_registry is owner_spec_loader.load_default_registry
     assert root_spec_normalize.normalize_registry is owner_spec_normalize.normalize_registry
     assert root_install_surface_core.InstallSurfaceStatus is owner_install_surface_statuses.InstallSurfaceStatus
     assert root_expected_effects.InstallSurface is owner_install_surface_models.InstallSurface
     assert root_platform_specs.InstallTargetCatalog is owner_install_target_catalog.InstallTargetCatalog
+    assert root_status.known_status_values is owner_status.known_status_values

@@ -207,6 +207,10 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     assert manifest["target_runtime_validation_sections"] == [{"section_title": "Synthetic Runtime", "status": "declared"}]
     assert "target_tool_runtime" not in manifest
     assert manifest["platform_coverage"] == list(plan.coverage_records)
+    assert "platforms" not in manifest
+    assert "selected_targets" not in manifest
+    assert "coverage_records" not in manifest
+    assert "runtime_limitation_sections" not in manifest
     assert "legacy-alias" not in json.dumps(manifest)
     assert "Legacy Alias" not in json.dumps(manifest)
     assert manifest["scenario_count"] == len(manifest["results"])

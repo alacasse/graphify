@@ -194,6 +194,50 @@ def test_target_runtime_validation_sections_are_registry_declared_manifest_data(
     assert "declared note" in markdown
 
 
+def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> None:
+    manifest = {
+        "results": [],
+        "platform_coverage": [
+            {
+                "platform": "codex",
+                "scope": "project",
+                "status": "runnable",
+                "install_command": ["graphify", "install", "--platform", "codex"],
+            }
+        ],
+        "target_runtime_validation_sections": [
+            {
+                "section_title": "Projected Runtime Boundary",
+                "status": "payload_consistency_only",
+                "evidence_path": None,
+                "strategy": "render manifest projection only",
+                "targets": ["codex"],
+                "notes": ["planner alias names are compatibility paths, not report inputs"],
+            }
+        ],
+        "selected_targets": ["must-not-render"],
+        "platforms": ["must-not-render"],
+        "coverage_records": [{"platform": "must-not-render"}],
+        "runtime_limitation_sections": [
+            {
+                "section_title": "Must Not Render",
+                "status": "legacy",
+                "strategy": "legacy alias",
+            }
+        ],
+    }
+
+    markdown = reports.render_report_md(manifest)
+
+    assert "## Platform Coverage" in markdown
+    assert "| codex | project | runnable | graphify install --platform codex |" in markdown
+    assert "## Projected Runtime Boundary" in markdown
+    assert "render manifest projection only" in markdown
+    assert "must-not-render" not in markdown
+    assert "Must Not Render" not in markdown
+    assert "legacy alias" not in markdown
+
+
 def test_write_report_markdown(tmp_path) -> None:
     path = tmp_path / "report.md"
 

@@ -263,6 +263,29 @@ def test_validation_plan_does_not_accept_selected_targets_constructor_input() ->
         )
 
 
+def test_validation_plan_keeps_target_and_report_aliases_as_compatibility_paths() -> None:
+    plan = validation_plan.ValidationPlan(
+        selected_platforms=("codex",),
+        requested_scope="project",
+        standard_scenarios=(),
+        universal_uninstall_scenarios=(),
+        disposable_artifact_scenarios=(),
+        platform_coverage=({"platform": "codex", "scope": "project", "status": "runnable"},),
+        runtime_limitation_sections=({"section_title": "Compatibility Runtime", "status": "declared"},),
+        platform_coverage_summary={"requested_scope": "project"},
+    )
+
+    assert plan.platforms == ("codex",)
+    assert plan.selected_platforms == plan.platforms
+    assert plan.selected_targets == plan.platforms
+    assert plan.universal_uninstall == plan.universal_uninstall_scenarios == ()
+    assert plan.disposable_artifacts == plan.disposable_artifact_scenarios == ()
+    assert plan.coverage_records == plan.platform_coverage == ({"platform": "codex", "scope": "project", "status": "runnable"},)
+    assert plan.target_runtime_validation_sections == plan.runtime_limitation_sections == (
+        {"section_title": "Compatibility Runtime", "status": "declared"},
+    )
+
+
 def test_validation_plan_derives_universal_uninstall_from_policy_and_target_facts() -> None:
     registry = _planner_registry()
 

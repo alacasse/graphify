@@ -23,7 +23,6 @@ def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
 
     for name in helper_names:
         assert getattr(platform_specs, name) is getattr(install_target_defaults, name)
-    assert platform_specs._LAZY_DEFAULT_NAMES is install_target_defaults._LAZY_DEFAULT_NAMES
 
 
 def test_install_target_module_helpers_use_default_catalog_seam() -> None:

@@ -9,7 +9,6 @@ from tools.install_sandbox.registry.spec_loader import load_default_registry, lo
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.targets import install_target_catalog
 from tools.install_sandbox.targets import install_target_models
-from tools.install_sandbox.targets import install_target_scenarios
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
 
@@ -82,12 +81,12 @@ def test_root_spec_loader_reexports_supported_registry_entrypoints() -> None:
     assert root_spec_loader.load_registry_from_data is registry_spec_loader.load_registry_from_data
     assert root_spec_loader.load_registry_from_dir is registry_spec_loader.load_registry_from_dir
     assert root_spec_loader.load_registry_from_yaml is registry_spec_loader.load_registry_from_yaml
+    assert not hasattr(root_spec_loader, "_scenario")
 
 
 def test_registry_spec_loader_is_owner_import_surface() -> None:
     assert registry_spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert registry_spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
-    assert registry_spec_loader._scenario is install_target_scenarios._scenario
 
 
 def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:

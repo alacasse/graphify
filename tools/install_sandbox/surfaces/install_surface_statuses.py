@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 try:
-    from ..expected_effects import (
+    from .install_surface_models import (
         InstallSurface,
         JsonExpectation,
         JsonHookExpectation,
@@ -22,7 +22,7 @@ try:
     )
     from ..json_helpers import object_dict, object_dicts, object_list
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import (  # type: ignore[no-redef]
+    from surfaces.install_surface_models import (  # type: ignore[no-redef]
         InstallSurface,
         JsonExpectation,
         JsonHookExpectation,

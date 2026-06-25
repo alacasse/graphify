@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from ..expected_effects import (
+    from ..surfaces.install_surface_models import (
         ExpectedPath,
         JsonExpectation,
         JsonHookExpectation,
@@ -22,7 +22,7 @@ try:
         TargetRuntimeValidationSpec,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import (  # type: ignore[no-redef]
+    from surfaces.install_surface_models import (  # type: ignore[no-redef]
         ExpectedPath,
         JsonExpectation,
         JsonHookExpectation,

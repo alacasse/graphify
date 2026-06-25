@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import AbstractSet, Iterable, Protocol
 
 try:
-    from ..expected_effects import InstallSurface, is_skill_effect
+    from .install_surface_models import InstallSurface, is_skill_effect
     from .install_surface_sidecars import skill_references_relative, skill_references_tmp_relative, skill_version_relative
     from .install_surface_state import USER_SENTINEL
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import InstallSurface, is_skill_effect  # type: ignore[no-redef]
+    from surfaces.install_surface_models import InstallSurface, is_skill_effect  # type: ignore[no-redef]
     from surfaces.install_surface_sidecars import (  # type: ignore[no-redef]
         skill_references_relative,
         skill_references_tmp_relative,

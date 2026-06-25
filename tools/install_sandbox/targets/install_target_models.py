@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
-    from ..expected_effects import (
+    from ..surfaces.install_surface_models import (
         ExpectedPath,
         FileEffect,
         InstallSurface,
@@ -19,7 +19,7 @@ try:
         TextSectionEffect,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import (  # type: ignore[no-redef]
+    from surfaces.install_surface_models import (  # type: ignore[no-redef]
         ExpectedPath,
         FileEffect,
         InstallSurface,

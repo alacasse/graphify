@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
 try:
-    from ..expected_effects import InstallSurface, SkillSidecarExpectation
+    from .install_surface_models import InstallSurface, SkillSidecarExpectation
     from ..reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import InstallSurface, SkillSidecarExpectation  # type: ignore[no-redef]
+    from surfaces.install_surface_models import InstallSurface, SkillSidecarExpectation  # type: ignore[no-redef]
     from reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus  # type: ignore[no-redef]
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
 try:
-    from ..expected_effects import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect
+    from .install_surface_models import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect
     from .install_surface_sidecars import (
         expected_skill_sidecar_relatives,
         reference_sidecar_expectation,
@@ -14,7 +14,7 @@ try:
     )
     from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
+    from surfaces.install_surface_models import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
     from surfaces.install_surface_sidecars import (  # type: ignore[no-redef]
         expected_skill_sidecar_relatives,
         reference_sidecar_expectation,

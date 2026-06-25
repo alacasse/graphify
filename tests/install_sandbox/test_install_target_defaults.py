@@ -26,21 +26,20 @@ def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
     assert platform_specs._LAZY_DEFAULT_NAMES is install_target_defaults._LAZY_DEFAULT_NAMES
 
 
-def test_install_target_module_helpers_match_default_registry() -> None:
-    assert install_target_defaults.default_install_target_catalog() is REGISTRY
-    assert install_target_defaults.install_target_specs() is REGISTRY.specs
-    assert install_target_defaults.install_target_spec("codex") is REGISTRY.target_spec("codex")
-    assert install_target_defaults.install_target_scenarios("cursor", "both") == REGISTRY.target_scenarios(
-        "cursor",
-        "both",
-    )
+def test_install_target_module_helpers_use_default_catalog_seam() -> None:
+    catalog = install_target_defaults.default_install_target_catalog()
+
+    assert catalog is REGISTRY
+    assert install_target_defaults.install_target_specs() is catalog.specs
+    assert install_target_defaults.install_target_spec("codex") is catalog.target_spec("codex")
+    assert install_target_defaults.install_target_scenarios("cursor", "both") == catalog.target_scenarios("cursor", "both")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         install_target_defaults.install_target_spec("missing-target")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         install_target_defaults.install_target_scenarios("missing-target", "both")
 
 
-def test_install_target_helpers_use_existing_default_registry_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = platform_specs.ScenarioRegistry(
         {
             "cached-target": platform_specs.PlatformSpec(
@@ -65,11 +64,9 @@ def test_install_target_helpers_use_existing_default_registry_cache(monkeypatch:
         "cached-target",
         "project",
     )
-    assert "DEFAULT_INSTALL_TARGET_CATALOG" not in platform_specs._LAZY_DEFAULT_NAMES
-    assert "DEFAULT_INSTALL_TARGET_CATALOG" not in install_target_defaults._LAZY_DEFAULT_NAMES
 
 
-def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lazy_default_catalog_exports_share_one_cache_for_compatibility_names(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
     registry = platform_specs.ScenarioRegistry(
         {
@@ -99,8 +96,6 @@ def test_lazy_default_catalog_exports_share_one_registry_cache(monkeypatch: pyte
         monkeypatch.delitem(install_target_defaults.__dict__, name, raising=False)
 
     assert install_target_defaults.default_install_target_catalog() is registry
-    assert install_target_defaults.install_target_specs() is registry.specs
-    assert install_target_defaults.install_target_spec("cached-target") is registry.target_spec("cached-target")
     assert platform_specs.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
     assert platform_specs.__getattr__("SANDBOX_PLATFORM_SPECS") is registry.specs
     assert platform_specs.__getattr__("ALL_PLATFORMS") == ["cached-target"]

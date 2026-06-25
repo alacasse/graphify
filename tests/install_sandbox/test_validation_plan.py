@@ -295,29 +295,41 @@ def test_validation_plan_derives_universal_uninstall_from_policy_and_target_fact
         platform_name="codex",
         scope="project",
     )
-    multi = validation_plan.universal_uninstall_scenarios(registry, ("codex", "claude", "gemini"), "project")
+    multi = validation_plan.build_validation_plan(
+        registry,
+        all_platforms=False,
+        platform_name=None,
+        selected_platform_names=("codex", "claude", "gemini"),
+        scope="project",
+    )
 
     assert single.universal_uninstall == selected.universal_uninstall == ()
-    assert len(multi) == 1
-    assert multi[0].spec.scenario_id == "universal-uninstall-project"
-    assert [scenario.platform for scenario in multi[0].installed_scenarios] == ["codex", "claude", "gemini"]
+    assert len(multi.universal_uninstall) == 1
+    assert multi.universal_uninstall[0].spec.scenario_id == "universal-uninstall-project"
+    assert [scenario.platform for scenario in multi.universal_uninstall[0].installed_scenarios] == [
+        "codex",
+        "claude",
+        "gemini",
+    ]
 
 
 def test_validation_plan_derives_disposable_artifacts_by_scope() -> None:
     registry = _planner_registry()
 
-    assert validation_plan.disposable_artifact_scenarios(registry, "user") == ()
-    project = validation_plan.disposable_artifact_scenarios(registry, "project")
+    user = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="user")
+    project = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="project")
 
-    assert len(project) == 1
-    assert project[0].scenario_id == "purge-disposable-graphify-out"
-    assert project[0].command == ("graphify", "uninstall", "--purge")
+    assert user.disposable_artifacts == ()
+    assert len(project.disposable_artifacts) == 1
+    assert project.disposable_artifacts[0].scenario_id == "purge-disposable-graphify-out"
+    assert project.disposable_artifacts[0].command == ("graphify", "uninstall", "--purge")
 
 
 def test_validation_plan_derives_runtime_limitation_sections_from_policy() -> None:
     registry = _planner_registry()
 
-    sections = validation_plan.target_runtime_validation_sections(registry)
+    plan = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="windows", scope="project")
+    sections = plan.target_runtime_validation_sections
 
     assert [section["section_title"] for section in sections] == ["Windows Validation"]
     assert sections[0]["status"] == "payload_consistency_only"
@@ -405,7 +417,8 @@ def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
         }
     )
 
-    sections = validation_plan.target_runtime_validation_sections(registry)
+    plan = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
+    sections = plan.target_runtime_validation_sections
 
     assert len(sections) == 1
     assert sections[0]["section_title"] == "Windows Validation"
@@ -413,7 +426,8 @@ def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
 
 def test_validation_plan_coverage_records_unsupported_scopes() -> None:
     registry = _planner_registry()
-    records = validation_plan.coverage_records(registry, ("cursor",), "both")
+    plan = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="cursor", scope="both")
+    records = plan.coverage_records
     user = next(record for record in records if record["scope"] == "user")
     project = next(record for record in records if record["scope"] == "project")
 

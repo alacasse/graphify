@@ -6,119 +6,26 @@ from typing import Iterable
 try:
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry
     from .targets.install_target_catalog import InstallTargetCatalog
+    from .targets import install_target_harness_policy as _harness_policy
     from .targets.install_target_models import (
         DisposableArtifactScenarioSpec,
-        DisposableSeedFile,
         Scenario,
         SelectedUniversalUninstallScenario,
-        TargetRuntimeValidationSpec,
-        UniversalUninstallScenarioSpec,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry  # type: ignore[no-redef]
     from targets.install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
+    from targets import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
     from targets.install_target_models import (  # type: ignore[no-redef]
         DisposableArtifactScenarioSpec,
-        DisposableSeedFile,
         Scenario,
         SelectedUniversalUninstallScenario,
-        TargetRuntimeValidationSpec,
-        UniversalUninstallScenarioSpec,
     )
 
 
-TARGET_RUNTIME_VERIFICATION_POLICY = {
-    "performed": False,
-    "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
-}
-
-
-def _default_universal_uninstall_specs() -> tuple[UniversalUninstallScenarioSpec, ...]:
-    return (
-        UniversalUninstallScenarioSpec(
-            scenario_id="universal-uninstall-user",
-            platform_label="multiple",
-            scope="user",
-            command=("graphify", "uninstall"),
-            cwd_root="user_cwd",
-            eligible_platform_scope="user",
-        ),
-        UniversalUninstallScenarioSpec(
-            scenario_id="universal-uninstall-project",
-            platform_label="multiple",
-            scope="project",
-            command=("graphify", "uninstall", "--project"),
-            cwd_root="project",
-            eligible_platform_scope="project",
-        ),
-    )
-
-
-def _default_disposable_artifact_specs() -> tuple[DisposableArtifactScenarioSpec, ...]:
-    return (
-        DisposableArtifactScenarioSpec(
-            scenario_id="purge-disposable-graphify-out",
-            platform_label="purge",
-            scope="project",
-            command=("graphify", "uninstall", "--purge"),
-            cwd_root="project",
-            artifact_subdir="uninstall-purge",
-            disposable_path_root="project",
-            disposable_path_relative="graphify-out",
-            seed_files=(DisposableSeedFile("graph.json", '{"nodes": [], "edges": []}\n'),),
-            scope_eligibility=("project", "both"),
-            risk_note="purge verified only against disposable sandbox graphify-out state",
-        ),
-    )
-
-
-def _default_runtime_limitation_sections() -> tuple[TargetRuntimeValidationSpec, ...]:
-    return (
-        TargetRuntimeValidationSpec(
-            section_title="Windows Validation",
-            status="payload_consistency_only",
-            evidence_path=None,
-            strategy=(
-                "Linux Docker validates Windows-named payload consistency only; real "
-                "Windows runtime/path semantics require separate Windows validation"
-            ),
-            targets=(
-                "windows payload file-effect simulation",
-                "antigravity remapping to antigravity-windows",
-                "Windows-specific skill payload and references generation",
-                "payload consistency for explicit Windows platform selection",
-            ),
-            notes=(
-                "Linux sandbox results for windows and antigravity-windows check packaged payloads, "
-                "references, and generated file consistency only.",
-                "This does not validate Windows Path.home(), PowerShell/cmd entrypoints, cleanup semantics, "
-                "permissions, or target-app discovery.",
-            ),
-        ),
-    )
-
-
-@dataclass(frozen=True)
-class HarnessPolicy:
-    universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...] = field(default_factory=_default_universal_uninstall_specs)
-    disposable_artifact_specs: tuple[DisposableArtifactScenarioSpec, ...] = field(default_factory=_default_disposable_artifact_specs)
-    runtime_limitation_sections: tuple[TargetRuntimeValidationSpec, ...] = field(default_factory=_default_runtime_limitation_sections)
-    target_runtime_verification: dict[str, object] = field(default_factory=lambda: dict(TARGET_RUNTIME_VERIFICATION_POLICY))
-
-    def validate_roots(self, declared_roots: Iterable[str]) -> None:
-        declared = set(declared_roots)
-        unknown: set[str] = set()
-        unknown.update(spec.cwd_root for spec in self.universal_uninstall_specs if spec.cwd_root not in declared)
-        for spec in self.disposable_artifact_specs:
-            if spec.cwd_root not in declared:
-                unknown.add(spec.cwd_root)
-            if spec.disposable_path_root not in declared:
-                unknown.add(spec.disposable_path_root)
-        if unknown:
-            raise RuntimeError(f"unknown harness policy root declaration(s): {', '.join(sorted(unknown))}")
-
-
-DEFAULT_HARNESS_POLICY = HarnessPolicy()
+TARGET_RUNTIME_VERIFICATION_POLICY = _harness_policy.TARGET_RUNTIME_VERIFICATION_POLICY
+HarnessPolicy = _harness_policy.HarnessPolicy
+DEFAULT_HARNESS_POLICY = _harness_policy.DEFAULT_HARNESS_POLICY
 
 
 @dataclass(frozen=True, init=False)
@@ -254,36 +161,7 @@ def _standard_scenarios(registry: InstallTargetCatalog, platforms: tuple[str, ..
 
 
 def coverage_records(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[dict[str, object], ...]:
-    if not hasattr(registry, "make_scenario") and hasattr(registry, "coverage_records"):
-        return tuple(registry.coverage_records(list(platforms), scope))
-    records: list[dict[str, object]] = []
-    for platform_name in platforms:
-        for one_scope in _selected_scopes(scope):
-            reason = registry.unsupported_scope_reason(platform_name, one_scope)
-            scenario = registry.make_scenario(platform_name, one_scope) if reason is None else None
-            if scenario is None:
-                records.append(
-                    {
-                        "platform": platform_name,
-                        "scope": one_scope,
-                        "status": "unsupported",
-                        "reason": reason or "no sandbox scenario is defined for this platform/scope",
-                    }
-                )
-                continue
-            records.append(
-                {
-                    "platform": platform_name,
-                    "scope": one_scope,
-                    "status": "runnable",
-                    "scenario_id": registry.scenario_id(platform_name, one_scope),
-                    "install_command": list(scenario.install_command),
-                    "uninstall_command": None if scenario.uninstall_command is None else list(scenario.uninstall_command),
-                    "generic_direct_equivalence": registry.equivalence_status(scenario),
-                    "risk_notes": list(scenario.risk_notes),
-                }
-            )
-    return tuple(records)
+    return tuple(registry.coverage_records(list(platforms), scope))
 
 
 def universal_uninstall_scenarios(
@@ -292,25 +170,7 @@ def universal_uninstall_scenarios(
     scope: str,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[SelectedUniversalUninstallScenario, ...]:
-    if not hasattr(registry, "make_scenario"):
-        return ()
-    specs = getattr(registry, "universal_uninstall_specs", ()) or policy.universal_uninstall_specs
-    requested = set(platforms)
-    selected_scopes = set(_selected_scopes(scope))
-    selected: list[SelectedUniversalUninstallScenario] = []
-    for universal_spec in specs:
-        if universal_spec.scope not in selected_scopes:
-            continue
-        scenarios = [
-            registry.make_scenario(platform_name, universal_spec.eligible_platform_scope)
-            for platform_name in platforms
-            if platform_name in requested
-            and universal_spec.eligible_platform_scope in registry.platform_spec(platform_name).universal_uninstall_scopes
-        ]
-        runnable = tuple(scenario for scenario in scenarios if scenario is not None)
-        if len(runnable) >= universal_spec.minimum_installed_scenarios:
-            selected.append(SelectedUniversalUninstallScenario(universal_spec, runnable))
-    return tuple(selected)
+    return _harness_policy.selected_universal_uninstall_scenarios(registry, platforms, scope, policy)
 
 
 def disposable_artifact_scenarios(
@@ -318,20 +178,7 @@ def disposable_artifact_scenarios(
     scope: str,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[DisposableArtifactScenarioSpec, ...]:
-    specs = getattr(registry, "disposable_artifact_specs", ()) or policy.disposable_artifact_specs
-    return tuple(spec for spec in specs if scope in spec.scope_eligibility)
-
-
-def _dedupe_sections(sections: Iterable[TargetRuntimeValidationSpec]) -> tuple[dict[str, object], ...]:
-    rendered: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    for section in sections:
-        key = (section.section_title, section.status)
-        if key in seen:
-            continue
-        seen.add(key)
-        rendered.append(section.to_manifest())
-    return tuple(rendered)
+    return _harness_policy.selected_disposable_artifact_scenarios(registry, scope, policy)
 
 
 def target_runtime_validation_sections(
@@ -339,19 +186,7 @@ def target_runtime_validation_sections(
     platforms: tuple[str, ...] | None = None,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[dict[str, object], ...]:
-    if any(not hasattr(platform, "target_runtime_validation") for platform in registry.specs.values()):
-        if hasattr(registry, "target_runtime_validation_sections"):
-            return tuple(registry.target_runtime_validation_sections())
-        return ()
-    if platforms is None:
-        platforms = tuple(registry.specs)
-    declared_sections = [
-        section
-        for platform_name in platforms
-        for section in registry.platform_spec(platform_name).target_runtime_validation
-    ]
-    policy_sections = policy.runtime_limitation_sections if any(registry.platform_spec(platform_name).simulated_linux_layout for platform_name in platforms) else ()
-    return _dedupe_sections([*declared_sections, *policy_sections])
+    return _harness_policy.selected_target_runtime_validation_sections(registry, platforms, policy)
 
 
 def _coverage_summary(

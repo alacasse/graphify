@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 try:
     from ..surfaces.install_surface_models import (
-        ExpectedPath,
+        InstallSurface,
         JsonExpectation,
         JsonHookExpectation,
         JsonPluginExpectation,
@@ -23,7 +24,7 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     from surfaces.install_surface_models import (  # type: ignore[no-redef]
-        ExpectedPath,
+        InstallSurface,
         JsonExpectation,
         JsonHookExpectation,
         JsonPluginExpectation,
@@ -103,18 +104,18 @@ def _generated_file_expectation(expectation: GeneratedFileExpectation) -> dict[s
     }
 
 
-def _expected_path(path: ExpectedPath) -> dict[str, object]:
+def _install_surface(surface: InstallSurface) -> dict[str, object]:
     return {
-        "effect_type": effect_type_name(path),
-        "root": path.root,
-        "relative": path.relative,
-        "kind": path.kind,
-        "content_kind": path.content_kind,
-        "marker": path.marker,
-        "remove_on_uninstall": path.remove_on_uninstall,
-        "text_expectation": _text_expectation(path.text_expectation),
-        "json_expectation": _json_expectation(path.json_expectation),
-        "skill_sidecar_expectation": _skill_sidecar(path.skill_sidecar_expectation),
+        "effect_type": effect_type_name(surface),
+        "root": surface.root,
+        "relative": surface.relative,
+        "kind": surface.kind,
+        "content_kind": surface.content_kind,
+        "marker": surface.marker,
+        "remove_on_uninstall": surface.remove_on_uninstall,
+        "text_expectation": _text_expectation(surface.text_expectation),
+        "json_expectation": _json_expectation(surface.json_expectation),
+        "skill_sidecar_expectation": _skill_sidecar(surface.skill_sidecar_expectation),
     }
 
 
@@ -123,18 +124,23 @@ def _install_variant(variant: InstallCommandVariant) -> dict[str, object]:
 
 
 def _scope_spec(scope: ScopeSpec) -> dict[str, object]:
+    effects = [_install_surface(surface) for surface in scope.effects]
     return {
         "install_command": list(scope.install_command),
         "uninstall_command": _command(scope.uninstall_command),
         "cwd_root": scope.cwd_root,
-        "expected": [_expected_path(path) for path in scope.expected],
-        "effects": [_expected_path(path) for path in scope.effects],
+        "expected": _legacy_expected_effects(effects),
+        "effects": effects,
         "risk_notes": list(scope.risk_notes),
         "equivalent_install_command": _command(scope.equivalent_install_command),
         "install_variants": [_install_variant(variant) for variant in scope.install_variants],
         "allowed_roots": list(scope.allowed_roots),
         "generated_file_expectation": _generated_file_expectation(scope.generated_file_expectation),
     }
+
+
+def _legacy_expected_effects(effects: list[dict[str, object]]) -> list[dict[str, object]]:
+    return deepcopy(effects)
 
 
 def _reference_bundle(bundle: ReferenceBundle) -> dict[str, object]:

@@ -243,21 +243,21 @@ def _is_plugin_payload(effect: Mapping[str, Any], context: str) -> bool:
     return kind == "file" and root and path.suffix == ".js" and "plugins" in path.parts
 
 
-def _scope_effect_list_context(context: str) -> tuple[str, str]:
+def _scope_effects_context(context: str) -> tuple[str, str]:
     for key in ("expected", "effects"):
         token = f".{key}["
         if token in context:
             return context.rsplit(token, 1)[0], key
-    return context, "expected"
+    return context, "effects"
 
 
-def _paired_plugin_relative(effect: Mapping[str, Any], expected_values: list[Any], context: str) -> str:
+def _paired_plugin_relative(effect: Mapping[str, Any], effect_values: list[Any], context: str) -> str:
     if "plugin_relative" in effect:
         return _string(effect.get("plugin_relative"), f"{context}.plugin_relative")
     root = _string(effect.get("root"), f"{context}.root")
-    scope_context, effects_key = _scope_effect_list_context(context)
+    scope_context, effects_key = _scope_effects_context(context)
     candidates: list[str] = []
-    for index, candidate_value in enumerate(expected_values):
+    for index, candidate_value in enumerate(effect_values):
         candidate_context = f"{scope_context}.{effects_key}[{index}]"
         candidate = _mapping(candidate_value, candidate_context)
         candidate_root = _string(candidate.get("root"), f"{candidate_context}.root")
@@ -284,7 +284,7 @@ def _text_section_removes_on_uninstall(root: str, relative: str, declared_remove
     return True
 
 
-def _expected_path(effect_value: object, context: str, *, expected_values: list[Any] | None = None) -> InstallSurface:
+def _install_surface(effect_value: object, context: str, *, effect_values: list[Any] | None = None) -> InstallSurface:
     effect = _mapping(effect_value, context)
     root, relative, declared_remove_on_uninstall = _effect_common(effect, context)
     kind = _effect_kind(effect, relative, context)
@@ -321,8 +321,8 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
             ),
         )
     elif kind == "json_plugin":
-        if expected_values is None:
-            _fail(context, "json_plugin derivation requires scope expected context")
+        if effect_values is None:
+            _fail(context, "json_plugin derivation requires scope effects context")
         path = JsonPluginEffect(
             root,
             relative,
@@ -330,7 +330,7 @@ def _expected_path(effect_value: object, context: str, *, expected_values: list[
             json_expectation=JsonExpectation(
                 schema_name=_string(effect.get("schema_name"), f"{context}.schema_name"),
                 plugin=JsonPluginExpectation(
-                    expected_entry=_paired_plugin_relative(effect, expected_values, context),
+                    expected_entry=_paired_plugin_relative(effect, effect_values, context),
                     allow_file_uri=_bool(effect.get("allow_file_uri", False), f"{context}.allow_file_uri"),
                 ),
             ),
@@ -416,23 +416,27 @@ def _scope_effect_values(data: Mapping[str, Any], context: str) -> tuple[str, li
     if has_effects:
         return "effects", _sequence(data.get("effects"), f"{context}.effects")
     if has_expected:
-        return "expected", _sequence(data.get("expected"), f"{context}.expected")
+        return _legacy_expected_effect_values(data, context)
     _fail(context, "runnable scope must declare expected or effects")
+
+
+def _legacy_expected_effect_values(data: Mapping[str, Any], context: str) -> tuple[str, list[Any]]:
+    return "expected", _sequence(data.get("expected"), f"{context}.expected")
 
 
 def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> ScopeSpec:
     data = _mapping(value, context)
     if scope_name not in _SCOPE_NAMES:
         _fail(context, f"invalid platform scope: {scope_name}")
-    effect_key, expected_values = _scope_effect_values(data, context)
-    if not expected_values:
+    effect_key, effect_values = _scope_effect_values(data, context)
+    if not effect_values:
         _fail(f"{context}.{effect_key}", f"runnable scope must declare at least one {effect_key} file effect")
-    expected = tuple(_expected_path(effect, f"{context}.{effect_key}[{index}]", expected_values=expected_values) for index, effect in enumerate(expected_values))
+    install_surfaces = tuple(_install_surface(effect, f"{context}.{effect_key}[{index}]", effect_values=effect_values) for index, effect in enumerate(effect_values))
     explicit_risk_notes = _string_list(data.get("risk_notes", []), f"{context}.risk_notes")
     for note in explicit_risk_notes:
         if note not in _KNOWN_SCOPE_RISK_NOTES:
             _fail(f"{context}.risk_notes", f"unknown structured risk note: {note}")
-    locality_note, derived_allowed_roots = _scope_locality(scope_name, expected)
+    locality_note, derived_allowed_roots = _scope_locality(scope_name, install_surfaces)
 
     install_command = None
     if "install_command" in data:
@@ -462,7 +466,7 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
     scope = _scenario(
         platform_name,
         scope_name,
-        expected,
+        install_surfaces,
         install_command=install_command,
         uninstall_command=uninstall_command,
         cwd_root=cwd_root,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 import yaml
@@ -62,6 +63,13 @@ def valid_registry_data() -> dict[str, Any]:
             }
         ],
     }
+
+
+def valid_effects_registry_data() -> dict[str, Any]:
+    data = deepcopy(valid_registry_data())
+    for scope in data["platforms"]["mini"]["scopes"].values():
+        scope["effects"] = scope.pop("expected")
+    return data
 
 
 def expect_invalid_registry(data: dict[str, Any], match: str) -> None:

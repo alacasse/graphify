@@ -88,6 +88,24 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
     }
 
 
+def test_normalized_scope_emits_legacy_expected_compatibility_alias() -> None:
+    normalized = normalize_default_registry()
+    codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
+    effects_hook = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
+    expected_hook = next(entry for entry in codex_project["expected"] if entry["relative"] == ".codex/hooks.json")
+
+    assert codex_project["effects"] == codex_project["expected"]
+    assert codex_project["effects"] is not codex_project["expected"]
+    assert effects_hook is not expected_hook
+    assert effects_hook["json_expectation"] is not expected_hook["json_expectation"]
+    assert effects_hook["json_expectation"]["hooks"] is not expected_hook["json_expectation"]["hooks"]
+    assert effects_hook["json_expectation"]["hooks"][0] is not expected_hook["json_expectation"]["hooks"][0]
+    assert (
+        effects_hook["json_expectation"]["hooks"][0]["required_fragments"]
+        is not expected_hook["json_expectation"]["hooks"][0]["required_fragments"]
+    )
+
+
 def test_normalized_registry_does_not_emit_install_target_alias_keys() -> None:
     def walk(value: object) -> None:
         if isinstance(value, dict):

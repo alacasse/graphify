@@ -171,7 +171,7 @@ def _validate_relative(relative: str, context: str) -> None:
 
 
 def _root_names() -> tuple[set[str], set[str]]:
-    expected_roots = DEFAULT_SANDBOX_ROOT_REGISTRY.declared_expected_root_names()
+    expected_roots = DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names()
     all_roots = {root.name for root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots}
     return expected_roots, all_roots
 

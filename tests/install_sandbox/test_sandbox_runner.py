@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import sandbox_runner, status
+from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.runtime import command_runner, source_snapshot
@@ -357,7 +358,7 @@ def test_install_graphify_rejects_wrong_package_provenance_after_probe(monkeypat
     assert "expected_source=" in message
 
 
-def test_runner_status_helpers_are_file_effect_only() -> None:
+def test_runner_status_helpers_use_reporting_status_owner() -> None:
     scenario = Scenario(
         platform="codex",
         scope="project",
@@ -371,8 +372,23 @@ def test_runner_status_helpers_are_file_effect_only() -> None:
 
     assert sandbox_runner.combined_status(True) == sandbox_runner.RISK_GRAPHIFY_VERIFIED
     assert sandbox_runner.combined_status(False) == sandbox_runner.RISK_GRAPHIFY_FAILED
-    assert sandbox_runner.RISK_GRAPHIFY_VERIFIED == status.RISK_GRAPHIFY_VERIFIED == "graphify_install_verified"
-    assert sandbox_runner.RISK_GRAPHIFY_FAILED == status.RISK_GRAPHIFY_FAILED == "graphify_install_failed"
-    assert sandbox_runner.known_status_values() == reports.known_status_values() == status.known_status_values()
+    assert (
+        sandbox_runner.RISK_GRAPHIFY_VERIFIED
+        == reporting_status.RISK_GRAPHIFY_VERIFIED
+        == status.RISK_GRAPHIFY_VERIFIED
+        == "graphify_install_verified"
+    )
+    assert (
+        sandbox_runner.RISK_GRAPHIFY_FAILED
+        == reporting_status.RISK_GRAPHIFY_FAILED
+        == status.RISK_GRAPHIFY_FAILED
+        == "graphify_install_failed"
+    )
+    assert (
+        sandbox_runner.known_status_values()
+        == reports.known_status_values()
+        == reporting_status.known_status_values()
+        == status.known_status_values()
+    )
     assert report["statuses"] == [sandbox_runner.RISK_GRAPHIFY_VERIFIED]
     assert "target_tool_runtime_verified" not in report

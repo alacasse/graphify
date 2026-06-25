@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-
-try:
-    from .targets.install_target_models import PlatformSpec
-except ImportError:
-    from targets.install_target_models import PlatformSpec  # type: ignore[no-redef]
+from typing import Literal, Protocol
 
 
 ReferenceResolutionStatus = Literal[
@@ -18,6 +13,18 @@ ReferenceResolutionStatus = Literal[
     "missing",
     "not_directory",
 ]
+
+
+class ReferenceBundleFact(Protocol):
+    name: str
+
+    def is_eligible(self, package_dir: Path) -> bool: ...
+
+
+class TargetReferenceFacts(Protocol):
+    name: str
+    uses_packaged_references: bool
+    reference_bundles: tuple[ReferenceBundleFact, ...]
 
 
 @dataclass(frozen=True)
@@ -36,33 +43,50 @@ def package_dir_from_main_module(graphify_main: object) -> Path:
     return Path(str(getattr(graphify_main, "__file__"))).parent
 
 
+def resolve_target_packaged_references(
+    target_name: str,
+    *,
+    graphify_main: object,
+    target_reference_facts: TargetReferenceFacts,
+) -> PackagedReferenceResolution:
+    if target_reference_facts.reference_bundles:
+        return _resolve_bundled_references(graphify_main, target_reference_facts)
+    if not target_reference_facts.uses_packaged_references:
+        return PackagedReferenceResolution(
+            "intentionally_absent",
+            detail=f"{target_name} does not use packaged references",
+        )
+
+    refs_dir = graphify_main._packaged_skill_refs_dir(target_name)
+    if refs_dir is None:
+        return PackagedReferenceResolution(
+            "intentionally_absent",
+            detail=f"{target_name} packaged references returned None",
+        )
+    return _classify_refs_dir(Path(refs_dir), detail_prefix=f"{target_name} legacy packaged references")
+
+
 def resolve_packaged_references(
     platform_name: str,
     *,
     graphify_main: object,
-    platform_spec: PlatformSpec,
+    platform_spec: TargetReferenceFacts,
 ) -> PackagedReferenceResolution:
-    if platform_spec.reference_bundles:
-        return _resolve_bundled_references(graphify_main, platform_spec)
-    if not platform_spec.uses_packaged_references:
-        return PackagedReferenceResolution(
-            "intentionally_absent",
-            detail=f"{platform_name} does not use packaged references",
-        )
-
-    refs_dir = graphify_main._packaged_skill_refs_dir(platform_name)
-    if refs_dir is None:
-        return PackagedReferenceResolution(
-            "intentionally_absent",
-            detail=f"{platform_name} packaged references returned None",
-        )
-    return _classify_refs_dir(Path(refs_dir), detail_prefix=f"{platform_name} legacy packaged references")
+    """Compatibility wrapper for callers still using platform vocabulary."""
+    return resolve_target_packaged_references(
+        platform_name,
+        graphify_main=graphify_main,
+        target_reference_facts=platform_spec,
+    )
 
 
-def _resolve_bundled_references(graphify_main: object, platform_spec: PlatformSpec) -> PackagedReferenceResolution:
+def _resolve_bundled_references(
+    graphify_main: object,
+    target_reference_facts: TargetReferenceFacts,
+) -> PackagedReferenceResolution:
     package_dir = package_dir_from_main_module(graphify_main)
     attempted: list[str] = []
-    for bundle in platform_spec.reference_bundles:
+    for bundle in target_reference_facts.reference_bundles:
         if not bundle.is_eligible(package_dir):
             attempted.append(f"{bundle.name}:ineligible")
             continue
@@ -71,10 +95,13 @@ def _resolve_bundled_references(graphify_main: object, platform_spec: PlatformSp
             attempted.append(f"{bundle.name}:missing_bundle_dir")
             continue
         refs_dir = bundle_dir / "references"
-        return _classify_refs_dir(refs_dir, detail_prefix=f"{platform_spec.name} bundle {bundle.name}")
+        return _classify_refs_dir(refs_dir, detail_prefix=f"{target_reference_facts.name} bundle {bundle.name}")
     return PackagedReferenceResolution(
         "no_eligible_bundle",
-        detail=f"no eligible reference bundle for {platform_spec.name}; attempted={', '.join(attempted) or 'none'}",
+        detail=(
+            f"no eligible reference bundle for {target_reference_facts.name}; "
+            f"attempted={', '.join(attempted) or 'none'}"
+        ),
     )
 
 

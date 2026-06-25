@@ -4,6 +4,12 @@ from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,
     valid_registry_data as _valid_data,
 )
+from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+
+
+def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
+    assert DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names() == {"home", "project", "user_cwd"}
+    assert DEFAULT_SANDBOX_ROOT_REGISTRY.declared_expected_root_names() == DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names()
 
 
 def test_loader_rejects_unknown_expected_root() -> None:

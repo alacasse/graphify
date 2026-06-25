@@ -28,7 +28,7 @@ try:
     from .reporting import reports
     from .runtime import command_runner
     from .runtime import source_snapshot
-    from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
+    from .reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .targets.install_target_defaults import default_install_target_catalog
     from .targets.install_target_models import (
         GRAPHIFY_MARKER,
@@ -49,7 +49,7 @@ except ImportError:
     from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import command_runner  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import source_snapshot  # type: ignore[no-redef]
-    from tools.install_sandbox.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
     from tools.install_sandbox.targets.install_target_defaults import default_install_target_catalog  # type: ignore[no-redef]
     from tools.install_sandbox.targets.install_target_models import (
         GRAPHIFY_MARKER,
@@ -111,10 +111,10 @@ def expected_graphify_version() -> str:
 def packaged_reference_resolution(platform_name: str) -> reference_resolution.PackagedReferenceResolution:
     graphify_main = graphify_main_module()
     spec = SCENARIO_REGISTRY.platform_spec(platform_name)
-    return reference_resolution.resolve_packaged_references(
+    return reference_resolution.resolve_target_packaged_references(
         platform_name,
         graphify_main=graphify_main,
-        platform_spec=spec,
+        target_reference_facts=spec,
     )
 
 
@@ -399,8 +399,8 @@ def scenario_lifecycle_hooks(
 
 
 def preflight() -> dict[str, object]:
-    SCENARIO_REGISTRY.validate_roots(ROOT_REGISTRY.declared_expected_root_names())
-    validation_plan.DEFAULT_HARNESS_POLICY.validate_roots(ROOT_REGISTRY.declared_expected_root_names())
+    SCENARIO_REGISTRY.validate_roots(ROOT_REGISTRY.install_surface_root_names())
+    validation_plan.DEFAULT_HARNESS_POLICY.validate_roots(ROOT_REGISTRY.install_surface_root_names())
     for root in ROOT_REGISTRY.roots:
         path = RUNTIME_ROOTS[root.name]
         if root.reset or root.mount_mode == "rw" or root.name == "xdg_config_home":

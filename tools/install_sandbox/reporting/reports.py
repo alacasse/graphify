@@ -7,7 +7,7 @@ from typing import Iterable
 
 try:
     from tools.install_sandbox.json_helpers import object_dict, object_dicts, object_list
-    from tools.install_sandbox.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
+    from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 except ImportError:
     from json_helpers import object_dict, object_dicts, object_list
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values

@@ -383,7 +383,7 @@ def build_validation_plan(
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
     root_registry: SandboxRootRegistry = DEFAULT_SANDBOX_ROOT_REGISTRY,
 ) -> ValidationPlan:
-    declared_roots = root_registry.declared_expected_root_names()
+    declared_roots = root_registry.install_surface_root_names()
     if hasattr(registry, "validate_roots"):
         registry.validate_roots(declared_roots)
     policy.validate_roots(declared_roots)

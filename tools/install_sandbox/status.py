@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+"""Compatibility facade for reporting-owned status vocabulary."""
 
-RISK_GRAPHIFY_VERIFIED = "graphify_install_verified"
-RISK_GRAPHIFY_FAILED = "graphify_install_failed"
+try:
+    from .reporting.status import (
+        RISK_GRAPHIFY_FAILED,
+        RISK_GRAPHIFY_VERIFIED,
+        combined_status,
+        known_status_values,
+    )
+except ImportError:  # pragma: no cover - direct script import fallback
+    from reporting.status import (  # type: ignore[no-redef]
+        RISK_GRAPHIFY_FAILED,
+        RISK_GRAPHIFY_VERIFIED,
+        combined_status,
+        known_status_values,
+    )
 
-
-def known_status_values() -> list[str]:
-    return [RISK_GRAPHIFY_VERIFIED, RISK_GRAPHIFY_FAILED]
-
-
-def combined_status(graphify_passed: bool) -> str:
-    return RISK_GRAPHIFY_VERIFIED if graphify_passed else RISK_GRAPHIFY_FAILED
+__all__ = [
+    "RISK_GRAPHIFY_FAILED",
+    "RISK_GRAPHIFY_VERIFIED",
+    "combined_status",
+    "known_status_values",
+]

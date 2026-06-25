@@ -53,8 +53,12 @@ class SandboxRootRegistry:
     def preflight_roots(self) -> tuple[SandboxRootSpec, ...]:
         return tuple(root for root in self.roots if root.preflight_required)
 
-    def declared_expected_root_names(self) -> set[str]:
+    def install_surface_root_names(self) -> set[str]:
         return {"home", "project", "user_cwd"}
+
+    def declared_expected_root_names(self) -> set[str]:
+        """Compatibility name for install-surface roots."""
+        return self.install_surface_root_names()
 
 
 DEFAULT_SANDBOX_ROOT_REGISTRY = SandboxRootRegistry(

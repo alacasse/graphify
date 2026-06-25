@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.install_sandbox.reference_resolution import resolve_packaged_references
+from tools.install_sandbox.reference_resolution import resolve_packaged_references, resolve_target_packaged_references
 from tools.install_sandbox.targets.install_target_models import PlatformSpec, ReferenceBundle
 
 
@@ -24,7 +24,7 @@ def bundled_spec(*bundles: ReferenceBundle) -> PlatformSpec:
     )
 
 
-def test_reference_bundle_eligibility_comes_from_platform_spec_policy(tmp_path: Path) -> None:
+def test_reference_bundle_eligibility_comes_from_target_reference_facts(tmp_path: Path) -> None:
     package_dir = tmp_path / "graphify"
     guarded_refs = package_dir / "skills" / "guarded" / "references"
     fallback_refs = package_dir / "skills" / "fallback" / "references"
@@ -33,10 +33,10 @@ def test_reference_bundle_eligibility_comes_from_platform_spec_policy(tmp_path: 
     (guarded_refs / "guarded.md").write_text("guarded\n", encoding="utf-8")
     (fallback_refs / "fallback.md").write_text("fallback\n", encoding="utf-8")
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir),
-        platform_spec=bundled_spec(
+        target_reference_facts=bundled_spec(
             ReferenceBundle("guarded", required_package_relative="skill-guarded.md"),
             ReferenceBundle("fallback"),
         ),
@@ -57,10 +57,10 @@ def test_non_vscode_guarded_wins_when_guard_present(tmp_path: Path) -> None:
     (guarded_refs / "guarded.md").write_text("guarded\n", encoding="utf-8")
     (fallback_refs / "fallback.md").write_text("fallback\n", encoding="utf-8")
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir),
-        platform_spec=bundled_spec(
+        target_reference_facts=bundled_spec(
             ReferenceBundle("guarded", required_package_relative="skill-guarded.md"),
             ReferenceBundle("fallback"),
         ),
@@ -80,10 +80,14 @@ def test_reference_bundles_take_precedence_over_uses_packaged_references(tmp_pat
     (bundle_refs / "bundle.md").write_text("bundle\n", encoding="utf-8")
     (legacy_refs / "legacy.md").write_text("legacy\n", encoding="utf-8")
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir, legacy_refs),
-        platform_spec=PlatformSpec(name="unit", uses_packaged_references=True, reference_bundles=(ReferenceBundle("bundle"),)),
+        target_reference_facts=PlatformSpec(
+            name="unit",
+            uses_packaged_references=True,
+            reference_bundles=(ReferenceBundle("bundle"),),
+        ),
     )
 
     assert resolution.status == "available"
@@ -97,10 +101,10 @@ def test_selected_bundle_with_no_markdown_refs_returns_empty(tmp_path: Path) -> 
     refs_dir.mkdir(parents=True)
     (refs_dir / "notes.txt").write_text("ignored\n", encoding="utf-8")
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir),
-        platform_spec=bundled_spec(ReferenceBundle("guarded")),
+        target_reference_facts=bundled_spec(ReferenceBundle("guarded")),
     )
 
     assert resolution.status == "empty"
@@ -113,10 +117,10 @@ def test_no_eligible_guarded_bundle_returns_no_eligible_bundle(tmp_path: Path) -
     package_dir = tmp_path / "graphify"
     package_dir.mkdir()
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir),
-        platform_spec=bundled_spec(ReferenceBundle("guarded", required_package_relative="skill-guarded.md")),
+        target_reference_facts=bundled_spec(ReferenceBundle("guarded", required_package_relative="skill-guarded.md")),
     )
 
     assert resolution.status == "no_eligible_bundle"
@@ -132,10 +136,10 @@ def test_legacy_packaged_skill_refs_dir_path_returns_available_names(tmp_path: P
     (refs_dir / "b.md").write_text("b\n", encoding="utf-8")
     (refs_dir / "a.md").write_text("a\n", encoding="utf-8")
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir, refs_dir),
-        platform_spec=PlatformSpec(name="unit", uses_packaged_references=True),
+        target_reference_facts=PlatformSpec(name="unit", uses_packaged_references=True),
     )
 
     assert resolution.status == "available"
@@ -146,10 +150,10 @@ def test_legacy_packaged_skill_refs_dir_path_returns_available_names(tmp_path: P
 def test_legacy_packaged_skill_refs_dir_none_returns_intentionally_absent(tmp_path: Path) -> None:
     package_dir = tmp_path / "graphify"
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir, None),
-        platform_spec=PlatformSpec(name="unit", uses_packaged_references=True),
+        target_reference_facts=PlatformSpec(name="unit", uses_packaged_references=True),
     )
 
     assert resolution.status == "intentionally_absent"
@@ -164,10 +168,10 @@ def test_refs_path_as_file_returns_not_directory(tmp_path: Path) -> None:
     refs_path.parent.mkdir(parents=True)
     refs_path.write_text("not a dir\n", encoding="utf-8")
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir),
-        platform_spec=bundled_spec(ReferenceBundle("guarded")),
+        target_reference_facts=bundled_spec(ReferenceBundle("guarded")),
     )
 
     assert resolution.status == "not_directory"
@@ -181,13 +185,29 @@ def test_eligible_bundle_dir_with_missing_references_child_returns_missing(tmp_p
     bundle_dir = package_dir / "skills" / "guarded"
     bundle_dir.mkdir(parents=True)
 
-    resolution = resolve_packaged_references(
+    resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir),
-        platform_spec=bundled_spec(ReferenceBundle("guarded")),
+        target_reference_facts=bundled_spec(ReferenceBundle("guarded")),
     )
 
     assert resolution.status == "missing"
     assert resolution.refs_dir == bundle_dir / "references"
     assert resolution.expected_names == ()
     assert resolution.expects_references is True
+
+
+def test_legacy_platform_named_resolver_delegates_to_target_facts(tmp_path: Path) -> None:
+    package_dir = tmp_path / "graphify"
+    refs_dir = tmp_path / "refs"
+    refs_dir.mkdir()
+    (refs_dir / "legacy.md").write_text("legacy\n", encoding="utf-8")
+
+    resolution = resolve_packaged_references(
+        "unit",
+        graphify_main=GraphifyMain(package_dir, refs_dir),
+        platform_spec=PlatformSpec(name="unit", uses_packaged_references=True),
+    )
+
+    assert resolution.status == "available"
+    assert resolution.expected_names == ("legacy.md",)

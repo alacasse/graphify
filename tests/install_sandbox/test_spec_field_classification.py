@@ -5,9 +5,9 @@ from typing import Any
 
 import yaml
 
-from tools.install_sandbox import spec_loader
-from tools.install_sandbox.spec_loader import load_registry_from_data, load_registry_from_dir
-from tools.install_sandbox.spec_normalize import normalize_registry
+from tools.install_sandbox.registry import spec_loader
+from tools.install_sandbox.registry.spec_loader import load_registry_from_data, load_registry_from_dir
+from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data, write_registry_dir
 

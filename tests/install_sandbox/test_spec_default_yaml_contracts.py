@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tools.install_sandbox import spec_loader
+from tools.install_sandbox.registry import spec_loader
 
 
 def _default_product_spec_paths() -> list[Path]:

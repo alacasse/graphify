@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tools.install_sandbox import platform_specs
-from tools.install_sandbox.spec_loader import load_registry_from_data
+from tools.install_sandbox.registry.spec_loader import load_registry_from_data
 
 from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,

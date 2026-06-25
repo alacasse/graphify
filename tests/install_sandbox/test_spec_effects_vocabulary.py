@@ -7,8 +7,8 @@ from tests.install_sandbox.install_target_test_support import (
     valid_effects_registry_data as _valid_effects_data,
     valid_registry_data as _valid_data,
 )
-from tools.install_sandbox.spec_loader import load_registry_from_data
-from tools.install_sandbox.spec_normalize import normalize_registry
+from tools.install_sandbox.registry.spec_loader import load_registry_from_data
+from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
 
 def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:

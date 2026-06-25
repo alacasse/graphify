@@ -3,13 +3,13 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from tools.install_sandbox import spec_loader
 from tools.install_sandbox.registry import spec_loader as registry_spec_loader
+from tools.install_sandbox import spec_loader as root_spec_loader
+from tools.install_sandbox.registry.spec_loader import load_default_registry, load_registry_from_data
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.targets import install_target_catalog
 from tools.install_sandbox.targets import install_target_models
 from tools.install_sandbox.targets import install_target_scenarios
-from tools.install_sandbox.spec_loader import load_default_registry, load_registry_from_data
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
 
@@ -76,12 +76,12 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
     assert registry.disposable_artifact_specs == ()
 
 
-def test_spec_loader_uses_catalog_import_surface() -> None:
-    assert spec_loader.load_registry_from_data is registry_spec_loader.load_registry_from_data
-    assert spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
-    assert spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
-    assert "_scenario" not in spec_loader.__all__
-    assert not hasattr(spec_loader, "_scenario")
+def test_root_spec_loader_reexports_supported_registry_entrypoints() -> None:
+    assert root_spec_loader.SpecLoaderError is registry_spec_loader.SpecLoaderError
+    assert root_spec_loader.load_default_registry is registry_spec_loader.load_default_registry
+    assert root_spec_loader.load_registry_from_data is registry_spec_loader.load_registry_from_data
+    assert root_spec_loader.load_registry_from_dir is registry_spec_loader.load_registry_from_dir
+    assert root_spec_loader.load_registry_from_yaml is registry_spec_loader.load_registry_from_yaml
 
 
 def test_registry_spec_loader_is_owner_import_surface() -> None:

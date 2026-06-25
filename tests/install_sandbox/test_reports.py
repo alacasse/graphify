@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from tools.install_sandbox import reports, status
+from tools.install_sandbox import status
+from tools.install_sandbox.reporting import reports
 
 
 def test_known_status_values_are_serializable_file_effect_statuses() -> None:

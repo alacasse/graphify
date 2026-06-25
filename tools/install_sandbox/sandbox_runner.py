@@ -15,10 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from . import agent_summary
     from . import command_runner
     from . import reference_resolution
-    from . import reports
     from .lifecycle import scenario_lifecycle_plan
     from .lifecycle import scenario_lifecycle_support
     from . import source_snapshot
@@ -28,6 +26,8 @@ try:
     from .effects import file_effect_state
     from .effects import scenario_file_effects_adapter
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+    from .reporting import agent_summary
+    from .reporting import reports
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
@@ -35,10 +35,8 @@ try:
         Scenario,
     )
 except ImportError:
-    import agent_summary
     import command_runner
     import reference_resolution
-    import reports
     from lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
     from lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
     import source_snapshot
@@ -48,6 +46,8 @@ except ImportError:
     from effects import file_effect_state  # type: ignore[no-redef]
     from effects import scenario_file_effects_adapter  # type: ignore[no-redef]
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+    from reporting import agent_summary  # type: ignore[no-redef]
+    from reporting import reports  # type: ignore[no-redef]
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,

@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tools.install_sandbox import agent_summary
+from tools.install_sandbox import agent_summary as root_agent_summary
+from tools.install_sandbox.reporting import agent_summary
+
+
+def test_root_agent_summary_wrapper_preserves_module_entrypoint_compatibility() -> None:
+    assert root_agent_summary.main is agent_summary.main
+    assert root_agent_summary.summarize_output is agent_summary.summarize_output
 
 
 def write_json(path: Path, data: object) -> None:

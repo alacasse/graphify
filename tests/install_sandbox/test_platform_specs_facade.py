@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from tools.install_sandbox import expected_effects, platform_specs
 from tools.install_sandbox.surfaces import install_surface_models
-from tools.install_sandbox.targets import install_target_catalog, install_target_models, install_target_scenarios
+from tools.install_sandbox.targets import install_target_catalog, install_target_models
 
 from install_target_test_support import REGISTRY
 
@@ -19,6 +19,15 @@ def test_install_target_catalog_keeps_legacy_import_surface() -> None:
     expected_names = {
         "ScenarioRegistry",
         "InstallTargetCatalog",
+    }
+
+    for name in expected_names:
+        assert hasattr(install_target_catalog, name), name
+    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
+
+
+def test_platform_specs_facade_does_not_export_private_install_target_helpers() -> None:
+    private_helper_names = {
         "_dedupe_notes",
         "_generic_install_command",
         "_generic_uninstall_command",
@@ -28,12 +37,8 @@ def test_install_target_catalog_keeps_legacy_import_surface() -> None:
         "_scenario",
     }
 
-    for name in expected_names:
-        assert hasattr(install_target_catalog, name), name
-        assert getattr(platform_specs, name) is getattr(install_target_catalog, name)
-        if name.startswith("_"):
-            assert getattr(install_target_catalog, name) is getattr(install_target_scenarios, name)
-    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
+    for name in private_helper_names:
+        assert not hasattr(platform_specs, name), name
 
 
 def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None:

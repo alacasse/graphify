@@ -15,7 +15,7 @@ else:
 
 try:
     from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario
+    from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
     from ..targets.install_target_models import (
         GRAPHIFY_MARKER,
         MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
@@ -33,6 +33,7 @@ try:
         TargetRuntimeValidationSpec,
         UniversalUninstallScenarioSpec,
     )
+    from ..targets.install_target_scenarios import _scenario
     from ..surfaces.install_surface_models import (
         FileEffect,
         InstallSurface,
@@ -47,7 +48,7 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
-    from targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry, _scenario  # type: ignore[no-redef]
+    from targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry  # type: ignore[no-redef]
     from targets.install_target_models import (  # type: ignore[no-redef]
         GRAPHIFY_MARKER,
         MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
@@ -65,6 +66,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         TargetRuntimeValidationSpec,
         UniversalUninstallScenarioSpec,
     )
+    from targets.install_target_scenarios import _scenario  # type: ignore[no-redef]
     from surfaces.install_surface_models import (  # type: ignore[no-redef]
         FileEffect,
         InstallSurface,

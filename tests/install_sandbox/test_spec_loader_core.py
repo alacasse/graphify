@@ -8,6 +8,7 @@ from tools.install_sandbox.registry import spec_loader as registry_spec_loader
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.targets import install_target_catalog
 from tools.install_sandbox.targets import install_target_models
+from tools.install_sandbox.targets import install_target_scenarios
 from tools.install_sandbox.spec_loader import load_default_registry, load_registry_from_data
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
@@ -79,13 +80,14 @@ def test_spec_loader_uses_catalog_import_surface() -> None:
     assert spec_loader.load_registry_from_data is registry_spec_loader.load_registry_from_data
     assert spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
-    assert spec_loader._scenario is install_target_catalog._scenario
+    assert "_scenario" not in spec_loader.__all__
+    assert not hasattr(spec_loader, "_scenario")
 
 
 def test_registry_spec_loader_is_owner_import_surface() -> None:
     assert registry_spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert registry_spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
-    assert registry_spec_loader._scenario is install_target_catalog._scenario
+    assert registry_spec_loader._scenario is install_target_scenarios._scenario
 
 
 def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:

@@ -69,7 +69,19 @@ def test_root_topology_closeout_keeps_batch_compatibility_facades_importable() -
     assert (INSTALL_SANDBOX_ROOT / "status.py").exists()
     assert root_agent_summary.summarize_output is owner_agent_summary.summarize_output
     assert root_spec_loader.load_default_registry is owner_spec_loader.load_default_registry
+    assert set(root_spec_loader.__all__) == {
+        "DEFAULT_REGISTRY_PATH",
+        "SCHEMA_VERSION",
+        "InstallTargetCatalog",
+        "ScenarioRegistry",
+        "SpecLoaderError",
+        "load_default_registry",
+        "load_registry_from_data",
+        "load_registry_from_dir",
+        "load_registry_from_yaml",
+    }
     assert root_spec_normalize.normalize_registry is owner_spec_normalize.normalize_registry
+    assert root_spec_normalize.__all__ == ["normalize_registry"]
     assert root_install_surface_core.InstallSurfaceStatus is owner_install_surface_statuses.InstallSurfaceStatus
     assert root_expected_effects.InstallSurface is owner_install_surface_models.InstallSurface
     assert root_platform_specs.InstallTargetCatalog is owner_install_target_catalog.InstallTargetCatalog

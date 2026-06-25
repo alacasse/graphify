@@ -41,13 +41,6 @@ try:
     from .targets.install_target_catalog import (
         InstallTargetCatalog,
         ScenarioRegistry,
-        _declared_install_variants,
-        _dedupe_notes,
-        _direct_project_install,
-        _generic_install_command,
-        _generic_uninstall_command,
-        _scenario,
-        _skill,
     )
     from .targets import install_target_defaults as _install_target_defaults
     from .targets.install_target_defaults import (
@@ -116,13 +109,6 @@ except ImportError:  # pragma: no cover - direct script import fallback
     from targets.install_target_catalog import (  # type: ignore[no-redef]
         InstallTargetCatalog,
         ScenarioRegistry,
-        _declared_install_variants,
-        _dedupe_notes,
-        _direct_project_install,
-        _generic_install_command,
-        _generic_uninstall_command,
-        _scenario,
-        _skill,
     )
     from targets import install_target_defaults as _install_target_defaults  # type: ignore[no-redef]
     from targets.install_target_defaults import (  # type: ignore[no-redef]

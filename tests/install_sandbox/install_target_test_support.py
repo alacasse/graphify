@@ -5,12 +5,14 @@ from typing import Any
 
 import yaml
 
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
+from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
+from tools.install_sandbox.targets.install_target_defaults import ALL_PLATFORMS, DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets.install_target_models import PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, Scenario
 
 
-REGISTRY = platform_specs.DEFAULT_SCENARIO_REGISTRY
+REGISTRY = DEFAULT_SCENARIO_REGISTRY
 
 
 def normalize_default_registry() -> dict[str, object]:
@@ -32,7 +34,7 @@ def valid_registry_data() -> dict[str, Any]:
                     "user": {
                         "expected": [skill_effect_data()],
                         "uninstall_command": None,
-                        "risk_notes": [platform_specs.PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE],
+                        "risk_notes": [PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE],
                     },
                     "project": {
                         "expected": [
@@ -84,20 +86,20 @@ def write_registry_dir(path: Any, data: dict[str, Any]) -> None:
         (path / f"{platform_name}.yaml").write_text(yaml.safe_dump(platform_data, sort_keys=False), encoding="utf-8")
 
 
-def scenario_for(platform_name: str, scope: str) -> platform_specs.Scenario:
+def scenario_for(platform_name: str, scope: str) -> Scenario:
     scenario = REGISTRY.make_scenario(platform_name, scope)
     assert scenario is not None
     return scenario
 
 
-def expected_entry(platform_name: str, scope: str, root: str, relative: str) -> platform_specs.ExpectedPath:
+def expected_entry(platform_name: str, scope: str, root: str, relative: str) -> ExpectedPath:
     scenario = scenario_for(platform_name, scope)
     return next(entry for entry in scenario.expected if entry.root == root and entry.relative == relative)
 
 
-def scenario_entries() -> list[tuple[str, str, platform_specs.Scenario, platform_specs.ExpectedPath]]:
-    entries: list[tuple[str, str, platform_specs.Scenario, platform_specs.ExpectedPath]] = []
-    for platform_name in platform_specs.ALL_PLATFORMS:
+def scenario_entries() -> list[tuple[str, str, Scenario, ExpectedPath]]:
+    entries: list[tuple[str, str, Scenario, ExpectedPath]] = []
+    for platform_name in ALL_PLATFORMS:
         for scope in ("user", "project"):
             scenario = REGISTRY.make_scenario(platform_name, scope)
             if scenario is None:
@@ -106,5 +108,5 @@ def scenario_entries() -> list[tuple[str, str, platform_specs.Scenario, platform
     return entries
 
 
-def entry_id(platform_name: str, scope: str, entry: platform_specs.ExpectedPath) -> tuple[str, str, str, str]:
+def entry_id(platform_name: str, scope: str, entry: ExpectedPath) -> tuple[str, str, str, str]:
     return platform_name, scope, entry.root, entry.relative

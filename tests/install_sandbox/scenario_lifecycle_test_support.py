@@ -7,11 +7,11 @@ from typing import cast
 
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_support
-from tools.install_sandbox.platform_specs import (
-    DEFAULT_SCENARIO_REGISTRY,
+from tools.install_sandbox.surfaces.install_surface_models import InstallSurface
+from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
-    InstallSurface,
     Scenario,
     SelectedUniversalUninstallScenario,
     UniversalUninstallScenarioSpec,

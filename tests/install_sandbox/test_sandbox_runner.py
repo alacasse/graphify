@@ -15,6 +15,7 @@ from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.runtime import command_runner, source_snapshot
+from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
 from tools.install_sandbox.targets.install_target_models import Scenario
 
@@ -58,14 +59,10 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
     assert "file_effects" not in module_imports
     assert "scenario_lifecycle" not in module_imports
     assert "platform_specs" not in module_imports
-    assert {
-        "file_effect_generated_artifacts",
-        "file_effect_oracle",
-        "file_effect_state",
-        "scenario_file_effects_adapter",
-        "scenario_lifecycle_plan",
-        "scenario_lifecycle_support",
-    } <= module_imports
+    assert "SandboxRunEnvironment" in module_imports
+    assert "file_effect_oracle" not in module_imports
+    assert "scenario_file_effects_adapter" not in module_imports
+    assert {"file_effect_state", "scenario_lifecycle_plan", "scenario_lifecycle_support"} <= module_imports
 
 
 def test_sandbox_runner_direct_script_help_works() -> None:
@@ -83,15 +80,16 @@ def test_sandbox_runner_direct_script_help_works() -> None:
 
 
 def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_path) -> None:
+    run_environment = SandboxRunEnvironment()
     home = tmp_path / "home"
     xdg = home / ".config"
     project = tmp_path / "project"
-    monkeypatch.setattr(sandbox_runner, "HOME", home)
-    monkeypatch.setattr(sandbox_runner, "XDG_CONFIG_HOME", xdg)
-    monkeypatch.setattr(sandbox_runner, "PROJECT", project)
+    monkeypatch.setitem(run_environment.runtime_roots, "home", home)
+    monkeypatch.setitem(run_environment.runtime_roots, "xdg_config_home", xdg)
+    monkeypatch.setitem(run_environment.runtime_roots, "project", project)
     monkeypatch.setenv("PATH", "/usr/bin")
 
-    env = sandbox_runner.sandbox_env()
+    env = run_environment.sandbox_env()
 
     assert env["HOME"] == str(home)
     assert env["XDG_CONFIG_HOME"] == str(xdg)
@@ -113,16 +111,32 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         expected=(ExpectedPath("project", "AGENTS.md"),),
     )
 
-    monkeypatch.setattr(sandbox_runner, "OUTPUT", output)
-    monkeypatch.setattr(sandbox_runner, "sandbox_env", lambda: calls.append("env") or {"HOME": "/tmp/graphify-home"})
-    def preflight() -> dict[str, object]:
-        calls.append("preflight")
-        output.mkdir(parents=True, exist_ok=True)
-        return {"project": "/tmp/graphify-project"}
+    class RunEnvironmentDouble:
+        harness_version = "2099-12-31.test"
 
-    monkeypatch.setattr(sandbox_runner, "preflight", preflight)
-    monkeypatch.setattr(source_snapshot, "copy_source_tree", lambda copy_source="always", *, config: calls.append(f"copy:{copy_source}") or {"root": "/tmp/graphify-src", "copy_source_mode": copy_source})
-    monkeypatch.setattr(sandbox_runner, "install_graphify", lambda env: calls.append("install-package") or {"version": "test", "install_mode": "normal"})
+        def __init__(self) -> None:
+            self.output = output
+            self.scenario_registry = Registry()
+
+        def sandbox_env(self):
+            calls.append("env")
+            return {"HOME": "/tmp/graphify-home"}
+
+        def preflight(self):
+            calls.append("preflight")
+            output.mkdir(parents=True, exist_ok=True)
+            return {"project": "/tmp/graphify-project"}
+
+        def copy_source_tree(self, copy_source):
+            calls.append(f"copy:{copy_source}")
+            return {"root": "/tmp/graphify-src", "copy_source_mode": copy_source}
+
+        def install_graphify(self, env):
+            calls.append("install-package")
+            return {"version": "test", "install_mode": "normal"}
+
+        def scenario_lifecycle_hooks(self):
+            return object()
 
     class Registry:
         specs = {"codex": object()}
@@ -130,11 +144,12 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         def platform_scenarios(self, platform_name: str, scope: str):
             return [scenario]
 
-    monkeypatch.setattr(sandbox_runner, "SCENARIO_REGISTRY", Registry())
+    run_environment = RunEnvironmentDouble()
+    monkeypatch.setattr(sandbox_runner, "RUN_ENVIRONMENT", run_environment)
     plan = SimpleNamespace(requested_scope="project")
 
     def build_plan(registry, *, all_platforms, platform_name=None, scope="both", **kwargs):
-        assert registry is sandbox_runner.SCENARIO_REGISTRY
+        assert registry is run_environment.scenario_registry
         calls.append(f"plan:{platform_name}:{scope}:{all_platforms}")
         return plan
 
@@ -206,6 +221,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     assert (output / "report.md").read_text(encoding="utf-8") == "report\n"
     assert (output / "agent-summary.md").exists()
     assert json.loads((output / "agent-summary.json").read_text(encoding="utf-8"))["status"] == "FAIL"
+    assert manifest["harness_version"] == run_environment.harness_version
     assert manifest["target_runtime_verification"] == {
         "performed": False,
         "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
@@ -232,21 +248,6 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
         expected=(ExpectedPath("project", "AGENTS.md"),),
     )
 
-    monkeypatch.setattr(sandbox_runner, "OUTPUT", output)
-    monkeypatch.setattr(sandbox_runner, "sandbox_env", lambda: {"HOME": "/tmp/graphify-home"})
-
-    def preflight() -> dict[str, object]:
-        output.mkdir(parents=True, exist_ok=True)
-        return {"project": "/tmp/graphify-project"}
-
-    monkeypatch.setattr(sandbox_runner, "preflight", preflight)
-    monkeypatch.setattr(
-        source_snapshot,
-        "copy_source_tree",
-        lambda copy_source="always", *, config: {"root": "/tmp/graphify-src", "copy_source_mode": copy_source},
-    )
-    monkeypatch.setattr(sandbox_runner, "install_graphify", lambda env: {"version": "test", "install_mode": "normal"})
-
     class Plan:
         platforms = ("codex",)
         requested_scope = "project"
@@ -271,6 +272,30 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
         target_runtime_verification = {"performed": False}
 
     plan = Plan()
+    class RunEnvironmentDouble:
+        harness_version = "2026-06-01.1"
+        scenario_registry = object()
+
+        def __init__(self) -> None:
+            self.output = output
+
+        def sandbox_env(self):
+            return {"HOME": "/tmp/graphify-home"}
+
+        def preflight(self):
+            output.mkdir(parents=True, exist_ok=True)
+            return {"project": "/tmp/graphify-project"}
+
+        def copy_source_tree(self, copy_source):
+            return {"root": "/tmp/graphify-src", "copy_source_mode": copy_source}
+
+        def install_graphify(self, env):
+            return {"version": "test", "install_mode": "normal"}
+
+        def scenario_lifecycle_hooks(self):
+            return object()
+
+    monkeypatch.setattr(sandbox_runner, "RUN_ENVIRONMENT", RunEnvironmentDouble())
     monkeypatch.setattr(sandbox_runner.validation_plan, "build_validation_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr(
         scenario_lifecycle_plan,
@@ -311,8 +336,8 @@ def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp
     output = tmp_path / "out"
     source = tmp_path / "graphify-src"
     calls: list[str] = []
-    monkeypatch.setattr(sandbox_runner, "OUTPUT", output)
-    monkeypatch.setattr(sandbox_runner, "SRC", source)
+    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "output", output)
+    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "src", source)
     monkeypatch.setattr(source_snapshot, "read_installed_package_metadata", lambda package_name, source_path, *, home=None: {"installed_from_copied_source": True})
 
     def run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
@@ -332,8 +357,8 @@ def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp
 def test_install_graphify_rejects_wrong_package_provenance_after_probe(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
     source = tmp_path / "graphify-src"
-    monkeypatch.setattr(sandbox_runner, "OUTPUT", output)
-    monkeypatch.setattr(sandbox_runner, "SRC", source)
+    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "output", output)
+    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "src", source)
     monkeypatch.setattr(
         source_snapshot,
         "read_installed_package_metadata",

@@ -25,6 +25,7 @@ try:
     from .effects import scenario_file_effects_adapter
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from .reporting import agent_summary
+    from .reporting import manifest_projection
     from .reporting import reports
     from .runtime import command_runner
     from .runtime import source_snapshot
@@ -46,6 +47,7 @@ except ImportError:
     from tools.install_sandbox.lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
     from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import agent_summary  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting import manifest_projection  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import command_runner  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import source_snapshot  # type: ignore[no-redef]
@@ -443,9 +445,7 @@ def main(argv: list[str] | None = None) -> int:
     passed = sum(1 for result in results if result["passed"])
     failed = len(results) - passed
 
-    coverage = list(plan.coverage_records)
-    platform_coverage_summary = dict(plan.platform_coverage_summary)
-    platform_coverage_summary["universal_scenario_count"] = max(0, len(results) - len(plan.standard_scenarios))
+    projected_plan = manifest_projection.validation_plan_manifest_projection(plan, results)
     manifest = {
         "harness_version": HARNESS_VERSION,
         "python_version": sys.version,
@@ -455,11 +455,7 @@ def main(argv: list[str] | None = None) -> int:
         "package_install": package_data,
         "source_snapshot": src_data,
         "preflight": preflight_data,
-        "target_runtime_verification": plan.target_runtime_verification,
-        "target_runtime_validation_sections": list(plan.target_runtime_validation_sections),
-        "platform_coverage": coverage,
-        "platform_coverage_summary": platform_coverage_summary,
-        "scenario_count": len(results),
+        **projected_plan,
         "graphify_file_effect_pass_count": passed,
         "graphify_file_effect_fail_count": failed,
         "pass_count": passed,

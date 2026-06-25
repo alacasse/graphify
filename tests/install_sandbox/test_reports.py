@@ -5,6 +5,7 @@ import json
 import pytest
 
 from tools.install_sandbox import status
+from tools.install_sandbox.reporting import manifest_projection
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.reporting import status as reporting_status
 
@@ -236,6 +237,60 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
     assert "must-not-render" not in markdown
     assert "Must Not Render" not in markdown
     assert "legacy alias" not in markdown
+
+
+def test_validation_plan_manifest_projection_returns_manifest_primitives() -> None:
+    class Plan:
+        standard_scenarios = ("codex-project",)
+        coverage_records = (
+            {
+                "platform": "codex",
+                "scope": "project",
+                "status": "runnable",
+                "install_command": ["graphify", "install", "--platform", "codex"],
+            },
+        )
+        target_runtime_validation_sections = ({"section_title": "Projected Runtime", "status": "declared"},)
+        platform_coverage_summary = {
+            "registered_platform_count": 1,
+            "requested_scope": "project",
+            "runnable_scope_count": 1,
+            "universal_scenario_count": 0,
+            "unsupported_scope_count": 0,
+        }
+        target_runtime_verification = {"performed": False, "reason": "file effects only"}
+
+        platform_coverage = ({"platform": "legacy-alias", "status": "must-not-project"},)
+        runtime_limitation_sections = ({"section_title": "Legacy Alias", "status": "must-not-project"},)
+
+    projected = manifest_projection.validation_plan_manifest_projection(
+        Plan(),
+        [
+            {"id": "codex-project", "passed": True},
+            {"id": "universal-cleanup", "passed": True},
+        ],
+    )
+
+    assert projected == {
+        "target_runtime_verification": {"performed": False, "reason": "file effects only"},
+        "target_runtime_validation_sections": [{"section_title": "Projected Runtime", "status": "declared"}],
+        "platform_coverage": [
+            {
+                "platform": "codex",
+                "scope": "project",
+                "status": "runnable",
+                "install_command": ["graphify", "install", "--platform", "codex"],
+            }
+        ],
+        "platform_coverage_summary": {
+            "registered_platform_count": 1,
+            "requested_scope": "project",
+            "runnable_scope_count": 1,
+            "universal_scenario_count": 1,
+            "unsupported_scope_count": 0,
+        },
+        "scenario_count": 2,
+    }
 
 
 def test_write_report_markdown(tmp_path) -> None:

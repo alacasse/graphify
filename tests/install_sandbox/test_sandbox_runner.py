@@ -165,6 +165,16 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
         runtime_limitation_sections = ({"section_title": "Legacy Alias", "status": "must-not-appear"},)
 
     plan = Plan()
+    projection_calls: list[tuple[object, int]] = []
+    original_projection = sandbox_runner.manifest_projection.validation_plan_manifest_projection
+
+    def project_plan(plan_arg, results_arg):
+        results_list = list(results_arg)
+        projection_calls.append((plan_arg, len(results_list)))
+        return original_projection(plan_arg, results_list)
+
+    monkeypatch.setattr(sandbox_runner.manifest_projection, "validation_plan_manifest_projection", project_plan)
+
     def build_plan(registry, *, all_platforms, platform_name=None, scope="both", **kwargs):
         assert registry is sandbox_runner.SCENARIO_REGISTRY
         calls.append(f"plan:{platform_name}:{scope}:{all_platforms}")
@@ -196,6 +206,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
 
     assert exit_code == 1
+    assert projection_calls == [(plan, 1)]
     assert calls == ["env", "preflight", "copy:auto", "install-package", "plan:codex:project:False", "validation-plan:project:True"]
     assert (output / "report.md").read_text(encoding="utf-8") == "report\n"
     assert (output / "agent-summary.md").exists()

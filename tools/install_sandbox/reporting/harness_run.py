@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from . import manifest_projection
+from .manifest_projection import ManifestProjectionPlan
 from .status import known_status_values
 
 
@@ -16,7 +17,7 @@ class HarnessRunResult:
     package_install: dict[str, object]
     source_snapshot: dict[str, object]
     preflight: dict[str, object]
-    plan: object
+    plan: ManifestProjectionPlan
     results: list[dict[str, object]]
 
     @property
@@ -57,7 +58,7 @@ def harness_run_result(
     package_install: dict[str, object],
     source_snapshot: dict[str, object],
     preflight: dict[str, object],
-    plan: object,
+    plan: ManifestProjectionPlan,
     results: Iterable[dict[str, object]],
 ) -> HarnessRunResult:
     return HarnessRunResult(

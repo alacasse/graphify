@@ -240,6 +240,16 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
     assert "legacy alias" not in markdown
 
 
+def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
+    assert set(manifest_projection.ManifestProjectionPlan.__annotations__) == {
+        "standard_scenarios",
+        "coverage_records",
+        "target_runtime_validation_sections",
+        "platform_coverage_summary",
+        "target_runtime_verification",
+    }
+
+
 def test_validation_plan_manifest_projection_returns_manifest_primitives() -> None:
     class Plan:
         standard_scenarios = ("codex-project",)

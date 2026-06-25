@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from types import SimpleNamespace
 from pathlib import Path
 from typing import cast
 
@@ -236,37 +237,51 @@ class HookFactory:
             def write_manifest(_, path, roots, **kwargs):
                 write_file_manifest(path, roots, **kwargs)
 
-            def capture_state(_, scenario):
-                return scenario_file_state(scenario)
+            def initial_install_effects(_, scenario, artifact_dir, *, phase):
+                state_after_install = scenario_file_state(scenario)
+                install_checks = assert_expected_files(scenario) + assert_scope_boundaries(scenario)
+                unexpected_install_checks = unexpected_checks(scenario, phase=phase)
+                return SimpleNamespace(
+                    state_after_install=state_after_install,
+                    install_checks=install_checks,
+                    scope_checks=[],
+                    unexpected_install_checks=unexpected_install_checks,
+                )
 
-            def install_checks(_, scenario):
-                return assert_expected_files(scenario) + assert_scope_boundaries(scenario)
-
-            def unexpected_checks(_, scenario, *, phase):
-                return unexpected_checks(scenario, phase=phase)
-
-            def archive_generated_files(_, scenario, artifact_dir):
+            def archive_initial_install_artifacts(_, scenario, artifact_dir):
                 self.calls.append(f"copy:{scenario.platform}")
 
-            def repeat_install_checks(_, scenario, before, after, *, phase):
-                return repeat_install_checks(scenario, before, after, phase=phase)
+            def repeat_install_effects(_, scenario, before, *, phase):
+                state_after_repeat = scenario_file_state(scenario)
+                return SimpleNamespace(
+                    state_after_repeat=state_after_repeat,
+                    idempotency_checks=repeat_install_checks(scenario, before, state_after_repeat, phase=phase),
+                )
 
             def seed_stale_sidecar_repair(_, scenario):
                 return seed_stale_sidecar_repair(scenario)
 
-            def stale_sidecar_repair_checks(_, scenario, *, phase):
-                return stale_sidecar_repair_checks(scenario, phase=phase)
+            def stale_sidecar_repair_effects(_, scenario, *, phase):
+                return SimpleNamespace(stale_sidecar_repair_checks=stale_sidecar_repair_checks(scenario, phase=phase))
 
-            def uninstall_checks(_, scenario, *, phase):
-                return uninstall_checks(scenario, phase=phase)
+            def uninstall_effects(_, scenario, *, phase):
+                return SimpleNamespace(
+                    uninstall_checks=uninstall_checks(scenario, phase=phase),
+                    unexpected_uninstall_checks=[],
+                )
 
             def equivalence_checks(_, scenario, env, artifact_dir):
                 return run_equivalence_check(scenario, env, artifact_dir)
 
+            def universal_install_effects(_, scenario):
+                return assert_expected_files(scenario) + assert_scope_boundaries(scenario)
+
             def universal_uninstall_checks(_, runner_scenario, installed_scenarios, install_checks):
                 checks = list(install_checks)
                 for scenario in installed_scenarios:
-                    checks.extend(uninstall_checks(scenario, phase="universal_uninstall"))
+                    self.calls.append(f"universal-uninstalled:{scenario.platform}")
+                    checks.append({"ok": True, "detail": "removed"})
+                self.calls.append("unexpected:universal_uninstall")
                 if not self.universal_check_ok:
                     checks.append({"ok": False, "detail": "universal_uninstall_failed"})
                 return checks

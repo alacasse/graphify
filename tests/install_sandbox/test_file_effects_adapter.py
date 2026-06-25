@@ -126,8 +126,6 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
 
 
 def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(oracle) -> None:
-    calls: list[tuple[object, ...]] = []
-
     class RecordingOracle(file_effect_oracle.FileEffectOracle):
         def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
             super().__init__(
@@ -138,7 +136,6 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
             )
 
         def assert_uninstalled(self, scenario_arg):
-            calls.append(("assert_uninstalled", scenario_arg.platform))
             if scenario_arg.platform == "first":
                 return [
                     {"path": "first.md", "ok": True, "detail": "removed"},
@@ -147,7 +144,6 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
             return [{"path": "second.md", "ok": True, "detail": "removed"}]
 
         def assert_no_unexpected_graphify_files(self, scenario_arg, *, phase, expected_keys=None):
-            calls.append(("assert_no_unexpected_graphify_files", scenario_arg.platform, phase, expected_keys))
             return [
                 {"path": "leftover.md", "ok": False, "detail": "unexpected_graphify_related_file_after_universal_uninstall"},
                 {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
@@ -177,19 +173,9 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
         {"path": "leftover.md", "ok": False, "detail": "unexpected_graphify_related_file_after_universal_uninstall"},
         {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
     ]
-    assert calls == [
-        ("assert_uninstalled", "first"),
-        ("assert_uninstalled", "second"),
-        (
-            "assert_no_unexpected_graphify_files",
-            "runner",
-            "universal_uninstall",
-            {("project", "first.md"), ("home", "second.md")},
-        ),
-    ]
 
 
-def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots, tmp_path) -> None:
+def test_scenario_file_effects_adapter_preserves_phase_result_shapes(oracle, roots, tmp_path) -> None:
     calls: list[tuple[object, ...]] = []
 
     class RecordingOracle(file_effect_oracle.FileEffectOracle):
@@ -250,37 +236,50 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
 
     assert adapter.seed_scenario_inputs(adapter_scenario) is None
     adapter.write_manifest(manifest_path, roots, scenario=adapter_scenario)
-    assert adapter.capture_state(adapter_scenario) == {"state": {"exists": True}}
-    assert adapter.install_checks(adapter_scenario) == [
+
+    initial = adapter.initial_install_effects(adapter_scenario, artifact_dir, phase="install")
+    assert initial.state_after_install == {"state": {"exists": True}}
+    assert initial.install_checks == [
         {"path": "expected", "ok": True, "detail": "expected"},
         {"path": "scope", "ok": True, "detail": "scope"},
     ]
-    assert adapter.unexpected_checks(adapter_scenario, phase="install") == [
+    assert initial.scope_checks == []
+    assert initial.unexpected_install_checks == [
         {"path": "unexpected", "ok": True, "detail": "none_after_install"}
     ]
-    assert adapter.archive_generated_files(adapter_scenario, artifact_dir) is None
-    assert adapter.repeat_install_checks(
+    assert adapter.archive_initial_install_artifacts(adapter_scenario, artifact_dir) is None
+
+    repeat = adapter.repeat_install_effects(
         adapter_scenario,
-        {"project/AGENTS.md": {"exists": True, "sha256": "a"}},
-        {"project/AGENTS.md": {"exists": True, "sha256": "a"}},
+        {"state": {"exists": True}},
         phase="repeat_install",
-    ) == [
-        {"path": "project/AGENTS.md", "ok": True, "detail": "unchanged_after_repeat_install"},
+    )
+    assert repeat.state_after_repeat == {"state": {"exists": True}}
+    assert repeat.idempotency_checks == [
+        {"path": "state", "ok": True, "detail": "unchanged_after_repeat_install"},
         {"path": "unexpected", "ok": True, "detail": "none_after_repeat_install"},
     ]
     assert adapter.seed_stale_sidecar_repair(adapter_scenario) == [
         {"path": "stale", "ok": True, "detail": "seeded_stale_reference_fragment"}
     ]
-    assert adapter.stale_sidecar_repair_checks(adapter_scenario, phase="stale_sidecar_repair") == [
+    stale_repair = adapter.stale_sidecar_repair_effects(adapter_scenario, phase="stale_sidecar_repair")
+    assert stale_repair.stale_sidecar_repair_checks == [
         {"path": "sidecars", "ok": True, "detail": "sidecars"},
         {"path": "unexpected", "ok": True, "detail": "none_after_stale_sidecar_repair"},
     ]
-    assert adapter.uninstall_checks(adapter_scenario, phase="uninstall") == [
+
+    uninstall = adapter.uninstall_effects(adapter_scenario, phase="uninstall")
+    assert uninstall.uninstall_checks == [
         {"path": "uninstalled-unit", "ok": True, "detail": "removed"},
         {"path": "unexpected", "ok": True, "detail": "none_after_uninstall"},
     ]
+    assert uninstall.unexpected_uninstall_checks == []
     assert adapter.equivalence_checks(adapter_scenario, {"HOME": str(roots["home"])}, artifact_dir) == [
         {"path": "equivalence", "ok": True, "detail": "equivalent"}
+    ]
+    assert adapter.universal_install_effects(adapter_scenario) == [
+        {"path": "expected", "ok": True, "detail": "expected"},
+        {"path": "scope", "ok": True, "detail": "scope"},
     ]
     assert adapter.universal_uninstall_checks(
         adapter_scenario,
@@ -304,6 +303,7 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
         ("assert_scope_boundaries", "unit"),
         ("assert_no_unexpected_graphify_files", "unit", "install", None),
         ("copy_generated_files", "unit", artifact_dir),
+        ("scenario_file_state", "unit"),
         ("assert_no_unexpected_graphify_files", "unit", "repeat_install", None),
         ("seed_stale_skill_sidecars", "unit"),
         ("assert_installed_skill_sidecars", "unit"),
@@ -311,6 +311,8 @@ def test_scenario_file_effects_adapter_pins_delegation_boundaries(oracle, roots,
         ("assert_uninstalled", "unit"),
         ("assert_no_unexpected_graphify_files", "unit", "uninstall", None),
         ("equivalence_check", "unit", {"HOME": str(roots["home"])}, artifact_dir),
+        ("assert_expected_files", "unit"),
+        ("assert_scope_boundaries", "unit"),
         ("assert_uninstalled", "first"),
         ("assert_uninstalled", "second"),
         (

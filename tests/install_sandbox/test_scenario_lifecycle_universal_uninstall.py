@@ -65,9 +65,8 @@ def test_universal_uninstall_scenario_writes_assertions_and_risk_artifacts(tmp_p
         "scope:second",
         "manifest:after-install-files.json",
         "command:graphify uninstall --project",
-        "uninstalled:first",
-        "unexpected:universal_uninstall",
-        "uninstalled:second",
+        "universal-uninstalled:first",
+        "universal-uninstalled:second",
         "unexpected:universal_uninstall",
         "manifest:after-uninstall-files.json",
     ]

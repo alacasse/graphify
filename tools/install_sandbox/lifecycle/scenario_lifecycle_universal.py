@@ -85,7 +85,7 @@ class UniversalUninstallLifecycle:
                 artifact_dir=self.install_artifact_dir(context, scenario),
                 command_class="installer",
             )
-            scenario_install_checks = self.hooks.file_effects.install_checks(scenario)
+            scenario_install_checks = self.hooks.file_effects.universal_install_effects(scenario)
             install_checks.extend(scenario_install_checks)
             install_results.append(
                 {

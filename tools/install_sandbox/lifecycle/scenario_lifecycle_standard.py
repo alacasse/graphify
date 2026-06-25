@@ -74,14 +74,20 @@ class StandardLifecycleMechanics:
             return
         self.write_manifest(phase.manifest_filename)
 
-    def unexpected_checks(self, phase: StandardLifecyclePhase) -> list[dict[str, object]]:
-        return self.hooks.file_effects.unexpected_checks(self.scenario, phase=phase.check_phase)
+    def initial_install_effects(self, phase: StandardLifecyclePhase):
+        return self.hooks.file_effects.initial_install_effects(self.scenario, self.artifact_dir, phase=phase.check_phase)
 
-    def state(self) -> dict[str, dict[str, object]]:
-        return self.hooks.file_effects.capture_state(self.scenario)
+    def archive_initial_install_artifacts(self) -> None:
+        self.hooks.file_effects.archive_initial_install_artifacts(self.scenario, self.artifact_dir)
 
-    def copy_generated_files(self) -> None:
-        self.hooks.file_effects.archive_generated_files(self.scenario, self.artifact_dir)
+    def repeat_install_effects(self, before: dict[str, dict[str, object]], phase: StandardLifecyclePhase):
+        return self.hooks.file_effects.repeat_install_effects(self.scenario, before, phase=phase.check_phase)
+
+    def stale_sidecar_repair_effects(self, phase: StandardLifecyclePhase):
+        return self.hooks.file_effects.stale_sidecar_repair_effects(self.scenario, phase=phase.check_phase)
+
+    def uninstall_effects(self, phase: StandardLifecyclePhase):
+        return self.hooks.file_effects.uninstall_effects(self.scenario, phase=phase.check_phase)
 
 
 def run_initial_install(context: ScenarioRunContext, *, hooks: ScenarioLifecycleHooks) -> StandardScenarioStages:
@@ -91,32 +97,26 @@ def run_initial_install(context: ScenarioRunContext, *, hooks: ScenarioLifecycle
     lifecycle.write_manifest("before-install-files.json")
 
     install_1 = lifecycle.capture(scenario.install_command, INITIAL_INSTALL_PHASE)
-    state_after_install = lifecycle.state()
-    install_checks = hooks.file_effects.install_checks(scenario)
-    scope_checks: list[dict[str, object]] = []
-    unexpected_install_checks = lifecycle.unexpected_checks(INITIAL_INSTALL_PHASE)
+    file_effects = lifecycle.initial_install_effects(INITIAL_INSTALL_PHASE)
     lifecycle.write_phase_manifest(INITIAL_INSTALL_PHASE)
-    lifecycle.copy_generated_files()
-    return StandardScenarioStages(
+    stages = StandardScenarioStages(
         install_1=install_1,
-        state_after_install=state_after_install,
-        install_checks=install_checks,
-        scope_checks=scope_checks,
-        unexpected_install_checks=unexpected_install_checks,
+        state_after_install=file_effects.state_after_install,
+        install_checks=file_effects.install_checks,
+        scope_checks=file_effects.scope_checks,
+        unexpected_install_checks=file_effects.unexpected_install_checks,
     )
+    lifecycle.archive_initial_install_artifacts()
+    return stages
 
 
 def run_repeat_install(context: ScenarioRunContext, stages: StandardScenarioStages, *, hooks: ScenarioLifecycleHooks) -> None:
     scenario = context.scenario
     lifecycle = StandardLifecycleMechanics(context, hooks)
     stages.install_2 = lifecycle.capture(scenario.install_command, REPEAT_INSTALL_PHASE)
-    stages.state_after_repeat = lifecycle.state()
-    stages.idempotency_checks = hooks.file_effects.repeat_install_checks(
-        scenario,
-        stages.state_after_install,
-        stages.state_after_repeat,
-        phase=REPEAT_INSTALL_PHASE.check_phase,
-    )
+    file_effects = lifecycle.repeat_install_effects(stages.state_after_install, REPEAT_INSTALL_PHASE)
+    stages.state_after_repeat = file_effects.state_after_repeat
+    stages.idempotency_checks = file_effects.idempotency_checks
     lifecycle.write_phase_manifest(REPEAT_INSTALL_PHASE)
 
 
@@ -128,10 +128,8 @@ def run_stale_sidecar_repair(context: ScenarioRunContext, stages: StandardScenar
         return
     stages.stale_sidecar_repair_result = lifecycle.capture(scenario.install_command, STALE_SIDECAR_REPAIR_PHASE)
     if stages.stale_sidecar_repair_result.returncode == 0:
-        stages.stale_sidecar_repair_checks = hooks.file_effects.stale_sidecar_repair_checks(
-            scenario,
-            phase=STALE_SIDECAR_REPAIR_PHASE.check_phase,
-        )
+        file_effects = lifecycle.stale_sidecar_repair_effects(STALE_SIDECAR_REPAIR_PHASE)
+        stages.stale_sidecar_repair_checks = file_effects.stale_sidecar_repair_checks
     lifecycle.write_phase_manifest(STALE_SIDECAR_REPAIR_PHASE)
 
 
@@ -141,8 +139,9 @@ def run_uninstall_stage(context: ScenarioRunContext, stages: StandardScenarioSta
         return
     lifecycle = StandardLifecycleMechanics(context, hooks)
     stages.uninstall_result = lifecycle.capture(scenario.uninstall_command, UNINSTALL_PHASE)
-    stages.uninstall_checks = hooks.file_effects.uninstall_checks(scenario, phase=UNINSTALL_PHASE.check_phase)
-    stages.unexpected_uninstall_checks = []
+    file_effects = lifecycle.uninstall_effects(UNINSTALL_PHASE)
+    stages.uninstall_checks = file_effects.uninstall_checks
+    stages.unexpected_uninstall_checks = file_effects.unexpected_uninstall_checks
     lifecycle.write_phase_manifest(UNINSTALL_PHASE)
 
 

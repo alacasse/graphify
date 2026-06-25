@@ -29,6 +29,12 @@ def test_scenario_file_effects_protocol_omits_oracle_and_core_leaf_helpers() -> 
         "assert_idempotent_state",
         "assert_installed_skill_sidecars",
         "expected_generated_relative_keys",
+        "capture_state",
+        "install_checks",
+        "repeat_install_checks",
+        "stale_sidecar_repair_checks",
+        "uninstall_checks",
+        "unexpected_checks",
         "check_record",
     } & lifecycle_methods
     assert not hasattr(scenario_lifecycle_support, "_standard_scenario_command_ok")

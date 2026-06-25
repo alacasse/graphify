@@ -70,6 +70,31 @@ class FileEffectOracleLike(Protocol):
 
 
 @dataclass(frozen=True)
+class InitialInstallFileEffects:
+    state_after_install: dict[str, dict[str, object]]
+    install_checks: list[dict[str, object]]
+    scope_checks: list[dict[str, object]]
+    unexpected_install_checks: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
+class RepeatInstallFileEffects:
+    state_after_repeat: dict[str, dict[str, object]]
+    idempotency_checks: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
+class StaleSidecarRepairFileEffects:
+    stale_sidecar_repair_checks: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
+class UninstallFileEffects:
+    uninstall_checks: list[dict[str, object]]
+    unexpected_uninstall_checks: list[dict[str, object]]
+
+
+@dataclass(frozen=True)
 class ScenarioFileEffectsAdapter:
     oracle: FileEffectOracleLike
     write_file_manifest: Callable[..., None]
@@ -93,6 +118,20 @@ class ScenarioFileEffectsAdapter:
     def archive_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
         self.oracle.copy_generated_files(scenario, artifact_dir)
 
+    def initial_install_effects(self, scenario: Scenario, artifact_dir: Path, *, phase: str) -> InitialInstallFileEffects:
+        state_after_install = self.capture_state(scenario)
+        install_checks = self.install_checks(scenario)
+        unexpected_install_checks = self.unexpected_checks(scenario, phase=phase)
+        return InitialInstallFileEffects(
+            state_after_install=state_after_install,
+            install_checks=install_checks,
+            scope_checks=[],
+            unexpected_install_checks=unexpected_install_checks,
+        )
+
+    def archive_initial_install_artifacts(self, scenario: Scenario, artifact_dir: Path) -> None:
+        self.archive_generated_files(scenario, artifact_dir)
+
     def repeat_install_checks(
         self,
         scenario: Scenario,
@@ -103,14 +142,43 @@ class ScenarioFileEffectsAdapter:
     ) -> list[dict[str, object]]:
         return file_effect_state.assert_idempotent_state(before, after) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
 
+    def repeat_install_effects(
+        self,
+        scenario: Scenario,
+        before: dict[str, dict[str, object]],
+        *,
+        phase: str,
+    ) -> RepeatInstallFileEffects:
+        state_after_repeat = self.capture_state(scenario)
+        return RepeatInstallFileEffects(
+            state_after_repeat=state_after_repeat,
+            idempotency_checks=self.repeat_install_checks(
+                scenario,
+                before,
+                state_after_repeat,
+                phase=phase,
+            ),
+        )
+
     def seed_stale_sidecar_repair(self, scenario: Scenario) -> list[dict[str, object]]:
         return self.oracle.seed_stale_skill_sidecars(scenario)
 
     def stale_sidecar_repair_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
         return self.oracle.assert_installed_skill_sidecars(scenario) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
 
+    def stale_sidecar_repair_effects(self, scenario: Scenario, *, phase: str) -> StaleSidecarRepairFileEffects:
+        return StaleSidecarRepairFileEffects(
+            stale_sidecar_repair_checks=self.stale_sidecar_repair_checks(scenario, phase=phase),
+        )
+
     def uninstall_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
         return self.oracle.assert_uninstalled(scenario) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+
+    def uninstall_effects(self, scenario: Scenario, *, phase: str) -> UninstallFileEffects:
+        return UninstallFileEffects(
+            uninstall_checks=self.uninstall_checks(scenario, phase=phase),
+            unexpected_uninstall_checks=[],
+        )
 
     def equivalence_checks(self, scenario: Scenario, env: dict[str, str], artifact_dir: Path) -> list[dict[str, object]]:
         return self.run_equivalence_check(scenario, env, artifact_dir)
@@ -143,6 +211,9 @@ class ScenarioFileEffectsAdapter:
             uninstall_checks,
             unexpected_checks,
         )
+
+    def universal_install_effects(self, scenario: Scenario) -> list[dict[str, object]]:
+        return self.install_checks(scenario)
 
     def disposable_artifact_checks(self, disposable_path: Path, removed: bool) -> list[dict[str, object]]:
         return [check_record(disposable_path, removed, "removed" if removed else "still_exists")]

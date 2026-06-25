@@ -241,30 +241,27 @@ class ScenarioFileEffects(Protocol):
 
     def write_manifest(self, path: Path, roots: dict[str, Path], **kwargs: object) -> None: ...
 
-    def capture_state(self, scenario: Scenario) -> dict[str, dict[str, object]]: ...
+    def initial_install_effects(self, scenario: Scenario, artifact_dir: Path, *, phase: str) -> InitialInstallEffects: ...
 
-    def install_checks(self, scenario: Scenario) -> list[dict[str, object]]: ...
+    def archive_initial_install_artifacts(self, scenario: Scenario, artifact_dir: Path) -> None: ...
 
-    def unexpected_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]: ...
-
-    def archive_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None: ...
-
-    def repeat_install_checks(
+    def repeat_install_effects(
         self,
         scenario: Scenario,
         before: dict[str, dict[str, object]],
-        after: dict[str, dict[str, object]],
         *,
         phase: str,
-    ) -> list[dict[str, object]]: ...
+    ) -> RepeatInstallEffects: ...
 
     def seed_stale_sidecar_repair(self, scenario: Scenario) -> list[dict[str, object]]: ...
 
-    def stale_sidecar_repair_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]: ...
+    def stale_sidecar_repair_effects(self, scenario: Scenario, *, phase: str) -> StaleSidecarRepairEffects: ...
 
-    def uninstall_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]: ...
+    def uninstall_effects(self, scenario: Scenario, *, phase: str) -> UninstallEffects: ...
 
     def equivalence_checks(self, scenario: Scenario, env: dict[str, str], artifact_dir: Path) -> list[dict[str, object]]: ...
+
+    def universal_install_effects(self, scenario: Scenario) -> list[dict[str, object]]: ...
 
     def universal_uninstall_checks(
         self,
@@ -274,6 +271,27 @@ class ScenarioFileEffects(Protocol):
     ) -> list[dict[str, object]]: ...
 
     def disposable_artifact_checks(self, disposable_path: Path, removed: bool) -> list[dict[str, object]]: ...
+
+
+class InitialInstallEffects(Protocol):
+    state_after_install: dict[str, dict[str, object]]
+    install_checks: list[dict[str, object]]
+    scope_checks: list[dict[str, object]]
+    unexpected_install_checks: list[dict[str, object]]
+
+
+class RepeatInstallEffects(Protocol):
+    state_after_repeat: dict[str, dict[str, object]]
+    idempotency_checks: list[dict[str, object]]
+
+
+class StaleSidecarRepairEffects(Protocol):
+    stale_sidecar_repair_checks: list[dict[str, object]]
+
+
+class UninstallEffects(Protocol):
+    uninstall_checks: list[dict[str, object]]
+    unexpected_uninstall_checks: list[dict[str, object]]
 
 
 @dataclass(frozen=True)

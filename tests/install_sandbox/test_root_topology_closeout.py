@@ -22,7 +22,23 @@ def test_root_topology_closeout_keeps_moved_implementation_packages_importable()
 
 
 def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> None:
-    for module_name in ("reports", "command_runner", "container_runtime", "source_snapshot"):
+    removed_root_implementation_modules = (
+        "reports",
+        "command_runner",
+        "container_runtime",
+        "source_snapshot",
+        "install_surface_generated",
+        "install_surface_sidecars",
+        "install_surface_state",
+        "install_surface_statuses",
+        "install_target_catalog",
+        "install_target_defaults",
+        "install_target_harness_policy",
+        "install_target_models",
+        "install_target_scenarios",
+        "install_target_selection",
+    )
+    for module_name in removed_root_implementation_modules:
         assert not (INSTALL_SANDBOX_ROOT / f"{module_name}.py").exists()
         assert importlib.util.find_spec(f"tools.install_sandbox.{module_name}") is None
 
@@ -34,10 +50,22 @@ def test_root_topology_closeout_keeps_batch_compatibility_facades_importable() -
     owner_spec_loader = importlib.import_module("tools.install_sandbox.registry.spec_loader")
     root_spec_normalize = importlib.import_module("tools.install_sandbox.spec_normalize")
     owner_spec_normalize = importlib.import_module("tools.install_sandbox.registry.spec_normalize")
+    root_install_surface_core = importlib.import_module("tools.install_sandbox.install_surface_core")
+    owner_install_surface_statuses = importlib.import_module("tools.install_sandbox.surfaces.install_surface_statuses")
+    root_expected_effects = importlib.import_module("tools.install_sandbox.expected_effects")
+    owner_install_surface_models = importlib.import_module("tools.install_sandbox.surfaces.install_surface_models")
+    root_platform_specs = importlib.import_module("tools.install_sandbox.platform_specs")
+    owner_install_target_catalog = importlib.import_module("tools.install_sandbox.targets.install_target_catalog")
 
     assert (INSTALL_SANDBOX_ROOT / "agent_summary.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "spec_loader.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "spec_normalize.py").exists()
+    assert (INSTALL_SANDBOX_ROOT / "install_surface_core.py").exists()
+    assert (INSTALL_SANDBOX_ROOT / "expected_effects.py").exists()
+    assert (INSTALL_SANDBOX_ROOT / "platform_specs.py").exists()
     assert root_agent_summary.summarize_output is owner_agent_summary.summarize_output
     assert root_spec_loader.load_default_registry is owner_spec_loader.load_default_registry
     assert root_spec_normalize.normalize_registry is owner_spec_normalize.normalize_registry
+    assert root_install_surface_core.InstallSurfaceStatus is owner_install_surface_statuses.InstallSurfaceStatus
+    assert root_expected_effects.InstallSurface is owner_install_surface_models.InstallSurface
+    assert root_platform_specs.InstallTargetCatalog is owner_install_target_catalog.InstallTargetCatalog

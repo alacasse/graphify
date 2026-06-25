@@ -15,11 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from . import command_runner
     from . import reference_resolution
     from .lifecycle import scenario_lifecycle_plan
     from .lifecycle import scenario_lifecycle_support
-    from . import source_snapshot
     from . import validation_plan
     from .effects import file_effect_generated_artifacts
     from .effects import file_effect_oracle as file_effect_oracle_module
@@ -28,6 +26,8 @@ try:
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from .reporting import agent_summary
     from .reporting import reports
+    from .runtime import command_runner
+    from .runtime import source_snapshot
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
@@ -35,21 +35,22 @@ try:
         Scenario,
     )
 except ImportError:
-    import command_runner
-    import reference_resolution
-    from lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
-    from lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
-    import source_snapshot
-    import validation_plan
-    from effects import file_effect_generated_artifacts  # type: ignore[no-redef]
-    from effects import file_effect_oracle as file_effect_oracle_module  # type: ignore[no-redef]
-    from effects import file_effect_state  # type: ignore[no-redef]
-    from effects import scenario_file_effects_adapter  # type: ignore[no-redef]
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from reporting import agent_summary  # type: ignore[no-redef]
-    from reporting import reports  # type: ignore[no-redef]
-    from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
-    from platform_specs import (
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tools.install_sandbox import reference_resolution  # type: ignore[no-redef]
+    from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
+    from tools.install_sandbox.effects import file_effect_generated_artifacts  # type: ignore[no-redef]
+    from tools.install_sandbox.effects import file_effect_oracle as file_effect_oracle_module  # type: ignore[no-redef]
+    from tools.install_sandbox.effects import file_effect_state  # type: ignore[no-redef]
+    from tools.install_sandbox.effects import scenario_file_effects_adapter  # type: ignore[no-redef]
+    from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
+    from tools.install_sandbox.lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
+    from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting import agent_summary  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
+    from tools.install_sandbox.runtime import command_runner  # type: ignore[no-redef]
+    from tools.install_sandbox.runtime import source_snapshot  # type: ignore[no-redef]
+    from tools.install_sandbox.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
+    from tools.install_sandbox.platform_specs import (
         DEFAULT_SCENARIO_REGISTRY,
         GRAPHIFY_MARKER,
         Scenario,

@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from tools.install_sandbox import source_snapshot
+from tools.install_sandbox.runtime import source_snapshot
 
 
 def snapshot_config(repo, src) -> source_snapshot.SourceSnapshotConfig:

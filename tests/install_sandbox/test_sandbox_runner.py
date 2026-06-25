@@ -9,10 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import command_runner, sandbox_runner, source_snapshot, status
+from tools.install_sandbox import sandbox_runner, status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
 from tools.install_sandbox.reporting import reports
+from tools.install_sandbox.runtime import command_runner, source_snapshot
 
 
 def test_parse_args_requires_platform_or_all() -> None:

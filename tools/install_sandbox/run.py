@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 try:
-    from tools.install_sandbox.container_runtime import (
+    from tools.install_sandbox.runtime.container_runtime import (
         BUILD_TIMEOUT_SECONDS,
         CONTAINER_HOME,
         CONTAINER_OUTPUT,
@@ -24,7 +24,8 @@ try:
     )
     from tools.install_sandbox.reporting import agent_summary
 except ModuleNotFoundError:  # pragma: no cover - supports running this file directly from any cwd.
-    from container_runtime import (  # type: ignore[no-redef]
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tools.install_sandbox.runtime.container_runtime import (  # type: ignore[no-redef]
         BUILD_TIMEOUT_SECONDS,
         CONTAINER_HOME,
         CONTAINER_OUTPUT,
@@ -39,7 +40,7 @@ except ModuleNotFoundError:  # pragma: no cover - supports running this file dir
         run_command,
         shell_join,
     )
-    from reporting import agent_summary  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting import agent_summary  # type: ignore[no-redef]
 
 
 def write_and_print_agent_summary(output: Path) -> None:

@@ -6,13 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-try:
-    from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-except ImportError:
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
 
 
-HARNESS_DIR = Path(__file__).resolve().parent
+HARNESS_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_IMAGE = "graphify-install-sandbox:local"
 ROOT_REGISTRY = DEFAULT_SANDBOX_ROOT_REGISTRY
 CONTAINER_REPO = ROOT_REGISTRY.container_path("repo_mount")

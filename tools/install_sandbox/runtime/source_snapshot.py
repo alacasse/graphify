@@ -13,10 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-try:
-    from .file_walk import pruned_file_walk as _shared_pruned_file_walk
-except ImportError:
-    from file_walk import pruned_file_walk as _shared_pruned_file_walk
+from ..file_walk import pruned_file_walk as _shared_pruned_file_walk
 
 
 PACKAGE_NAME = "graphifyy"

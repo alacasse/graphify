@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-from tools.install_sandbox import command_runner
+from tools.install_sandbox.runtime import command_runner
 
 
 def test_run_capture_timeout_serialization(tmp_path) -> None:

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import container_runtime
+from tools.install_sandbox.runtime import container_runtime
 
 
 def test_docker_command_construction(tmp_path) -> None:
@@ -78,3 +78,5 @@ def test_build_image_command_uses_harness_directory() -> None:
         "image",
         str(container_runtime.HARNESS_DIR),
     ]
+    assert container_runtime.HARNESS_DIR.name == "install_sandbox"
+    assert container_runtime.HARNESS_DIR.joinpath("Dockerfile").is_file()

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from tools.install_sandbox import status
+from tools.install_sandbox.reporting import harness_run
 from tools.install_sandbox.reporting import manifest_projection
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.reporting import status as reporting_status
@@ -291,6 +292,50 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
         },
         "scenario_count": 2,
     }
+
+
+def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> None:
+    class Plan:
+        standard_scenarios = ("codex-project",)
+
+    projection_calls: list[tuple[object, int]] = []
+
+    def project_plan(plan_arg, results_arg):
+        results_list = list(results_arg)
+        projection_calls.append((plan_arg, len(results_list)))
+        return {
+            "target_runtime_verification": {"performed": False},
+            "target_runtime_validation_sections": [],
+            "platform_coverage": [],
+            "platform_coverage_summary": {"universal_scenario_count": 1},
+            "scenario_count": len(results_list),
+        }
+
+    monkeypatch.setattr(harness_run.manifest_projection, "validation_plan_manifest_projection", project_plan)
+    plan = Plan()
+    run_result = harness_run.harness_run_result(
+        harness_version="test-harness",
+        python_version="3.12 synthetic",
+        os_release={"PRETTY_NAME": "Synthetic Linux"},
+        architecture="x86_64",
+        package_install={"version": "9.9.9"},
+        source_snapshot={"root": "/tmp/src"},
+        preflight={"project": "/tmp/project"},
+        plan=plan,
+        results=[{"id": "codex-project", "passed": True}, {"id": "cleanup", "passed": False}],
+    )
+
+    manifest = run_result.manifest()
+
+    assert projection_calls == [(plan, 2)]
+    assert run_result.passed == 1
+    assert run_result.failed == 1
+    assert manifest["graphify_version"] == "9.9.9"
+    assert manifest["scenario_count"] == 2
+    assert manifest["platform_coverage_summary"] == {"universal_scenario_count": 1}
+    assert manifest["graphify_file_effect_pass_count"] == 1
+    assert manifest["graphify_file_effect_fail_count"] == 1
+    assert manifest["risk_status_values"] == reporting_status.known_status_values()
 
 
 def test_write_report_markdown(tmp_path) -> None:

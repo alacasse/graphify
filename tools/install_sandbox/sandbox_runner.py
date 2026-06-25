@@ -25,7 +25,7 @@ try:
     from .effects import scenario_file_effects_adapter
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from .reporting import agent_summary
-    from .reporting import manifest_projection
+    from .reporting import harness_run
     from .reporting import reports
     from .runtime import command_runner
     from .runtime import source_snapshot
@@ -47,7 +47,7 @@ except ImportError:
     from tools.install_sandbox.lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
     from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import agent_summary  # type: ignore[no-redef]
-    from tools.install_sandbox.reporting import manifest_projection  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting import harness_run  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import command_runner  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import source_snapshot  # type: ignore[no-redef]
@@ -442,32 +442,23 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     results = scenario_lifecycle_plan.run_validation_plan(plan, env, hooks, fail_fast_scenarios=args.fail_fast_scenarios)
-    passed = sum(1 for result in results if result["passed"])
-    failed = len(results) - passed
-
-    projected_plan = manifest_projection.validation_plan_manifest_projection(plan, results)
-    manifest = {
-        "harness_version": HARNESS_VERSION,
-        "python_version": sys.version,
-        "os_release": read_os_release(),
-        "architecture": platform_mod.machine(),
-        "graphify_version": package_data.get("version"),
-        "package_install": package_data,
-        "source_snapshot": src_data,
-        "preflight": preflight_data,
-        **projected_plan,
-        "graphify_file_effect_pass_count": passed,
-        "graphify_file_effect_fail_count": failed,
-        "pass_count": passed,
-        "fail_count": failed,
-        "results": results,
-        "risk_status_values": known_status_values(),
-    }
+    run_result = harness_run.harness_run_result(
+        harness_version=HARNESS_VERSION,
+        python_version=sys.version,
+        os_release=read_os_release(),
+        architecture=platform_mod.machine(),
+        package_install=package_data,
+        source_snapshot=src_data,
+        preflight=preflight_data,
+        plan=plan,
+        results=results,
+    )
+    manifest = run_result.manifest()
     reports.write_manifest_json(OUTPUT / "manifest.json", manifest)
     reports.write_report_md(OUTPUT / "report.md", manifest)
     agent_summary.write_summary(OUTPUT, agent_summary.summarize_output(OUTPUT))
-    reports.print_summary(OUTPUT, passed=passed, failed=failed)
-    return 0 if failed == 0 else 1
+    reports.print_summary(OUTPUT, passed=run_result.passed, failed=run_result.failed)
+    return 0 if run_result.failed == 0 else 1
 
 
 if __name__ == "__main__":

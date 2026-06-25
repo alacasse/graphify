@@ -12,6 +12,7 @@ def test_root_topology_closeout_keeps_moved_implementation_packages_importable()
     for module_name in (
         "tools.install_sandbox.registry.spec_loader",
         "tools.install_sandbox.registry.spec_normalize",
+        "tools.install_sandbox.reporting.harness_run",
         "tools.install_sandbox.reporting.reports",
         "tools.install_sandbox.reporting.agent_summary",
         "tools.install_sandbox.runtime.command_runner",

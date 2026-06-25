@@ -74,3 +74,55 @@ def test_root_topology_closeout_keeps_batch_compatibility_facades_importable() -
     assert root_expected_effects.InstallSurface is owner_install_surface_models.InstallSurface
     assert root_platform_specs.InstallTargetCatalog is owner_install_target_catalog.InstallTargetCatalog
     assert root_status.known_status_values is owner_status.known_status_values
+
+
+def test_root_topology_closeout_names_validation_reporting_and_runner_public_apis() -> None:
+    validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
+    manifest_projection = importlib.import_module("tools.install_sandbox.reporting.manifest_projection")
+    harness_run = importlib.import_module("tools.install_sandbox.reporting.harness_run")
+    reports = importlib.import_module("tools.install_sandbox.reporting.reports")
+    agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
+    sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
+    root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
+
+    assert callable(validation_plan.build_validation_plan)
+    assert validation_plan.HarnessPolicy
+    assert validation_plan.DEFAULT_HARNESS_POLICY.target_runtime_verification
+    assert callable(manifest_projection.validation_plan_manifest_projection)
+    assert callable(reports.render_report_md)
+    assert callable(reports.write_report_md)
+    assert callable(agent_summary.summarize_output)
+    assert callable(agent_summary.write_summary)
+    assert callable(harness_run.harness_run_result)
+    assert callable(sandbox_runner.main)
+    assert callable(sandbox_runner.parse_args)
+    assert root_agent_summary.summarize_output is agent_summary.summarize_output
+
+
+def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fields() -> None:
+    harness_run = importlib.import_module("tools.install_sandbox.reporting.harness_run")
+
+    class Plan:
+        standard_scenarios = ("codex-project",)
+        coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
+        target_runtime_validation_sections = ({"section_title": "Runtime Boundary", "status": "declared"},)
+        platform_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
+        target_runtime_verification = {"performed": False}
+
+    manifest = harness_run.harness_run_result(
+        harness_version="test",
+        python_version="3.12",
+        os_release={},
+        architecture="x86_64",
+        package_install={"version": "9.9.9"},
+        source_snapshot={},
+        preflight={},
+        plan=Plan(),
+        results=[{"id": "codex-project", "passed": True}, {"id": "universal-cleanup", "passed": True}],
+    ).manifest()
+
+    assert manifest["target_runtime_verification"] == {"performed": False}
+    assert manifest["target_runtime_validation_sections"] == [{"section_title": "Runtime Boundary", "status": "declared"}]
+    assert manifest["platform_coverage"] == [{"platform": "codex", "scope": "project", "status": "runnable"}]
+    assert manifest["platform_coverage_summary"]["universal_scenario_count"] == 1
+    assert manifest["scenario_count"] == 2

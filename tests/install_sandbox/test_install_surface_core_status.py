@@ -3,20 +3,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import platform_specs
-from tools.install_sandbox.platform_specs import InstallSurface
+from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_statuses
+from tools.install_sandbox.surfaces.install_surface_models import InstallSurface
+from tools.install_sandbox.targets import install_target_defaults
+from tools.install_sandbox.targets import install_target_models
 
 # Status-decision ownership lives here. Sidecar, state-plan, and generated-file
 # Installer Core decisions live in the sibling test_install_surface_core_* modules.
 
 
-def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
+def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
         marker=marker,
-        text_expectation=platform_specs.TextExpectation(
+        text_expectation=install_surface_models.TextExpectation(
             preserve_user_content=preserve_user_content,
             repair_stale_graphify_section=True,
             require_user_content_on_uninstall=preserve_user_content,
@@ -38,7 +40,7 @@ def json_status_from_loaded_data(surface: InstallSurface, data: object) -> insta
 
 
 def registered_json_status(platform: str, scope: str, relative: str, data: object) -> install_surface_statuses.InstallSurfaceStatus:
-    test_scenario = platform_specs.DEFAULT_SCENARIO_REGISTRY.make_scenario(platform, scope)
+    test_scenario = install_target_defaults.default_install_target_catalog().make_scenario(platform, scope)
     assert test_scenario is not None
     entry = next(item for item in test_scenario.expected if item.relative == relative)
     return json_status_from_loaded_data(entry, data)
@@ -90,7 +92,7 @@ def test_install_surface_core_decides_installed_status_from_observed_facts() -> 
             path=Path("/observed/notes.md"),
             exists=True,
             is_file=True,
-            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n",
         ),
     )
 
@@ -152,7 +154,7 @@ def test_installed_surface_status_observation_helper_preserves_paths_and_details
 
     text_surface = section("project", "notes.md", preserve_user_content=True)
     text_path = Path("/observed/notes.md")
-    text = f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    text = f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n"
 
     assert install_surface_statuses.installed_surface_status_from_observation(
         text_surface,
@@ -210,17 +212,17 @@ def test_text_marker_status_from_already_read_text_preserves_details() -> None:
     text_surface = section("project", "notes.md", preserve_user_content=True)
 
     assert install_surface_statuses.text_marker_status_from_text(
-        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n",
+        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n",
         text_surface,
     ) == (True, "marker_count=1; user_content_preserved; stale_replaced=True")
 
     assert install_surface_statuses.text_marker_status_from_text(
-        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\nfirst\n\n{platform_specs.GRAPHIFY_MARKER}\nsecond\n",
+        f"# Notes\n\n{install_target_models.GRAPHIFY_MARKER}\nfirst\n\n{install_target_models.GRAPHIFY_MARKER}\nsecond\n",
         text_surface,
     ) == (False, "marker_count=2; user_content_missing; stale_replaced=True")
 
     assert install_surface_statuses.text_marker_status_from_text(
-        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n",
         text_surface,
     ) == (False, "marker_count=1; user_content_preserved; stale_replaced=False")
 
@@ -313,7 +315,7 @@ def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -
             path=Path("/observed/notes.md"),
             exists=True,
             is_file=True,
-            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n",
+            text=f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n",
         ),
     )
 
@@ -374,7 +376,10 @@ def test_uninstalled_surface_status_observation_helper_preserves_paths_and_detai
         ),
     )
 
-    stale_text = f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n"
+    stale_text = (
+        f"# Notes\n\n{install_surface_statuses.USER_SENTINEL}\n\n"
+        f"{install_target_models.GRAPHIFY_MARKER}\n{install_surface_statuses.STALE_GRAPHIFY_SENTINEL}\n"
+    )
 
     assert install_surface_statuses.uninstalled_surface_status_from_observation(
         text_section,

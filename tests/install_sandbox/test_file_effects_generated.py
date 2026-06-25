@@ -7,12 +7,13 @@ import pytest
 from tools.install_sandbox.effects import file_effect_generated_artifacts
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_state
-from tools.install_sandbox import install_surface_core
-from tools.install_sandbox.surfaces import install_surface_generated
 from tools.install_sandbox.effects import scenario_file_effects_adapter
+from tools.install_sandbox.surfaces import install_surface_generated
+from tools.install_sandbox.surfaces import install_surface_models
+from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath, InstallSurface
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.targets import install_target_models
-from tools.install_sandbox.targets.install_target_models import ExpectedPath, InstallSurface, Scenario
+from tools.install_sandbox.targets.install_target_models import Scenario
 
 from install_target_test_support import scenario_for
 
@@ -68,7 +69,7 @@ def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -
 
 
 def expected_skill(root: str, relative: str) -> InstallSurface:
-    return InstallSurface(root, relative, skill_sidecar_expectation=install_target_models.SkillSidecarExpectation())
+    return InstallSurface(root, relative, skill_sidecar_expectation=install_surface_models.SkillSidecarExpectation())
 
 
 def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
@@ -76,7 +77,7 @@ def section(root: str, relative: str, marker: str = install_target_models.GRAPHI
         root,
         relative,
         marker=marker,
-        text_expectation=install_target_models.TextExpectation(
+        text_expectation=install_surface_models.TextExpectation(
             preserve_user_content=preserve_user_content,
             repair_stale_graphify_section=True,
             require_user_content_on_uninstall=preserve_user_content,
@@ -127,7 +128,7 @@ def test_legacy_expected_path_with_text_policy_dispatches_as_text_section(oracle
     legacy_text_policy = ExpectedPath(
         "project",
         "notes.txt",
-        text_expectation=install_target_models.TextExpectation(preserve_user_content=True, require_user_content_on_uninstall=True),
+        text_expectation=install_surface_models.TextExpectation(preserve_user_content=True, require_user_content_on_uninstall=True),
     )
     test_scenario = scenario("unit", legacy_text_policy)
 
@@ -141,7 +142,7 @@ def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(or
     legacy_text_policy = ExpectedPath(
         "project",
         "legacy-notes.txt",
-        text_expectation=install_target_models.TextExpectation(preserve_user_content=True),
+        text_expectation=install_surface_models.TextExpectation(preserve_user_content=True),
     )
     no_preserve_text_section = section("project", "no-preserve.md")
     plain_surface = ExpectedPath("project", "plain.txt")

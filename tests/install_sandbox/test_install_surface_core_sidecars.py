@@ -5,11 +5,12 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import platform_specs
-from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_generated
+from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_sidecars
+from tools.install_sandbox.surfaces.install_surface_models import InstallSurface
+from tools.install_sandbox.targets.install_target_models import Scenario
 
 
 def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test detail") -> PackagedReferenceResolution:
@@ -28,14 +29,14 @@ def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -
 
 
 def expected_skill(root: str, relative: str) -> InstallSurface:
-    return InstallSurface(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+    return InstallSurface(root, relative, skill_sidecar_expectation=install_surface_models.SkillSidecarExpectation())
 
 
 def expected_skill_with_docs_sidecar(root: str, relative: str) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
-        skill_sidecar_expectation=platform_specs.SkillSidecarExpectation(
+        skill_sidecar_expectation=install_surface_models.SkillSidecarExpectation(
             references_dir="docs",
             references_tmp_dir="docs.tmp",
             reference_pointer_pattern=r"docs/([A-Za-z0-9_.-]+\.md)\b",
@@ -65,7 +66,9 @@ def expected_skill_with_docs_sidecar(root: str, relative: str) -> InstallSurface
 def test_reference_sidecar_expectation_owns_expected_relatives(status: str, names: tuple[str, ...], expected_relatives: set[str]) -> None:
     expectation = install_surface_sidecars.ReferenceSidecarExpectation.from_resolution(resolution(status, names))
 
-    assert expectation.expected_relatives(Path(".unit/graphify"), platform_specs.SkillSidecarExpectation()) == {Path(relative) for relative in expected_relatives}
+    assert expectation.expected_relatives(Path(".unit/graphify"), install_surface_models.SkillSidecarExpectation()) == {
+        Path(relative) for relative in expected_relatives
+    }
 
 
 def test_reference_sidecar_expectation_validates_installed_status_matrix() -> None:
@@ -119,7 +122,7 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
 
 
 def test_install_surface_core_evaluates_skill_sidecar_status_decisions() -> None:
-    sidecar = platform_specs.SkillSidecarExpectation()
+    sidecar = install_surface_models.SkillSidecarExpectation()
 
     assert install_surface_sidecars.skill_version_status(None, "9.9.9") == (False, "missing; expected=9.9.9")
     assert install_surface_sidecars.skill_version_status("9.9.9\n", "9.9.9") == (True, "actual=9.9.9; expected=9.9.9")

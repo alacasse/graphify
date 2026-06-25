@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import platform_specs
-from tools.install_sandbox.platform_specs import InstallSurface
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_generated
+from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_state
 from tools.install_sandbox.surfaces import install_surface_statuses
+from tools.install_sandbox.targets import install_target_models
+from tools.install_sandbox.surfaces.install_surface_models import InstallSurface
 
 
 def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test detail") -> PackagedReferenceResolution:
@@ -16,14 +17,14 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 
 
 def expected_skill(root: str, relative: str) -> InstallSurface:
-    return InstallSurface(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+    return InstallSurface(root, relative, skill_sidecar_expectation=install_surface_models.SkillSidecarExpectation())
 
 
 def test_install_surface_generated_classifies_generated_file_relevance_decisions() -> None:
     skill_entry = expected_skill("home", ".codex/skills/graphify/SKILL.md")
     ordinary_entry = InstallSurface("project", "AGENTS.md")
     expected = (skill_entry, ordinary_entry)
-    expectation = platform_specs.GeneratedFileExpectation(
+    expectation = install_target_models.GeneratedFileExpectation(
         relative_substrings=("graphify",),
         text_suffixes=(".md",),
         content_markers=("Graphify",),
@@ -207,7 +208,7 @@ def test_install_surface_core_decides_file_fingerprint_from_observed_facts() -> 
             text=notes_text,
         ),
         "## graphify",
-        platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True),
+        install_surface_models.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True),
     )
 
     assert fingerprint["exists"] is True

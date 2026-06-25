@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox import install_surface_core
-from tools.install_sandbox import platform_specs
-from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_state
+from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath, InstallSurface
+from tools.install_sandbox.targets import install_target_models
 
 
 def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test detail") -> PackagedReferenceResolution:
@@ -14,15 +15,15 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 
 
 def expected_skill(root: str, relative: str) -> InstallSurface:
-    return InstallSurface(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+    return InstallSurface(root, relative, skill_sidecar_expectation=install_surface_models.SkillSidecarExpectation())
 
 
-def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
+def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
         marker=marker,
-        text_expectation=platform_specs.TextExpectation(
+        text_expectation=install_surface_models.TextExpectation(
             preserve_user_content=preserve_user_content,
             repair_stale_graphify_section=True,
             require_user_content_on_uninstall=preserve_user_content,
@@ -55,7 +56,7 @@ def test_install_surface_state_derives_ordered_idempotency_state_plan() -> None:
     ]
     assert plan[0].root_name == "project"
     assert plan[0].relative == Path("notes.md")
-    assert plan[0].marker == platform_specs.GRAPHIFY_MARKER
+    assert plan[0].marker == install_target_models.GRAPHIFY_MARKER
     assert plan[0].text_expectation is not None
     assert plan[0].text_expectation.preserve_user_content is True
     assert plan[1].root_name == "home"
@@ -91,7 +92,7 @@ def test_install_surface_state_derives_user_content_seed_plans() -> None:
     legacy_text_policy = ExpectedPath(
         "home",
         "legacy-notes.txt",
-        text_expectation=platform_specs.TextExpectation(preserve_user_content=True),
+        text_expectation=install_surface_models.TextExpectation(preserve_user_content=True),
     )
     no_preserve_text_section = section("project", "no-preserve.md")
     plain_surface = ExpectedPath("project", "plain.txt")
@@ -113,7 +114,7 @@ def test_install_surface_state_derives_user_content_seed_plans() -> None:
             relative=Path("stale-notes.md"),
             text=(
                 f"# User Notes\n\n{install_surface_state.USER_SENTINEL}\n\n"
-                f"{platform_specs.GRAPHIFY_MARKER}\n{install_surface_state.STALE_GRAPHIFY_SENTINEL}\n\n"
+                f"{install_target_models.GRAPHIFY_MARKER}\n{install_surface_state.STALE_GRAPHIFY_SENTINEL}\n\n"
                 "## User Section\nThis section should survive Graphify install and uninstall.\n"
             ),
         ),

@@ -10,9 +10,16 @@ from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
 try:
-    from ..platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry
+    from ..targets.install_target_catalog import ScenarioRegistry
+    from ..targets.install_target_defaults import default_install_target_catalog
+    from ..targets.install_target_models import DisposableArtifactScenarioSpec, Scenario
 except ImportError:  # pragma: no cover - direct script import fallback
-    from platform_specs import DEFAULT_SCENARIO_REGISTRY, DisposableArtifactScenarioSpec, Scenario, ScenarioRegistry  # type: ignore[no-redef]
+    from targets.install_target_catalog import ScenarioRegistry  # type: ignore[no-redef]
+    from targets.install_target_defaults import default_install_target_catalog  # type: ignore[no-redef]
+    from targets.install_target_models import DisposableArtifactScenarioSpec, Scenario  # type: ignore[no-redef]
+
+
+DEFAULT_SCENARIO_REGISTRY = default_install_target_catalog()
 
 
 @dataclass(frozen=True)

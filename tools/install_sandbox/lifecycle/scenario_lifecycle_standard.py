@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
-    from ..platform_specs import Scenario
+    from ..targets.install_target_models import Scenario
     from .scenario_lifecycle_support import (
         ScenarioLifecycleHooks,
         ScenarioRunContext,
@@ -13,7 +13,7 @@ try:
         prepare_scenario_run,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
-    from platform_specs import Scenario  # type: ignore[no-redef]
+    from targets.install_target_models import Scenario  # type: ignore[no-redef]
     from .scenario_lifecycle_support import (  # type: ignore[no-redef]
         ScenarioLifecycleHooks,
         ScenarioRunContext,

@@ -29,8 +29,8 @@ try:
     from .runtime import command_runner
     from .runtime import source_snapshot
     from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
-    from .platform_specs import (
-        DEFAULT_SCENARIO_REGISTRY,
+    from .targets.install_target_defaults import default_install_target_catalog
+    from .targets.install_target_models import (
         GRAPHIFY_MARKER,
         Scenario,
     )
@@ -50,8 +50,8 @@ except ImportError:
     from tools.install_sandbox.runtime import command_runner  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import source_snapshot  # type: ignore[no-redef]
     from tools.install_sandbox.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
-    from tools.install_sandbox.platform_specs import (
-        DEFAULT_SCENARIO_REGISTRY,
+    from tools.install_sandbox.targets.install_target_defaults import default_install_target_catalog  # type: ignore[no-redef]
+    from tools.install_sandbox.targets.install_target_models import (
         GRAPHIFY_MARKER,
         Scenario,
     )
@@ -85,7 +85,7 @@ StandardScenarioStages = scenario_lifecycle_support.StandardScenarioStages
 
 ROOTS = ROOT_REGISTRY.scenario_roots(RUNTIME_ROOTS)
 
-SCENARIO_REGISTRY = DEFAULT_SCENARIO_REGISTRY
+SCENARIO_REGISTRY = default_install_target_catalog()
 
 
 @functools.lru_cache(maxsize=None)

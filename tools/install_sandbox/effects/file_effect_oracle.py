@@ -14,7 +14,8 @@ try:
         resolve_install_surface_path,
     )
     from ..surfaces.install_surface_generated import GeneratedFileDecision
-    from ..platform_specs import InstallSurface, Scenario, TextExpectation
+    from ..surfaces.install_surface_models import InstallSurface, TextExpectation
+    from ..targets.install_target_models import Scenario
     from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
     try:
@@ -32,7 +33,8 @@ except ImportError:  # pragma: no cover - direct script import fallback
         resolve_install_surface_path,
     )
     from surfaces.install_surface_generated import GeneratedFileDecision  # type: ignore[no-redef]
-    from platform_specs import InstallSurface, Scenario, TextExpectation  # type: ignore[no-redef]
+    from surfaces.install_surface_models import InstallSurface, TextExpectation  # type: ignore[no-redef]
+    from targets.install_target_models import Scenario  # type: ignore[no-redef]
     from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
 
 

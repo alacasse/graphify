@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Literal
 
 try:
-    from .platform_specs import PlatformSpec
+    from .targets.install_target_models import PlatformSpec
 except ImportError:
-    from platform_specs import PlatformSpec
+    from targets.install_target_models import PlatformSpec  # type: ignore[no-redef]
 
 
 ReferenceResolutionStatus = Literal[

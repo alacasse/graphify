@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.install_sandbox.reference_resolution import resolve_packaged_references
-from tools.install_sandbox.platform_specs import PlatformSpec, ReferenceBundle
+from tools.install_sandbox.targets.install_target_models import PlatformSpec, ReferenceBundle
 
 
 class GraphifyMain:

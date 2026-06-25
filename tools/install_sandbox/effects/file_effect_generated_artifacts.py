@@ -15,7 +15,7 @@ try:
         text_mentions_expected_generated_marker,
     )
     from ..surfaces.install_surface_state import expected_generated_relative_keys
-    from ..platform_specs import Scenario
+    from ..targets.install_target_models import Scenario
     from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
     from file_walk import pruned_file_walk as walk_pruned_files  # type: ignore[no-redef]
@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         text_mentions_expected_generated_marker,
     )
     from surfaces.install_surface_state import expected_generated_relative_keys  # type: ignore[no-redef]
-    from platform_specs import Scenario  # type: ignore[no-redef]
+    from targets.install_target_models import Scenario  # type: ignore[no-redef]
     from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
 
 

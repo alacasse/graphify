@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support
-from tools.install_sandbox.platform_specs import (
-    DEFAULT_SCENARIO_REGISTRY,
+from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
     SelectedUniversalUninstallScenario,

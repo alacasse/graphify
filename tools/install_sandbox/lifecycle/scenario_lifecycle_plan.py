@@ -5,14 +5,14 @@ from typing import Callable
 
 try:
     from .. import validation_plan
-    from ..platform_specs import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario
+    from ..targets.install_target_models import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario
     from .scenario_lifecycle_disposable import run_disposable_artifact_scenario
     from .scenario_lifecycle_standard import run_scenario
     from .scenario_lifecycle_support import ScenarioLifecycleHooks
     from .scenario_lifecycle_universal import run_universal_uninstall_scenario
 except ImportError:  # pragma: no cover - direct script import fallback
     import validation_plan  # type: ignore[no-redef]
-    from platform_specs import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario  # type: ignore[no-redef]
+    from targets.install_target_models import DisposableArtifactScenarioSpec, SelectedUniversalUninstallScenario  # type: ignore[no-redef]
     from .scenario_lifecycle_disposable import run_disposable_artifact_scenario  # type: ignore[no-redef]
     from .scenario_lifecycle_standard import run_scenario  # type: ignore[no-redef]
     from .scenario_lifecycle_support import ScenarioLifecycleHooks  # type: ignore[no-redef]

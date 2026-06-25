@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from tools.install_sandbox.lifecycle import scenario_lifecycle_disposable
-from tools.install_sandbox.platform_specs import DisposableArtifactScenarioSpec, DisposableSeedFile
+from tools.install_sandbox.targets.install_target_models import DisposableArtifactScenarioSpec, DisposableSeedFile
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     HookFactory,
     artifact_names,

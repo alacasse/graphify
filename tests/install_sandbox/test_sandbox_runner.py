@@ -11,9 +11,10 @@ import pytest
 
 from tools.install_sandbox import sandbox_runner, status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
-from tools.install_sandbox.platform_specs import ExpectedPath, Scenario
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.runtime import command_runner, source_snapshot
+from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
+from tools.install_sandbox.targets.install_target_models import Scenario
 
 
 def test_parse_args_requires_platform_or_all() -> None:
@@ -48,10 +49,13 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
         if isinstance(node, ast.Import):
             module_imports.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
+            if node.module is not None:
+                module_imports.add(node.module)
             module_imports.update(alias.name for alias in node.names)
 
     assert "file_effects" not in module_imports
     assert "scenario_lifecycle" not in module_imports
+    assert "platform_specs" not in module_imports
     assert {
         "file_effect_generated_artifacts",
         "file_effect_oracle",

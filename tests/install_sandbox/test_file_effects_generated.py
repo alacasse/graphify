@@ -9,10 +9,10 @@ from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.surfaces import install_surface_generated
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.effects import scenario_file_effects_adapter
-from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets import install_target_models
+from tools.install_sandbox.targets.install_target_models import ExpectedPath, InstallSurface, Scenario
 
 from install_target_test_support import scenario_for
 
@@ -68,15 +68,15 @@ def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -
 
 
 def expected_skill(root: str, relative: str) -> InstallSurface:
-    return InstallSurface(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+    return InstallSurface(root, relative, skill_sidecar_expectation=install_target_models.SkillSidecarExpectation())
 
 
-def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
+def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
         marker=marker,
-        text_expectation=platform_specs.TextExpectation(
+        text_expectation=install_target_models.TextExpectation(
             preserve_user_content=preserve_user_content,
             repair_stale_graphify_section=True,
             require_user_content_on_uninstall=preserve_user_content,
@@ -93,12 +93,12 @@ def test_seeded_stale_section_must_be_replaced(oracle, roots) -> None:
     assert file_effect_state.STALE_GRAPHIFY_SENTINEL in seeded.read_text(encoding="utf-8")
     assert oracle.assert_expected_files(test_scenario)[0]["ok"] is False
 
-    seeded.write_text(f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n", encoding="utf-8")
+    seeded.write_text(f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n", encoding="utf-8")
     assert oracle.assert_expected_files(test_scenario)[0]["ok"] is True
 
 
 def test_text_policy_is_declared_not_inferred_from_known_file_names(oracle, roots) -> None:
-    known_without_policy = ExpectedPath("project", "AGENTS.md", marker=platform_specs.GRAPHIFY_MARKER)
+    known_without_policy = ExpectedPath("project", "AGENTS.md", marker=install_target_models.GRAPHIFY_MARKER)
     declared_random_path = section("project", "not-a-platform-file.txt", preserve_user_content=True)
     test_scenario = scenario("unit", known_without_policy, declared_random_path)
 
@@ -108,11 +108,11 @@ def test_text_policy_is_declared_not_inferred_from_known_file_names(oracle, root
     assert (roots["project"] / "not-a-platform-file.txt").exists()
 
     (roots["project"] / "AGENTS.md").write_text(
-        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     (roots["project"] / "not-a-platform-file.txt").write_text(
-        f"# Notes\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
 
@@ -127,7 +127,7 @@ def test_legacy_expected_path_with_text_policy_dispatches_as_text_section(oracle
     legacy_text_policy = ExpectedPath(
         "project",
         "notes.txt",
-        text_expectation=platform_specs.TextExpectation(preserve_user_content=True, require_user_content_on_uninstall=True),
+        text_expectation=install_target_models.TextExpectation(preserve_user_content=True, require_user_content_on_uninstall=True),
     )
     test_scenario = scenario("unit", legacy_text_policy)
 
@@ -141,7 +141,7 @@ def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(or
     legacy_text_policy = ExpectedPath(
         "project",
         "legacy-notes.txt",
-        text_expectation=platform_specs.TextExpectation(preserve_user_content=True),
+        text_expectation=install_target_models.TextExpectation(preserve_user_content=True),
     )
     no_preserve_text_section = section("project", "no-preserve.md")
     plain_surface = ExpectedPath("project", "plain.txt")
@@ -161,7 +161,7 @@ def test_seed_user_owned_content_writes_only_declared_preserved_text_surfaces(or
 
     assert (roots["project"] / "stale-notes.md").read_text(encoding="utf-8") == (
         f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n\n"
+        f"{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n\n"
         "## User Section\nThis section should survive Graphify install and uninstall.\n"
     )
     assert (roots["project"] / "legacy-notes.txt").read_text(encoding="utf-8") == (
@@ -181,7 +181,7 @@ def test_file_effect_state_seeds_user_owned_content(roots) -> None:
 
     assert (roots["project"] / "stale-notes.md").read_text(encoding="utf-8") == (
         f"# User Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n\n"
+        f"{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n\n"
         "## User Section\nThis section should survive Graphify install and uninstall.\n"
     )
 

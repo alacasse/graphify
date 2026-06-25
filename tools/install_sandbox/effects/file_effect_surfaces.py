@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 try:
-    from ..expected_effects import is_json_effect
+    from ..surfaces.install_surface_models import InstallSurface, TextExpectation, is_json_effect
     from ..surfaces.path_resolution import resolve_install_surface_path
     from ..surfaces.install_surface_statuses import (
         FileFingerprintObservation,
@@ -16,9 +16,9 @@ try:
         installed_surface_status_from_observation,
         uninstalled_surface_status_from_observation,
     )
-    from ..platform_specs import InstallSurface, Scenario, TextExpectation
+    from ..targets.install_target_models import Scenario
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import is_json_effect  # type: ignore[no-redef]
+    from surfaces.install_surface_models import InstallSurface, TextExpectation, is_json_effect  # type: ignore[no-redef]
     from surfaces.path_resolution import resolve_install_surface_path  # type: ignore[no-redef]
     from surfaces.install_surface_statuses import (  # type: ignore[no-redef]
         FileFingerprintObservation,
@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         installed_surface_status_from_observation,
         uninstalled_surface_status_from_observation,
     )
-    from platform_specs import InstallSurface, Scenario, TextExpectation  # type: ignore[no-redef]
+    from targets.install_target_models import Scenario  # type: ignore[no-redef]
 
 
 def _check_record(

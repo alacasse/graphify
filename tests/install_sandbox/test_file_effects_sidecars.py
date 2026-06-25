@@ -9,9 +9,9 @@ from tools.install_sandbox.effects import file_effect_generated_artifacts
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_sidecars
 from tools.install_sandbox.effects import file_effect_state
-from tools.install_sandbox import platform_specs
-from tools.install_sandbox.platform_specs import InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets import install_target_models
+from tools.install_sandbox.targets.install_target_models import InstallSurface, Scenario
 
 from install_target_test_support import expected_entry, scenario_for
 
@@ -68,14 +68,14 @@ def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -
 
 
 def expected_skill(root: str, relative: str) -> InstallSurface:
-    return InstallSurface(root, relative, skill_sidecar_expectation=platform_specs.SkillSidecarExpectation())
+    return InstallSurface(root, relative, skill_sidecar_expectation=install_target_models.SkillSidecarExpectation())
 
 
 def expected_skill_with_docs_sidecar(root: str, relative: str) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
-        skill_sidecar_expectation=platform_specs.SkillSidecarExpectation(
+        skill_sidecar_expectation=install_target_models.SkillSidecarExpectation(
             references_dir="docs",
             references_tmp_dir="docs.tmp",
             reference_pointer_pattern=r"docs/([A-Za-z0-9_.-]+\.md)\b",
@@ -83,12 +83,12 @@ def expected_skill_with_docs_sidecar(root: str, relative: str) -> InstallSurface
     )
 
 
-def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
+def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
         marker=marker,
-        text_expectation=platform_specs.TextExpectation(
+        text_expectation=install_target_models.TextExpectation(
             preserve_user_content=preserve_user_content,
             repair_stale_graphify_section=True,
             require_user_content_on_uninstall=preserve_user_content,
@@ -209,10 +209,10 @@ def test_agents_amp_and_antigravity_keep_distinct_agents_surface_facts() -> None
     antigravity_rules = expected_entry("antigravity", "project", "project", ".agents/rules/graphify.md")
     antigravity_workflow = expected_entry("antigravity", "project", "project", ".agents/workflows/graphify.md")
 
-    assert agents_user.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
-    assert amp_user.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
-    assert amp_project.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
-    assert antigravity_project_skill.skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert agents_user.skill_sidecar_expectation == install_target_models.SkillSidecarExpectation()
+    assert amp_user.skill_sidecar_expectation == install_target_models.SkillSidecarExpectation()
+    assert amp_project.skill_sidecar_expectation == install_target_models.SkillSidecarExpectation()
+    assert antigravity_project_skill.skill_sidecar_expectation == install_target_models.SkillSidecarExpectation()
     assert amp_user.relative != agents_user.relative
     assert antigravity_rules.skill_sidecar_expectation is None
     assert antigravity_workflow.skill_sidecar_expectation is None
@@ -484,7 +484,7 @@ def test_scenario_file_state_pins_expected_surface_and_tracked_sidecar_fingerpri
     expected_notes = section("project", "notes.md", preserve_user_content=True)
     skill_entry = expected_skill("home", ".codex/skills/graphify/SKILL.md")
     test_scenario = scenario("claude", expected_notes, skill_entry)
-    notes_text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\ninstalled\n"
+    notes_text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\ninstalled\n"
     skill_text = "See references/query.md.\n"
     version_text = "9.9.9"
     query_text = "# query\n"

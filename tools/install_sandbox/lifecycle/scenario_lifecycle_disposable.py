@@ -6,7 +6,7 @@ from pathlib import Path
 
 try:
     from .. import validation_plan
-    from ..platform_specs import DisposableArtifactScenarioSpec, Scenario
+    from ..targets.install_target_models import DisposableArtifactScenarioSpec, Scenario
     from .scenario_lifecycle_support import (
         DisposableArtifactOutcome,
         ScenarioLifecycleHooks,
@@ -15,7 +15,7 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script import fallback
     import validation_plan  # type: ignore[no-redef]
-    from platform_specs import DisposableArtifactScenarioSpec, Scenario  # type: ignore[no-redef]
+    from targets.install_target_models import DisposableArtifactScenarioSpec, Scenario  # type: ignore[no-redef]
     from .scenario_lifecycle_support import (  # type: ignore[no-redef]
         DisposableArtifactOutcome,
         ScenarioLifecycleHooks,

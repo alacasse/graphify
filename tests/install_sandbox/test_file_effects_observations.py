@@ -10,10 +10,10 @@ from tools.install_sandbox.effects import file_effect_generated_artifacts
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox.effects import file_effect_surfaces
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.surfaces import install_surface_statuses
-from tools.install_sandbox.platform_specs import ExpectedPath, InstallSurface, Scenario
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets import install_target_models
+from tools.install_sandbox.targets.install_target_models import ExpectedPath, InstallSurface, Scenario
 
 
 @pytest.fixture
@@ -62,12 +62,12 @@ def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -
     )
 
 
-def section(root: str, relative: str, marker: str = platform_specs.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
+def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
     return InstallSurface(
         root,
         relative,
         marker=marker,
-        text_expectation=platform_specs.TextExpectation(
+        text_expectation=install_target_models.TextExpectation(
             preserve_user_content=preserve_user_content,
             repair_stale_graphify_section=True,
             require_user_content_on_uninstall=preserve_user_content,
@@ -90,7 +90,7 @@ def check_by_relative(checks: list[dict[str, object]], relative: str) -> dict[st
 
 def test_file_effect_surfaces_file_fingerprint_observes_paths_and_delegates_to_core(tmp_path: Path) -> None:
     marker = "## graphify"
-    text_expectation = platform_specs.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True)
+    text_expectation = install_target_models.TextExpectation(preserve_user_content=True, repair_stale_graphify_section=True)
     missing = tmp_path / "missing.md"
     assert file_effect_surfaces.file_fingerprint(missing) == install_surface_statuses.file_fingerprint_from_observation(
         install_surface_statuses.FileFingerprintObservation(exists=False)
@@ -128,9 +128,9 @@ def test_assertion_detects_missing_file(oracle) -> None:
 
 
 def test_install_surface_alias_is_accepted_by_scenario_and_oracle(oracle, roots) -> None:
-    assert platform_specs.ExpectedPath is platform_specs.InstallSurface
+    assert install_target_models.ExpectedPath is install_target_models.InstallSurface
 
-    surface = platform_specs.InstallSurface("project", "surface.txt")
+    surface = install_target_models.InstallSurface("project", "surface.txt")
     (roots["project"] / "surface.txt").write_text("installed\n", encoding="utf-8")
     test_scenario = Scenario(
         platform="unit",
@@ -185,7 +185,7 @@ def test_install_surface_kind_status_contracts(oracle, roots) -> None:
 def test_assert_expected_files_uses_surface_module_installed_surface_observation(oracle, roots, monkeypatch) -> None:
     surface = section("project", "virtual-notes.md", preserve_user_content=True)
     path = roots["project"] / "virtual-notes.md"
-    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n"
     observed = install_surface_statuses.InstallSurfaceObservation(
         path=path,
         exists=True,
@@ -219,7 +219,7 @@ def test_assert_expected_files_uses_surface_module_installed_surface_observation
 def test_oracle_installed_surface_observation_override_affects_status_and_assertions(oracle, roots, monkeypatch) -> None:
     surface = section("project", "virtual-notes.md", preserve_user_content=True)
     path = roots["project"] / "virtual-notes.md"
-    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n"
     observed = install_surface_statuses.InstallSurfaceObservation(
         path=path,
         exists=True,
@@ -257,7 +257,7 @@ def test_oracle_installed_surface_observation_override_affects_status_and_assert
 def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
-    text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\nnew section\n"
+    text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n"
     path.write_text(text, encoding="utf-8")
     captured: dict[str, object] = {}
 
@@ -287,15 +287,15 @@ def test_oracle_renders_installed_surface_observations_as_assertion_records(orac
         "hooks.json",
         content_kind="json",
         marker="graphify",
-        json_expectation=platform_specs.JsonExpectation(
+        json_expectation=install_target_models.JsonExpectation(
             schema_name="unit_hooks",
-            hooks=(platform_specs.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
+            hooks=(install_target_models.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
         ),
     )
     (roots["project"] / "wrong-kind").write_text("not a directory\n", encoding="utf-8")
     (roots["project"] / "notes.md").write_text(
         f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
+        f"{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     (roots["project"] / "hooks.json").write_text(
@@ -366,7 +366,7 @@ def test_uninstall_surface_status_contracts(oracle, roots) -> None:
     assert oracle.uninstalled_entry_status(text_section) == (True, "graphify_removed=True; user_content_preserved=True")
 
     notes_path.write_text(
-        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
+        f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
@@ -472,14 +472,14 @@ def test_oracle_renders_uninstalled_surface_observations_as_assertion_records(or
     repaired_text = InstallSurface(
         "project",
         "repaired.md",
-        marker=platform_specs.GRAPHIFY_MARKER,
-        text_expectation=platform_specs.TextExpectation(remove_graphify_section_on_uninstall=True),
+        marker=install_target_models.GRAPHIFY_MARKER,
+        text_expectation=install_target_models.TextExpectation(remove_graphify_section_on_uninstall=True),
     )
     kept = InstallSurface("project", "kept.txt", remove_on_uninstall=False)
     (roots["project"] / "plain.txt").write_text("still installed\n", encoding="utf-8")
     (roots["project"] / "notes.md").write_text(
         f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
+        f"{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
     (roots["project"] / "repaired.md").write_text(
@@ -535,7 +535,7 @@ def test_oracle_captures_fingerprint_observations_without_assertion_record_shape
     (roots["project"] / "installed-dir").mkdir()
     notes_text = (
         f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n"
-        f"{platform_specs.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n"
+        f"{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n"
     )
     (roots["project"] / "notes.md").write_text(notes_text, encoding="utf-8")
     test_scenario = scenario("unit", missing, directory, text_surface)
@@ -560,13 +560,13 @@ def test_oracle_captures_fingerprint_observations_without_assertion_record_shape
 def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(oracle, roots, monkeypatch) -> None:
     surface = section("project", "virtual-notes.md", preserve_user_content=True)
     path = roots["project"] / "virtual-notes.md"
-    calls: list[tuple[Path, str | None, platform_specs.TextExpectation | None]] = []
+    calls: list[tuple[Path, str | None, install_target_models.TextExpectation | None]] = []
 
     def file_fingerprint(
         self: file_effect_oracle.FileEffectOracle,
         observed_path: Path,
         marker: str | None = None,
-        text_expectation: platform_specs.TextExpectation | None = None,
+        text_expectation: install_target_models.TextExpectation | None = None,
     ) -> dict[str, object]:
         calls.append((observed_path, marker, text_expectation))
         return {"observed": observed_path.name, "marker": marker}
@@ -575,12 +575,12 @@ def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(orac
 
     state = oracle.scenario_file_state(scenario("unit", surface))
 
-    assert calls == [(path, platform_specs.GRAPHIFY_MARKER, surface.text_expectation)]
+    assert calls == [(path, install_target_models.GRAPHIFY_MARKER, surface.text_expectation)]
     assert not path.exists()
     assert state == {
         "project/virtual-notes.md": {
             "observed": "virtual-notes.md",
-            "marker": platform_specs.GRAPHIFY_MARKER,
+            "marker": install_target_models.GRAPHIFY_MARKER,
         }
     }
 
@@ -588,12 +588,12 @@ def test_scenario_file_state_uses_oracle_file_fingerprint_observation_point(orac
 def test_file_effect_state_captures_planned_state_entries(roots) -> None:
     surface = section("project", "virtual-notes.md", preserve_user_content=True)
     test_scenario = scenario("unit", surface)
-    calls: list[tuple[Path, str | None, platform_specs.TextExpectation | None]] = []
+    calls: list[tuple[Path, str | None, install_target_models.TextExpectation | None]] = []
 
     def file_fingerprint(
         observed_path: Path,
         marker: str | None = None,
-        text_expectation: platform_specs.TextExpectation | None = None,
+        text_expectation: install_target_models.TextExpectation | None = None,
     ) -> dict[str, object]:
         calls.append((observed_path, marker, text_expectation))
         return {"observed": observed_path.name, "marker": marker}
@@ -606,23 +606,23 @@ def test_file_effect_state_captures_planned_state_entries(roots) -> None:
         file_fingerprint,
     )
 
-    assert calls == [(roots["project"] / "virtual-notes.md", platform_specs.GRAPHIFY_MARKER, surface.text_expectation)]
+    assert calls == [(roots["project"] / "virtual-notes.md", install_target_models.GRAPHIFY_MARKER, surface.text_expectation)]
     assert state == {
         "project/virtual-notes.md": {
             "observed": "virtual-notes.md",
-            "marker": platform_specs.GRAPHIFY_MARKER,
+            "marker": install_target_models.GRAPHIFY_MARKER,
         }
     }
 
 
 def test_oracle_dispatches_named_effect_types(oracle, roots) -> None:
-    skill = platform_specs.SkillEffect("project", ".unit/graphify/SKILL.md")
-    hooks = platform_specs.JsonHooksEffect(
+    skill = install_target_models.SkillEffect("project", ".unit/graphify/SKILL.md")
+    hooks = install_target_models.JsonHooksEffect(
         "project",
         ".unit/hooks.json",
-        json_expectation=platform_specs.JsonExpectation(
+        json_expectation=install_target_models.JsonExpectation(
             schema_name="unit_hooks",
-            hooks=(platform_specs.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
+            hooks=(install_target_models.JsonHookExpectation("PreToolUse", "Bash", "bash_hook_present"),),
         ),
     )
     write_skill(roots["project"], ".unit/graphify/SKILL.md", version="9.9.9")

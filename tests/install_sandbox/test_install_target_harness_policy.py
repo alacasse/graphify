@@ -52,10 +52,13 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
         evidence_path="evidence/synthetic.md",
     )
     specs = {
-        "runtime-one": install_target_models.PlatformSpec(name="runtime-one", target_runtime_validation=(validation,)),
-        "runtime-two": install_target_models.PlatformSpec(name="runtime-two", target_runtime_validation=(validation,)),
+        "runtime-one": install_target_models.PlatformSpec(
+            name="runtime-one", target_runtime_validation=(validation,)
+        ),
+        "runtime-two": install_target_models.PlatformSpec(
+            name="runtime-two", target_runtime_validation=(validation,)
+        ),
     }
-    registry = install_target_catalog.ScenarioRegistry(specs)
     expected_sections = [
         {
             "section_title": "Synthetic Runtime Validation",
@@ -67,19 +70,23 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
         }
     ]
 
-    assert install_target_harness_policy.target_runtime_validation_sections(specs) == expected_sections
-    assert registry.target_runtime_validation_sections() == expected_sections
+    assert (
+        install_target_harness_policy.target_runtime_validation_sections(specs) == expected_sections
+    )
     assert (
         install_target_harness_policy.target_runtime_validation_sections(
             {"plain": install_target_models.PlatformSpec(name="plain")},
         )
         == []
     )
-    assert install_target_catalog.ScenarioRegistry(
-        {"plain": install_target_models.PlatformSpec(name="plain")},
-    ).target_runtime_validation_sections() == []
-    assert install_target_defaults.target_runtime_validation_sections() == REGISTRY.target_runtime_validation_sections()
-    assert platform_specs.target_runtime_validation_sections() == REGISTRY.target_runtime_validation_sections()
+    assert (
+        install_target_defaults.target_runtime_validation_sections()
+        == install_target_harness_policy.target_runtime_validation_sections(REGISTRY.specs)
+    )
+    assert (
+        platform_specs.target_runtime_validation_sections()
+        == install_target_harness_policy.target_runtime_validation_sections(REGISTRY.specs)
+    )
 
 
 def test_disposable_artifact_scenarios_are_declared_by_scope() -> None:
@@ -125,7 +132,9 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
             scopes={"project": installable_scope},
             universal_uninstall_scopes=("project",),
         ),
-        "beta": install_target_models.PlatformSpec(name="beta", scopes={"project": installable_scope}),
+        "beta": install_target_models.PlatformSpec(
+            name="beta", scopes={"project": installable_scope}
+        ),
     }
 
     selected = install_target_harness_policy.universal_uninstall_scenarios(
@@ -168,10 +177,15 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
         }
     )
 
-    assert registry.selected_targets(all_platforms=True, target_name=None) == ["alpha", "beta", "unsupported"]
-    assert [(scenario.platform, scenario.scope) for scenario in registry.target_scenarios("alpha", "project")] == [
-        ("alpha", "project")
+    assert registry.selected_targets(all_platforms=True, target_name=None) == [
+        "alpha",
+        "beta",
+        "unsupported",
     ]
+    assert [
+        (scenario.platform, scenario.scope)
+        for scenario in registry.target_scenarios("alpha", "project")
+    ] == [("alpha", "project")]
     assert registry.coverage_records(["alpha", "unsupported"], "project") == [
         {
             "platform": "alpha",
@@ -211,11 +225,15 @@ def test_catalog_platform_selection_aliases_preserve_compatibility_behavior() ->
         }
     )
 
-    assert registry.selected_platforms(all_platforms=False, platform_name="alpha") == registry.selected_targets(
+    assert registry.selected_platforms(
+        all_platforms=False, platform_name="alpha"
+    ) == registry.selected_targets(
         all_platforms=False,
         target_name="alpha",
     )
-    assert registry.platform_scenarios("alpha", "project") == registry.target_scenarios("alpha", "project")
+    assert registry.platform_scenarios("alpha", "project") == registry.target_scenarios(
+        "alpha", "project"
+    )
 
 
 def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> None:
@@ -264,7 +282,6 @@ def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> No
         disposable_artifact_specs=(disposable,),
     )
 
-    selected = registry.universal_uninstall_scenarios(["alpha", "beta"], "project")
     owner_selected = install_target_harness_policy.universal_uninstall_scenarios(
         registry.specs,
         registry.universal_uninstall_specs,
@@ -272,6 +289,7 @@ def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> No
         "project",
     )
 
+    selected = registry.universal_uninstall_scenarios(["alpha", "beta"], "project")
     assert selected == owner_selected
     assert len(selected) == 1
     assert selected[0].spec is universal
@@ -288,6 +306,37 @@ def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> No
         registry.validate_roots({"home"})
 
 
+def test_catalog_runtime_and_risk_note_wrappers_preserve_compatibility_behavior() -> None:
+    validation = install_target_models.TargetRuntimeValidationSpec(
+        section_title="Synthetic Runtime Validation",
+        status="declared-only",
+        strategy="inspect generated payloads",
+        targets=("runtime",),
+        notes=("synthetic policy wrapper check",),
+    )
+    registry = install_target_catalog.InstallTargetCatalog(
+        {
+            "runtime": install_target_models.InstallTargetSpec(
+                name="runtime",
+                target_runtime_validation=(validation,),
+                simulated_linux_layout=True,
+            )
+        }
+    )
+
+    assert (
+        registry.target_runtime_validation_sections()
+        == install_target_harness_policy.target_runtime_validation_sections(registry.specs)
+    )
+    assert registry.risk_notes(
+        "declared", platform_name="runtime"
+    ) == install_target_harness_policy.risk_notes(
+        registry.specs,
+        "declared",
+        platform_name="runtime",
+    )
+
+
 def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         specs={
@@ -298,7 +347,9 @@ def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> Non
                         install_command=("tool", "install"),
                         uninstall_command=None,
                         cwd_root="declared-cwd",
-                        expected=(install_target_models.ExpectedPath("declared-output", "artifact.txt"),),
+                        expected=(
+                            install_target_models.ExpectedPath("declared-output", "artifact.txt"),
+                        ),
                     )
                 },
             )
@@ -330,7 +381,9 @@ def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
                     install_command=("tool", "install"),
                     uninstall_command=None,
                     cwd_root="declared-cwd",
-                    expected=(install_target_models.ExpectedPath("declared-output", "artifact.txt"),),
+                    expected=(
+                        install_target_models.ExpectedPath("declared-output", "artifact.txt"),
+                    ),
                 )
             },
         )
@@ -369,7 +422,9 @@ def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
     )
     install_target_defaults.validate_roots({"home", "project", "user_cwd"})
     with pytest.raises(RuntimeError, match="declared-output"):
-        install_target_harness_policy.validate_roots(specs, universal_specs, disposable_specs, {"declared-cwd"})
+        install_target_harness_policy.validate_roots(
+            specs, universal_specs, disposable_specs, {"declared-cwd"}
+        )
 
 
 def test_default_registry_does_not_own_universal_uninstall_selection() -> None:

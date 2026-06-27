@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 try:
+    from . import install_target_harness_policy as _harness_policy
     from .install_target_catalog import ScenarioRegistry
     from .install_target_models import (
         DisposableArtifactScenarioSpec,
@@ -11,6 +12,7 @@ try:
         SelectedUniversalUninstallScenario,
     )
 except ImportError:  # pragma: no cover - direct script import fallback
+    from targets import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
     from targets.install_target_catalog import ScenarioRegistry  # type: ignore[no-redef]
     from targets.install_target_models import (  # type: ignore[no-redef]
         DisposableArtifactScenarioSpec,
@@ -122,7 +124,9 @@ def equivalent_install_command(scenario: Scenario) -> tuple[str, ...] | None:
     return _load_default_scenario_registry().equivalent_install_command(scenario)
 
 
-def equivalent_install_variants(scenario: Scenario) -> tuple[InstallCommandVariant, InstallCommandVariant] | None:
+def equivalent_install_variants(
+    scenario: Scenario,
+) -> tuple[InstallCommandVariant, InstallCommandVariant] | None:
     return _load_default_scenario_registry().equivalent_install_variants(scenario)
 
 
@@ -139,20 +143,37 @@ def make_scenario(platform_name: str, scope: str) -> Scenario | None:
 
 
 def target_runtime_validation_sections() -> list[dict[str, object]]:
-    return _load_default_scenario_registry().target_runtime_validation_sections()
+    registry = _load_default_scenario_registry()
+    return _harness_policy.target_runtime_validation_sections(registry.specs)
 
 
-def universal_uninstall_scenarios(platforms: list[str], scope: str) -> list[SelectedUniversalUninstallScenario]:
-    return _load_default_scenario_registry().universal_uninstall_scenarios(platforms, scope)
+def universal_uninstall_scenarios(
+    platforms: list[str], scope: str
+) -> list[SelectedUniversalUninstallScenario]:
+    registry = _load_default_scenario_registry()
+    return _harness_policy.universal_uninstall_scenarios(
+        registry.specs,
+        registry.universal_uninstall_specs,
+        platforms,
+        scope,
+    )
 
 
 def disposable_artifact_scenarios(scope: str) -> list[DisposableArtifactScenarioSpec]:
-    return _load_default_scenario_registry().disposable_artifact_scenarios(scope)
+    registry = _load_default_scenario_registry()
+    return _harness_policy.disposable_artifact_scenarios(registry.disposable_artifact_specs, scope)
 
 
 def validate_roots(declared_roots: set[str]) -> None:
-    _load_default_scenario_registry().validate_roots(declared_roots)
+    registry = _load_default_scenario_registry()
+    _harness_policy.validate_roots(
+        registry.specs,
+        registry.universal_uninstall_specs,
+        registry.disposable_artifact_specs,
+        declared_roots,
+    )
 
 
 def risk_notes(*notes: str, platform_name: str | None = None) -> tuple[str, ...]:
-    return _load_default_scenario_registry().risk_notes(*notes, platform_name=platform_name)
+    registry = _load_default_scenario_registry()
+    return _harness_policy.risk_notes(registry.specs, *notes, platform_name=platform_name)

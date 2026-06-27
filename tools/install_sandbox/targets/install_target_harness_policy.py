@@ -233,6 +233,20 @@ def selected_disposable_artifact_scenarios(
     return tuple(disposable_artifact_scenarios(specs, scope))
 
 
+def validate_selected_harness_policy_roots(
+    registry: object,
+    policy: HarnessPolicy,
+    declared_roots: Iterable[str],
+) -> None:
+    selected_policy = HarnessPolicy(
+        universal_uninstall_specs=getattr(registry, "universal_uninstall_specs", ()) or policy.universal_uninstall_specs,
+        disposable_artifact_specs=getattr(registry, "disposable_artifact_specs", ()) or policy.disposable_artifact_specs,
+        runtime_limitation_sections=policy.runtime_limitation_sections,
+        target_runtime_verification=policy.target_runtime_verification,
+    )
+    selected_policy.validate_roots(declared_roots)
+
+
 def target_runtime_validation_sections(specs: dict[str, PlatformSpec]) -> list[dict[str, object]]:
     return _dedupe_runtime_sections(
         validation

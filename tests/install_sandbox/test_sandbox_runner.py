@@ -11,13 +11,20 @@ from types import SimpleNamespace
 import pytest
 
 from tools.install_sandbox import sandbox_runner, status
+from tools.install_sandbox.harness_specs import SandboxRootRegistry, SandboxRootSpec
 from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.runtime import command_runner, source_snapshot
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
-from tools.install_sandbox.targets.install_target_models import Scenario
+from tools.install_sandbox.targets.install_target_models import (
+    DisposableArtifactScenarioSpec,
+    PlatformSpec,
+    Scenario,
+    ScopeSpec,
+    UniversalUninstallScenarioSpec,
+)
 
 
 def test_parse_args_requires_platform_or_all() -> None:
@@ -96,6 +103,98 @@ def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_pa
     assert env["GRAPHIFY_PROJECT"] == str(project)
     assert env["PATH"].startswith(str(home / ".local" / "bin"))
     assert env["PATH"].endswith(":/usr/bin")
+
+
+def test_preflight_uses_explicit_target_root_validation_owner(tmp_path) -> None:
+    calls: list[tuple[str, set[str]]] = []
+
+    class Registry:
+        def validate_target_roots(self, declared_roots: set[str]) -> None:
+            calls.append(("target", declared_roots))
+
+        def validate_roots(self, declared_roots: set[str]) -> None:
+            raise AssertionError("preflight should not use combined root validation when target owner exists")
+
+    root_registry = SandboxRootRegistry(
+        (
+            SandboxRootSpec("home", str(tmp_path / "home"), reset=True),
+            SandboxRootSpec("xdg_config_home", str(tmp_path / "home" / ".config")),
+            SandboxRootSpec("project", str(tmp_path / "project"), reset=True),
+            SandboxRootSpec("user_cwd", str(tmp_path / "user-cwd"), reset=True),
+            SandboxRootSpec("repo_mount", str(tmp_path / "repo")),
+            SandboxRootSpec("src", str(tmp_path / "src")),
+            SandboxRootSpec("output", str(tmp_path / "out"), mount_mode="rw"),
+        )
+    )
+    run_environment = SandboxRunEnvironment(root_registry=root_registry, scenario_registry=Registry())
+
+    run_environment.preflight()
+
+    assert calls == [("target", {"home", "project", "user_cwd"})]
+
+
+def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) -> None:
+    root_registry = SandboxRootRegistry(
+        (
+            SandboxRootSpec("home", str(tmp_path / "home"), reset=True),
+            SandboxRootSpec("xdg_config_home", str(tmp_path / "home" / ".config")),
+            SandboxRootSpec("project", str(tmp_path / "project"), reset=True),
+            SandboxRootSpec("user_cwd", str(tmp_path / "user-cwd"), reset=True),
+            SandboxRootSpec("repo_mount", str(tmp_path / "repo")),
+            SandboxRootSpec("src", str(tmp_path / "src")),
+            SandboxRootSpec("output", str(tmp_path / "out"), mount_mode="rw"),
+        )
+    )
+    registry = sandbox_runner.validation_plan.InstallTargetCatalog(
+        {
+            "alpha": PlatformSpec(
+                name="alpha",
+                scopes={
+                    "project": ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(ExpectedPath("project", "installed.txt"),),
+                    )
+                },
+                universal_uninstall_scopes=("project",),
+            )
+        },
+        universal_uninstall_specs=(
+            UniversalUninstallScenarioSpec(
+                scenario_id="custom-uninstall",
+                platform_label="custom",
+                scope="project",
+                command=("tool", "uninstall"),
+                cwd_root="missing-universal-root",
+                eligible_platform_scope="project",
+            ),
+        ),
+        disposable_artifact_specs=(
+            DisposableArtifactScenarioSpec(
+                scenario_id="custom-disposable",
+                platform_label="custom",
+                scope="project",
+                command=("tool", "purge"),
+                cwd_root="project",
+                artifact_subdir="custom-disposable",
+                disposable_path_root="missing-disposable-root",
+                disposable_path_relative="cache",
+                seed_files=(),
+                scope_eligibility=("project",),
+                risk_note="custom disposable artifact policy",
+            ),
+        ),
+    )
+    run_environment = SandboxRunEnvironment(root_registry=root_registry, scenario_registry=registry)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_environment.preflight()
+
+    message = str(excinfo.value)
+    assert "unknown harness policy root declaration" in message
+    assert "missing-universal-root" in message
+    assert "missing-disposable-root" in message
 
 
 def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, tmp_path) -> None:

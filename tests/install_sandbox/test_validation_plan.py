@@ -457,6 +457,51 @@ def test_harness_policy_validates_owned_roots() -> None:
         policy.validate_roots({"project"})
 
 
+def test_build_validation_plan_validates_registry_specific_synthetic_policy_roots() -> None:
+    registry = install_target_catalog.ScenarioRegistry(
+        {
+            "alpha": install_target_models.PlatformSpec(
+                name="alpha",
+                scopes={"project": _scope("alpha.txt")},
+                universal_uninstall_scopes=("project",),
+            ),
+        },
+        universal_uninstall_specs=(
+            install_target_models.UniversalUninstallScenarioSpec(
+                scenario_id="custom-uninstall",
+                platform_label="custom",
+                scope="project",
+                command=("tool", "uninstall"),
+                cwd_root="missing-universal-root",
+                eligible_platform_scope="project",
+            ),
+        ),
+        disposable_artifact_specs=(
+            install_target_models.DisposableArtifactScenarioSpec(
+                scenario_id="custom-disposable",
+                platform_label="custom",
+                scope="project",
+                command=("tool", "purge"),
+                cwd_root="project",
+                artifact_subdir="custom-disposable",
+                disposable_path_root="missing-disposable-root",
+                disposable_path_relative="cache",
+                seed_files=(),
+                scope_eligibility=("project",),
+                risk_note="custom disposable artifact policy",
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
+
+    message = str(excinfo.value)
+    assert "unknown harness policy root declaration" in message
+    assert "missing-universal-root" in message
+    assert "missing-disposable-root" in message
+
+
 def test_validation_plan_supports_direct_script_import_fallback() -> None:
     result = subprocess.run(
         [

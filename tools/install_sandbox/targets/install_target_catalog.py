@@ -145,7 +145,18 @@ class ScenarioRegistry:
     def target_runtime_validation_sections(self) -> list[dict[str, object]]:
         return _harness_policy.target_runtime_validation_sections(self.specs)
 
+    def validate_target_roots(self, declared_roots: set[str]) -> None:
+        unknown: set[str] = set()
+        for platform in self.specs.values():
+            for scope in platform.scopes.values():
+                if scope.cwd_root not in declared_roots:
+                    unknown.add(scope.cwd_root)
+                unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)
+        if unknown:
+            raise RuntimeError(f"unknown sandbox root declaration(s): {', '.join(sorted(unknown))}")
+
     def validate_roots(self, declared_roots: set[str]) -> None:
+        self.validate_target_roots(declared_roots)
         _harness_policy.validate_roots(
             self.specs,
             self.universal_uninstall_specs,

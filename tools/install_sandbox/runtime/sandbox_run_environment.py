@@ -381,8 +381,16 @@ class SandboxRunEnvironment:
         )
 
     def preflight(self) -> dict[str, object]:
-        self.scenario_registry.validate_roots(self.root_registry.install_surface_root_names())
-        validation_plan.DEFAULT_HARNESS_POLICY.validate_roots(self.root_registry.install_surface_root_names())
+        declared_roots = self.root_registry.install_surface_root_names()
+        if hasattr(self.scenario_registry, "validate_target_roots"):
+            self.scenario_registry.validate_target_roots(declared_roots)
+        else:
+            self.scenario_registry.validate_roots(declared_roots)
+        validation_plan.validate_policy_owned_roots(
+            self.scenario_registry,
+            validation_plan.DEFAULT_HARNESS_POLICY,
+            declared_roots,
+        )
         for root in self.root_registry.roots:
             path = self.runtime_roots[root.name]
             if root.reset or root.mount_mode == "rw" or root.name == "xdg_config_home":
@@ -405,4 +413,3 @@ class SandboxRunEnvironment:
         if not all(bool(checks[key]) for key in required_keys):
             raise RuntimeError(f"sandbox invariant failed: {checks}")
         return checks
-

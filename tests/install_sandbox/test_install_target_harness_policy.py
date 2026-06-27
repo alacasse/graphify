@@ -288,6 +288,39 @@ def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> No
         registry.validate_roots({"home"})
 
 
+def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> None:
+    registry = install_target_catalog.ScenarioRegistry(
+        specs={
+            "rooted": install_target_models.PlatformSpec(
+                name="rooted",
+                scopes={
+                    "project": install_target_models.ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="declared-cwd",
+                        expected=(install_target_models.ExpectedPath("declared-output", "artifact.txt"),),
+                    )
+                },
+            )
+        },
+        universal_uninstall_specs=(
+            install_target_models.UniversalUninstallScenarioSpec(
+                scenario_id="universal",
+                platform_label="combo",
+                scope="project",
+                command=("tool", "uninstall"),
+                cwd_root="policy-cwd",
+                eligible_platform_scope="project",
+            ),
+        ),
+        disposable_artifact_specs=(),
+    )
+
+    registry.validate_target_roots({"declared-cwd", "declared-output"})
+    with pytest.raises(RuntimeError, match=r"unknown sandbox root declaration\(s\): policy-cwd"):
+        registry.validate_roots({"declared-cwd", "declared-output"})
+
+
 def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
     specs = {
         "rooted": install_target_models.PlatformSpec(

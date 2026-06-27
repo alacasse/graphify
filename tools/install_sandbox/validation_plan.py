@@ -189,6 +189,14 @@ def target_runtime_validation_sections(
     return _harness_policy.selected_target_runtime_validation_sections(registry, platforms, policy)
 
 
+def validate_policy_owned_roots(
+    registry: InstallTargetCatalog,
+    policy: HarnessPolicy,
+    declared_roots: Iterable[str],
+) -> None:
+    _harness_policy.validate_selected_harness_policy_roots(registry, policy, declared_roots)
+
+
 def _coverage_summary(
     *,
     platforms: tuple[str, ...],
@@ -219,9 +227,11 @@ def build_validation_plan(
     root_registry: SandboxRootRegistry = DEFAULT_SANDBOX_ROOT_REGISTRY,
 ) -> ValidationPlan:
     declared_roots = root_registry.install_surface_root_names()
-    if hasattr(registry, "validate_roots"):
+    if hasattr(registry, "validate_target_roots"):
+        registry.validate_target_roots(declared_roots)
+    elif hasattr(registry, "validate_roots"):
         registry.validate_roots(declared_roots)
-    policy.validate_roots(declared_roots)
+    validate_policy_owned_roots(registry, policy, declared_roots)
 
     selected_targets = selected_platforms(
         registry,

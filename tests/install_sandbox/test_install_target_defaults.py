@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from tools.install_sandbox import platform_specs
+from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
+from tools.install_sandbox.targets import install_target_catalog, install_target_models
 from tools.install_sandbox.targets import install_target_defaults
 
 from install_target_test_support import REGISTRY
@@ -39,16 +41,16 @@ def test_install_target_module_helpers_use_default_catalog_seam() -> None:
 
 
 def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    registry = platform_specs.ScenarioRegistry(
+    registry = install_target_catalog.ScenarioRegistry(
         {
-            "cached-target": platform_specs.PlatformSpec(
+            "cached-target": install_target_models.PlatformSpec(
                 name="cached-target",
                 scopes={
-                    "project": platform_specs.ScopeSpec(
+                    "project": install_target_models.ScopeSpec(
                         install_command=("tool", "install"),
                         uninstall_command=None,
                         cwd_root="project",
-                        expected=(platform_specs.ExpectedPath("project", "cached.txt"),),
+                        expected=(ExpectedPath("project", "cached.txt"),),
                     )
                 },
             )
@@ -67,16 +69,16 @@ def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest
 
 def test_lazy_default_catalog_exports_share_one_cache_for_compatibility_names(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
-    registry = platform_specs.ScenarioRegistry(
+    registry = install_target_catalog.ScenarioRegistry(
         {
-            "cached-target": platform_specs.PlatformSpec(
+            "cached-target": install_target_models.PlatformSpec(
                 name="cached-target",
                 scopes={
-                    "project": platform_specs.ScopeSpec(
+                    "project": install_target_models.ScopeSpec(
                         install_command=("tool", "install"),
                         uninstall_command=None,
                         cwd_root="project",
-                        expected=(platform_specs.InstallSurface("project", "cached.txt"),),
+                        expected=(install_target_models.InstallSurface("project", "cached.txt"),),
                     )
                 },
             )

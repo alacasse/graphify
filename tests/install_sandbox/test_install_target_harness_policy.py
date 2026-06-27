@@ -13,7 +13,7 @@ from tools.install_sandbox.targets import (
 from install_target_test_support import REGISTRY
 
 
-def test_synthetic_policy_scenario_ids() -> None:
+def test_synthetic_policy_scenario_ids_are_owned_by_harness_policy() -> None:
     assert (
         install_target_harness_policy.universal_uninstall_scenario_id(
             REGISTRY.universal_uninstall_specs,
@@ -27,8 +27,19 @@ def test_synthetic_policy_scenario_ids() -> None:
         )
         == "purge-disposable-graphify-out"
     )
-    assert REGISTRY.universal_uninstall_scenario_id("project") == "universal-uninstall-project"
-    assert REGISTRY.purge_disposable_graphify_out_scenario_id() == "purge-disposable-graphify-out"
+
+
+def test_catalog_synthetic_policy_ids_are_compatibility_wrappers() -> None:
+    owner_uninstall_id = install_target_harness_policy.universal_uninstall_scenario_id(
+        REGISTRY.universal_uninstall_specs,
+        "project",
+    )
+    owner_disposable_id = install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
+        REGISTRY.disposable_artifact_specs,
+    )
+
+    assert REGISTRY.universal_uninstall_scenario_id("project") == owner_uninstall_id
+    assert REGISTRY.purge_disposable_graphify_out_scenario_id() == owner_disposable_id
 
 
 def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
@@ -131,7 +142,83 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
     assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha"]
 
 
-def test_catalog_facade_boundary_preserves_selection_and_synthetic_behavior() -> None:
+def test_catalog_boundary_preserves_target_selection_behavior() -> None:
+    installable_scope = install_target_models.ScopeSpec(
+        install_command=("tool", "install"),
+        uninstall_command=("tool", "uninstall"),
+        cwd_root="project",
+        expected=(install_target_models.InstallSurface("project", "installed.txt"),),
+    )
+    registry = install_target_catalog.InstallTargetCatalog(
+        {
+            "alpha": install_target_models.InstallTargetSpec(
+                name="alpha",
+                scopes={"project": installable_scope},
+                universal_uninstall_scopes=("project",),
+            ),
+            "beta": install_target_models.InstallTargetSpec(
+                name="beta",
+                scopes={"project": installable_scope},
+                universal_uninstall_scopes=("project",),
+            ),
+            "unsupported": install_target_models.InstallTargetSpec(
+                name="unsupported",
+                unsupported_scopes={"project": "project install is not supported"},
+            ),
+        }
+    )
+
+    assert registry.selected_targets(all_platforms=True, target_name=None) == ["alpha", "beta", "unsupported"]
+    assert [(scenario.platform, scenario.scope) for scenario in registry.target_scenarios("alpha", "project")] == [
+        ("alpha", "project")
+    ]
+    assert registry.coverage_records(["alpha", "unsupported"], "project") == [
+        {
+            "platform": "alpha",
+            "scope": "project",
+            "status": "runnable",
+            "scenario_id": "alpha-project",
+            "install_command": ["tool", "install"],
+            "uninstall_command": ["tool", "uninstall"],
+            "generic_direct_equivalence": {
+                "status": "not_applicable",
+                "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
+            },
+            "risk_notes": [],
+        },
+        {
+            "platform": "unsupported",
+            "scope": "project",
+            "status": "unsupported",
+            "reason": "project install is not supported",
+        },
+    ]
+
+
+def test_catalog_platform_selection_aliases_preserve_compatibility_behavior() -> None:
+    installable_scope = install_target_models.ScopeSpec(
+        install_command=("tool", "install"),
+        uninstall_command=("tool", "uninstall"),
+        cwd_root="project",
+        expected=(install_target_models.InstallSurface("project", "installed.txt"),),
+    )
+    registry = install_target_catalog.InstallTargetCatalog(
+        {
+            "alpha": install_target_models.InstallTargetSpec(
+                name="alpha",
+                scopes={"project": installable_scope},
+            ),
+        }
+    )
+
+    assert registry.selected_platforms(all_platforms=False, platform_name="alpha") == registry.selected_targets(
+        all_platforms=False,
+        target_name="alpha",
+    )
+    assert registry.platform_scenarios("alpha", "project") == registry.target_scenarios("alpha", "project")
+
+
+def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> None:
     installable_scope = install_target_models.ScopeSpec(
         install_command=("tool", "install"),
         uninstall_command=("tool", "uninstall"),
@@ -172,46 +259,29 @@ def test_catalog_facade_boundary_preserves_selection_and_synthetic_behavior() ->
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "unsupported": install_target_models.InstallTargetSpec(
-                name="unsupported",
-                unsupported_scopes={"project": "project install is not supported"},
-            ),
         },
         universal_uninstall_specs=(universal,),
         disposable_artifact_specs=(disposable,),
     )
 
-    assert registry.selected_targets(all_platforms=True, target_name=None) == ["alpha", "beta", "unsupported"]
-    assert registry.selected_platforms(all_platforms=False, platform_name="alpha") == ["alpha"]
-    assert [(scenario.platform, scenario.scope) for scenario in registry.target_scenarios("alpha", "project")] == [
-        ("alpha", "project")
-    ]
-    assert registry.platform_scenarios("alpha", "project") == registry.target_scenarios("alpha", "project")
-    assert registry.coverage_records(["alpha", "unsupported"], "project") == [
-        {
-            "platform": "alpha",
-            "scope": "project",
-            "status": "runnable",
-            "scenario_id": "alpha-project",
-            "install_command": ["tool", "install"],
-            "uninstall_command": ["tool", "uninstall"],
-            "generic_direct_equivalence": {
-                "status": "not_applicable",
-                "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
-            },
-            "risk_notes": [],
-        },
-        {
-            "platform": "unsupported",
-            "scope": "project",
-            "status": "unsupported",
-            "reason": "project install is not supported",
-        },
-    ]
-    selected = registry.universal_uninstall_scenarios(["alpha", "beta", "unsupported"], "project")
+    selected = registry.universal_uninstall_scenarios(["alpha", "beta"], "project")
+    owner_selected = install_target_harness_policy.universal_uninstall_scenarios(
+        registry.specs,
+        registry.universal_uninstall_specs,
+        ["alpha", "beta"],
+        "project",
+    )
+
+    assert selected == owner_selected
     assert len(selected) == 1
     assert selected[0].spec is universal
     assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
+    assert registry.disposable_artifact_scenarios(
+        "project"
+    ) == install_target_harness_policy.disposable_artifact_scenarios(
+        registry.disposable_artifact_specs,
+        "project",
+    )
     assert registry.disposable_artifact_scenarios("project") == [disposable]
     registry.validate_roots({"project"})
     with pytest.raises(RuntimeError, match=r"unknown sandbox root declaration\(s\): project"):

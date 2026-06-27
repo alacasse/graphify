@@ -13,18 +13,28 @@ def test_scenario_id() -> None:
     assert install_target_selection.scenario_id("...", "___") == "scenario"
 
 
-def test_catalog_accessors_preserve_target_and_platform_names() -> None:
-    assert REGISTRY.target_names == REGISTRY.platform_names
-    assert REGISTRY.target_spec("codex") is REGISTRY.platform_spec("codex")
-    assert REGISTRY.selected_targets(all_platforms=True, target_name=None) == REGISTRY.selected_platforms(
+def test_catalog_preferred_target_accessors_select_target_facts() -> None:
+    assert REGISTRY.target_names == list(REGISTRY.specs)
+    assert REGISTRY.target_spec("codex") is REGISTRY.specs["codex"]
+    assert REGISTRY.selected_targets(all_platforms=True, target_name=None) == REGISTRY.target_names
+    assert REGISTRY.selected_targets(all_platforms=False, target_name="codex") == ["codex"]
+    assert [(scenario.platform, scenario.scope) for scenario in REGISTRY.target_scenarios("cursor", "both")] == [
+        ("cursor", "project")
+    ]
+
+
+def test_catalog_legacy_platform_aliases_preserve_target_accessor_compatibility() -> None:
+    assert REGISTRY.platform_names == REGISTRY.target_names
+    assert REGISTRY.platform_spec("codex") is REGISTRY.target_spec("codex")
+    assert REGISTRY.selected_platforms(all_platforms=True, platform_name=None) == REGISTRY.selected_targets(
         all_platforms=True,
-        platform_name=None,
+        target_name=None,
     )
-    assert REGISTRY.selected_targets(all_platforms=False, target_name="codex") == REGISTRY.selected_platforms(
+    assert REGISTRY.selected_platforms(all_platforms=False, platform_name="codex") == REGISTRY.selected_targets(
         all_platforms=False,
-        platform_name="codex",
+        target_name="codex",
     )
-    assert REGISTRY.target_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
+    assert REGISTRY.platform_scenarios("cursor", "both") == REGISTRY.target_scenarios("cursor", "both")
 
 
 def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:
@@ -43,13 +53,13 @@ def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording()
 
 
 def test_every_catalog_scope_is_runnable_or_explained() -> None:
-    for platform_name in REGISTRY.target_names:
+    for target_name in REGISTRY.target_names:
         for scope in ("user", "project"):
-            scenario = REGISTRY.make_scenario(platform_name, scope)
-            reason = REGISTRY.unsupported_scope_reason(platform_name, scope)
-            assert (scenario is not None) != (reason is not None), f"{platform_name}/{scope} should have exactly one scenario or unsupported reason"
+            scenario = REGISTRY.make_scenario(target_name, scope)
+            reason = REGISTRY.unsupported_scope_reason(target_name, scope)
+            assert (scenario is not None) != (reason is not None), f"{target_name}/{scope} should have exactly one scenario or unsupported reason"
             if scenario is not None:
-                assert scenario.expected, f"{platform_name}/{scope} should assert at least one file effect"
+                assert scenario.expected, f"{target_name}/{scope} should assert at least one file effect"
 
 
 def test_cursor_both_scope_selects_project_scenario() -> None:
@@ -92,10 +102,10 @@ def test_agents_command_variants_and_equivalence_are_generic_target_facts() -> N
 
 
 def test_make_scenario_projects_catalog_scope_specs() -> None:
-    for platform_name in REGISTRY.target_names:
-        spec = REGISTRY.platform_spec(platform_name)
+    for target_name in REGISTRY.target_names:
+        spec = REGISTRY.target_spec(target_name)
         for scope, scope_spec in spec.scopes.items():
-            scenario = REGISTRY.make_scenario(platform_name, scope)
+            scenario = REGISTRY.make_scenario(target_name, scope)
             assert scenario is not None
             assert scenario.install_command == scope_spec.install_command
             assert scenario.uninstall_command == scope_spec.uninstall_command
@@ -105,10 +115,10 @@ def test_make_scenario_projects_catalog_scope_specs() -> None:
 
 
 def test_direct_equivalence_uses_catalog_scope_specs() -> None:
-    for platform_name in REGISTRY.target_names:
-        spec = REGISTRY.platform_spec(platform_name)
+    for target_name in REGISTRY.target_names:
+        spec = REGISTRY.target_spec(target_name)
         for scope, scope_spec in spec.scopes.items():
-            scenario = REGISTRY.make_scenario(platform_name, scope)
+            scenario = REGISTRY.make_scenario(target_name, scope)
             assert scenario is not None
             assert REGISTRY.equivalent_install_command(scenario) == scope_spec.equivalent_install_command
 
@@ -167,7 +177,7 @@ def test_install_variant_fallback_uses_neutral_labels_for_unrecognized_commands(
     )
 
 
-def test_platform_coverage_records_unsupported_scopes() -> None:
+def test_target_coverage_records_unsupported_scopes() -> None:
     records = REGISTRY.coverage_records(["cursor"], "both")
     user = next(record for record in records if record["scope"] == "user")
     project = next(record for record in records if record["scope"] == "project")

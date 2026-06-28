@@ -306,6 +306,51 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
     assert "missing-disposable-root" in message
 
 
+def test_preflight_current_policy_validation_uses_install_surface_roots_not_all_runtime_roots(tmp_path) -> None:
+    root_registry = SandboxRootRegistry(
+        (
+            SandboxRootSpec("home", str(tmp_path / "home"), reset=True),
+            SandboxRootSpec("xdg_config_home", str(tmp_path / "home" / ".config")),
+            SandboxRootSpec("project", str(tmp_path / "project"), reset=True),
+            SandboxRootSpec("user_cwd", str(tmp_path / "user-cwd"), reset=True),
+            SandboxRootSpec("repo_mount", str(tmp_path / "repo")),
+            SandboxRootSpec("src", str(tmp_path / "src")),
+            SandboxRootSpec("output", str(tmp_path / "out"), mount_mode="rw"),
+        )
+    )
+    registry = sandbox_runner.validation_plan.InstallTargetCatalog(
+        {
+            "alpha": PlatformSpec(
+                name="alpha",
+                scopes={
+                    "project": ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(ExpectedPath("project", "installed.txt"),),
+                    )
+                },
+                universal_uninstall_scopes=("project",),
+            )
+        },
+        universal_uninstall_specs=(
+            UniversalUninstallScenarioSpec(
+                scenario_id="repo-mounted-uninstall",
+                platform_label="repo-mounted",
+                scope="project",
+                command=("tool", "uninstall"),
+                cwd_root="repo_mount",
+                eligible_platform_scope="project",
+            ),
+        ),
+        disposable_artifact_specs=(),
+    )
+    run_environment = SandboxRunEnvironment(root_registry=root_registry, scenario_registry=registry)
+
+    with pytest.raises(RuntimeError, match="repo_mount"):
+        run_environment.preflight()
+
+
 def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
     calls: list[str] = []

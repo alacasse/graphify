@@ -39,6 +39,22 @@ def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
     assert registry.disposable_artifact_specs[0].cwd_root == "repo_mount"
 
 
+def test_loader_rejects_unknown_policy_cwd_root_before_catalog_validation() -> None:
+    data = _valid_data()
+    data["universal_uninstall_specs"] = [
+        {
+            "scenario_id": "unknown-root-uninstall",
+            "platform_label": "unknown-root",
+            "scope": "project",
+            "command": ["graphify", "uninstall", "--project"],
+            "cwd_root": "missing_root",
+            "eligible_platform_scope": "project",
+        }
+    ]
+
+    _expect_invalid(data, "unknown cwd root: missing_root")
+
+
 def test_loader_rejects_unknown_expected_root() -> None:
     data = _valid_data()
     data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["root"] = "repo_mount"

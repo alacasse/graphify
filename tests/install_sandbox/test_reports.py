@@ -54,6 +54,86 @@ def test_status_label_prefers_overall_status_then_passed_flag() -> None:
     assert reports.status_label({"passed": False}) == reports.RISK_GRAPHIFY_FAILED
 
 
+def test_report_artifact_helpers_characterize_current_contract(tmp_path) -> None:
+    # Report helper names are characterized for migration; root compatibility is
+    # pinned separately in the agent-summary wrapper tests.
+    output = tmp_path / "out"
+    artifact_dir = output / "scenarios" / "codex-project"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "command-result.json").write_text(
+        json.dumps(
+            {
+                "command": ["graphify", "install", "--project", "--platform", "codex"],
+                "command_class": "installer",
+                "started_at": "2026-06-02T00:00:00Z",
+                "duration_ms": 123,
+                "exit_code": 0,
+                "timeout_seconds": 30,
+                "timed_out": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "stdout.txt").write_text(" line 1\n\n line\t2 \n", encoding="utf-8")
+    (artifact_dir / "stderr.txt").write_text(("x" * 502) + "\nsecond line", encoding="utf-8")
+
+    assert reports.artifact_relpath(artifact_dir / "transcript.txt", output) == "scenarios/codex-project/transcript.txt"
+    assert reports.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
+    assert reports.read_json_object(artifact_dir / "command-result.json")["command_class"] == "installer"
+    assert reports.read_json_object(artifact_dir / "missing.json") == {}
+    (artifact_dir / "invalid.json").write_text("{", encoding="utf-8")
+    (artifact_dir / "array.json").write_text("[]", encoding="utf-8")
+    assert reports.read_json_object(artifact_dir / "invalid.json") == {}
+    assert reports.read_json_object(artifact_dir / "array.json") == {}
+
+    summary = reports.command_artifact_summary(artifact_dir, output_root=output)
+
+    assert summary == {
+        "command": "graphify install --project --platform codex",
+        "command_class": "installer",
+        "started_at": "2026-06-02T00:00:00Z",
+        "duration_ms": 123,
+        "exit_code": 0,
+        "timeout_seconds": 30,
+        "timed_out": False,
+        "transcript_path": "scenarios/codex-project/transcript.txt",
+        "stdout_snippet": "line 1\n\n line\t2",
+        "stderr_snippet": ("x" * 500) + "...",
+    }
+
+
+def test_report_command_artifact_summary_characterizes_command_text_precedence(tmp_path) -> None:
+    output = tmp_path / "out"
+    display_dir = output / "scenarios" / "display"
+    fallback_dir = output / "scenarios" / "fallback"
+    display_dir.mkdir(parents=True)
+    fallback_dir.mkdir(parents=True)
+    (display_dir / "command-result.json").write_text(
+        json.dumps(
+            {
+                "command": ["ignored", "list"],
+                "command_display": "display wins",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (fallback_dir / "command-result.json").write_text(
+        json.dumps(
+            {
+                "command": "not-a-list",
+                "command_display": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (fallback_dir / "command.txt").write_text(" fallback command\nwith preserved newline ", encoding="utf-8")
+
+    assert reports.command_artifact_summary(display_dir, output_root=output)["command"] == "display wins"
+    assert reports.command_artifact_summary(fallback_dir, output_root=output)["command"] == (
+        "fallback command\nwith preserved newline"
+    )
+
+
 def test_report_markdown_generation() -> None:
     manifest = {
         "graphify_file_effect_pass_count": 1,

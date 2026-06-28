@@ -10,11 +10,69 @@ from tools.install_sandbox.reporting import agent_summary
 def test_root_agent_summary_wrapper_preserves_module_entrypoint_compatibility() -> None:
     assert root_agent_summary.main is agent_summary.main
     assert root_agent_summary.summarize_output is agent_summary.summarize_output
+    # Root __all__ is the compatibility surface. Helper behavior below is
+    # migration characterization, not new public API.
+    assert root_agent_summary.__all__ == [
+        "USAGE_GUIDANCE",
+        "artifact_relpath",
+        "compact_path",
+        "failed_checks",
+        "load_json",
+        "main",
+        "parse_args",
+        "render_json",
+        "render_markdown",
+        "summarize_incomplete",
+        "summarize_output",
+        "tail_file",
+        "text_snippet",
+        "write_summary",
+    ]
 
 
 def write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def test_agent_summary_artifact_helpers_characterize_current_contract(tmp_path: Path) -> None:
+    output = tmp_path / "out"
+    scenario_dir = output / "scenarios" / "codex-project"
+    scenario_dir.mkdir(parents=True)
+    write_json(output / "object.json", {"ok": True})
+    write_json(output / "array.json", [])
+    (output / "invalid.json").write_text("{", encoding="utf-8")
+    (output / "tail.txt").write_text("0123456789", encoding="utf-8")
+    write_json(
+        scenario_dir / "assertions.json",
+        {
+            "checks": [
+                {"ok": False, "relative": "AGENTS.md", "root": "project", "detail": "missing Graphify block"},
+                {"ok": False, "path": "/tmp/graphify-home/.codex/AGENTS.md", "root": "home", "detail": "missing local block"},
+                {"ok": False, "relative": "skip.md", "detail": "generic_direct_equivalent=True"},
+                {"ok": True, "relative": "ok.md", "detail": "exists"},
+            ]
+        },
+    )
+
+    assert agent_summary.load_json(output / "object.json") == {"ok": True}
+    assert agent_summary.load_json(output / "missing.json") == {}
+    assert agent_summary.load_json(output / "array.json") == {"_error": "json root is not an object"}
+    assert agent_summary.load_json(output / "invalid.json")["_error"].startswith("invalid json:")
+    assert agent_summary.artifact_relpath(scenario_dir / "assertions.json", output) == "scenarios/codex-project/assertions.json"
+    assert agent_summary.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
+    assert agent_summary.compact_path("/tmp/graphify-project/AGENTS.md") == "project/AGENTS.md"
+    assert agent_summary.compact_path("/tmp/graphify-home/.codex/AGENTS.md") == "home/.codex/AGENTS.md"
+    assert agent_summary.compact_path("/tmp/graphify-user-cwd/file.txt") == "user_cwd/file.txt"
+    assert agent_summary.compact_path(123) == ""
+    assert agent_summary.text_snippet(" alpha\n\n beta\tgamma ", limit=20) == "alpha beta gamma"
+    assert agent_summary.text_snippet("abcdefghij", limit=8) == "abcde..."
+    assert agent_summary.tail_file(output / "tail.txt", limit=4) == "6789"
+    assert agent_summary.tail_file(output / "missing-tail.txt") == ""
+    assert agent_summary.failed_checks(output, "codex-project", limit=2) == [
+        {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"},
+        {"path": "home/.codex/AGENTS.md", "detail": "missing local block", "root": "home"},
+    ]
 
 
 def test_pass_manifest_reports_pass(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 
 from tools.install_sandbox.registry import spec_loader
+from tools.install_sandbox.registry import spec_harness_policy_inputs
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data, load_registry_from_dir
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
@@ -128,6 +129,10 @@ def test_top_level_registry_policy_inputs_are_not_target_facts() -> None:
 
     assert unclassified_fields == set()
     assert actual_inventory == REGISTRY_FIELD_EXAMPLES
+    assert (
+        spec_harness_policy_inputs.TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS
+        == set(REGISTRY_FIELD_CLASSIFICATION)
+    )
 
 
 def test_default_yaml_has_targeted_examples_for_spec_weight_field_categories() -> None:

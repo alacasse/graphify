@@ -48,6 +48,14 @@ def test_default_sandbox_root_registry_characterizes_current_role_groups() -> No
         "GRAPHIFY_SRC": "/tmp/graphify-src",
         "GRAPHIFY_OUTPUT": "/sandbox-out",
     }
+    assert tuple(root.name for root in registry.env_roots()) == (
+        "home",
+        "xdg_config_home",
+        "project",
+        "repo_mount",
+        "src",
+        "output",
+    )
     assert {
         root.name: root.sandbox_path_required
         for root in registry.roots

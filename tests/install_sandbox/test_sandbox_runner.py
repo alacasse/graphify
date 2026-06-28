@@ -17,7 +17,7 @@ from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.runtime import harness_orchestration
-from tools.install_sandbox.runtime import command_runner, source_snapshot
+from tools.install_sandbox.runtime import command_runner, sandbox_run_environment, source_snapshot
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
 from tools.install_sandbox.targets.install_target_models import (
@@ -200,9 +200,15 @@ def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_pa
     home = tmp_path / "home"
     xdg = home / ".config"
     project = tmp_path / "project"
+    repo_mount = tmp_path / "repo"
+    src = tmp_path / "src"
+    output = tmp_path / "out"
     monkeypatch.setitem(run_environment.runtime_roots, "home", home)
     monkeypatch.setitem(run_environment.runtime_roots, "xdg_config_home", xdg)
     monkeypatch.setitem(run_environment.runtime_roots, "project", project)
+    monkeypatch.setitem(run_environment.runtime_roots, "repo_mount", repo_mount)
+    monkeypatch.setitem(run_environment.runtime_roots, "src", src)
+    monkeypatch.setitem(run_environment.runtime_roots, "output", output)
     monkeypatch.setenv("PATH", "/usr/bin")
 
     env = run_environment.sandbox_env()
@@ -210,6 +216,10 @@ def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_pa
     assert env["HOME"] == str(home)
     assert env["XDG_CONFIG_HOME"] == str(xdg)
     assert env["GRAPHIFY_PROJECT"] == str(project)
+    assert env["GRAPHIFY_REPO_MOUNT"] == str(repo_mount)
+    assert env["GRAPHIFY_SRC"] == str(src)
+    assert env["GRAPHIFY_OUTPUT"] == str(output)
+    assert "GRAPHIFY_USER_CWD" not in env
     assert env["PATH"].startswith(str(home / ".local" / "bin"))
     assert env["PATH"].endswith(":/usr/bin")
 
@@ -304,6 +314,54 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
     assert "unknown harness policy root declaration" in message
     assert "missing-universal-root" in message
     assert "missing-disposable-root" in message
+
+
+def test_preflight_preserves_root_path_and_invariant_keys(monkeypatch, tmp_path) -> None:
+    root_registry = SandboxRootRegistry(
+        (
+            SandboxRootSpec("home", str(tmp_path / "home"), reset=True, preflight_required=True, sandbox_path_required=str(tmp_path / "home")),
+            SandboxRootSpec(
+                "xdg_config_home",
+                str(tmp_path / "home" / ".config"),
+                preflight_required=True,
+                sandbox_path_required=str(tmp_path / "home" / ".config"),
+            ),
+            SandboxRootSpec("project", str(tmp_path / "project"), reset=True, preflight_required=True, sandbox_path_required=str(tmp_path / "project")),
+            SandboxRootSpec("user_cwd", str(tmp_path / "user-cwd"), reset=True),
+            SandboxRootSpec("repo_mount", str(tmp_path / "repo"), preflight_required=True, mount_mode="ro"),
+            SandboxRootSpec("src", str(tmp_path / "src")),
+            SandboxRootSpec("output", str(tmp_path / "out"), mount_mode="rw"),
+        )
+    )
+
+    class Registry:
+        def validate_target_roots(self, declared_roots: set[str]) -> None:
+            assert declared_roots == {"home", "project", "user_cwd"}
+
+    (tmp_path / "repo").mkdir()
+    monkeypatch.setattr(sandbox_run_environment, "probe_read_only", lambda path: True)
+    run_environment = SandboxRunEnvironment(root_registry=root_registry, scenario_registry=Registry())
+
+    checks = run_environment.preflight()
+    preflight_json = json.loads((tmp_path / "out" / "preflight.json").read_text(encoding="utf-8"))
+
+    assert set(checks) == {
+        "home",
+        "xdg_config_home",
+        "project",
+        "user_cwd",
+        "repo_mount",
+        "src",
+        "output",
+        "home_is_sandbox",
+        "xdg_is_sandbox",
+        "project_is_sandbox",
+        "repo_mount_exists",
+        "repo_mount_read_only",
+    }
+    assert preflight_json == checks
+    assert checks["repo_mount_exists"] is True
+    assert checks["repo_mount_read_only"] is True
 
 
 def test_preflight_current_policy_validation_uses_install_surface_roots_not_all_runtime_roots(tmp_path) -> None:

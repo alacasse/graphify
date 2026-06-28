@@ -53,6 +53,9 @@ class SandboxRootRegistry:
     def env_entries(self) -> dict[str, str]:
         return {root.env_var: root.container_path for root in self.roots if root.env_var is not None}
 
+    def env_roots(self) -> tuple[SandboxRootSpec, ...]:
+        return tuple(root for root in self.roots if root.env_var is not None)
+
     def volume_roots(self) -> tuple[SandboxRootSpec, ...]:
         return tuple(root for root in self.roots if root.mount_mode is not None)
 

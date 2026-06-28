@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib
 import importlib.util
 import types
@@ -168,6 +169,22 @@ def test_root_topology_closeout_characterizes_supported_runner_compatibility_sur
         assert isinstance(dependency, types.ModuleType)
         assert dependency.__name__ == owner_module_name
         assert dependency is importlib.import_module(owner_module_name)
+
+
+def test_root_topology_closeout_keeps_runtime_root_roles_on_registry_apis() -> None:
+    runtime_module = importlib.import_module("tools.install_sandbox.runtime.sandbox_run_environment")
+    tree = ast.parse(Path(runtime_module.__file__).read_text(encoding="utf-8"))
+
+    root_registry_roots_reads = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and node.attr == "roots"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "root_registry"
+    ]
+
+    assert root_registry_roots_reads == []
 
 
 def test_root_topology_closeout_names_slice2_runtime_orchestration_owner() -> None:

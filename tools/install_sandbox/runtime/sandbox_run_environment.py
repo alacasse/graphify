@@ -106,7 +106,7 @@ class SandboxRunEnvironment:
         self.install_mode = install_mode
         self.copy_excludes = COPY_EXCLUDES
         self.manifest_prune_dirs = MANIFEST_PRUNE_DIRS
-        self.roots = root_registry.scenario_roots(self.runtime_roots)
+        self.roots = root_registry.scenario_root_paths(self.runtime_roots)
 
     @property
     def home(self) -> Path:
@@ -180,17 +180,8 @@ class SandboxRunEnvironment:
 
     def sandbox_env(self) -> dict[str, str]:
         env = os.environ.copy()
-        current_roots = {
-            "home": self.home,
-            "xdg_config_home": self.xdg_config_home,
-            "project": self.project,
-            "repo_mount": self.repo_mount,
-            "src": self.src,
-            "output": self.output,
-        }
-        for root in self.root_registry.roots:
-            if root.env_var is not None:
-                env[root.env_var] = str(current_roots[root.name])
+        for root in self.root_registry.env_roots():
+            env[str(root.env_var)] = str(self.runtime_roots[root.name])
         env["PATH"] = f"{self.home / '.local' / 'bin'}:{env.get('PATH', '')}"
         return env
 
@@ -391,18 +382,21 @@ class SandboxRunEnvironment:
             validation_plan.DEFAULT_HARNESS_POLICY,
             declared_roots,
         )
-        for root in self.root_registry.roots:
+        roots_to_prepare = {root.name: root for root in self.root_registry.reset_roots()}
+        roots_to_prepare.update({root.name: root for root in self.root_registry.sandbox_path_assertion_roots()})
+        roots_to_prepare.update({root.name: root for root in self.root_registry.volume_roots() if root.mount_mode == "rw"})
+        for root in roots_to_prepare.values():
             path = self.runtime_roots[root.name]
-            if root.reset or root.mount_mode == "rw" or root.name == "xdg_config_home":
-                path.mkdir(parents=True, exist_ok=True)
-        checks: dict[str, object] = {root.name: str(self.runtime_roots[root.name]) for root in self.root_registry.roots}
+            path.mkdir(parents=True, exist_ok=True)
+        checks: dict[str, object] = {root_name: str(self.runtime_roots[root_name]) for root_name in self.root_registry.root_names()}
         required_keys: list[str] = []
+        for root in self.root_registry.sandbox_path_assertion_roots():
+            path = self.runtime_roots[root.name]
+            key = "xdg_is_sandbox" if root.name == "xdg_config_home" else f"{root.name}_is_sandbox"
+            checks[key] = str(path) == root.sandbox_path_required
+            required_keys.append(key)
         for root in self.root_registry.preflight_roots():
             path = self.runtime_roots[root.name]
-            if root.sandbox_path_required is not None:
-                key = "xdg_is_sandbox" if root.name == "xdg_config_home" else f"{root.name}_is_sandbox"
-                checks[key] = str(path) == root.sandbox_path_required
-                required_keys.append(key)
             if root.mount_mode == "ro":
                 exists_key = f"{root.name}_exists"
                 read_only_key = f"{root.name}_read_only"

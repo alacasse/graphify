@@ -110,8 +110,7 @@ def _optional_command(value: object, context: str) -> tuple[str, ...] | None:
 
 
 def _validate_cwd_root(root: str, context: str) -> None:
-    all_roots = {sandbox_root.name for sandbox_root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots}
-    if root not in all_roots:
+    if root not in DEFAULT_SANDBOX_ROOT_REGISTRY.policy_cwd_root_names():
         _fail(context, f"unknown cwd root: {root}")
 
 

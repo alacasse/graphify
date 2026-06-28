@@ -667,6 +667,29 @@ def test_build_validation_plan_validates_target_roots_before_selected_policy_roo
     assert calls == [("target", {"home", "project", "user_cwd"})]
 
 
+def test_build_validation_plan_consumes_install_surface_root_role_for_validation() -> None:
+    class RootRegistry:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def install_surface_root_names(self) -> set[str]:
+            self.calls += 1
+            return {"home", "project", "user_cwd"}
+
+    root_registry = RootRegistry()
+
+    plan = validation_plan.build_validation_plan(
+        _planner_registry(),
+        all_platforms=False,
+        platform_name="codex",
+        scope="project",
+        root_registry=root_registry,  # type: ignore[arg-type]
+    )
+
+    assert plan.platforms == ("codex",)
+    assert root_registry.calls == 2
+
+
 def test_build_validation_plan_keeps_target_roots_limited_to_install_surface_roots() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
@@ -688,7 +711,7 @@ def test_build_validation_plan_keeps_target_roots_limited_to_install_surface_roo
         validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
 
 
-def test_build_validation_plan_current_policy_validation_uses_install_surface_roots_not_all_runtime_roots() -> None:
+def test_build_validation_plan_policy_validation_uses_install_surface_roots_not_all_runtime_roots() -> None:
     root_registry = SandboxRootRegistry(
         (
             SandboxRootSpec("home", "/tmp/graphify-home"),

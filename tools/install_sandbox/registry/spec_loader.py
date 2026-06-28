@@ -81,7 +81,7 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallT
     }
     universal, disposable = _top_level_policy_inputs(registry, source)
     loaded = ScenarioRegistry(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
-    loaded.validate_roots({root.name for root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots})
+    loaded.validate_roots(DEFAULT_SANDBOX_ROOT_REGISTRY.root_names())
     return loaded
 
 

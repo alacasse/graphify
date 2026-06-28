@@ -19,7 +19,7 @@ try:
     from ..effects import scenario_file_effects_adapter
     from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
     from ..lifecycle import scenario_lifecycle_support
-    from ..reporting import reports
+    from ..reporting import artifacts as reporting_artifacts
     from ..reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from ..targets.install_target_defaults import default_install_target_catalog
     from ..targets.install_target_models import Scenario
@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
     from tools.install_sandbox.effects import scenario_file_effects_adapter  # type: ignore[no-redef]
     from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
     from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
-    from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
+    from tools.install_sandbox.reporting import artifacts as reporting_artifacts  # type: ignore[no-redef]
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
     from tools.install_sandbox.targets.install_target_defaults import default_install_target_catalog  # type: ignore[no-redef]
     from tools.install_sandbox.targets.install_target_models import Scenario  # type: ignore[no-redef]
@@ -368,7 +368,7 @@ class SandboxRunEnvironment:
             commands=scenario_lifecycle_support.CommandExecutor(command_runner.run_capture),
             artifacts=scenario_lifecycle_support.ScenarioArtifacts(
                 risk_report=self.risk_report,
-                command_artifact_summary=lambda artifact_dir: reports.command_artifact_summary(artifact_dir, output_root=self.output),
+                command_artifact_summary=lambda artifact_dir: reporting_artifacts.command_artifact_summary(artifact_dir, output_root=self.output),
                 combined_status=combined_status,
                 known_status_values=known_status_values,
             ),

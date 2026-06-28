@@ -9,6 +9,8 @@ try:
     from tools.install_sandbox.reporting.artifacts import (
         artifact_relpath,
         compact_path,
+        failed_checks as summarize_failed_checks,
+        failure_summary,
         load_json_object,
         normalized_text_snippet,
         tail_file,
@@ -18,6 +20,8 @@ except ImportError:  # pragma: no cover - supports running this file directly.
         from reporting.artifacts import (  # type: ignore[no-redef]
             artifact_relpath,
             compact_path,
+            failed_checks as summarize_failed_checks,
+            failure_summary,
             load_json_object,
             normalized_text_snippet,
             tail_file,
@@ -26,6 +30,8 @@ except ImportError:  # pragma: no cover - supports running this file directly.
         from artifacts import (  # type: ignore[no-redef]
             artifact_relpath,
             compact_path,
+            failed_checks as summarize_failed_checks,
+            failure_summary,
             load_json_object,
             normalized_text_snippet,
             tail_file,
@@ -48,26 +54,7 @@ def text_snippet(value: Any, *, limit: int = 240) -> str:
 
 
 def failed_checks(output_dir: Path, scenario_id: str, *, limit: int) -> list[dict[str, Any]]:
-    assertions_path = output_dir / "scenarios" / scenario_id / "assertions.json"
-    assertions = load_json(assertions_path)
-    checks = assertions.get("checks") if isinstance(assertions.get("checks"), list) else []
-    failed: list[dict[str, Any]] = []
-    for check in checks:
-        if not isinstance(check, dict) or check.get("ok") is True:
-            continue
-        detail = check.get("detail")
-        if isinstance(detail, str) and detail.startswith("generic_direct_equivalent=True"):
-            continue
-        failed.append(
-            {
-                "path": check.get("relative") or compact_path(check.get("path")),
-                "detail": detail,
-                "root": check.get("root"),
-            }
-        )
-        if len(failed) >= limit:
-            break
-    return failed
+    return summarize_failed_checks(output_dir, scenario_id, limit=limit)
 
 
 def summarize_incomplete(output_dir: Path, *, manifest_error: str | None = None) -> dict[str, Any]:
@@ -133,27 +120,7 @@ def summarize_output(output_dir: Path, *, max_failures: int = 5, max_checks: int
     failures = [item for item in results if isinstance(item, dict) and item.get("passed") is not True]
     failure_summaries: list[dict[str, Any]] = []
     for item in failures[:max_failures]:
-        scenario_id = str(item.get("id") or "")
-        artifact = item.get("command_artifact") if isinstance(item.get("command_artifact"), dict) else {}
-        checks = failed_checks(output_dir, scenario_id, limit=max_checks) if scenario_id else []
-        failure: dict[str, Any] = {
-            "scenario": scenario_id,
-            "platform": item.get("platform"),
-            "scope": item.get("scope"),
-            "reproduce": item.get("reproduction_command") or artifact.get("command"),
-            "exit": artifact.get("exit_code"),
-            "transcript": artifact.get("transcript_path"),
-            "assertions": artifact_relpath(output_dir / "scenarios" / scenario_id / "assertions.json", output_dir) if scenario_id else None,
-            "failed_checks": checks,
-        }
-        if not checks:
-            stderr = text_snippet(artifact.get("stderr_snippet"), limit=240)
-            stdout = text_snippet(artifact.get("stdout_snippet"), limit=240)
-            if stderr:
-                failure["stderr"] = stderr
-            if stdout:
-                failure["stdout"] = stdout
-        failure_summaries.append(failure)
+        failure_summaries.append(failure_summary(item, output_dir=output_dir, max_checks=max_checks))
 
     report_path = output_dir / "report.md"
     return {

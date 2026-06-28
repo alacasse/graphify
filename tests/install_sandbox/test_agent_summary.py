@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from tools.install_sandbox import agent_summary as root_agent_summary
+from tools.install_sandbox.reporting import artifacts
 from tools.install_sandbox.reporting import agent_summary
 
 
@@ -89,6 +90,7 @@ def test_agent_summary_artifact_helpers_characterize_current_contract(tmp_path: 
         {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"},
         {"path": "home/.codex/AGENTS.md", "detail": "missing local block", "root": "home"},
     ]
+    assert artifacts.failed_checks(output, "codex-project", limit=2) == agent_summary.failed_checks(output, "codex-project", limit=2)
 
 
 def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
@@ -161,6 +163,11 @@ def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
     assert summary["failures"][0]["failed_checks"] == [
         {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"}
     ]
+    assert artifacts.failure_summary(
+        json.loads((output / "manifest.json").read_text(encoding="utf-8"))["results"][0],
+        output_dir=output.resolve(),
+        max_checks=6,
+    ) == summary["failures"][0]
     assert "AGENTS.md: missing Graphify block" in markdown
     assert "scenarios/codex-project/assertions.json" in markdown
 

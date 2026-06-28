@@ -5,6 +5,7 @@ import json
 import pytest
 
 from tools.install_sandbox import status
+from tools.install_sandbox.reporting import artifacts
 from tools.install_sandbox.reporting import harness_run
 from tools.install_sandbox.reporting import manifest_projection
 from tools.install_sandbox.reporting import reports
@@ -100,6 +101,7 @@ def test_report_artifact_helpers_characterize_current_contract(tmp_path) -> None
         "stdout_snippet": "line 1\n\n line\t2",
         "stderr_snippet": ("x" * 500) + "...",
     }
+    assert artifacts.command_artifact_summary(artifact_dir, output_root=output) == summary
 
 
 def test_report_command_artifact_summary_characterizes_command_text_precedence(tmp_path) -> None:

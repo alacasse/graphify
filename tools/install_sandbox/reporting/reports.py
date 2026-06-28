@@ -7,11 +7,11 @@ from typing import Iterable
 
 try:
     from tools.install_sandbox.json_helpers import object_dict, object_dicts, object_list
-    from tools.install_sandbox.reporting.artifacts import artifact_relpath, file_text_snippet, read_json_object
+    from tools.install_sandbox.reporting.artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 except ImportError:
     from json_helpers import object_dict, object_dicts, object_list
-    from reporting.artifacts import artifact_relpath, file_text_snippet, read_json_object
+    from reporting.artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 
 
@@ -20,21 +20,7 @@ def text_snippet(path: Path, limit: int = 500) -> str:
 
 
 def command_artifact_summary(artifact_dir: Path, *, output_root: Path) -> dict[str, object]:
-    result = read_json_object(artifact_dir / "command-result.json")
-    command = result.get("command")
-    command_text = str(result.get("command_display") or (shlex.join([str(part) for part in command]) if isinstance(command, list) else text_snippet(artifact_dir / "command.txt", 1000)))
-    return {
-        "command": command_text,
-        "command_class": result.get("command_class"),
-        "started_at": result.get("started_at"),
-        "duration_ms": result.get("duration_ms"),
-        "exit_code": result.get("exit_code"),
-        "timeout_seconds": result.get("timeout_seconds"),
-        "timed_out": result.get("timed_out"),
-        "transcript_path": artifact_relpath(artifact_dir / "transcript.txt", output_root),
-        "stdout_snippet": text_snippet(artifact_dir / "stdout.txt"),
-        "stderr_snippet": text_snippet(artifact_dir / "stderr.txt"),
-    }
+    return summarize_command_artifact(artifact_dir, output_root=output_root)
 
 
 def status_label(result: dict[str, object]) -> str:

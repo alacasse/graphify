@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, Literal
 
 try:
     from .harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry
@@ -28,6 +28,29 @@ HarnessPolicy = _harness_policy.HarnessPolicy
 DEFAULT_HARNESS_POLICY = _harness_policy.DEFAULT_HARNESS_POLICY
 
 
+ValidationWorkItemKind = Literal["standard_scenario", "universal_uninstall", "disposable_artifact"]
+ValidationWorkItemPayload = Scenario | SelectedUniversalUninstallScenario | DisposableArtifactScenarioSpec
+
+
+@dataclass(frozen=True)
+class ValidationWorkItem:
+    kind: ValidationWorkItemKind
+    payload: ValidationWorkItemPayload
+
+
+def _validation_work_items(
+    *,
+    standard_scenarios: tuple[Scenario, ...],
+    universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...],
+    disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...],
+) -> tuple[ValidationWorkItem, ...]:
+    return (
+        *(ValidationWorkItem("standard_scenario", scenario) for scenario in standard_scenarios),
+        *(ValidationWorkItem("universal_uninstall", selected) for selected in universal_uninstall),
+        *(ValidationWorkItem("disposable_artifact", spec) for spec in disposable_artifacts),
+    )
+
+
 @dataclass(frozen=True, init=False)
 class ValidationPlan:
     platforms: tuple[str, ...]
@@ -35,6 +58,7 @@ class ValidationPlan:
     standard_scenarios: tuple[Scenario, ...]
     universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...]
     disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...]
+    validation_work_items: tuple[ValidationWorkItem, ...]
     coverage_records: tuple[dict[str, object], ...]
     target_runtime_validation_sections: tuple[dict[str, object], ...]
     platform_coverage_summary: dict[str, object]
@@ -78,6 +102,15 @@ class ValidationPlan:
         object.__setattr__(self, "standard_scenarios", standard_scenarios)
         object.__setattr__(self, "universal_uninstall", resolved_universal)
         object.__setattr__(self, "disposable_artifacts", resolved_disposable)
+        object.__setattr__(
+            self,
+            "validation_work_items",
+            _validation_work_items(
+                standard_scenarios=standard_scenarios,
+                universal_uninstall=resolved_universal,
+                disposable_artifacts=resolved_disposable,
+            ),
+        )
         object.__setattr__(self, "coverage_records", resolved_coverage)
         object.__setattr__(self, "target_runtime_validation_sections", resolved_runtime)
         object.__setattr__(self, "platform_coverage_summary", platform_coverage_summary)

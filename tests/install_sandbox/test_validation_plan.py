@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 import subprocess
 import sys
 
@@ -176,6 +177,50 @@ def test_validation_plan_preserves_explicit_platform_order_and_full_plan_content
     assert plan.target_runtime_verification == validation_plan.TARGET_RUNTIME_VERIFICATION_POLICY
 
 
+def test_validation_plan_builds_ordered_typed_work_items_from_existing_buckets() -> None:
+    registry = _planner_registry()
+
+    plan = validation_plan.build_validation_plan(
+        registry,
+        all_platforms=False,
+        platform_name=None,
+        selected_platform_names=("gemini", "claude", "codex"),
+        scope="project",
+    )
+
+    assert [work_item.kind for work_item in plan.validation_work_items] == [
+        "standard_scenario",
+        "standard_scenario",
+        "standard_scenario",
+        "universal_uninstall",
+        "disposable_artifact",
+    ]
+    assert [work_item.payload for work_item in plan.validation_work_items] == [
+        *plan.standard_scenarios,
+        *plan.universal_uninstall,
+        *plan.disposable_artifacts,
+    ]
+    assert plan.synthetic_scenario_count == 2
+    assert plan.scenario_count == 5
+
+
+def test_validation_work_item_is_frozen_plan_owned_model() -> None:
+    scenario = install_target_models.Scenario(
+        platform="codex",
+        scope="project",
+        install_command=("graphify", "install"),
+        uninstall_command=("graphify", "uninstall"),
+        cwd_root="project",
+        expected=(),
+    )
+    work_item = validation_plan.ValidationWorkItem("standard_scenario", scenario)
+
+    assert work_item.kind == "standard_scenario"
+    assert work_item.payload == scenario
+    with pytest.raises(FrozenInstanceError):
+        work_item.kind = "disposable_artifact"  # type: ignore[misc]
+
+
 def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
@@ -233,6 +278,15 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
         "universal_scenario_count": 3,
         "unsupported_scope_count": 0,
     }
+    assert [work_item.kind for work_item in plan.validation_work_items] == [
+        "standard_scenario",
+        "standard_scenario",
+        "standard_scenario",
+        "standard_scenario",
+        "universal_uninstall",
+        "universal_uninstall",
+        "disposable_artifact",
+    ]
 
 
 def test_validation_plan_rejects_unknown_explicit_platform_names() -> None:
@@ -279,6 +333,7 @@ def test_validation_plan_keeps_target_and_report_aliases_as_compatibility_paths(
     assert plan.selected_targets == plan.platforms
     assert plan.universal_uninstall == plan.universal_uninstall_scenarios == ()
     assert plan.disposable_artifacts == plan.disposable_artifact_scenarios == ()
+    assert plan.validation_work_items == ()
     assert plan.coverage_records == plan.platform_coverage == ({"platform": "codex", "scope": "project", "status": "runnable"},)
     assert plan.target_runtime_validation_sections == plan.runtime_limitation_sections == (
         {"section_title": "Compatibility Runtime", "status": "declared"},
@@ -330,6 +385,60 @@ def test_validation_plan_constructor_aliases_are_limited_to_supported_compatibil
             scenario_count=1,
             **required,
         )
+    with pytest.raises(TypeError, match="validation_work_items"):
+        validation_plan.ValidationPlan(  # type: ignore[call-arg]
+            platforms=("codex",),
+            universal_uninstall=(),
+            disposable_artifacts=(),
+            coverage_records=(),
+            target_runtime_validation_sections=(),
+            validation_work_items=(),
+            **required,
+        )
+
+
+def test_validation_plan_constructor_derives_work_items_without_changing_alias_paths() -> None:
+    scenario = install_target_models.Scenario(
+        platform="codex",
+        scope="project",
+        install_command=("graphify", "install"),
+        uninstall_command=("graphify", "uninstall"),
+        cwd_root="project",
+        expected=(),
+    )
+    disposable = install_target_models.DisposableArtifactScenarioSpec(
+        scenario_id="purge-disposable-graphify-out",
+        platform_label="purge",
+        scope="project",
+        command=("graphify", "uninstall", "--purge"),
+        cwd_root="project",
+        artifact_subdir="uninstall-purge",
+        disposable_path_root="project",
+        disposable_path_relative="graphify-out",
+        seed_files=(),
+        scope_eligibility=("project",),
+        risk_note="purge verified only against disposable sandbox graphify-out state",
+    )
+
+    plan = validation_plan.ValidationPlan(
+        selected_platforms=("codex",),
+        requested_scope="project",
+        standard_scenarios=(scenario,),
+        universal_uninstall_scenarios=(),
+        disposable_artifact_scenarios=(disposable,),
+        platform_coverage=(),
+        runtime_limitation_sections=(),
+        platform_coverage_summary={"requested_scope": "project"},
+    )
+
+    assert plan.validation_work_items == (
+        validation_plan.ValidationWorkItem("standard_scenario", scenario),
+        validation_plan.ValidationWorkItem("disposable_artifact", disposable),
+    )
+    assert plan.standard_scenarios == (scenario,)
+    assert plan.disposable_artifacts == plan.disposable_artifact_scenarios == (disposable,)
+    assert plan.synthetic_scenario_count == 1
+    assert plan.scenario_count == 2
 
 
 def test_validation_plan_derives_universal_uninstall_from_policy_and_target_facts() -> None:
@@ -554,7 +663,9 @@ def test_validation_plan_supports_direct_script_import_fallback() -> None:
         [
             sys.executable,
             "-c",
-            "import sys; sys.path.insert(0, 'tools/install_sandbox'); from validation_plan import build_validation_plan; print(build_validation_plan.__name__)",
+            "import sys; sys.path.insert(0, 'tools/install_sandbox'); "
+            "from validation_plan import ValidationWorkItem, build_validation_plan; "
+            "print(build_validation_plan.__name__, ValidationWorkItem.__name__)",
         ],
         check=False,
         capture_output=True,
@@ -562,4 +673,4 @@ def test_validation_plan_supports_direct_script_import_fallback() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "build_validation_plan"
+    assert result.stdout.strip() == "build_validation_plan ValidationWorkItem"

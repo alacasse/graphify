@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import types
 from pathlib import Path
 
 
@@ -109,6 +110,70 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     assert callable(sandbox_runner.main)
     assert callable(sandbox_runner.parse_args)
     assert root_agent_summary.summarize_output is agent_summary.summarize_output
+
+
+def test_root_topology_closeout_characterizes_supported_runner_compatibility_surface() -> None:
+    sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
+    run_environment = sandbox_runner.RUN_ENVIRONMENT
+
+    supported_runtime_globals = {
+        "ROOT_REGISTRY": "root_registry",
+        "RUNTIME_ROOTS": "runtime_roots",
+        "HOME": "home",
+        "XDG_CONFIG_HOME": "xdg_config_home",
+        "PROJECT": "project",
+        "USER_CWD": "user_cwd",
+        "REPO_MOUNT": "repo_mount",
+        "SRC": "src",
+        "OUTPUT": "output",
+        "HARNESS_VERSION": "harness_version",
+        "SCENARIO_REGISTRY": "scenario_registry",
+    }
+    for public_name, environment_name in supported_runtime_globals.items():
+        assert getattr(sandbox_runner, public_name) is getattr(run_environment, environment_name)
+
+    supported_wrappers_and_aliases = {
+        "USER_SENTINEL": sandbox_runner.file_effect_state.USER_SENTINEL,
+        "STALE_GRAPHIFY_SENTINEL": sandbox_runner.file_effect_state.STALE_GRAPHIFY_SENTINEL,
+        "ScenarioRunContext": sandbox_runner.scenario_lifecycle_support.ScenarioRunContext,
+        "StandardScenarioStages": sandbox_runner.scenario_lifecycle_support.StandardScenarioStages,
+    }
+    for public_name, owner_value in supported_wrappers_and_aliases.items():
+        assert getattr(sandbox_runner, public_name) is owner_value
+
+    assert sandbox_runner.USER_SENTINEL == sandbox_runner.file_effect_state.USER_SENTINEL
+    assert sandbox_runner.STALE_GRAPHIFY_SENTINEL == sandbox_runner.file_effect_state.STALE_GRAPHIFY_SENTINEL
+    assert sandbox_runner.ScenarioRunContext is sandbox_runner.scenario_lifecycle_support.ScenarioRunContext
+    assert sandbox_runner.StandardScenarioStages is sandbox_runner.scenario_lifecycle_support.StandardScenarioStages
+    assert callable(sandbox_runner.sandbox_env)
+    assert callable(sandbox_runner.install_graphify)
+    assert callable(sandbox_runner.risk_report)
+    assert callable(sandbox_runner.preflight)
+    assert callable(sandbox_runner.scenario_lifecycle_hooks)
+
+    ordinary_imported_dependencies = {
+        "agent_summary": "tools.install_sandbox.reporting.agent_summary",
+        "file_effect_state": "tools.install_sandbox.effects.file_effect_state",
+        "harness_run": "tools.install_sandbox.reporting.harness_run",
+        "platform_mod": "platform",
+        "reports": "tools.install_sandbox.reporting.reports",
+        "scenario_lifecycle_plan": "tools.install_sandbox.lifecycle.scenario_lifecycle_plan",
+        "scenario_lifecycle_support": "tools.install_sandbox.lifecycle.scenario_lifecycle_support",
+        "validation_plan": "tools.install_sandbox.validation_plan",
+    }
+    for dependency_name, owner_module_name in ordinary_imported_dependencies.items():
+        dependency = getattr(sandbox_runner, dependency_name)
+        assert isinstance(dependency, types.ModuleType)
+        assert dependency.__name__ == owner_module_name
+        assert dependency is importlib.import_module(owner_module_name)
+
+
+def test_root_topology_closeout_names_slice2_runtime_orchestration_owner() -> None:
+    slice2_owner_module = "tools.install_sandbox.runtime.harness_orchestration"
+
+    assert importlib.util.find_spec("tools.install_sandbox.runtime") is not None
+    assert importlib.util.find_spec("tools.install_sandbox.runtime.sandbox_run_environment") is not None
+    assert slice2_owner_module.rsplit(".", 1)[0] == "tools.install_sandbox.runtime"
 
 
 def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fields() -> None:

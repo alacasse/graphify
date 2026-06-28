@@ -37,6 +37,25 @@ def test_parse_args_requires_platform_or_all() -> None:
     assert args.fail_fast_scenarios is True
 
 
+def test_parse_args_keeps_public_cli_contract_explicit() -> None:
+    all_args = sandbox_runner.parse_args(["--all"])
+
+    assert all_args.all is True
+    assert all_args.platform is None
+    assert all_args.scope == "both"
+    assert all_args.copy_source == "always"
+    assert all_args.fail_fast_scenarios is False
+
+    with pytest.raises(SystemExit):
+        sandbox_runner.parse_args([])
+    with pytest.raises(SystemExit):
+        sandbox_runner.parse_args(["--platform", "codex", "--all"])
+    with pytest.raises(SystemExit):
+        sandbox_runner.parse_args(["--platform", "codex", "--scope", "workspace"])
+    with pytest.raises(SystemExit):
+        sandbox_runner.parse_args(["--platform", "codex", "--copy-source", "never"])
+
+
 def test_dockerfile_uses_package_layout() -> None:
     dockerfile = Path("tools/install_sandbox/Dockerfile").read_text(encoding="utf-8")
     dockerignore = Path("tools/install_sandbox/.dockerignore").read_text(encoding="utf-8").splitlines()
@@ -84,6 +103,26 @@ def test_sandbox_runner_direct_script_help_works() -> None:
     assert result.returncode == 0
     assert "--platform" in result.stdout
     assert "--all" in result.stdout
+    assert "--scope" in result.stdout
+    assert "--copy-source" in result.stdout
+    assert "--fail-fast-scenarios" in result.stdout
+
+
+def test_sandbox_runner_module_help_works() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.install_sandbox.sandbox_runner", "--help"],
+        check=False,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "--platform" in result.stdout
+    assert "--all" in result.stdout
+    assert "--scope" in result.stdout
+    assert "--copy-source" in result.stdout
+    assert "--fail-fast-scenarios" in result.stdout
 
 
 def test_sandbox_env_uses_isolated_home_xdg_project_and_path(monkeypatch, tmp_path) -> None:
@@ -197,7 +236,7 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
     assert "missing-disposable-root" in message
 
 
-def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, tmp_path) -> None:
+def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
     calls: list[str] = []
 
@@ -271,10 +310,39 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
             }
         ],
     )
-    monkeypatch.setattr(sandbox_runner, "read_os_release", lambda: {"PRETTY_NAME": "Synthetic Linux"})
-    monkeypatch.setattr(reports, "write_report_md", lambda path, manifest: Path(path).write_text("report\n", encoding="utf-8"))
+    monkeypatch.setattr(sandbox_runner, "read_os_release", lambda: calls.append("os-release") or {"PRETTY_NAME": "Synthetic Linux"})
+    monkeypatch.setattr(sandbox_runner.platform_mod, "machine", lambda: calls.append("architecture") or "synthetic-arch")
+
+    original_write_manifest_json = reports.write_manifest_json
+    original_write_summary = sandbox_runner.agent_summary.write_summary
+
+    def write_manifest(path, manifest):
+        calls.append("write-manifest")
+        original_write_manifest_json(path, manifest)
+
+    def write_report(path, manifest):
+        calls.append("write-report")
+        Path(path).write_text("report\n", encoding="utf-8")
+
+    def summarize_output(path):
+        calls.append("summarize-output")
+        return {"status": "FAIL", "failed_checks": [], "usage_guidance": "synthetic"}
+
+    def write_summary(path, summary):
+        calls.append("write-agent-summary")
+        original_write_summary(path, summary)
+
+    def print_summary(path, *, passed, failed):
+        calls.append(f"stdout-summary:{passed}:{failed}")
+
+    monkeypatch.setattr(reports, "write_manifest_json", write_manifest)
+    monkeypatch.setattr(reports, "write_report_md", write_report)
+    monkeypatch.setattr(sandbox_runner.agent_summary, "summarize_output", summarize_output)
+    monkeypatch.setattr(sandbox_runner.agent_summary, "write_summary", write_summary)
+    monkeypatch.setattr(reports, "print_summary", print_summary)
 
     def fake_harness_run_result(**kwargs):
+        calls.append("harness-result")
         assert kwargs["plan"] is plan
         assert len(kwargs["results"]) == 1
 
@@ -283,6 +351,7 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
             failed = 1
 
             def manifest(self) -> dict[str, object]:
+                calls.append("manifest")
                 return {
                     "harness_version": kwargs["harness_version"],
                     "python_version": kwargs["python_version"],
@@ -316,7 +385,23 @@ def test_main_records_tier1_runtime_boundary_and_writes_artifacts(monkeypatch, t
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
 
     assert exit_code == 1
-    assert calls == ["env", "preflight", "copy:auto", "install-package", "plan:codex:project:False", "validation-plan:project:True"]
+    assert calls == [
+        "env",
+        "preflight",
+        "copy:auto",
+        "install-package",
+        "plan:codex:project:False",
+        "validation-plan:project:True",
+        "os-release",
+        "architecture",
+        "harness-result",
+        "manifest",
+        "write-manifest",
+        "write-report",
+        "summarize-output",
+        "write-agent-summary",
+        "stdout-summary:0:1",
+    ]
     assert (output / "report.md").read_text(encoding="utf-8") == "report\n"
     assert (output / "agent-summary.md").exists()
     assert json.loads((output / "agent-summary.json").read_text(encoding="utf-8"))["status"] == "FAIL"

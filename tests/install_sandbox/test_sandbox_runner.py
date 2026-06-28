@@ -12,6 +12,7 @@ import pytest
 
 from tools.install_sandbox import sandbox_runner, status
 from tools.install_sandbox.harness_specs import SandboxRootRegistry, SandboxRootSpec
+from tools.install_sandbox.reporting import harness_run
 from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.reporting import reports
@@ -71,7 +72,7 @@ def test_dockerfile_uses_package_layout() -> None:
     assert {"out/", "__pycache__/", "*.pyc", ".pytest_cache/"}.issubset(set(dockerignore))
 
 
-def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
+def test_sandbox_runner_compatibility_imports_stay_on_owner_modules() -> None:
     tree = ast.parse(Path(sandbox_runner.__file__).read_text(encoding="utf-8"))
     module_imports: set[str] = set()
 
@@ -92,6 +93,72 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
     assert "agent_summary" not in module_imports
     assert "reports" not in module_imports
     assert {"file_effect_state", "harness_orchestration", "scenario_lifecycle_support"} <= module_imports
+
+
+def test_sandbox_runner_adapter_boundary_does_not_regrow_orchestration() -> None:
+    tree = ast.parse(Path(sandbox_runner.__file__).read_text(encoding="utf-8"))
+    imported_names: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_names.update(alias.name.rsplit(".", 1)[-1] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module is not None:
+                imported_names.add(node.module.rsplit(".", 1)[-1])
+            imported_names.update(alias.name for alias in node.names)
+
+    assert {
+        "scenario_lifecycle_plan",
+        "reports",
+        "agent_summary",
+        "command_runner",
+        "source_snapshot",
+        "container_runtime",
+    }.isdisjoint(imported_names)
+
+    main_node = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+    called_attributes = {
+        node.attr
+        for node in ast.walk(main_node)
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
+    }
+
+    assert "run_harness_and_write_outputs" not in called_attributes
+    assert "run_harness" in called_attributes
+    assert "write_harness_run_outputs" in called_attributes
+    assert {
+        "sandbox_env",
+        "preflight",
+        "copy_source_tree",
+        "install_graphify",
+        "scenario_lifecycle_hooks",
+        "build_validation_plan",
+        "run_validation_plan",
+    }.isdisjoint(called_attributes)
+
+
+def test_sandbox_runner_main_composes_runtime_run_and_reporting_write(monkeypatch, tmp_path) -> None:
+    calls: list[str] = []
+
+    run_environment = SimpleNamespace(output=tmp_path / "out")
+    run_result = SimpleNamespace(failed=0)
+
+    def run_harness(args, environment):
+        calls.append(f"run:{args.platform}")
+        assert environment is run_environment
+        return run_result
+
+    def write_harness_run_outputs(output, result):
+        calls.append("write")
+        assert output == run_environment.output
+        assert result is run_result
+
+    monkeypatch.setattr(sandbox_runner, "RUN_ENVIRONMENT", run_environment)
+    monkeypatch.setattr(harness_orchestration, "run_harness", run_harness)
+    monkeypatch.setattr(harness_run, "write_harness_run_outputs", write_harness_run_outputs)
+
+    assert sandbox_runner.main(["--platform", "codex"]) == 0
+    assert calls == ["run:codex", "write"]
 
 
 def test_sandbox_runner_direct_script_help_works() -> None:
@@ -294,11 +361,7 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
         calls.append(f"plan:{platform_name}:{scope}:{all_platforms}")
         return plan
 
-    monkeypatch.setattr(
-        sandbox_runner.validation_plan,
-        "build_validation_plan",
-        build_plan,
-    )
+    monkeypatch.setattr(harness_orchestration.validation_plan, "build_validation_plan", build_plan)
     monkeypatch.setattr(
         scenario_lifecycle_plan,
         "run_validation_plan",
@@ -317,7 +380,7 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     monkeypatch.setattr(harness_orchestration.platform_mod, "machine", lambda: calls.append("architecture") or "synthetic-arch")
 
     original_write_manifest_json = reports.write_manifest_json
-    original_write_summary = sandbox_runner.harness_run.agent_summary.write_summary
+    original_write_summary = harness_orchestration.harness_run.agent_summary.write_summary
 
     def write_manifest(path, manifest):
         calls.append("write-manifest")
@@ -340,8 +403,8 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
 
     monkeypatch.setattr(reports, "write_manifest_json", write_manifest)
     monkeypatch.setattr(reports, "write_report_md", write_report)
-    monkeypatch.setattr(sandbox_runner.harness_run.agent_summary, "summarize_output", summarize_output)
-    monkeypatch.setattr(sandbox_runner.harness_run.agent_summary, "write_summary", write_summary)
+    monkeypatch.setattr(harness_orchestration.harness_run.agent_summary, "summarize_output", summarize_output)
+    monkeypatch.setattr(harness_orchestration.harness_run.agent_summary, "write_summary", write_summary)
     monkeypatch.setattr(reports, "print_summary", print_summary)
 
     def fake_harness_run_result(**kwargs):
@@ -483,7 +546,7 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
             return object()
 
     monkeypatch.setattr(sandbox_runner, "RUN_ENVIRONMENT", RunEnvironmentDouble())
-    monkeypatch.setattr(sandbox_runner.validation_plan, "build_validation_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(harness_orchestration.validation_plan, "build_validation_plan", lambda *args, **kwargs: plan)
     monkeypatch.setattr(
         scenario_lifecycle_plan,
         "run_validation_plan",

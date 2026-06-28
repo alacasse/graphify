@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 try:
+    # Public adapter owners.
     from .lifecycle import scenario_lifecycle_support
     from . import validation_plan
     from .effects import file_effect_state
@@ -15,6 +16,7 @@ try:
     from .runtime.sandbox_run_environment import SandboxRunEnvironment
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    # Public adapter owners.
     from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
     from tools.install_sandbox.effects import file_effect_state  # type: ignore[no-redef]
     from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
@@ -25,6 +27,8 @@ except ImportError:
 
 
 RUN_ENVIRONMENT = SandboxRunEnvironment()
+
+# Compatibility surface for historical direct imports from sandbox_runner.
 ROOT_REGISTRY = RUN_ENVIRONMENT.root_registry
 RUNTIME_ROOTS = RUN_ENVIRONMENT.runtime_roots
 HOME = RUN_ENVIRONMENT.home
@@ -75,9 +79,8 @@ def scenario_lifecycle_hooks(**kwargs) -> scenario_lifecycle_support.ScenarioLif
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    run_environment = RUN_ENVIRONMENT
-    run_result = harness_orchestration.run_harness(args, run_environment)
-    harness_run.write_harness_run_outputs(run_environment.output, run_result)
+    run_result = harness_orchestration.run_harness(args, RUN_ENVIRONMENT)
+    harness_run.write_harness_run_outputs(RUN_ENVIRONMENT.output, run_result)
     return 0 if run_result.failed == 0 else 1
 
 

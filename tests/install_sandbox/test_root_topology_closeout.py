@@ -111,6 +111,7 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     assert callable(harness_run.harness_run_result)
     assert callable(harness_run.write_harness_run_outputs)
     assert callable(harness_orchestration.run_harness)
+    assert not hasattr(harness_orchestration, "run_harness_and_write_outputs")
     assert callable(sandbox_runner.main)
     assert callable(sandbox_runner.parse_args)
     assert root_agent_summary.summarize_output is agent_summary.summarize_output

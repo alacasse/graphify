@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support
 from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
 from tools.install_sandbox.targets.install_target_models import (
@@ -16,6 +17,51 @@ from tests.install_sandbox.scenario_lifecycle_test_support import (
     make_universal_uninstall_selection,
     make_validation_plan,
 )
+
+
+def test_run_validation_plan_consumes_work_items_without_bucket_access(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    calls: list[str] = []
+    first = make_scenario("first", "project", uninstall=False)
+    disposable_spec = make_disposable_graphify_out_spec()
+
+    class WorkItemOnlyPlan:
+        validation_work_items = (
+            validation_plan.ValidationWorkItem("standard_scenario", first),
+            validation_plan.ValidationWorkItem("disposable_artifact", disposable_spec),
+        )
+
+        @property
+        def standard_scenarios(self):
+            raise AssertionError("lifecycle should consume validation_work_items")
+
+        @property
+        def universal_uninstall_scenarios(self):
+            raise AssertionError("lifecycle should consume validation_work_items")
+
+        @property
+        def disposable_artifact_scenarios(self):
+            raise AssertionError("lifecycle should consume validation_work_items")
+
+    def run_scenario(item, env):
+        calls.append(f"standard:{item.platform}:{item.scope}")
+        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+
+    def run_disposable(spec, env):
+        calls.append(f"disposable:{spec.scenario_id}")
+        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+
+    results = scenario_lifecycle_plan.run_validation_plan(
+        WorkItemOnlyPlan(),
+        {},
+        hooks=factory.hooks(
+            run_scenario_func=run_scenario,
+            run_disposable_artifact_scenario_func=run_disposable,
+        ),
+    )
+
+    assert calls == ["standard:first:project", "disposable:purge-disposable-graphify-out"]
+    assert [result["id"] for result in results] == ["first-project", "purge-disposable-graphify-out"]
 
 
 def test_run_validation_plan_preserves_matrix_runner_overrides(tmp_path) -> None:

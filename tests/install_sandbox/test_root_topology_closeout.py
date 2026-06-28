@@ -115,7 +115,7 @@ def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fi
     harness_run = importlib.import_module("tools.install_sandbox.reporting.harness_run")
 
     class Plan:
-        standard_scenarios = ("codex-project",)
+        standard_validation_count = 1
         coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
         target_runtime_validation_sections = ({"section_title": "Runtime Boundary", "status": "declared"},)
         platform_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}

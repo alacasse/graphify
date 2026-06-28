@@ -242,7 +242,7 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
 
 def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
     assert set(manifest_projection.ManifestProjectionPlan.__annotations__) == {
-        "standard_scenarios",
+        "standard_validation_count",
         "coverage_records",
         "target_runtime_validation_sections",
         "platform_coverage_summary",
@@ -252,7 +252,7 @@ def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
 
 def test_validation_plan_manifest_projection_returns_manifest_primitives() -> None:
     class Plan:
-        standard_scenarios = ("codex-project",)
+        standard_validation_count = 1
         coverage_records = (
             {
                 "platform": "codex",
@@ -306,7 +306,7 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
 
 def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> None:
     class Plan:
-        standard_scenarios = ("codex-project",)
+        standard_validation_count = 1
 
     projection_calls: list[tuple[object, int]] = []
 

@@ -350,7 +350,7 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
     class Plan:
         platforms = ("codex",)
         requested_scope = "project"
-        standard_scenarios = (scenario,)
+        standard_validation_count = 1
         coverage_records = (
             {
                 "platform": "codex",

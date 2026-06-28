@@ -149,8 +149,12 @@ class ValidationPlan:
         return len(self.universal_uninstall) + len(self.disposable_artifacts)
 
     @property
+    def standard_validation_count(self) -> int:
+        return sum(1 for work_item in self.validation_work_items if work_item.kind == "standard_scenario")
+
+    @property
     def scenario_count(self) -> int:
-        return len(self.standard_scenarios) + self.synthetic_scenario_count
+        return self.standard_validation_count + self.synthetic_scenario_count
 
 
 def _selected_scopes(scope: str) -> tuple[str, ...]:

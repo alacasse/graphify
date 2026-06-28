@@ -200,6 +200,7 @@ def test_validation_plan_builds_ordered_typed_work_items_from_existing_buckets()
         *plan.universal_uninstall,
         *plan.disposable_artifacts,
     ]
+    assert plan.standard_validation_count == 3
     assert plan.synthetic_scenario_count == 2
     assert plan.scenario_count == 5
 
@@ -437,6 +438,7 @@ def test_validation_plan_constructor_derives_work_items_without_changing_alias_p
     )
     assert plan.standard_scenarios == (scenario,)
     assert plan.disposable_artifacts == plan.disposable_artifact_scenarios == (disposable,)
+    assert plan.standard_validation_count == 1
     assert plan.synthetic_scenario_count == 1
     assert plan.scenario_count == 2
 

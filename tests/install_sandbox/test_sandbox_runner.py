@@ -15,6 +15,7 @@ from tools.install_sandbox.harness_specs import SandboxRootRegistry, SandboxRoot
 from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan
 from tools.install_sandbox.reporting import reports
+from tools.install_sandbox.runtime import harness_orchestration
 from tools.install_sandbox.runtime import command_runner, source_snapshot
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
@@ -88,7 +89,7 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
     assert "SandboxRunEnvironment" in module_imports
     assert "file_effect_oracle" not in module_imports
     assert "scenario_file_effects_adapter" not in module_imports
-    assert {"file_effect_state", "scenario_lifecycle_plan", "scenario_lifecycle_support"} <= module_imports
+    assert {"file_effect_state", "harness_orchestration", "scenario_lifecycle_support"} <= module_imports
 
 
 def test_sandbox_runner_direct_script_help_works() -> None:
@@ -310,8 +311,8 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
             }
         ],
     )
-    monkeypatch.setattr(sandbox_runner, "read_os_release", lambda: calls.append("os-release") or {"PRETTY_NAME": "Synthetic Linux"})
-    monkeypatch.setattr(sandbox_runner.platform_mod, "machine", lambda: calls.append("architecture") or "synthetic-arch")
+    monkeypatch.setattr(harness_orchestration, "read_os_release", lambda: calls.append("os-release") or {"PRETTY_NAME": "Synthetic Linux"})
+    monkeypatch.setattr(harness_orchestration.platform_mod, "machine", lambda: calls.append("architecture") or "synthetic-arch")
 
     original_write_manifest_json = reports.write_manifest_json
     original_write_summary = sandbox_runner.agent_summary.write_summary
@@ -379,7 +380,7 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
 
         return FakeHarnessRunResult()
 
-    monkeypatch.setattr(sandbox_runner.harness_run, "harness_run_result", fake_harness_run_result)
+    monkeypatch.setattr(harness_orchestration.harness_run, "harness_run_result", fake_harness_run_result)
 
     exit_code = sandbox_runner.main(["--platform", "codex", "--scope", "project", "--copy-source", "auto", "--fail-fast-scenarios"])
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
@@ -501,7 +502,7 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
             },
         ],
     )
-    monkeypatch.setattr(sandbox_runner, "read_os_release", lambda: {"PRETTY_NAME": "Synthetic Linux"})
+    monkeypatch.setattr(harness_orchestration, "read_os_release", lambda: {"PRETTY_NAME": "Synthetic Linux"})
     monkeypatch.setattr(reports, "write_report_md", lambda path, manifest: Path(path).write_text("report\n", encoding="utf-8"))
 
     exit_code = sandbox_runner.main(["--platform", "codex", "--scope", "project"])

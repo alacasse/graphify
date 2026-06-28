@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import platform as platform_mod
 import sys
 from pathlib import Path
 
 try:
-    from .lifecycle import scenario_lifecycle_plan
     from .lifecycle import scenario_lifecycle_support
     from . import validation_plan
     from .effects import file_effect_state
@@ -15,17 +13,18 @@ try:
     from .reporting import harness_run
     from .reporting import reports
     from .reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
+    from .runtime import harness_orchestration
     from .runtime.sandbox_run_environment import SandboxRunEnvironment
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
     from tools.install_sandbox.effects import file_effect_state  # type: ignore[no-redef]
-    from tools.install_sandbox.lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
     from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import agent_summary  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import harness_run  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
+    from tools.install_sandbox.runtime import harness_orchestration  # type: ignore[no-redef]
     from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment  # type: ignore[no-redef]
 
 
@@ -58,18 +57,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def read_os_release() -> dict[str, str]:
-    data: dict[str, str] = {}
-    path = Path("/etc/os-release")
-    if not path.exists():
-        return data
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            data[key] = value.strip().strip('"')
-    return data
-
-
 def sandbox_env() -> dict[str, str]:
     return RUN_ENVIRONMENT.sandbox_env()
 
@@ -93,30 +80,7 @@ def scenario_lifecycle_hooks(**kwargs) -> scenario_lifecycle_support.ScenarioLif
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     run_environment = RUN_ENVIRONMENT
-    env = run_environment.sandbox_env()
-    preflight_data = run_environment.preflight()
-    src_data = run_environment.copy_source_tree(args.copy_source)
-    package_data = run_environment.install_graphify(env)
-    hooks = run_environment.scenario_lifecycle_hooks()
-    plan = validation_plan.build_validation_plan(
-        run_environment.scenario_registry,
-        all_platforms=args.all,
-        platform_name=args.platform,
-        scope=args.scope,
-    )
-
-    results = scenario_lifecycle_plan.run_validation_plan(plan, env, hooks, fail_fast_scenarios=args.fail_fast_scenarios)
-    run_result = harness_run.harness_run_result(
-        harness_version=run_environment.harness_version,
-        python_version=sys.version,
-        os_release=read_os_release(),
-        architecture=platform_mod.machine(),
-        package_install=package_data,
-        source_snapshot=src_data,
-        preflight=preflight_data,
-        plan=plan,
-        results=results,
-    )
+    run_result = harness_orchestration.run_harness(args, run_environment)
     manifest = run_result.manifest()
     reports.write_manifest_json(run_environment.output / "manifest.json", manifest)
     reports.write_report_md(run_environment.output / "report.md", manifest)

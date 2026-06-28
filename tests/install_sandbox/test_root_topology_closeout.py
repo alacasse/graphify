@@ -18,6 +18,7 @@ def test_root_topology_closeout_keeps_moved_implementation_packages_importable()
         "tools.install_sandbox.reporting.agent_summary",
         "tools.install_sandbox.runtime.command_runner",
         "tools.install_sandbox.runtime.container_runtime",
+        "tools.install_sandbox.runtime.harness_orchestration",
         "tools.install_sandbox.runtime.source_snapshot",
     ):
         assert importlib.import_module(module_name).__name__ == module_name
@@ -95,6 +96,7 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     harness_run = importlib.import_module("tools.install_sandbox.reporting.harness_run")
     reports = importlib.import_module("tools.install_sandbox.reporting.reports")
     agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
+    harness_orchestration = importlib.import_module("tools.install_sandbox.runtime.harness_orchestration")
     sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
     root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
 
@@ -107,6 +109,7 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     assert callable(agent_summary.summarize_output)
     assert callable(agent_summary.write_summary)
     assert callable(harness_run.harness_run_result)
+    assert callable(harness_orchestration.run_harness)
     assert callable(sandbox_runner.main)
     assert callable(sandbox_runner.parse_args)
     assert root_agent_summary.summarize_output is agent_summary.summarize_output
@@ -155,9 +158,8 @@ def test_root_topology_closeout_characterizes_supported_runner_compatibility_sur
         "agent_summary": "tools.install_sandbox.reporting.agent_summary",
         "file_effect_state": "tools.install_sandbox.effects.file_effect_state",
         "harness_run": "tools.install_sandbox.reporting.harness_run",
-        "platform_mod": "platform",
         "reports": "tools.install_sandbox.reporting.reports",
-        "scenario_lifecycle_plan": "tools.install_sandbox.lifecycle.scenario_lifecycle_plan",
+        "harness_orchestration": "tools.install_sandbox.runtime.harness_orchestration",
         "scenario_lifecycle_support": "tools.install_sandbox.lifecycle.scenario_lifecycle_support",
         "validation_plan": "tools.install_sandbox.validation_plan",
     }

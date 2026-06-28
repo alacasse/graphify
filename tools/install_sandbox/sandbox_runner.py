@@ -9,9 +9,7 @@ try:
     from .lifecycle import scenario_lifecycle_support
     from . import validation_plan
     from .effects import file_effect_state
-    from .reporting import agent_summary
     from .reporting import harness_run
-    from .reporting import reports
     from .reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .runtime import harness_orchestration
     from .runtime.sandbox_run_environment import SandboxRunEnvironment
@@ -20,9 +18,7 @@ except ImportError:
     from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
     from tools.install_sandbox.effects import file_effect_state  # type: ignore[no-redef]
     from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
-    from tools.install_sandbox.reporting import agent_summary  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import harness_run  # type: ignore[no-redef]
-    from tools.install_sandbox.reporting import reports  # type: ignore[no-redef]
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import harness_orchestration  # type: ignore[no-redef]
     from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment  # type: ignore[no-redef]
@@ -81,11 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     run_environment = RUN_ENVIRONMENT
     run_result = harness_orchestration.run_harness(args, run_environment)
-    manifest = run_result.manifest()
-    reports.write_manifest_json(run_environment.output / "manifest.json", manifest)
-    reports.write_report_md(run_environment.output / "report.md", manifest)
-    agent_summary.write_summary(run_environment.output, agent_summary.summarize_output(run_environment.output))
-    reports.print_summary(run_environment.output, passed=run_result.passed, failed=run_result.failed)
+    harness_run.write_harness_run_outputs(run_environment.output, run_result)
     return 0 if run_result.failed == 0 else 1
 
 

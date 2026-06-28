@@ -89,6 +89,8 @@ def test_sandbox_runner_imports_file_effect_owner_modules() -> None:
     assert "SandboxRunEnvironment" in module_imports
     assert "file_effect_oracle" not in module_imports
     assert "scenario_file_effects_adapter" not in module_imports
+    assert "agent_summary" not in module_imports
+    assert "reports" not in module_imports
     assert {"file_effect_state", "harness_orchestration", "scenario_lifecycle_support"} <= module_imports
 
 
@@ -315,7 +317,7 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     monkeypatch.setattr(harness_orchestration.platform_mod, "machine", lambda: calls.append("architecture") or "synthetic-arch")
 
     original_write_manifest_json = reports.write_manifest_json
-    original_write_summary = sandbox_runner.agent_summary.write_summary
+    original_write_summary = sandbox_runner.harness_run.agent_summary.write_summary
 
     def write_manifest(path, manifest):
         calls.append("write-manifest")
@@ -338,8 +340,8 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
 
     monkeypatch.setattr(reports, "write_manifest_json", write_manifest)
     monkeypatch.setattr(reports, "write_report_md", write_report)
-    monkeypatch.setattr(sandbox_runner.agent_summary, "summarize_output", summarize_output)
-    monkeypatch.setattr(sandbox_runner.agent_summary, "write_summary", write_summary)
+    monkeypatch.setattr(sandbox_runner.harness_run.agent_summary, "summarize_output", summarize_output)
+    monkeypatch.setattr(sandbox_runner.harness_run.agent_summary, "write_summary", write_summary)
     monkeypatch.setattr(reports, "print_summary", print_summary)
 
     def fake_harness_run_result(**kwargs):

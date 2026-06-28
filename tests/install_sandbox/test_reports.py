@@ -348,6 +348,61 @@ def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> N
     assert manifest["risk_status_values"] == reporting_status.known_status_values()
 
 
+def test_harness_run_output_writer_preserves_summary_order(monkeypatch, tmp_path) -> None:
+    output = tmp_path / "out"
+    output.mkdir()
+    calls: list[str] = []
+
+    class RunResult:
+        passed = 1
+        failed = 0
+
+        def manifest(self) -> dict[str, object]:
+            calls.append("manifest")
+            return {"results": [], "platform_coverage": [], "pass_count": 1, "fail_count": 0}
+
+    def write_manifest(path, manifest):
+        calls.append("write-manifest")
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def write_report(path, manifest):
+        calls.append("write-report")
+        path.write_text("report\n", encoding="utf-8")
+
+    def summarize_output(path):
+        calls.append("summarize-output")
+        assert (path / "manifest.json").exists()
+        assert (path / "report.md").exists()
+        return {"status": "PASS", "output": str(path), "failures": []}
+
+    def write_summary(path, summary):
+        calls.append("write-agent-summary")
+        (path / "agent-summary.md").write_text("summary\n", encoding="utf-8")
+        (path / "agent-summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    def print_summary(path, *, passed, failed):
+        calls.append(f"stdout-summary:{passed}:{failed}")
+        assert (path / "agent-summary.md").exists()
+        assert (path / "agent-summary.json").exists()
+
+    monkeypatch.setattr(harness_run.reports, "write_manifest_json", write_manifest)
+    monkeypatch.setattr(harness_run.reports, "write_report_md", write_report)
+    monkeypatch.setattr(harness_run.agent_summary, "summarize_output", summarize_output)
+    monkeypatch.setattr(harness_run.agent_summary, "write_summary", write_summary)
+    monkeypatch.setattr(harness_run.reports, "print_summary", print_summary)
+
+    harness_run.write_harness_run_outputs(output, RunResult())
+
+    assert calls == [
+        "manifest",
+        "write-manifest",
+        "write-report",
+        "summarize-output",
+        "write-agent-summary",
+        "stdout-summary:1:0",
+    ]
+
+
 def test_write_report_markdown(tmp_path) -> None:
     path = tmp_path / "report.md"
 

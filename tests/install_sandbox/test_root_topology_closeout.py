@@ -109,6 +109,7 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     assert callable(agent_summary.summarize_output)
     assert callable(agent_summary.write_summary)
     assert callable(harness_run.harness_run_result)
+    assert callable(harness_run.write_harness_run_outputs)
     assert callable(harness_orchestration.run_harness)
     assert callable(sandbox_runner.main)
     assert callable(sandbox_runner.parse_args)
@@ -155,10 +156,8 @@ def test_root_topology_closeout_characterizes_supported_runner_compatibility_sur
     assert callable(sandbox_runner.scenario_lifecycle_hooks)
 
     ordinary_imported_dependencies = {
-        "agent_summary": "tools.install_sandbox.reporting.agent_summary",
         "file_effect_state": "tools.install_sandbox.effects.file_effect_state",
         "harness_run": "tools.install_sandbox.reporting.harness_run",
-        "reports": "tools.install_sandbox.reporting.reports",
         "harness_orchestration": "tools.install_sandbox.runtime.harness_orchestration",
         "scenario_lifecycle_support": "tools.install_sandbox.lifecycle.scenario_lifecycle_support",
         "validation_plan": "tools.install_sandbox.validation_plan",

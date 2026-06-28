@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
+from . import agent_summary
 from . import manifest_projection
 from .manifest_projection import ManifestProjectionPlan
+from . import reports
 from .status import known_status_values
 
 
@@ -72,3 +75,11 @@ def harness_run_result(
         plan=plan,
         results=list(results),
     )
+
+
+def write_harness_run_outputs(output: Path, run_result: HarnessRunResult) -> None:
+    manifest = run_result.manifest()
+    reports.write_manifest_json(output / "manifest.json", manifest)
+    reports.write_report_md(output / "report.md", manifest)
+    agent_summary.write_summary(output, agent_summary.summarize_output(output))
+    reports.print_summary(output, passed=run_result.passed, failed=run_result.failed)

@@ -14,9 +14,10 @@ def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
 
 
 def test_loader_root_validation_also_uses_all_sandbox_roots_for_harness_policy() -> None:
-    all_root_names = {root.name for root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots}
+    all_root_names = DEFAULT_SANDBOX_ROOT_REGISTRY.root_names()
 
     assert "repo_mount" in all_root_names - DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names()
+    assert DEFAULT_SANDBOX_ROOT_REGISTRY.policy_cwd_root_names() == all_root_names
 
 
 def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:

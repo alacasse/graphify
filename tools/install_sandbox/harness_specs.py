@@ -38,8 +38,17 @@ class SandboxRootRegistry:
     def runtime_paths(self, environ: dict[str, str] | None = None) -> dict[str, Path]:
         return {root.name: self.runtime_path(root.name, environ) for root in self.roots}
 
+    def root_names(self) -> set[str]:
+        return {root.name for root in self.roots}
+
+    def scenario_root_names(self) -> tuple[str, ...]:
+        return ("home", "project", "user_cwd")
+
+    def scenario_root_paths(self, paths: dict[str, Path]) -> dict[str, Path]:
+        return {name: paths[name] for name in self.scenario_root_names()}
+
     def scenario_roots(self, paths: dict[str, Path]) -> dict[str, Path]:
-        return {name: paths[name] for name in ("home", "project", "user_cwd")}
+        return self.scenario_root_paths(paths)
 
     def env_entries(self) -> dict[str, str]:
         return {root.env_var: root.container_path for root in self.roots if root.env_var is not None}
@@ -55,6 +64,12 @@ class SandboxRootRegistry:
 
     def install_surface_root_names(self) -> set[str]:
         return {"home", "project", "user_cwd"}
+
+    def policy_cwd_root_names(self) -> set[str]:
+        return self.root_names()
+
+    def sandbox_path_assertion_roots(self) -> tuple[SandboxRootSpec, ...]:
+        return tuple(root for root in self.roots if root.sandbox_path_required is not None)
 
     def declared_expected_root_names(self) -> set[str]:
         """Compatibility name for install-surface roots."""

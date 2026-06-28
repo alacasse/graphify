@@ -17,8 +17,20 @@ def test_default_sandbox_root_registry_characterizes_current_role_groups() -> No
         "src",
         "output",
     )
+    assert registry.root_names() == {
+        "home",
+        "xdg_config_home",
+        "project",
+        "user_cwd",
+        "repo_mount",
+        "src",
+        "output",
+    }
     assert registry.install_surface_root_names() == {"home", "project", "user_cwd"}
+    assert registry.scenario_root_names() == ("home", "project", "user_cwd")
+    assert registry.policy_cwd_root_names() == registry.root_names()
     assert registry.declared_expected_root_names() == registry.install_surface_root_names()
+    assert registry.scenario_root_paths(registry.runtime_paths()) == registry.scenario_roots(registry.runtime_paths())
     assert tuple(registry.scenario_roots(registry.runtime_paths())) == ("home", "project", "user_cwd")
     assert tuple(root.name for root in registry.reset_roots()) == ("home", "project", "user_cwd")
     assert tuple(root.name for root in registry.preflight_roots()) == (
@@ -45,6 +57,11 @@ def test_default_sandbox_root_registry_characterizes_current_role_groups() -> No
         "xdg_config_home": "/tmp/graphify-home/.config",
         "project": "/tmp/graphify-project",
     }
+    assert tuple(root.name for root in registry.sandbox_path_assertion_roots()) == (
+        "home",
+        "xdg_config_home",
+        "project",
+    )
 
 
 def test_default_sandbox_root_registry_runtime_paths_use_env_overrides_only_for_env_roots() -> None:

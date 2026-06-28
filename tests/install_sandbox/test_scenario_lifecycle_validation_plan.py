@@ -87,6 +87,73 @@ def test_run_validation_plan_preserves_matrix_runner_overrides(tmp_path) -> None
     ]
 
 
+def test_run_validation_plan_executes_plan_buckets_in_current_order(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    calls: list[str] = []
+    first = make_scenario("first", "project", uninstall=False)
+    second = make_scenario("second", "project", uninstall=False)
+    user_universal = make_universal_uninstall_selection(
+        (make_scenario("first", "user"), make_scenario("second", "user")),
+        scenario_id="universal-user",
+        scope="user",
+        command=("cleanup", "user"),
+        cwd_root="user_cwd",
+        eligible_platform_scope="user",
+    )
+    project_universal = make_universal_uninstall_selection(
+        (first, second),
+        scenario_id="universal-project",
+        scope="project",
+        command=("cleanup", "project"),
+        eligible_platform_scope="project",
+    )
+    disposable_spec = make_disposable_graphify_out_spec()
+    plan = make_validation_plan(
+        platforms=("first", "second"),
+        scope="both",
+        standard_scenarios=(first, second),
+        universal_uninstall=(user_universal, project_universal),
+        disposable_artifacts=(disposable_spec,),
+    )
+
+    def run_scenario(item, env):
+        calls.append(f"standard:{item.platform}:{item.scope}")
+        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+
+    def run_universal(selected, env):
+        calls.append(f"universal:{selected.spec.scenario_id}")
+        return {"id": selected.spec.scenario_id, "platform": selected.spec.platform_label, "scope": selected.spec.scope, "passed": True}
+
+    def run_disposable(spec, env):
+        calls.append(f"disposable:{spec.scenario_id}")
+        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+
+    results = scenario_lifecycle_plan.run_validation_plan(
+        plan,
+        {},
+        hooks=factory.hooks(
+            run_scenario_func=run_scenario,
+            run_universal_uninstall_scenario_func=run_universal,
+            run_disposable_artifact_scenario_func=run_disposable,
+        ),
+    )
+
+    assert calls == [
+        "standard:first:project",
+        "standard:second:project",
+        "universal:universal-user",
+        "universal:universal-project",
+        "disposable:purge-disposable-graphify-out",
+    ]
+    assert [result["id"] for result in results] == [
+        "first-project",
+        "second-project",
+        "universal-user",
+        "universal-project",
+        "purge-disposable-graphify-out",
+    ]
+
+
 def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
@@ -146,6 +213,47 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
 
     assert calls == ["scenario:first", "scenario:second"]
     assert [result["passed"] for result in results] == [False, True]
+
+
+def test_run_validation_plan_fail_fast_only_short_circuits_standard_scenarios(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    calls: list[str] = []
+    first = make_scenario("first", "project", uninstall=False)
+    universal = make_universal_uninstall_selection((first,), scenario_id="universal-fails")
+    disposable_spec = make_disposable_graphify_out_spec()
+    plan = make_validation_plan(
+        platforms=("first",),
+        scope="project",
+        standard_scenarios=(first,),
+        universal_uninstall=(universal,),
+        disposable_artifacts=(disposable_spec,),
+    )
+
+    def run_scenario(item, env):
+        calls.append(f"standard:{item.platform}")
+        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+
+    def run_universal(selected, env):
+        calls.append(f"universal:{selected.spec.scenario_id}")
+        return {"id": selected.spec.scenario_id, "platform": selected.spec.platform_label, "scope": selected.spec.scope, "passed": False}
+
+    def run_disposable(spec, env):
+        calls.append(f"disposable:{spec.scenario_id}")
+        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+
+    results = scenario_lifecycle_plan.run_validation_plan(
+        plan,
+        {},
+        hooks=factory.hooks(
+            run_scenario_func=run_scenario,
+            run_universal_uninstall_scenario_func=run_universal,
+            run_disposable_artifact_scenario_func=run_disposable,
+        ),
+        fail_fast_scenarios=True,
+    )
+
+    assert calls == ["standard:first", "universal:universal-fails", "disposable:purge-disposable-graphify-out"]
+    assert [result["passed"] for result in results] == [True, False, True]
 
 
 def test_run_validation_plan_fail_fast_stops_first_graphify_failure(tmp_path) -> None:

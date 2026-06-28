@@ -285,6 +285,53 @@ def test_validation_plan_keeps_target_and_report_aliases_as_compatibility_paths(
     )
 
 
+def test_validation_plan_constructor_aliases_are_limited_to_supported_compatibility_names() -> None:
+    required = {
+        "requested_scope": "project",
+        "standard_scenarios": (),
+        "platform_coverage_summary": {"requested_scope": "project"},
+    }
+
+    alias_constructed = validation_plan.ValidationPlan(
+        selected_platforms=("codex",),
+        universal_uninstall_scenarios=(),
+        disposable_artifact_scenarios=(),
+        platform_coverage=(),
+        runtime_limitation_sections=(),
+        **required,
+    )
+    owner_constructed = validation_plan.ValidationPlan(
+        platforms=("codex",),
+        universal_uninstall=(),
+        disposable_artifacts=(),
+        coverage_records=(),
+        target_runtime_validation_sections=(),
+        **required,
+    )
+
+    assert alias_constructed == owner_constructed
+    assert alias_constructed.selected_targets == ("codex",)
+    with pytest.raises(TypeError, match="selected_targets"):
+        validation_plan.ValidationPlan(  # type: ignore[call-arg]
+            selected_targets=("codex",),
+            universal_uninstall=(),
+            disposable_artifacts=(),
+            coverage_records=(),
+            target_runtime_validation_sections=(),
+            **required,
+        )
+    with pytest.raises(TypeError, match="scenario_count"):
+        validation_plan.ValidationPlan(  # type: ignore[call-arg]
+            platforms=("codex",),
+            universal_uninstall=(),
+            disposable_artifacts=(),
+            coverage_records=(),
+            target_runtime_validation_sections=(),
+            scenario_count=1,
+            **required,
+        )
+
+
 def test_validation_plan_derives_universal_uninstall_from_policy_and_target_facts() -> None:
     registry = _planner_registry()
 

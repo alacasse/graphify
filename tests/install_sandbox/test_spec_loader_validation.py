@@ -5,6 +5,7 @@ from tests.install_sandbox.install_target_test_support import (
     valid_registry_data as _valid_data,
 )
 from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from tools.install_sandbox.registry.spec_loader import load_registry_from_data
 
 
 def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
@@ -12,9 +13,42 @@ def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
     assert DEFAULT_SANDBOX_ROOT_REGISTRY.declared_expected_root_names() == DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names()
 
 
+def test_loader_root_validation_also_uses_all_sandbox_roots_for_harness_policy() -> None:
+    all_root_names = {root.name for root in DEFAULT_SANDBOX_ROOT_REGISTRY.roots}
+
+    assert "repo_mount" in all_root_names - DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names()
+
+
+def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
+    data = _valid_data()
+    data["universal_uninstall_specs"] = [
+        {
+            "scenario_id": "repo-mount-uninstall",
+            "platform_label": "repo-mounted",
+            "scope": "project",
+            "command": ["graphify", "uninstall", "--project"],
+            "cwd_root": "repo_mount",
+            "eligible_platform_scope": "project",
+        }
+    ]
+    data["disposable_artifact_specs"][0]["cwd_root"] = "repo_mount"
+
+    registry = load_registry_from_data(data)
+
+    assert registry.universal_uninstall_specs[0].cwd_root == "repo_mount"
+    assert registry.disposable_artifact_specs[0].cwd_root == "repo_mount"
+
+
 def test_loader_rejects_unknown_expected_root() -> None:
     data = _valid_data()
     data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["root"] = "repo_mount"
+
+    _expect_invalid(data, "unknown expected root")
+
+
+def test_loader_rejects_non_surface_root_for_disposable_path_root() -> None:
+    data = _valid_data()
+    data["disposable_artifact_specs"][0]["disposable_path_root"] = "repo_mount"
 
     _expect_invalid(data, "unknown expected root")
 

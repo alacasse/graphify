@@ -14,6 +14,7 @@ from tests.install_sandbox.install_target_test_support import valid_registry_dat
 
 FIELD_CLASS_DURABLE_TARGET_FACT = "durable_target_fact"
 FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION = "transitional_sandbox_execution_data"
+FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY = "transitional_sandbox_policy_data"
 FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
@@ -29,6 +30,11 @@ SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "target_runtime_validation": FIELD_CLASS_RUNTIME_LIMITATION,
 }
 
+REGISTRY_FIELD_CLASSIFICATION = {
+    "universal_uninstall_specs": FIELD_CLASS_HARNESS_POLICY,
+    "disposable_artifact_specs": FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY,
+}
+
 SPEC_WEIGHT_FIELD_EXAMPLES = {
     "install_command": "vscode.user",
     "uninstall_command": "codex.user",
@@ -37,6 +43,11 @@ SPEC_WEIGHT_FIELD_EXAMPLES = {
     "unsupported_scopes": "cursor",
     "simulated_linux_layout": "windows",
     "reference_bundles": "vscode",
+}
+
+REGISTRY_FIELD_EXAMPLES = {
+    "universal_uninstall_specs": {"<registry>"},
+    "disposable_artifact_specs": {"<registry>"},
 }
 
 DEFAULT_YAML_STRUCTURAL_TARGET_FIELDS = {
@@ -93,11 +104,30 @@ def test_spec_weight_field_classification_vocabulary_is_explicit() -> None:
     }
 
 
+def test_registry_field_classification_vocabulary_is_explicit() -> None:
+    assert REGISTRY_FIELD_CLASSIFICATION == {
+        "universal_uninstall_specs": FIELD_CLASS_HARNESS_POLICY,
+        "disposable_artifact_specs": FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY,
+    }
+
+
 def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:
     actual_inventory = _default_yaml_spec_weight_field_inventory()
     unclassified_fields = set(actual_inventory) - set(SPEC_WEIGHT_FIELD_CLASSIFICATION)
 
     assert unclassified_fields == set()
+
+
+def test_top_level_registry_policy_inputs_are_not_target_facts() -> None:
+    registry_data = valid_registry_data()
+    actual_inventory = {
+        field: {"<registry>"}
+        for field in registry_data.keys() - {"schema_version", "platforms"}
+    }
+    unclassified_fields = set(actual_inventory) - set(REGISTRY_FIELD_CLASSIFICATION)
+
+    assert unclassified_fields == set()
+    assert actual_inventory == REGISTRY_FIELD_EXAMPLES
 
 
 def test_default_yaml_has_targeted_examples_for_spec_weight_field_categories() -> None:

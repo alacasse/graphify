@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from tools.install_sandbox import agent_summary as root_agent_summary
@@ -28,6 +30,20 @@ def test_root_agent_summary_wrapper_preserves_module_entrypoint_compatibility() 
         "text_snippet",
         "write_summary",
     ]
+
+
+def test_reporting_agent_summary_direct_script_help() -> None:
+    repo_root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [sys.executable, "tools/install_sandbox/reporting/agent_summary.py", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Summarize Graphify install sandbox artifacts" in result.stdout
 
 
 def write_json(path: Path, data: object) -> None:

@@ -1,11 +1,35 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.install_sandbox.reporting.artifacts import (
+        artifact_relpath,
+        compact_path,
+        load_json_object,
+        normalized_text_snippet,
+        tail_file,
+    )
+except ImportError:  # pragma: no cover - supports running this file directly.
+    try:
+        from reporting.artifacts import (  # type: ignore[no-redef]
+            artifact_relpath,
+            compact_path,
+            load_json_object,
+            normalized_text_snippet,
+            tail_file,
+        )
+    except ImportError:
+        from artifacts import (  # type: ignore[no-redef]
+            artifact_relpath,
+            compact_path,
+            load_json_object,
+            normalized_text_snippet,
+            tail_file,
+        )
 
 USAGE_GUIDANCE = (
     "Use this as the first-read diagnostic. For FAIL, fix the listed failed checks "
@@ -16,54 +40,11 @@ USAGE_GUIDANCE = (
 
 
 def load_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError as exc:
-        return {"_error": f"invalid json: {exc}"}
-    return data if isinstance(data, dict) else {"_error": "json root is not an object"}
-
-
-def artifact_relpath(path: Path, root: Path) -> str:
-    try:
-        return path.relative_to(root).as_posix()
-    except ValueError:
-        return str(path)
-
-
-def compact_path(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    replacements = {
-        "/tmp/graphify-project/": "project/",
-        "/tmp/graphify-home/": "home/",
-        "/tmp/graphify-user-cwd/": "user_cwd/",
-    }
-    for prefix, replacement in replacements.items():
-        if value.startswith(prefix):
-            return replacement + value[len(prefix) :]
-    return value
+    return load_json_object(path)
 
 
 def text_snippet(value: Any, *, limit: int = 240) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = " ".join(value.split())
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[: limit - 3].rstrip() + "..."
-
-
-def tail_file(path: Path, *, limit: int = 600) -> str:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return ""
-    text = text.strip()
-    if len(text) <= limit:
-        return text
-    return text[-limit:]
+    return normalized_text_snippet(value, limit=limit)
 
 
 def failed_checks(output_dir: Path, scenario_id: str, *, limit: int) -> list[dict[str, Any]]:
@@ -258,6 +239,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
 
 
 def render_json(summary: dict[str, Any]) -> str:
+    import json
+
     return json.dumps(summary, separators=(",", ":"), sort_keys=True) + "\n"
 
 

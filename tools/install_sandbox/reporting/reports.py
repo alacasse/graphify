@@ -7,39 +7,16 @@ from typing import Iterable
 
 try:
     from tools.install_sandbox.json_helpers import object_dict, object_dicts, object_list
+    from tools.install_sandbox.reporting.artifacts import artifact_relpath, file_text_snippet, read_json_object
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 except ImportError:
     from json_helpers import object_dict, object_dicts, object_list
+    from reporting.artifacts import artifact_relpath, file_text_snippet, read_json_object
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 
 
-def artifact_relpath(path: Path, root: Path) -> str:
-    try:
-        return path.relative_to(root).as_posix()
-    except ValueError:
-        return str(path)
-
-
-def read_json_object(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def text_snippet(path: Path, limit: int = 500) -> str:
-    if not path.exists():
-        return ""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return ""
-    if len(text) <= limit:
-        return text
-    return text[:limit].rstrip() + "..."
+    return file_text_snippet(path, limit)
 
 
 def command_artifact_summary(artifact_dir: Path, *, output_root: Path) -> dict[str, object]:

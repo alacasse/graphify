@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -31,6 +32,33 @@ def test_root_agent_summary_wrapper_preserves_module_entrypoint_compatibility() 
         "text_snippet",
         "write_summary",
     ]
+
+
+def test_root_agent_summary_wrapper_stays_thin_public_facade() -> None:
+    tree = ast.parse(Path(root_agent_summary.__file__).read_text(encoding="utf-8"))
+
+    assert [node.name for node in tree.body if isinstance(node, ast.FunctionDef)] == []
+    assert [node.name for node in tree.body if isinstance(node, ast.ClassDef)] == []
+    assert root_agent_summary.main is agent_summary.main
+    assert root_agent_summary.write_summary is agent_summary.write_summary
+
+
+def test_agent_summary_public_helpers_delegate_to_artifact_owner() -> None:
+    tree = ast.parse(Path(agent_summary.__file__).read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+    helper_calls = {
+        "load_json": "load_json_object",
+        "text_snippet": "normalized_text_snippet",
+        "failed_checks": "summarize_failed_checks",
+    }
+    for helper_name, artifact_owner_call in helper_calls.items():
+        calls = {
+            node.func.id
+            for node in ast.walk(functions[helper_name])
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        assert calls == {artifact_owner_call}
 
 
 def test_reporting_agent_summary_direct_script_help() -> None:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import ast
 import json
+from pathlib import Path
 
 import pytest
 
 from tools.install_sandbox import status
 from tools.install_sandbox.reporting import artifacts
+from tools.install_sandbox.reporting import agent_summary
 from tools.install_sandbox.reporting import harness_run
 from tools.install_sandbox.reporting import manifest_projection
 from tools.install_sandbox.reporting import reports
@@ -102,6 +105,47 @@ def test_report_artifact_helpers_characterize_current_contract(tmp_path) -> None
         "stderr_snippet": ("x" * 500) + "...",
     }
     assert artifacts.command_artifact_summary(artifact_dir, output_root=output) == summary
+
+
+def test_report_artifact_helpers_stay_delegating_wrappers() -> None:
+    tree = ast.parse(Path(reports.__file__).read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+    text_calls = {node.func.id for node in ast.walk(functions["text_snippet"]) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    command_calls = {
+        node.func.id
+        for node in ast.walk(functions["command_artifact_summary"])
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    assert text_calls == {"file_text_snippet"}
+    assert command_calls == {"summarize_command_artifact"}
+
+
+def test_render_modules_do_not_regrow_artifact_helper_implementations() -> None:
+    report_functions = {
+        node.name
+        for node in ast.parse(Path(reports.__file__).read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef)
+    }
+    summary_functions = {
+        node.name
+        for node in ast.parse(Path(agent_summary.__file__).read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    duplicated_primitive_helpers = {
+        "compact_path",
+        "read_json_object",
+        "load_json_object",
+        "file_text_snippet",
+        "normalized_text_snippet",
+        "tail_file",
+    }
+
+    assert duplicated_primitive_helpers.isdisjoint(report_functions)
+    assert duplicated_primitive_helpers.isdisjoint(summary_functions)
+    assert artifacts.__name__ == "tools.install_sandbox.reporting.artifacts"
 
 
 def test_report_command_artifact_summary_characterizes_command_text_precedence(tmp_path) -> None:

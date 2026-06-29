@@ -57,26 +57,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def sandbox_env() -> dict[str, str]:
-    return RUN_ENVIRONMENT.sandbox_env()
-
-
-def install_graphify(env: dict[str, str]) -> dict[str, object]:
-    return RUN_ENVIRONMENT.install_graphify(env)
-
-
-def risk_report(scenario, passed: bool) -> dict[str, object]:
-    return RUN_ENVIRONMENT.risk_report(scenario, passed)
-
-
-def preflight() -> dict[str, object]:
-    return RUN_ENVIRONMENT.preflight()
-
-
-def scenario_lifecycle_hooks(**kwargs) -> scenario_lifecycle_support.ScenarioLifecycleHooks:
-    return RUN_ENVIRONMENT.scenario_lifecycle_hooks(**kwargs)
-
-
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     run_result = harness_orchestration.run_harness(args, RUN_ENVIRONMENT)

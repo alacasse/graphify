@@ -387,7 +387,7 @@ def test_root_topology_closeout_characterizes_runner_compatibility_tail_as_pruni
         "scenario_lifecycle_hooks",
     }
     for public_name in SANDBOX_RUNNER_PRUNING_CANDIDATES["wrapper_functions"]:
-        assert callable(getattr(sandbox_runner, public_name))
+        assert not hasattr(sandbox_runner, public_name)
 
     status_aliases = {
         "RISK_GRAPHIFY_FAILED": reporting_status.RISK_GRAPHIFY_FAILED,

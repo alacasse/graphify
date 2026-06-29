@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tools.install_sandbox import validation_plan
 from tools.install_sandbox import sandbox_runner
 from tools.install_sandbox.harness_specs import SandboxRootRegistry, SandboxRootSpec
 from tools.install_sandbox.reporting import harness_run
@@ -264,7 +265,7 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
             SandboxRootSpec("output", str(tmp_path / "out"), mount_mode="rw"),
         )
     )
-    registry = sandbox_runner.validation_plan.InstallTargetCatalog(
+    registry = validation_plan.InstallTargetCatalog(
         {
             "alpha": PlatformSpec(
                 name="alpha",
@@ -376,7 +377,7 @@ def test_preflight_current_policy_validation_uses_install_surface_roots_not_all_
             SandboxRootSpec("output", str(tmp_path / "out"), mount_mode="rw"),
         )
     )
-    registry = sandbox_runner.validation_plan.InstallTargetCatalog(
+    registry = validation_plan.InstallTargetCatalog(
         {
             "alpha": PlatformSpec(
                 name="alpha",
@@ -689,8 +690,9 @@ def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp
     output = tmp_path / "out"
     source = tmp_path / "graphify-src"
     calls: list[str] = []
-    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "output", output)
-    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "src", source)
+    run_environment = SandboxRunEnvironment()
+    monkeypatch.setitem(run_environment.runtime_roots, "output", output)
+    monkeypatch.setitem(run_environment.runtime_roots, "src", source)
     monkeypatch.setattr(source_snapshot, "read_installed_package_metadata", lambda package_name, source_path, *, home=None: {"installed_from_copied_source": True})
 
     def run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
@@ -702,7 +704,7 @@ def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp
     monkeypatch.setattr(command_runner, "run_capture", run_capture)
 
     with pytest.raises(RuntimeError, match="graphify version probe failed"):
-        sandbox_runner.install_graphify({})
+        run_environment.install_graphify({})
 
     assert calls == ["package_install", "graphify_version"]
 
@@ -710,8 +712,9 @@ def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp
 def test_install_graphify_rejects_wrong_package_provenance_after_probe(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
     source = tmp_path / "graphify-src"
-    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "output", output)
-    monkeypatch.setitem(sandbox_runner.RUN_ENVIRONMENT.runtime_roots, "src", source)
+    run_environment = SandboxRunEnvironment()
+    monkeypatch.setitem(run_environment.runtime_roots, "output", output)
+    monkeypatch.setitem(run_environment.runtime_roots, "src", source)
     monkeypatch.setattr(
         source_snapshot,
         "read_installed_package_metadata",
@@ -731,7 +734,7 @@ def test_install_graphify_rejects_wrong_package_provenance_after_probe(monkeypat
     monkeypatch.setattr(command_runner, "run_capture", run_capture)
 
     with pytest.raises(RuntimeError) as excinfo:
-        sandbox_runner.install_graphify({})
+        run_environment.install_graphify({})
 
     message = str(excinfo.value)
     assert "provenance check failed" in message
@@ -740,6 +743,7 @@ def test_install_graphify_rejects_wrong_package_provenance_after_probe(monkeypat
 
 
 def test_runner_status_helpers_use_reporting_status_owner() -> None:
+    run_environment = SandboxRunEnvironment()
     scenario = Scenario(
         platform="codex",
         scope="project",
@@ -749,24 +753,21 @@ def test_runner_status_helpers_use_reporting_status_owner() -> None:
         expected=(ExpectedPath("project", "AGENTS.md"),),
     )
 
-    report = sandbox_runner.risk_report(scenario, True)
+    report = run_environment.risk_report(scenario, True)
 
-    assert sandbox_runner.combined_status(True) == sandbox_runner.RISK_GRAPHIFY_VERIFIED
-    assert sandbox_runner.combined_status(False) == sandbox_runner.RISK_GRAPHIFY_FAILED
+    assert reporting_status.combined_status(True) == reporting_status.RISK_GRAPHIFY_VERIFIED
+    assert reporting_status.combined_status(False) == reporting_status.RISK_GRAPHIFY_FAILED
     assert (
-        sandbox_runner.RISK_GRAPHIFY_VERIFIED
-        == reporting_status.RISK_GRAPHIFY_VERIFIED
+        reporting_status.RISK_GRAPHIFY_VERIFIED
         == "graphify_install_verified"
     )
     assert (
-        sandbox_runner.RISK_GRAPHIFY_FAILED
-        == reporting_status.RISK_GRAPHIFY_FAILED
+        reporting_status.RISK_GRAPHIFY_FAILED
         == "graphify_install_failed"
     )
     assert (
-        sandbox_runner.known_status_values()
-        == reports.known_status_values()
+        reports.known_status_values()
         == reporting_status.known_status_values()
     )
-    assert report["statuses"] == [sandbox_runner.RISK_GRAPHIFY_VERIFIED]
+    assert report["statuses"] == [reporting_status.RISK_GRAPHIFY_VERIFIED]
     assert "target_tool_runtime_verified" not in report

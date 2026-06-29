@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 INSTALL_SANDBOX_ROOT = Path(__file__).parents[2] / "tools" / "install_sandbox"
-INSTALL_SANDBOX_TESTS_ROOT = Path(__file__).parents[1] / "install_sandbox"
+TESTS_ROOT = Path(__file__).parents[2] / "tests"
 MODULE_UNDER_TEST = "tools.install_sandbox.platform_specs"
 
 DELETED_PURE_ROOT_FACADE_MODULES = {
@@ -23,6 +23,24 @@ DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES = {
     "tools.install_sandbox.install_surface_core",
 }
 
+INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS = {
+    "tests/install_sandbox/test_file_effects.py": [
+        "tools.install_sandbox.install_surface_core",
+    ],
+    "tests/install_sandbox/test_install_surface_core_generated.py": [
+        "tools.install_sandbox.install_surface_core",
+    ],
+    "tests/install_sandbox/test_install_surface_core_sidecars.py": [
+        "tools.install_sandbox.install_surface_core",
+    ],
+    "tests/install_sandbox/test_install_surface_core_state_plans.py": [
+        "tools.install_sandbox.install_surface_core",
+    ],
+    "tests/install_sandbox/test_install_surface_core_status.py": [
+        "tools.install_sandbox.install_surface_core",
+    ],
+}
+
 ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",
 }
@@ -31,7 +49,7 @@ ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
 
-    for path in sorted(INSTALL_SANDBOX_TESTS_ROOT.glob("test_*.py")):
+    for path in sorted(TESTS_ROOT.rglob("*.py")):
         relative = path.relative_to(Path(__file__).parents[2]).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
         direct_imports: set[str] = set()
@@ -146,6 +164,12 @@ def test_root_topology_closeout_lists_deleted_platform_specs_direct_test_import_
     discovered_imports = _direct_test_import_surface({MODULE_UNDER_TEST})
 
     assert discovered_imports == {}
+
+
+def test_root_topology_closeout_lists_temporary_install_surface_core_direct_test_imports() -> None:
+    discovered_imports = _direct_test_import_surface(DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES)
+
+    assert discovered_imports == INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS
 
 
 def test_root_topology_closeout_names_validation_reporting_and_runner_public_apis() -> None:

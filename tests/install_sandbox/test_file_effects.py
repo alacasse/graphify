@@ -3,11 +3,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_sidecars
+from tools.install_sandbox.effects import file_effect_surfaces
 from tools.install_sandbox.effects import file_effect_state
-from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.effects import scenario_file_effects_adapter
+from tools.install_sandbox.surfaces import path_resolution
 
 # File-effects package and oracle boundary guards live here. Behavior assertions
 # stay with topic-owner tests such as test_file_effects_sidecars.py,
@@ -30,7 +32,7 @@ def test_file_effects_package_tests_do_not_claim_topic_behavior_ownership() -> N
     assert file_effect_oracle.FileEffectOracle.__name__ == "FileEffectOracle"
 
 
-def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
+def test_install_surface_core_facade_keeps_temporary_path_resolution_compatibility() -> None:
     tree = ast.parse(Path(install_surface_core.__file__).read_text(encoding="utf-8"))
     function_names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
     class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
@@ -38,6 +40,39 @@ def test_install_surface_core_facade_owns_only_path_resolution_glue() -> None:
     assert function_names == set()
     assert class_names == set()
     assert {"resolve_install_root", "resolve_install_surface_path"} <= set(install_surface_core.__all__)
+    assert install_surface_core.resolve_install_root is path_resolution.resolve_install_root
+    assert install_surface_core.resolve_install_surface_path is path_resolution.resolve_install_surface_path
+
+
+def test_file_effect_owners_import_path_resolution_helpers_from_owner_module() -> None:
+    owner_modules = (
+        file_effect_oracle,
+        file_effect_surfaces,
+    )
+
+    for module in owner_modules:
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        imported_owner_helpers = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.endswith("surfaces.path_resolution")
+            for alias in node.names
+        }
+        imported_core_helpers = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.endswith("install_surface_core")
+            for alias in node.names
+        }
+
+        assert "resolve_install_surface_path" in imported_owner_helpers
+        assert imported_core_helpers.isdisjoint(
+            {"resolve_install_root", "resolve_install_surface_path"}
+        )
 
 
 def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:

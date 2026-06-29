@@ -200,7 +200,7 @@ def test_install_surface_state_derives_expected_manifest_relatives_for_root() ->
     }
 
 
-def test_install_surface_core_reexports_state_planning_names_for_compatibility() -> None:
+def test_temporary_install_surface_core_facade_reexports_state_planning_names() -> None:
     assert install_surface_core.planned_state_entries is install_surface_state.planned_state_entries
     assert install_surface_core.IdempotencyStateChange is install_surface_state.IdempotencyStateChange
     assert install_surface_core.user_content_seed_plans is install_surface_state.user_content_seed_plans

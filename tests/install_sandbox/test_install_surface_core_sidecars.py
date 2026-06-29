@@ -178,7 +178,7 @@ def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_reso
         install_surface_sidecars.skill_sidecar_expectation(InstallSurface("project", "notes.md"))
 
 
-def test_install_surface_core_re_exports_sidecar_helpers_for_compatibility() -> None:
+def test_temporary_install_surface_core_facade_re_exports_sidecar_helpers() -> None:
     assert install_surface_core.ReferenceSidecarExpectation is install_surface_sidecars.ReferenceSidecarExpectation
     assert install_surface_core.skill_sidecar_expectation is install_surface_sidecars.skill_sidecar_expectation
     assert install_surface_core.skill_version_status is install_surface_sidecars.skill_version_status

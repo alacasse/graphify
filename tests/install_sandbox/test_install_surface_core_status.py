@@ -46,7 +46,7 @@ def registered_json_status(platform: str, scope: str, relative: str, data: objec
     return json_status_from_loaded_data(entry, data)
 
 
-def test_install_surface_core_re_exports_status_helpers_for_compatibility() -> None:
+def test_temporary_install_surface_core_facade_re_exports_status_helpers() -> None:
     assert install_surface_core.InstallSurfaceStatus is install_surface_statuses.InstallSurfaceStatus
     assert install_surface_core.InstallSurfaceObservation is install_surface_statuses.InstallSurfaceObservation
     assert install_surface_core.UninstallSurfaceObservation is install_surface_statuses.UninstallSurfaceObservation

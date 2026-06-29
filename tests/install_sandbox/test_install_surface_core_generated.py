@@ -181,7 +181,7 @@ def test_install_surface_generated_derives_generated_artifact_copy_destination()
     )
 
 
-def test_install_surface_core_re_exports_generated_file_helpers_for_compatibility() -> None:
+def test_temporary_install_surface_core_facade_re_exports_generated_file_helpers() -> None:
     assert install_surface_core.GeneratedFileObservation is install_surface_generated.GeneratedFileObservation
     assert install_surface_core.GeneratedFileDecision is install_surface_generated.GeneratedFileDecision
     assert install_surface_core.GeneratedArtifactCopyPlan is install_surface_generated.GeneratedArtifactCopyPlan

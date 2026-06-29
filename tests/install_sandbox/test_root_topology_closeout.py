@@ -27,15 +27,6 @@ ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
 }
 
 PLATFORM_SPECS_DIRECT_TEST_IMPORT_SURFACE = {
-    "tests/install_sandbox/test_install_target_defaults.py": [
-        "tools.install_sandbox.platform_specs",
-    ],
-    "tests/install_sandbox/test_install_target_harness_policy.py": [
-        "tools.install_sandbox.platform_specs",
-    ],
-    "tests/install_sandbox/test_install_target_models.py": [
-        "tools.install_sandbox.platform_specs",
-    ],
     "tests/install_sandbox/test_platform_specs_facade.py": [
         "tools.install_sandbox.platform_specs",
     ],

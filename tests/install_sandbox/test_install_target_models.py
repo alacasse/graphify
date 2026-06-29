@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from graphify import __main__ as graphify_main
 
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.targets import install_target_defaults, install_target_models
 
 from install_target_test_support import REGISTRY, entry_id, scenario_entries
@@ -37,7 +36,7 @@ def test_effects_alias_preserves_expected_model_compatibility() -> None:
 
     assert scenario is not None
     assert install_target_models.InstallEffect is install_target_models.InstallSurface
-    assert platform_specs.InstallEffect is platform_specs.InstallSurface
+    assert install_target_models.InstallTargetSpec is install_target_models.PlatformSpec
     assert scenario.effects is scenario.expected
     assert scope.effects is scope.expected
 

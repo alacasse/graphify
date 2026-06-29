@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from tools.install_sandbox import platform_specs
 from tools.install_sandbox.surfaces import install_surface_models
-from tools.install_sandbox.targets import install_target_catalog, install_target_models
+from tools.install_sandbox.targets import install_target_catalog, install_target_defaults, install_target_models
 
 from install_target_test_support import REGISTRY
 
@@ -75,6 +75,60 @@ def test_temporary_platform_specs_facade_exports_legacy_and_install_target_names
     assert platform_specs.ALL_PLATFORMS == REGISTRY.platform_names
     assert platform_specs.platform_spec("codex") is REGISTRY.platform_spec("codex")
     assert platform_specs.platform_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
+
+
+def test_temporary_platform_specs_facade_install_target_helpers_are_owner_aliases() -> None:
+    helper_names = (
+        "default_install_target_catalog",
+        "install_target_specs",
+        "install_target_spec",
+        "install_target_scenarios",
+        "platform_spec",
+        "platform_scenarios",
+        "make_scenario",
+        "risk_notes",
+        "validate_roots",
+        "target_runtime_validation_sections",
+    )
+
+    for name in helper_names:
+        assert getattr(platform_specs, name) is getattr(install_target_defaults, name)
+    assert (
+        platform_specs.target_runtime_validation_sections()
+        == install_target_defaults.target_runtime_validation_sections()
+    )
+
+
+def test_temporary_platform_specs_facade_lazy_defaults_share_owner_cache(monkeypatch) -> None:
+    registry = install_target_catalog.ScenarioRegistry(
+        {
+            "cached-target": install_target_models.PlatformSpec(
+                name="cached-target",
+                scopes={
+                    "project": install_target_models.ScopeSpec(
+                        install_command=("tool", "install"),
+                        uninstall_command=None,
+                        cwd_root="project",
+                        expected=(install_target_models.InstallSurface("project", "cached.txt"),),
+                    )
+                },
+            )
+        }
+    )
+
+    monkeypatch.setattr(install_target_defaults, "_DEFAULT_SCENARIO_REGISTRY", registry)
+    for name in install_target_defaults._LAZY_DEFAULT_NAMES:
+        monkeypatch.delitem(platform_specs.__dict__, name, raising=False)
+        monkeypatch.delitem(install_target_defaults.__dict__, name, raising=False)
+
+    assert platform_specs.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
+    assert platform_specs.__getattr__("SANDBOX_PLATFORM_SPECS") is registry.specs
+    assert platform_specs.__getattr__("ALL_PLATFORMS") == ["cached-target"]
+    assert install_target_defaults.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
+
+    for name in install_target_defaults._LAZY_DEFAULT_NAMES:
+        platform_specs.__dict__.pop(name, None)
+        install_target_defaults.__dict__.pop(name, None)
 
 
 def test_temporary_platform_specs_facade_install_target_fact_dataclasses_keep_facade_identity() -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
 from tools.install_sandbox.targets import install_target_catalog, install_target_models
 from tools.install_sandbox.targets import install_target_defaults
@@ -24,7 +23,7 @@ def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
     )
 
     for name in helper_names:
-        assert getattr(platform_specs, name) is getattr(install_target_defaults, name)
+        assert callable(getattr(install_target_defaults, name))
 
 
 def test_install_target_module_helpers_use_default_catalog_seam() -> None:
@@ -93,15 +92,12 @@ def test_lazy_default_catalog_exports_share_one_cache_for_compatibility_names(mo
     monkeypatch.setattr(install_target_defaults, "_DEFAULT_SCENARIO_REGISTRY", None)
     monkeypatch.setitem(install_target_defaults.__dict__, "_import_load_default_registry", lambda: load_default_registry)
     for name in install_target_defaults._LAZY_DEFAULT_NAMES:
-        monkeypatch.delitem(platform_specs.__dict__, name, raising=False)
         monkeypatch.delitem(install_target_defaults.__dict__, name, raising=False)
 
     assert install_target_defaults.default_install_target_catalog() is registry
-    assert platform_specs.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
-    assert platform_specs.__getattr__("SANDBOX_PLATFORM_SPECS") is registry.specs
-    assert platform_specs.__getattr__("ALL_PLATFORMS") == ["cached-target"]
     assert install_target_defaults.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
+    assert install_target_defaults.__getattr__("SANDBOX_PLATFORM_SPECS") is registry.specs
+    assert install_target_defaults.__getattr__("ALL_PLATFORMS") == ["cached-target"]
     assert calls == 1
     for name in install_target_defaults._LAZY_DEFAULT_NAMES:
-        platform_specs.__dict__.pop(name, None)
         install_target_defaults.__dict__.pop(name, None)

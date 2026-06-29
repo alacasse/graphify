@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.targets import (
     install_target_catalog,
     install_target_defaults,
@@ -81,10 +80,6 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
     )
     assert (
         install_target_defaults.target_runtime_validation_sections()
-        == install_target_harness_policy.target_runtime_validation_sections(REGISTRY.specs)
-    )
-    assert (
-        platform_specs.target_runtime_validation_sections()
         == install_target_harness_policy.target_runtime_validation_sections(REGISTRY.specs)
     )
 

@@ -10,7 +10,12 @@ from pathlib import Path
 INSTALL_SANDBOX_ROOT = Path(__file__).parents[2] / "tools" / "install_sandbox"
 INSTALL_SANDBOX_TESTS_ROOT = Path(__file__).parents[1] / "install_sandbox"
 
-PURE_COMPATIBILITY_FACADE_MODULES: set[str] = set()
+DELETED_PURE_ROOT_FACADE_MODULES = {
+    "tools.install_sandbox.expected_effects",
+    "tools.install_sandbox.spec_loader",
+    "tools.install_sandbox.spec_normalize",
+    "tools.install_sandbox.status",
+}
 
 DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES = {
     "tools.install_sandbox.install_surface_core",
@@ -63,8 +68,23 @@ def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> Non
         assert importlib.util.find_spec(f"tools.install_sandbox.{module_name}") is None
 
 
+def test_root_topology_closeout_keeps_deleted_pure_root_facades_absent() -> None:
+    for module_name in DELETED_PURE_ROOT_FACADE_MODULES:
+        root_file_name = module_name.rsplit(".", maxsplit=1)[-1]
+
+        assert not (INSTALL_SANDBOX_ROOT / f"{root_file_name}.py").exists()
+        assert importlib.util.find_spec(module_name) is None
+        assert module_name not in DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES
+        assert module_name not in ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS
+
+
 def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> None:
-    assert PURE_COMPATIBILITY_FACADE_MODULES == set()
+    assert DELETED_PURE_ROOT_FACADE_MODULES == {
+        "tools.install_sandbox.expected_effects",
+        "tools.install_sandbox.spec_loader",
+        "tools.install_sandbox.spec_normalize",
+        "tools.install_sandbox.status",
+    }
     assert DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES == {
         "tools.install_sandbox.install_surface_core",
         "tools.install_sandbox.platform_specs",
@@ -72,8 +92,8 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
     assert ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS == {
         "tools.install_sandbox.agent_summary",
     }
-    assert PURE_COMPATIBILITY_FACADE_MODULES.isdisjoint(DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES)
-    assert PURE_COMPATIBILITY_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
+    assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES)
+    assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
 
 
 def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importable() -> None:
@@ -92,7 +112,7 @@ def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importabl
     assert root_platform_specs.InstallTargetCatalog is owner_install_target_catalog.InstallTargetCatalog
 
 
-def test_root_topology_closeout_lists_pure_facade_direct_test_import_surface() -> None:
+def test_root_topology_closeout_lists_deleted_pure_facade_direct_test_import_surface() -> None:
     expected_imports: dict[str, list[str]] = {}
     discovered_imports: dict[str, list[str]] = {}
 
@@ -104,13 +124,13 @@ def test_root_topology_closeout_lists_pure_facade_direct_test_import_surface() -
             if isinstance(node, ast.ImportFrom) and node.module == "tools.install_sandbox":
                 for alias in node.names:
                     module_name = f"tools.install_sandbox.{alias.name}"
-                    if module_name in PURE_COMPATIBILITY_FACADE_MODULES:
+                    if module_name in DELETED_PURE_ROOT_FACADE_MODULES:
                         direct_imports.add(module_name)
-            elif isinstance(node, ast.ImportFrom) and node.module in PURE_COMPATIBILITY_FACADE_MODULES:
+            elif isinstance(node, ast.ImportFrom) and node.module in DELETED_PURE_ROOT_FACADE_MODULES:
                 direct_imports.add(node.module)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name in PURE_COMPATIBILITY_FACADE_MODULES:
+                    if alias.name in DELETED_PURE_ROOT_FACADE_MODULES:
                         direct_imports.add(alias.name)
 
         if direct_imports:

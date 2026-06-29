@@ -7,7 +7,7 @@ module preserves the historical aggregate import surface for existing callers.
 """
 
 try:
-    from .expected_effects import (
+    from .surfaces.install_surface_models import (
         InstallSurface,
         SkillSidecarExpectation,
         is_skill_effect,
@@ -87,7 +87,7 @@ try:
     )
     from .surfaces.path_resolution import resolve_install_root, resolve_install_surface_path
 except ImportError:  # pragma: no cover - direct script import fallback
-    from expected_effects import (  # type: ignore[no-redef]
+    from surfaces.install_surface_models import (  # type: ignore[no-redef]
         InstallSurface,
         SkillSidecarExpectation,
         is_skill_effect,

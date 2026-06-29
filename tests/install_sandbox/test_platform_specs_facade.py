@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.install_sandbox import expected_effects, platform_specs
+from tools.install_sandbox import platform_specs
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.targets import install_target_catalog, install_target_models
 
@@ -110,7 +110,7 @@ def test_install_target_fact_dataclasses_keep_facade_identity() -> None:
     assert scenario.expected[0].__class__ is platform_specs.InstallSurface
 
 
-def test_install_surface_models_keep_legacy_facade_identity() -> None:
+def test_install_surface_models_keep_owner_identity_across_remaining_facades() -> None:
     model_names = (
         "JsonHookExpectation",
         "JsonPluginExpectation",
@@ -130,10 +130,8 @@ def test_install_surface_models_keep_legacy_facade_identity() -> None:
         "is_json_effect",
     )
 
-    assert set(expected_effects.__all__) == set(model_names)
     for name in model_names:
         owner = getattr(install_surface_models, name)
-        assert getattr(expected_effects, name) is owner
         assert getattr(platform_specs, name) is owner
         if name not in {"effect_type_name", "is_skill_effect", "is_text_section_effect", "is_json_effect"}:
             assert getattr(install_target_models, name) is owner

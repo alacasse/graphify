@@ -7,9 +7,7 @@ from pathlib import Path
 
 try:
     # Public adapter owners.
-    from .lifecycle import scenario_lifecycle_support
     from . import validation_plan
-    from .effects import file_effect_state
     from .reporting import harness_run
     from .reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .runtime import harness_orchestration
@@ -18,8 +16,6 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     # Public adapter owners.
     from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
-    from tools.install_sandbox.effects import file_effect_state  # type: ignore[no-redef]
-    from tools.install_sandbox.lifecycle import scenario_lifecycle_support  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import harness_run  # type: ignore[no-redef]
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import harness_orchestration  # type: ignore[no-redef]
@@ -27,23 +23,6 @@ except ImportError:
 
 
 RUN_ENVIRONMENT = SandboxRunEnvironment()
-
-# Compatibility surface for historical direct imports from sandbox_runner.
-ROOT_REGISTRY = RUN_ENVIRONMENT.root_registry
-RUNTIME_ROOTS = RUN_ENVIRONMENT.runtime_roots
-HOME = RUN_ENVIRONMENT.home
-XDG_CONFIG_HOME = RUN_ENVIRONMENT.xdg_config_home
-PROJECT = RUN_ENVIRONMENT.project
-USER_CWD = RUN_ENVIRONMENT.user_cwd
-REPO_MOUNT = RUN_ENVIRONMENT.repo_mount
-SRC = RUN_ENVIRONMENT.src
-OUTPUT = RUN_ENVIRONMENT.output
-HARNESS_VERSION = RUN_ENVIRONMENT.harness_version
-SCENARIO_REGISTRY = RUN_ENVIRONMENT.scenario_registry
-USER_SENTINEL = file_effect_state.USER_SENTINEL
-STALE_GRAPHIFY_SENTINEL = file_effect_state.STALE_GRAPHIFY_SENTINEL
-ScenarioRunContext = scenario_lifecycle_support.ScenarioRunContext
-StandardScenarioStages = scenario_lifecycle_support.StandardScenarioStages
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

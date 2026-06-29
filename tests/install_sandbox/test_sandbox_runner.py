@@ -93,7 +93,7 @@ def test_sandbox_runner_compatibility_imports_stay_on_owner_modules() -> None:
     assert "scenario_file_effects_adapter" not in module_imports
     assert "agent_summary" not in module_imports
     assert "reports" not in module_imports
-    assert {"file_effect_state", "harness_orchestration", "scenario_lifecycle_support"} <= module_imports
+    assert "harness_orchestration" in module_imports
 
 
 def test_sandbox_runner_adapter_boundary_does_not_regrow_orchestration() -> None:

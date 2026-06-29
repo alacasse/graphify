@@ -339,45 +339,17 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     assert root_agent_summary.summarize_output is agent_summary.summarize_output
 
 
-def test_root_topology_closeout_characterizes_runner_compatibility_tail_as_pruning_candidates() -> None:
+def test_root_topology_closeout_keeps_runner_runtime_and_lifecycle_aliases_pruned() -> None:
     sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
-    run_environment = sandbox_runner.RUN_ENVIRONMENT
-    file_effect_state = importlib.import_module("tools.install_sandbox.effects.file_effect_state")
-    scenario_lifecycle_support = importlib.import_module("tools.install_sandbox.lifecycle.scenario_lifecycle_support")
     reporting_status = importlib.import_module("tools.install_sandbox.reporting.status")
 
-    runtime_global_names = {
-        "ROOT_REGISTRY": "root_registry",
-        "RUNTIME_ROOTS": "runtime_roots",
-        "HOME": "home",
-        "XDG_CONFIG_HOME": "xdg_config_home",
-        "PROJECT": "project",
-        "USER_CWD": "user_cwd",
-        "REPO_MOUNT": "repo_mount",
-        "SRC": "src",
-        "OUTPUT": "output",
-        "HARNESS_VERSION": "harness_version",
-        "SCENARIO_REGISTRY": "scenario_registry",
+    pruned_alias_names = {
+        *SANDBOX_RUNNER_PRUNING_CANDIDATES["runtime_globals"],
+        *SANDBOX_RUNNER_PRUNING_CANDIDATES["sentinel_aliases"],
+        *SANDBOX_RUNNER_PRUNING_CANDIDATES["lifecycle_aliases"],
     }
-    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["runtime_globals"]) == set(runtime_global_names)
-    for public_name, environment_name in runtime_global_names.items():
-        assert getattr(sandbox_runner, public_name) is getattr(run_environment, environment_name)
-
-    sentinel_aliases = {
-        "USER_SENTINEL": file_effect_state.USER_SENTINEL,
-        "STALE_GRAPHIFY_SENTINEL": file_effect_state.STALE_GRAPHIFY_SENTINEL,
-    }
-    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["sentinel_aliases"]) == set(sentinel_aliases)
-    for public_name, owner_value in sentinel_aliases.items():
-        assert getattr(sandbox_runner, public_name) is owner_value
-
-    lifecycle_aliases = {
-        "ScenarioRunContext": scenario_lifecycle_support.ScenarioRunContext,
-        "StandardScenarioStages": scenario_lifecycle_support.StandardScenarioStages,
-    }
-    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["lifecycle_aliases"]) == set(lifecycle_aliases)
-    for public_name, owner_value in lifecycle_aliases.items():
-        assert getattr(sandbox_runner, public_name) is owner_value
+    for public_name in pruned_alias_names:
+        assert not hasattr(sandbox_runner, public_name)
 
     assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["wrapper_functions"]) == {
         "sandbox_env",
@@ -400,10 +372,8 @@ def test_root_topology_closeout_characterizes_runner_compatibility_tail_as_pruni
         assert getattr(sandbox_runner, public_name) is owner_value
 
     ordinary_imported_dependencies = {
-        "file_effect_state": "tools.install_sandbox.effects.file_effect_state",
         "harness_run": "tools.install_sandbox.reporting.harness_run",
         "harness_orchestration": "tools.install_sandbox.runtime.harness_orchestration",
-        "scenario_lifecycle_support": "tools.install_sandbox.lifecycle.scenario_lifecycle_support",
         "validation_plan": "tools.install_sandbox.validation_plan",
     }
     for dependency_name, owner_module_name in ordinary_imported_dependencies.items():

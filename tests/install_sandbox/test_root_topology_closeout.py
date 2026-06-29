@@ -10,6 +10,7 @@ from pathlib import Path
 INSTALL_SANDBOX_ROOT = Path(__file__).parents[2] / "tools" / "install_sandbox"
 TESTS_ROOT = Path(__file__).parents[2] / "tests"
 MODULE_UNDER_TEST = "tools.install_sandbox.platform_specs"
+DELETED_FILE_WALK_MODULE = ".".join(("tools", "install_sandbox", "file_walk"))
 
 DELETED_PURE_ROOT_FACADE_MODULES = {
     "tools.install_sandbox.expected_effects",
@@ -23,17 +24,19 @@ DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES = {
     "tools.install_sandbox.install_surface_core",
 }
 
+DELETED_ROOT_HELPER_MODULES = {
+    DELETED_FILE_WALK_MODULE,
+}
+
 ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",
 }
 
 ROOT_HELPER_DELETION_CANDIDATES = {
-    "tools.install_sandbox.file_walk",
     "tools.install_sandbox.json_helpers",
 }
 
 ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS = {
-    "file_walk": "tools.install_sandbox.file_walk",
     "json_helpers": "tools.install_sandbox.json_helpers",
 }
 
@@ -194,12 +197,13 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
 
 
 def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -> None:
+    assert DELETED_ROOT_HELPER_MODULES == {
+        DELETED_FILE_WALK_MODULE,
+    }
     assert ROOT_HELPER_DELETION_CANDIDATES == {
-        "tools.install_sandbox.file_walk",
         "tools.install_sandbox.json_helpers",
     }
     assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {
-        "file_walk": "tools.install_sandbox.file_walk",
         "json_helpers": "tools.install_sandbox.json_helpers",
     }
     assert ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS == {
@@ -213,6 +217,16 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_PURE_ROOT_FACADE_MODULES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
+    assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_HELPER_DELETION_CANDIDATES)
+    assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+
+
+def test_root_topology_closeout_keeps_deleted_root_helpers_absent() -> None:
+    for module_name in DELETED_ROOT_HELPER_MODULES:
+        root_file_name = module_name.rsplit(".", maxsplit=1)[-1]
+
+        assert not (INSTALL_SANDBOX_ROOT / f"{root_file_name}.py").exists()
+        assert importlib.util.find_spec(module_name) is None
 
 
 def test_root_topology_closeout_keeps_root_worthy_facades_importable() -> None:
@@ -257,14 +271,8 @@ def test_root_topology_closeout_lists_root_helper_deletion_candidate_import_surf
     )
 
     assert discovered_imports == {
-        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": [
-            "tools.install_sandbox.file_walk",
-        ],
         "tools/install_sandbox/reporting/reports.py": [
             "tools.install_sandbox.json_helpers",
-        ],
-        "tools/install_sandbox/runtime/source_snapshot.py": [
-            "tools.install_sandbox.file_walk",
         ],
         "tools/install_sandbox/surfaces/install_surface_statuses.py": [
             "tools.install_sandbox.json_helpers",

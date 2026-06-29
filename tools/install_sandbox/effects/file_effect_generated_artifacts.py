@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 try:
-    from ..file_walk import pruned_file_walk as walk_pruned_files
     from ..surfaces.install_surface_generated import (
         GeneratedFileDecision,
         decide_generated_file_observation,
@@ -18,7 +18,6 @@ try:
     from ..targets.install_target_models import Scenario
     from ..reference_resolution import PackagedReferenceResolution
 except ImportError:  # pragma: no cover - direct script import fallback
-    from file_walk import pruned_file_walk as walk_pruned_files  # type: ignore[no-redef]
     from surfaces.install_surface_generated import (  # type: ignore[no-redef]
         GeneratedFileDecision,
         decide_generated_file_observation,
@@ -59,7 +58,14 @@ def _check_record(
 
 
 def pruned_file_walk(base: Path, manifest_prune_dirs: set[str]) -> Iterable[Path]:
-    yield from walk_pruned_files(base, manifest_prune_dirs)
+    if not base.exists():
+        return
+    prune = set(manifest_prune_dirs)
+    for root, dirs, files in os.walk(base):
+        root_path = Path(root)
+        dirs[:] = sorted(d for d in dirs if d not in prune)
+        for name in sorted(files):
+            yield root_path / name
 
 
 def file_mentions_expected_generated_marker(scenario: Scenario, path: Path) -> bool:

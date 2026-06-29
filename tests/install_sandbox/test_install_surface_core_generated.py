@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_generated
 from tools.install_sandbox.surfaces import install_surface_models
@@ -181,16 +180,7 @@ def test_install_surface_generated_derives_generated_artifact_copy_destination()
     )
 
 
-def test_temporary_install_surface_core_facade_re_exports_generated_file_helpers() -> None:
-    assert install_surface_core.GeneratedFileObservation is install_surface_generated.GeneratedFileObservation
-    assert install_surface_core.GeneratedFileDecision is install_surface_generated.GeneratedFileDecision
-    assert install_surface_core.GeneratedArtifactCopyPlan is install_surface_generated.GeneratedArtifactCopyPlan
-    assert install_surface_core.generated_file_observation is install_surface_generated.generated_file_observation
-    assert install_surface_core.generated_artifact_copy_plan is install_surface_generated.generated_artifact_copy_plan
-    assert install_surface_core.is_relevant_generated_file is install_surface_generated.is_relevant_generated_file
-
-
-def test_install_surface_core_decides_file_fingerprint_from_observed_facts() -> None:
+def test_install_surface_statuses_decides_file_fingerprint_from_observed_facts() -> None:
     notes_text = f"# Notes\n\n{install_surface_state.USER_SENTINEL}\n\n## graphify\n{install_surface_state.STALE_GRAPHIFY_SENTINEL}\n"
 
     assert install_surface_statuses.file_fingerprint_from_observation(

@@ -27,16 +27,10 @@ INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS = {
     "tests/install_sandbox/test_file_effects.py": [
         "tools.install_sandbox.install_surface_core",
     ],
-    "tests/install_sandbox/test_install_surface_core_generated.py": [
-        "tools.install_sandbox.install_surface_core",
-    ],
     "tests/install_sandbox/test_install_surface_core_sidecars.py": [
         "tools.install_sandbox.install_surface_core",
     ],
     "tests/install_sandbox/test_install_surface_core_state_plans.py": [
-        "tools.install_sandbox.install_surface_core",
-    ],
-    "tests/install_sandbox/test_install_surface_core_status.py": [
         "tools.install_sandbox.install_surface_core",
     ],
 }
@@ -145,12 +139,12 @@ def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importabl
     root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
     owner_agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
     root_install_surface_core = importlib.import_module("tools.install_sandbox.install_surface_core")
-    owner_install_surface_statuses = importlib.import_module("tools.install_sandbox.surfaces.install_surface_statuses")
+    owner_path_resolution = importlib.import_module("tools.install_sandbox.surfaces.path_resolution")
 
     assert (INSTALL_SANDBOX_ROOT / "agent_summary.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "install_surface_core.py").exists()
     assert root_agent_summary.summarize_output is owner_agent_summary.summarize_output
-    assert root_install_surface_core.InstallSurfaceStatus is owner_install_surface_statuses.InstallSurfaceStatus
+    assert root_install_surface_core.resolve_install_surface_path is owner_path_resolution.resolve_install_surface_path
 
 
 def test_root_topology_closeout_lists_deleted_pure_facade_direct_test_import_surface() -> None:

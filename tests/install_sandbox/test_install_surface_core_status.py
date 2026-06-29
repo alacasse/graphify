@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_statuses
 from tools.install_sandbox.surfaces.install_surface_models import InstallSurface
 from tools.install_sandbox.targets import install_target_defaults
 from tools.install_sandbox.targets import install_target_models
 
-# Status-decision ownership lives here. Sidecar, state-plan, and generated-file
-# Installer Core decisions live in the sibling test_install_surface_core_* modules.
+# Status-decision ownership lives in install_surface_statuses. Sidecar,
+# state-plan, and generated-file owner decisions live in sibling modules.
 
 
 def section(root: str, relative: str, marker: str = install_target_models.GRAPHIFY_MARKER, *, preserve_user_content: bool = False) -> InstallSurface:
@@ -46,17 +45,7 @@ def registered_json_status(platform: str, scope: str, relative: str, data: objec
     return json_status_from_loaded_data(entry, data)
 
 
-def test_temporary_install_surface_core_facade_re_exports_status_helpers() -> None:
-    assert install_surface_core.InstallSurfaceStatus is install_surface_statuses.InstallSurfaceStatus
-    assert install_surface_core.InstallSurfaceObservation is install_surface_statuses.InstallSurfaceObservation
-    assert install_surface_core.UninstallSurfaceObservation is install_surface_statuses.UninstallSurfaceObservation
-    assert install_surface_core.FileFingerprintObservation is install_surface_statuses.FileFingerprintObservation
-    assert install_surface_core.installed_surface_status_from_observation is install_surface_statuses.installed_surface_status_from_observation
-    assert install_surface_core.uninstalled_surface_status_from_observation is install_surface_statuses.uninstalled_surface_status_from_observation
-    assert install_surface_core.file_fingerprint_from_observation is install_surface_statuses.file_fingerprint_from_observation
-
-
-def test_install_surface_core_decides_installed_status_from_observed_facts() -> None:
+def test_install_surface_statuses_decides_installed_status_from_observed_facts() -> None:
     missing = InstallSurface("project", "missing.txt")
     missing_observation = install_surface_statuses.InstallSurfaceObservation(
         path=Path("/observed/missing.txt"),
@@ -119,7 +108,7 @@ def test_install_surface_core_decides_installed_status_from_observed_facts() -> 
     assert invalid_json_status.detail == "invalid_json=Expecting value"
 
 
-def test_install_surface_core_decides_kind_status_from_observed_facts() -> None:
+def test_install_surface_statuses_decides_kind_status_from_observed_facts() -> None:
     surface = InstallSurface("project", "installed.txt")
     observed_path = Path("/observed/installed.txt")
 
@@ -265,7 +254,7 @@ def test_registered_json_expectation_status_from_loaded_json_facts() -> None:
     assert registered_json_status("opencode", "project", ".opencode/opencode.json", {"plugin": ["file:///tmp/project/.opencode/plugins/graphify.js"]}).ok is False
 
 
-def test_install_surface_core_decides_uninstalled_status_from_observed_facts() -> None:
+def test_install_surface_statuses_decides_uninstalled_status_from_observed_facts() -> None:
     plain = InstallSurface("project", "plain.txt")
 
     removed_status = install_surface_statuses.uninstalled_surface_status_from_observation(

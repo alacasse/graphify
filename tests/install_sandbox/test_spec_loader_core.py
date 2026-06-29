@@ -12,6 +12,9 @@ from tools.install_sandbox.targets import install_target_models
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
 
 
+MODULE_UNDER_TEST = "tools.install_sandbox.platform_specs"
+
+
 def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     registry = load_registry_from_data(_valid_data())
     user = registry.make_scenario("mini", "user")
@@ -91,7 +94,7 @@ def test_spec_loader_can_be_imported_without_platform_specs_first() -> None:
                 "import sys; "
                 "from tools.install_sandbox.registry.spec_loader import load_registry_from_yaml; "
                 "print(load_registry_from_yaml.__name__); "
-                "print('tools.install_sandbox.platform_specs' in sys.modules)"
+                f"print({MODULE_UNDER_TEST!r} in sys.modules)"
             ),
         ],
         check=False,

@@ -27,6 +27,25 @@ ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",
 }
 
+ROOT_HELPER_DELETION_CANDIDATES = {
+    "tools.install_sandbox.file_walk",
+    "tools.install_sandbox.json_helpers",
+}
+
+ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS = {
+    "file_walk": "tools.install_sandbox.file_walk",
+    "json_helpers": "tools.install_sandbox.json_helpers",
+}
+
+ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
+    "tools.install_sandbox.agent_summary",
+    "tools.install_sandbox.harness_specs",
+    "tools.install_sandbox.reference_resolution",
+    "tools.install_sandbox.run",
+    "tools.install_sandbox.sandbox_runner",
+    "tools.install_sandbox.validation_plan",
+}
+
 
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
@@ -50,6 +69,56 @@ def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
 
         if direct_imports:
             discovered_imports[relative] = sorted(direct_imports)
+
+    return discovered_imports
+
+
+def _module_name_for(path: Path) -> str:
+    relative = path.relative_to(Path(__file__).parents[2]).with_suffix("")
+    return ".".join(relative.parts)
+
+
+def _resolve_import_from_module(importing_module: str, node: ast.ImportFrom) -> str | None:
+    if node.level == 0:
+        return node.module
+
+    package_parts = importing_module.split(".")[:-1]
+    parent_parts = package_parts[: len(package_parts) - node.level + 1]
+    if node.module:
+        parent_parts.extend(node.module.split("."))
+    return ".".join(parent_parts)
+
+
+def _direct_repo_import_surface(module_names: set[str], fallback_names: dict[str, str]) -> dict[str, list[str]]:
+    discovered_imports: dict[str, list[str]] = {}
+
+    for root in (INSTALL_SANDBOX_ROOT, TESTS_ROOT / "install_sandbox"):
+        for path in sorted(root.rglob("*.py")):
+            relative = path.relative_to(Path(__file__).parents[2]).as_posix()
+            importing_module = _module_name_for(path)
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            direct_imports: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    resolved_module = _resolve_import_from_module(importing_module, node)
+                    if resolved_module == "tools.install_sandbox":
+                        for alias in node.names:
+                            module_name = f"tools.install_sandbox.{alias.name}"
+                            if module_name in module_names:
+                                direct_imports.add(module_name)
+                    elif resolved_module in module_names:
+                        direct_imports.add(resolved_module)
+                    elif resolved_module in fallback_names:
+                        direct_imports.add(fallback_names[resolved_module])
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in module_names:
+                            direct_imports.add(alias.name)
+                        elif alias.name in fallback_names:
+                            direct_imports.add(fallback_names[alias.name])
+
+            if direct_imports:
+                discovered_imports[relative] = sorted(direct_imports)
 
     return discovered_imports
 
@@ -124,6 +193,28 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
     assert DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
 
 
+def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -> None:
+    assert ROOT_HELPER_DELETION_CANDIDATES == {
+        "tools.install_sandbox.file_walk",
+        "tools.install_sandbox.json_helpers",
+    }
+    assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {
+        "file_walk": "tools.install_sandbox.file_walk",
+        "json_helpers": "tools.install_sandbox.json_helpers",
+    }
+    assert ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS == {
+        "tools.install_sandbox.agent_summary",
+        "tools.install_sandbox.harness_specs",
+        "tools.install_sandbox.reference_resolution",
+        "tools.install_sandbox.run",
+        "tools.install_sandbox.sandbox_runner",
+        "tools.install_sandbox.validation_plan",
+    }
+    assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+    assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_PURE_ROOT_FACADE_MODULES)
+    assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
+
+
 def test_root_topology_closeout_keeps_root_worthy_facades_importable() -> None:
     root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
     owner_agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
@@ -157,6 +248,28 @@ def test_root_topology_closeout_lists_deleted_install_surface_core_direct_test_i
     discovered_imports = _direct_test_import_surface(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
 
     assert discovered_imports == {}
+
+
+def test_root_topology_closeout_lists_root_helper_deletion_candidate_import_surface() -> None:
+    discovered_imports = _direct_repo_import_surface(
+        ROOT_HELPER_DELETION_CANDIDATES,
+        ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS,
+    )
+
+    assert discovered_imports == {
+        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": [
+            "tools.install_sandbox.file_walk",
+        ],
+        "tools/install_sandbox/reporting/reports.py": [
+            "tools.install_sandbox.json_helpers",
+        ],
+        "tools/install_sandbox/runtime/source_snapshot.py": [
+            "tools.install_sandbox.file_walk",
+        ],
+        "tools/install_sandbox/surfaces/install_surface_statuses.py": [
+            "tools.install_sandbox.json_helpers",
+        ],
+    }
 
 
 def test_root_topology_closeout_names_validation_reporting_and_runner_public_apis() -> None:

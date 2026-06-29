@@ -48,6 +48,48 @@ ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
     "tools.install_sandbox.validation_plan",
 }
 
+SUPPORTED_SANDBOX_RUNNER_APIS = {
+    "main": "tools.install_sandbox.sandbox_runner",
+    "parse_args": "tools.install_sandbox.sandbox_runner",
+}
+
+SANDBOX_RUNNER_PRUNING_CANDIDATES = {
+    "runtime_globals": {
+        "ROOT_REGISTRY": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.root_registry",
+        "RUNTIME_ROOTS": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.runtime_roots",
+        "HOME": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.home",
+        "XDG_CONFIG_HOME": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.xdg_config_home",
+        "PROJECT": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.project",
+        "USER_CWD": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.user_cwd",
+        "REPO_MOUNT": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.repo_mount",
+        "SRC": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.src",
+        "OUTPUT": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.output",
+        "HARNESS_VERSION": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.harness_version",
+        "SCENARIO_REGISTRY": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.scenario_registry",
+    },
+    "wrapper_functions": {
+        "sandbox_env": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.sandbox_env",
+        "install_graphify": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.install_graphify",
+        "risk_report": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.risk_report",
+        "preflight": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.preflight",
+        "scenario_lifecycle_hooks": "tools.install_sandbox.runtime.sandbox_run_environment.SandboxRunEnvironment.scenario_lifecycle_hooks",
+    },
+    "sentinel_aliases": {
+        "USER_SENTINEL": "tools.install_sandbox.effects.file_effect_state.USER_SENTINEL",
+        "STALE_GRAPHIFY_SENTINEL": "tools.install_sandbox.effects.file_effect_state.STALE_GRAPHIFY_SENTINEL",
+    },
+    "lifecycle_aliases": {
+        "ScenarioRunContext": "tools.install_sandbox.lifecycle.scenario_lifecycle_support.ScenarioRunContext",
+        "StandardScenarioStages": "tools.install_sandbox.lifecycle.scenario_lifecycle_support.StandardScenarioStages",
+    },
+    "status_aliases": {
+        "RISK_GRAPHIFY_FAILED": "tools.install_sandbox.reporting.status.RISK_GRAPHIFY_FAILED",
+        "RISK_GRAPHIFY_VERIFIED": "tools.install_sandbox.reporting.status.RISK_GRAPHIFY_VERIFIED",
+        "combined_status": "tools.install_sandbox.reporting.status.combined_status",
+        "known_status_values": "tools.install_sandbox.reporting.status.known_status_values",
+    },
+}
+
 
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
@@ -291,16 +333,20 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     assert callable(harness_run.write_harness_run_outputs)
     assert callable(harness_orchestration.run_harness)
     assert not hasattr(harness_orchestration, "run_harness_and_write_outputs")
-    assert callable(sandbox_runner.main)
-    assert callable(sandbox_runner.parse_args)
+    for public_name, owner_module_name in SUPPORTED_SANDBOX_RUNNER_APIS.items():
+        assert getattr(sandbox_runner, public_name).__module__ == owner_module_name
+        assert callable(getattr(sandbox_runner, public_name))
     assert root_agent_summary.summarize_output is agent_summary.summarize_output
 
 
-def test_root_topology_closeout_characterizes_supported_runner_compatibility_surface() -> None:
+def test_root_topology_closeout_characterizes_runner_compatibility_tail_as_pruning_candidates() -> None:
     sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
     run_environment = sandbox_runner.RUN_ENVIRONMENT
+    file_effect_state = importlib.import_module("tools.install_sandbox.effects.file_effect_state")
+    scenario_lifecycle_support = importlib.import_module("tools.install_sandbox.lifecycle.scenario_lifecycle_support")
+    reporting_status = importlib.import_module("tools.install_sandbox.reporting.status")
 
-    supported_runtime_globals = {
+    runtime_global_names = {
         "ROOT_REGISTRY": "root_registry",
         "RUNTIME_ROOTS": "runtime_roots",
         "HOME": "home",
@@ -313,27 +359,45 @@ def test_root_topology_closeout_characterizes_supported_runner_compatibility_sur
         "HARNESS_VERSION": "harness_version",
         "SCENARIO_REGISTRY": "scenario_registry",
     }
-    for public_name, environment_name in supported_runtime_globals.items():
+    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["runtime_globals"]) == set(runtime_global_names)
+    for public_name, environment_name in runtime_global_names.items():
         assert getattr(sandbox_runner, public_name) is getattr(run_environment, environment_name)
 
-    supported_wrappers_and_aliases = {
-        "USER_SENTINEL": sandbox_runner.file_effect_state.USER_SENTINEL,
-        "STALE_GRAPHIFY_SENTINEL": sandbox_runner.file_effect_state.STALE_GRAPHIFY_SENTINEL,
-        "ScenarioRunContext": sandbox_runner.scenario_lifecycle_support.ScenarioRunContext,
-        "StandardScenarioStages": sandbox_runner.scenario_lifecycle_support.StandardScenarioStages,
+    sentinel_aliases = {
+        "USER_SENTINEL": file_effect_state.USER_SENTINEL,
+        "STALE_GRAPHIFY_SENTINEL": file_effect_state.STALE_GRAPHIFY_SENTINEL,
     }
-    for public_name, owner_value in supported_wrappers_and_aliases.items():
+    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["sentinel_aliases"]) == set(sentinel_aliases)
+    for public_name, owner_value in sentinel_aliases.items():
         assert getattr(sandbox_runner, public_name) is owner_value
 
-    assert sandbox_runner.USER_SENTINEL == sandbox_runner.file_effect_state.USER_SENTINEL
-    assert sandbox_runner.STALE_GRAPHIFY_SENTINEL == sandbox_runner.file_effect_state.STALE_GRAPHIFY_SENTINEL
-    assert sandbox_runner.ScenarioRunContext is sandbox_runner.scenario_lifecycle_support.ScenarioRunContext
-    assert sandbox_runner.StandardScenarioStages is sandbox_runner.scenario_lifecycle_support.StandardScenarioStages
-    assert callable(sandbox_runner.sandbox_env)
-    assert callable(sandbox_runner.install_graphify)
-    assert callable(sandbox_runner.risk_report)
-    assert callable(sandbox_runner.preflight)
-    assert callable(sandbox_runner.scenario_lifecycle_hooks)
+    lifecycle_aliases = {
+        "ScenarioRunContext": scenario_lifecycle_support.ScenarioRunContext,
+        "StandardScenarioStages": scenario_lifecycle_support.StandardScenarioStages,
+    }
+    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["lifecycle_aliases"]) == set(lifecycle_aliases)
+    for public_name, owner_value in lifecycle_aliases.items():
+        assert getattr(sandbox_runner, public_name) is owner_value
+
+    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["wrapper_functions"]) == {
+        "sandbox_env",
+        "install_graphify",
+        "risk_report",
+        "preflight",
+        "scenario_lifecycle_hooks",
+    }
+    for public_name in SANDBOX_RUNNER_PRUNING_CANDIDATES["wrapper_functions"]:
+        assert callable(getattr(sandbox_runner, public_name))
+
+    status_aliases = {
+        "RISK_GRAPHIFY_FAILED": reporting_status.RISK_GRAPHIFY_FAILED,
+        "RISK_GRAPHIFY_VERIFIED": reporting_status.RISK_GRAPHIFY_VERIFIED,
+        "combined_status": reporting_status.combined_status,
+        "known_status_values": reporting_status.known_status_values,
+    }
+    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["status_aliases"]) == set(status_aliases)
+    for public_name, owner_value in status_aliases.items():
+        assert getattr(sandbox_runner, public_name) is owner_value
 
     ordinary_imported_dependencies = {
         "file_effect_state": "tools.install_sandbox.effects.file_effect_state",

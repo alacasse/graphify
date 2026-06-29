@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 try:
     from .install_surface_models import (
@@ -20,7 +20,6 @@ try:
         expects_stale_graphify_section_repaired,
         expects_user_content_preserved,
     )
-    from ..json_helpers import object_dict, object_dicts, object_list
 except ImportError:  # pragma: no cover - direct script import fallback
     from surfaces.install_surface_models import (  # type: ignore[no-redef]
         InstallSurface,
@@ -36,7 +35,18 @@ except ImportError:  # pragma: no cover - direct script import fallback
         expects_stale_graphify_section_repaired,
         expects_user_content_preserved,
     )
-    from json_helpers import object_dict, object_dicts, object_list  # type: ignore[no-redef]
+
+
+def object_dict(value: object) -> dict[str, object]:
+    return cast(dict[str, object], value) if isinstance(value, dict) else {}
+
+
+def object_list(value: object) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
+
+def object_dicts(value: object) -> list[dict[str, object]]:
+    return [object_dict(item) for item in object_list(value) if isinstance(item, dict)]
 
 
 @dataclass(frozen=True)

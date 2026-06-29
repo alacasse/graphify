@@ -11,6 +11,7 @@ INSTALL_SANDBOX_ROOT = Path(__file__).parents[2] / "tools" / "install_sandbox"
 TESTS_ROOT = Path(__file__).parents[2] / "tests"
 MODULE_UNDER_TEST = "tools.install_sandbox.platform_specs"
 DELETED_FILE_WALK_MODULE = ".".join(("tools", "install_sandbox", "file_walk"))
+DELETED_JSON_HELPER_MODULE = ".".join(("tools", "install_sandbox", "json_helpers"))
 
 DELETED_PURE_ROOT_FACADE_MODULES = {
     "tools.install_sandbox.expected_effects",
@@ -26,18 +27,16 @@ DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES = {
 
 DELETED_ROOT_HELPER_MODULES = {
     DELETED_FILE_WALK_MODULE,
+    DELETED_JSON_HELPER_MODULE,
 }
 
 ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",
 }
 
-ROOT_HELPER_DELETION_CANDIDATES = {
-    "tools.install_sandbox.json_helpers",
-}
+ROOT_HELPER_DELETION_CANDIDATES: set[str] = set()
 
 ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS = {
-    "json_helpers": "tools.install_sandbox.json_helpers",
 }
 
 ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
@@ -199,13 +198,10 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
 def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -> None:
     assert DELETED_ROOT_HELPER_MODULES == {
         DELETED_FILE_WALK_MODULE,
+        DELETED_JSON_HELPER_MODULE,
     }
-    assert ROOT_HELPER_DELETION_CANDIDATES == {
-        "tools.install_sandbox.json_helpers",
-    }
-    assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {
-        "json_helpers": "tools.install_sandbox.json_helpers",
-    }
+    assert ROOT_HELPER_DELETION_CANDIDATES == set()
+    assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {}
     assert ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS == {
         "tools.install_sandbox.agent_summary",
         "tools.install_sandbox.harness_specs",
@@ -270,14 +266,7 @@ def test_root_topology_closeout_lists_root_helper_deletion_candidate_import_surf
         ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS,
     )
 
-    assert discovered_imports == {
-        "tools/install_sandbox/reporting/reports.py": [
-            "tools.install_sandbox.json_helpers",
-        ],
-        "tools/install_sandbox/surfaces/install_surface_statuses.py": [
-            "tools.install_sandbox.json_helpers",
-        ],
-    }
+    assert discovered_imports == {}
 
 
 def test_root_topology_closeout_names_validation_reporting_and_runner_public_apis() -> None:

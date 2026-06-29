@@ -3,16 +3,26 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, cast
 
 try:
-    from tools.install_sandbox.json_helpers import object_dict, object_dicts, object_list
     from tools.install_sandbox.reporting.artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
     from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 except ImportError:
-    from json_helpers import object_dict, object_dicts, object_list
     from reporting.artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
     from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
+
+
+def object_dict(value: object) -> dict[str, object]:
+    return cast(dict[str, object], value) if isinstance(value, dict) else {}
+
+
+def object_list(value: object) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
+
+def object_dicts(value: object) -> list[dict[str, object]]:
+    return [object_dict(item) for item in object_list(value) if isinstance(item, dict)]
 
 
 def text_snippet(path: Path, limit: int = 500) -> str:

@@ -26,6 +26,50 @@ ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",
 }
 
+PLATFORM_SPECS_DIRECT_TEST_IMPORT_SURFACE = {
+    "tests/install_sandbox/test_install_target_defaults.py": [
+        "tools.install_sandbox.platform_specs",
+    ],
+    "tests/install_sandbox/test_install_target_harness_policy.py": [
+        "tools.install_sandbox.platform_specs",
+    ],
+    "tests/install_sandbox/test_install_target_models.py": [
+        "tools.install_sandbox.platform_specs",
+    ],
+    "tests/install_sandbox/test_platform_specs_facade.py": [
+        "tools.install_sandbox.platform_specs",
+    ],
+    "tests/install_sandbox/test_spec_effect_derivation.py": [
+        "tools.install_sandbox.platform_specs",
+    ],
+}
+
+
+def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
+    discovered_imports: dict[str, list[str]] = {}
+
+    for path in sorted(INSTALL_SANDBOX_TESTS_ROOT.glob("test_*.py")):
+        relative = path.relative_to(Path(__file__).parents[2]).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        direct_imports: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "tools.install_sandbox":
+                for alias in node.names:
+                    module_name = f"tools.install_sandbox.{alias.name}"
+                    if module_name in module_names:
+                        direct_imports.add(module_name)
+            elif isinstance(node, ast.ImportFrom) and node.module in module_names:
+                direct_imports.add(node.module)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in module_names:
+                        direct_imports.add(alias.name)
+
+        if direct_imports:
+            discovered_imports[relative] = sorted(direct_imports)
+
+    return discovered_imports
+
 
 def test_root_topology_closeout_keeps_moved_implementation_packages_importable() -> None:
     for module_name in (
@@ -96,7 +140,7 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
     assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
 
 
-def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importable() -> None:
+def test_root_topology_closeout_keeps_root_worthy_and_temporary_deferred_facades_importable() -> None:
     root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
     owner_agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
     root_install_surface_core = importlib.import_module("tools.install_sandbox.install_surface_core")
@@ -114,29 +158,15 @@ def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importabl
 
 def test_root_topology_closeout_lists_deleted_pure_facade_direct_test_import_surface() -> None:
     expected_imports: dict[str, list[str]] = {}
-    discovered_imports: dict[str, list[str]] = {}
-
-    for path in sorted(INSTALL_SANDBOX_TESTS_ROOT.glob("test_*.py")):
-        relative = path.relative_to(Path(__file__).parents[2]).as_posix()
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        direct_imports: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "tools.install_sandbox":
-                for alias in node.names:
-                    module_name = f"tools.install_sandbox.{alias.name}"
-                    if module_name in DELETED_PURE_ROOT_FACADE_MODULES:
-                        direct_imports.add(module_name)
-            elif isinstance(node, ast.ImportFrom) and node.module in DELETED_PURE_ROOT_FACADE_MODULES:
-                direct_imports.add(node.module)
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name in DELETED_PURE_ROOT_FACADE_MODULES:
-                        direct_imports.add(alias.name)
-
-        if direct_imports:
-            discovered_imports[relative] = sorted(direct_imports)
+    discovered_imports = _direct_test_import_surface(DELETED_PURE_ROOT_FACADE_MODULES)
 
     assert discovered_imports == expected_imports
+
+
+def test_root_topology_closeout_lists_temporary_platform_specs_direct_test_import_surface() -> None:
+    discovered_imports = _direct_test_import_surface({"tools.install_sandbox.platform_specs"})
+
+    assert discovered_imports == PLATFORM_SPECS_DIRECT_TEST_IMPORT_SURFACE
 
 
 def test_root_topology_closeout_names_validation_reporting_and_runner_public_apis() -> None:

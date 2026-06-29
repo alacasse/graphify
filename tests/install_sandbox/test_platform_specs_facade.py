@@ -1,3 +1,9 @@
+"""Temporary compatibility coverage for the root platform_specs facade.
+
+Ordinary owner behavior should move to target and surface owner-module tests
+before this facade is deleted.
+"""
+
 from __future__ import annotations
 
 from tools.install_sandbox import platform_specs
@@ -7,7 +13,7 @@ from tools.install_sandbox.targets import install_target_catalog, install_target
 from install_target_test_support import REGISTRY
 
 
-def test_install_target_aliases_are_identity_aliases() -> None:
+def test_temporary_platform_specs_facade_install_target_aliases_are_identity_aliases() -> None:
     assert platform_specs.InstallTargetSpec is platform_specs.PlatformSpec
     assert platform_specs.InstallTargetCatalog is platform_specs.ScenarioRegistry
     assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
@@ -26,7 +32,7 @@ def test_install_target_catalog_keeps_legacy_import_surface() -> None:
     assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
 
 
-def test_platform_specs_facade_does_not_export_private_install_target_helpers() -> None:
+def test_temporary_platform_specs_facade_does_not_export_private_install_target_helpers() -> None:
     private_helper_names = {
         "_dedupe_notes",
         "_generic_install_command",
@@ -41,7 +47,7 @@ def test_platform_specs_facade_does_not_export_private_install_target_helpers() 
         assert not hasattr(platform_specs, name), name
 
 
-def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None:
+def test_temporary_platform_specs_facade_exports_legacy_and_install_target_names() -> None:
     legacy_platform_names = {
         "PlatformSpec",
         "ScenarioRegistry",
@@ -71,7 +77,7 @@ def test_platform_specs_facade_exports_legacy_and_install_target_names() -> None
     assert platform_specs.platform_scenarios("cursor", "both") == REGISTRY.platform_scenarios("cursor", "both")
 
 
-def test_install_target_fact_dataclasses_keep_facade_identity() -> None:
+def test_temporary_platform_specs_facade_install_target_fact_dataclasses_keep_facade_identity() -> None:
     model_names = (
         "GeneratedFileExpectation",
         "InstallCommandVariant",
@@ -110,7 +116,7 @@ def test_install_target_fact_dataclasses_keep_facade_identity() -> None:
     assert scenario.expected[0].__class__ is platform_specs.InstallSurface
 
 
-def test_install_surface_models_keep_owner_identity_across_remaining_facades() -> None:
+def test_temporary_platform_specs_facade_install_surface_models_keep_owner_identity() -> None:
     model_names = (
         "JsonHookExpectation",
         "JsonPluginExpectation",

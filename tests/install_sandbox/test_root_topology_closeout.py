@@ -12,7 +12,6 @@ INSTALL_SANDBOX_TESTS_ROOT = Path(__file__).parents[1] / "install_sandbox"
 
 PURE_COMPATIBILITY_FACADE_MODULES = {
     "tools.install_sandbox.expected_effects",
-    "tools.install_sandbox.status",
 }
 
 DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES = {
@@ -58,6 +57,7 @@ def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> Non
         "install_target_selection",
         "spec_loader",
         "spec_normalize",
+        "status",
     )
     for module_name in removed_root_implementation_modules:
         assert not (INSTALL_SANDBOX_ROOT / f"{module_name}.py").exists()
@@ -67,7 +67,6 @@ def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> Non
 def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> None:
     assert PURE_COMPATIBILITY_FACADE_MODULES == {
         "tools.install_sandbox.expected_effects",
-        "tools.install_sandbox.status",
     }
     assert DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES == {
         "tools.install_sandbox.install_surface_core",
@@ -99,20 +98,14 @@ def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importabl
 def test_root_topology_closeout_characterizes_remaining_pure_facades_as_test_compatibility() -> None:
     root_expected_effects = importlib.import_module("tools.install_sandbox.expected_effects")
     owner_install_surface_models = importlib.import_module("tools.install_sandbox.surfaces.install_surface_models")
-    root_status = importlib.import_module("tools.install_sandbox.status")
-    owner_status = importlib.import_module("tools.install_sandbox.reporting.status")
 
     assert (INSTALL_SANDBOX_ROOT / "expected_effects.py").exists()
-    assert (INSTALL_SANDBOX_ROOT / "status.py").exists()
     assert root_expected_effects.InstallSurface is owner_install_surface_models.InstallSurface
-    assert root_status.known_status_values is owner_status.known_status_values
 
 
 def test_root_topology_closeout_lists_pure_facade_direct_test_import_surface() -> None:
     expected_imports = {
         "tests/install_sandbox/test_platform_specs_facade.py": ["tools.install_sandbox.expected_effects"],
-        "tests/install_sandbox/test_reports.py": ["tools.install_sandbox.status"],
-        "tests/install_sandbox/test_sandbox_runner.py": ["tools.install_sandbox.status"],
     }
     discovered_imports: dict[str, list[str]] = {}
 

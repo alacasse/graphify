@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import status
 from tools.install_sandbox.reporting import artifacts
 from tools.install_sandbox.reporting import agent_summary
 from tools.install_sandbox.reporting import harness_run
@@ -23,20 +22,18 @@ def test_known_status_values_are_serializable_file_effect_statuses() -> None:
     assert "target_tool_runtime" not in encoded
 
 
-def test_status_values_are_owned_by_reporting_with_root_compatibility() -> None:
+def test_status_values_are_owned_by_reporting() -> None:
     assert (
         reports.RISK_GRAPHIFY_VERIFIED
         == reporting_status.RISK_GRAPHIFY_VERIFIED
-        == status.RISK_GRAPHIFY_VERIFIED
         == "graphify_install_verified"
     )
     assert (
         reports.RISK_GRAPHIFY_FAILED
         == reporting_status.RISK_GRAPHIFY_FAILED
-        == status.RISK_GRAPHIFY_FAILED
         == "graphify_install_failed"
     )
-    assert reports.known_status_values() == reporting_status.known_status_values() == status.known_status_values()
+    assert reports.known_status_values() == reporting_status.known_status_values()
 
 
 def test_markdown_helpers_escape_table_and_code_cells() -> None:

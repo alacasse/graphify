@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.install_sandbox import sandbox_runner, status
+from tools.install_sandbox import sandbox_runner
 from tools.install_sandbox.harness_specs import SandboxRootRegistry, SandboxRootSpec
 from tools.install_sandbox.reporting import harness_run
 from tools.install_sandbox.reporting import status as reporting_status
@@ -756,20 +756,17 @@ def test_runner_status_helpers_use_reporting_status_owner() -> None:
     assert (
         sandbox_runner.RISK_GRAPHIFY_VERIFIED
         == reporting_status.RISK_GRAPHIFY_VERIFIED
-        == status.RISK_GRAPHIFY_VERIFIED
         == "graphify_install_verified"
     )
     assert (
         sandbox_runner.RISK_GRAPHIFY_FAILED
         == reporting_status.RISK_GRAPHIFY_FAILED
-        == status.RISK_GRAPHIFY_FAILED
         == "graphify_install_failed"
     )
     assert (
         sandbox_runner.known_status_values()
         == reports.known_status_values()
         == reporting_status.known_status_values()
-        == status.known_status_values()
     )
     assert report["statuses"] == [sandbox_runner.RISK_GRAPHIFY_VERIFIED]
     assert "target_tool_runtime_verified" not in report

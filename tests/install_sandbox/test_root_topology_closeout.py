@@ -19,11 +19,9 @@ DELETED_PURE_ROOT_FACADE_MODULES = {
     "tools.install_sandbox.status",
 }
 
-DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES = {
+DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES = {
     "tools.install_sandbox.install_surface_core",
 }
-
-INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS: dict[str, list[str]] = {}
 
 ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",
@@ -103,7 +101,7 @@ def test_root_topology_closeout_keeps_deleted_pure_root_facades_absent() -> None
 
         assert not (INSTALL_SANDBOX_ROOT / f"{root_file_name}.py").exists()
         assert importlib.util.find_spec(module_name) is None
-        assert module_name not in DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES
+        assert module_name not in DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES
         assert module_name not in ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS
 
 
@@ -115,26 +113,31 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
         "tools.install_sandbox.spec_normalize",
         "tools.install_sandbox.status",
     }
-    assert DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES == {
+    assert DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES == {
         "tools.install_sandbox.install_surface_core",
     }
     assert ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS == {
         "tools.install_sandbox.agent_summary",
     }
-    assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES)
+    assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
+    assert DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
 
 
-def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importable() -> None:
+def test_root_topology_closeout_keeps_root_worthy_facades_importable() -> None:
     root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
     owner_agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
-    root_install_surface_core = importlib.import_module("tools.install_sandbox.install_surface_core")
-    owner_path_resolution = importlib.import_module("tools.install_sandbox.surfaces.path_resolution")
 
     assert (INSTALL_SANDBOX_ROOT / "agent_summary.py").exists()
-    assert (INSTALL_SANDBOX_ROOT / "install_surface_core.py").exists()
     assert root_agent_summary.summarize_output is owner_agent_summary.summarize_output
-    assert root_install_surface_core.resolve_install_surface_path is owner_path_resolution.resolve_install_surface_path
+
+
+def test_root_topology_closeout_keeps_deleted_install_surface_core_facade_absent() -> None:
+    for module_name in DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES:
+        root_file_name = module_name.rsplit(".", maxsplit=1)[-1]
+
+        assert not (INSTALL_SANDBOX_ROOT / f"{root_file_name}.py").exists()
+        assert importlib.util.find_spec(module_name) is None
 
 
 def test_root_topology_closeout_lists_deleted_pure_facade_direct_test_import_surface() -> None:
@@ -150,10 +153,10 @@ def test_root_topology_closeout_lists_deleted_platform_specs_direct_test_import_
     assert discovered_imports == {}
 
 
-def test_root_topology_closeout_lists_temporary_install_surface_core_direct_test_imports() -> None:
-    discovered_imports = _direct_test_import_surface(DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES)
+def test_root_topology_closeout_lists_deleted_install_surface_core_direct_test_import_surface() -> None:
+    discovered_imports = _direct_test_import_surface(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
 
-    assert discovered_imports == INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS
+    assert discovered_imports == {}
 
 
 def test_root_topology_closeout_names_validation_reporting_and_runner_public_apis() -> None:

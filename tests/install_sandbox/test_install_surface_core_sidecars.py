@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_generated
 from tools.install_sandbox.surfaces import install_surface_models
@@ -121,7 +120,7 @@ def test_reference_sidecar_expectation_validates_installed_status_matrix() -> No
     assert "status=available" in detail
 
 
-def test_install_surface_core_evaluates_skill_sidecar_status_decisions() -> None:
+def test_install_surface_sidecars_evaluates_skill_sidecar_status_decisions() -> None:
     sidecar = install_surface_models.SkillSidecarExpectation()
 
     assert install_surface_sidecars.skill_version_status(None, "9.9.9") == (False, "missing; expected=9.9.9")
@@ -148,7 +147,7 @@ def test_install_surface_core_evaluates_skill_sidecar_status_decisions() -> None
     assert install_surface_sidecars.uninstalled_skill_sidecar_status(True) == (False, "sidecar_still_exists")
 
 
-def test_install_surface_core_derives_skill_sidecar_relative_paths_from_declared_names() -> None:
+def test_install_surface_sidecars_derives_skill_sidecar_relative_paths_from_declared_names() -> None:
     default_entry = expected_skill("project", ".aider/graphify/SKILL.md")
     custom_entry = expected_skill_with_docs_sidecar("project", ".custom/graphify/SKILL.md")
 
@@ -163,7 +162,7 @@ def test_install_surface_core_derives_skill_sidecar_relative_paths_from_declared
     assert install_surface_sidecars.skill_references_tmp_relative(custom_entry) == Path(".custom/graphify/docs.tmp")
 
 
-def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_resolved_references() -> None:
+def test_install_surface_sidecars_derives_expected_skill_sidecar_relatives_from_resolved_references() -> None:
     entry = expected_skill("project", ".claude/skills/graphify/SKILL.md")
 
     assert install_surface_sidecars.expected_skill_sidecar_relatives(entry, resolution("available", ("query.md", "update.md"))) == {
@@ -176,14 +175,6 @@ def test_install_surface_core_derives_expected_skill_sidecar_relatives_from_reso
 
     with pytest.raises(AssertionError, match="expected path has no skill sidecar expectation: project/notes.md"):
         install_surface_sidecars.skill_sidecar_expectation(InstallSurface("project", "notes.md"))
-
-
-def test_temporary_install_surface_core_facade_re_exports_sidecar_helpers() -> None:
-    assert install_surface_core.ReferenceSidecarExpectation is install_surface_sidecars.ReferenceSidecarExpectation
-    assert install_surface_core.skill_sidecar_expectation is install_surface_sidecars.skill_sidecar_expectation
-    assert install_surface_core.skill_version_status is install_surface_sidecars.skill_version_status
-    assert install_surface_core.expected_skill_sidecar_relatives is install_surface_sidecars.expected_skill_sidecar_relatives
-    assert install_surface_core.uninstalled_skill_sidecar_status is install_surface_sidecars.uninstalled_skill_sidecar_status
 
 
 @pytest.mark.parametrize(
@@ -257,7 +248,7 @@ def test_expected_skill_sidecar_relatives_follow_packaged_reference_status(
     assert install_surface_sidecars.expected_skill_sidecar_relatives(entry, resolutions[platform]) == {Path(relative) for relative in expected_relatives}
 
 
-def test_install_surface_core_matches_skill_sidecar_version_and_nested_reference_paths() -> None:
+def test_install_surface_sidecars_match_skill_sidecar_version_and_nested_reference_paths() -> None:
     test_scenario = scenario("aider", expected_skill("project", ".aider/graphify/SKILL.md"))
 
     assert install_surface_generated.is_skill_sidecar_relative(test_scenario.expected, "project", Path(".aider/graphify/.graphify_version")) is True

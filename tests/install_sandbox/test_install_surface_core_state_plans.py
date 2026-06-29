@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_state
@@ -198,11 +197,3 @@ def test_install_surface_state_derives_expected_manifest_relatives_for_root() ->
         Path(".codex/skills/graphify/.graphify_version"),
         Path(".codex/skills/graphify/references.tmp"),
     }
-
-
-def test_temporary_install_surface_core_facade_reexports_state_planning_names() -> None:
-    assert install_surface_core.planned_state_entries is install_surface_state.planned_state_entries
-    assert install_surface_core.IdempotencyStateChange is install_surface_state.IdempotencyStateChange
-    assert install_surface_core.user_content_seed_plans is install_surface_state.user_content_seed_plans
-    assert install_surface_core.stale_sidecar_seed_plans is install_surface_state.stale_sidecar_seed_plans
-    assert install_surface_core.expected_manifest_relatives is install_surface_state.expected_manifest_relatives

@@ -3,12 +3,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tools.install_sandbox import install_surface_core
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_sidecars
 from tools.install_sandbox.effects import file_effect_surfaces
 from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox.effects import scenario_file_effects_adapter
+from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import path_resolution
 
 # File-effects package and oracle boundary guards live here. Behavior assertions
@@ -32,16 +32,28 @@ def test_file_effects_package_tests_do_not_claim_topic_behavior_ownership() -> N
     assert file_effect_oracle.FileEffectOracle.__name__ == "FileEffectOracle"
 
 
-def test_install_surface_core_facade_keeps_temporary_path_resolution_compatibility() -> None:
-    tree = ast.parse(Path(install_surface_core.__file__).read_text(encoding="utf-8"))
-    function_names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-    class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+def test_path_resolution_owner_resolves_roots_and_surface_paths() -> None:
+    roots = {
+        "project": Path("/sandbox/project"),
+        "home": Path("/sandbox/home"),
+    }
 
-    assert function_names == set()
-    assert class_names == set()
-    assert {"resolve_install_root", "resolve_install_surface_path"} <= set(install_surface_core.__all__)
-    assert install_surface_core.resolve_install_root is path_resolution.resolve_install_root
-    assert install_surface_core.resolve_install_surface_path is path_resolution.resolve_install_surface_path
+    assert path_resolution.resolve_install_root("home", roots) == Path("/sandbox/home")
+    assert path_resolution.resolve_install_surface_path(
+        install_surface_models.InstallSurface("project", "AGENTS.md"),
+        roots,
+    ) == Path("/sandbox/project/AGENTS.md")
+
+
+def test_path_resolution_owner_rejects_unknown_roots() -> None:
+    roots = {"project": Path("/sandbox/project")}
+
+    try:
+        path_resolution.resolve_install_root("missing", roots)
+    except AssertionError as exc:
+        assert str(exc) == "unknown root: missing"
+    else:  # pragma: no cover - assertion branch
+        raise AssertionError("unknown root did not raise")
 
 
 def test_file_effect_owners_import_path_resolution_helpers_from_owner_module() -> None:
@@ -142,12 +154,12 @@ def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
 
     assert oracle_methods.isdisjoint(pure_core_pass_through_methods), (
         "FileEffectOracle should not grow pure Installer Core pass-through methods; "
-        "call install_surface_core helpers directly instead."
+        "call surface owner helpers directly instead."
     )
     assert oracle_methods == oracle_adapter_methods
 
 
-def test_file_effects_tests_import_core_only_as_adapter_collaborator_module() -> None:
+def test_file_effects_tests_do_not_import_install_surface_core_helpers() -> None:
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
     core_test_modules = tuple(Path(__file__).parent.glob("test_install_surface_core*.py"))
 
@@ -161,7 +173,7 @@ def test_file_effects_tests_import_core_only_as_adapter_collaborator_module() ->
     assert core_test_modules, "direct Installer Core behavior tests belong in test_install_surface_core*.py"
     assert imported_core_helpers == set(), (
         "Keep test_file_effects.py adapter-owned; use module-qualified "
-        "install_surface_core collaborators here and put direct core behavior tests "
+        "surface-owner collaborators here and put direct surface behavior tests "
         "in test_install_surface_core*.py."
     )
 

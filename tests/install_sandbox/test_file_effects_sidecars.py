@@ -15,8 +15,8 @@ from tools.install_sandbox.targets.install_target_models import InstallSurface, 
 
 from install_target_test_support import expected_entry, scenario_for
 
-# Sandbox sidecar records live here. Direct sidecar status and path-planning
-# decisions remain in test_install_surface_core_sidecars.py.
+# Sandbox sidecar records live here. Direct surface-sidecar status and
+# path-planning decisions remain in test_install_surface_core_sidecars.py.
 
 
 @pytest.fixture

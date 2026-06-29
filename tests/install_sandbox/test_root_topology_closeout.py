@@ -23,17 +23,7 @@ DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES = {
     "tools.install_sandbox.install_surface_core",
 }
 
-INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS = {
-    "tests/install_sandbox/test_file_effects.py": [
-        "tools.install_sandbox.install_surface_core",
-    ],
-    "tests/install_sandbox/test_install_surface_core_sidecars.py": [
-        "tools.install_sandbox.install_surface_core",
-    ],
-    "tests/install_sandbox/test_install_surface_core_state_plans.py": [
-        "tools.install_sandbox.install_surface_core",
-    ],
-}
+INSTALL_SURFACE_CORE_TEMPORARY_DIRECT_TEST_IMPORTS: dict[str, list[str]] = {}
 
 ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
     "tools.install_sandbox.agent_summary",

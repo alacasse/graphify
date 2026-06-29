@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from tools.install_sandbox import platform_specs
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data
+from tools.install_sandbox.surfaces import install_surface_models
 
 from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,
@@ -13,8 +13,8 @@ from tests.install_sandbox.install_target_test_support import (
 def test_loader_derives_skill_sidecar_kind_and_rejects_explicit_wrong_kind() -> None:
     derived = load_registry_from_data(_valid_data()).make_scenario("mini", "user")
     assert derived is not None
-    assert isinstance(derived.expected[0], platform_specs.SkillEffect)
-    assert derived.expected[0].skill_sidecar_expectation == platform_specs.SkillSidecarExpectation()
+    assert isinstance(derived.expected[0], install_surface_models.SkillEffect)
+    assert derived.expected[0].skill_sidecar_expectation == install_surface_models.SkillSidecarExpectation()
 
     data = _valid_data()
     data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["kind"] = "file"
@@ -32,8 +32,8 @@ def test_loader_derives_plain_file_effect_from_non_skill_relative_path() -> None
 
     assert user is not None
     effect = user.expected[0]
-    assert isinstance(effect, platform_specs.FileEffect)
-    assert not isinstance(effect, platform_specs.SkillEffect)
+    assert isinstance(effect, install_surface_models.FileEffect)
+    assert not isinstance(effect, install_surface_models.SkillEffect)
     assert effect.root == "home"
     assert effect.relative == ".mini/config.toml"
     assert effect.content_kind == "text"
@@ -72,7 +72,7 @@ def test_loader_derives_json_hook_detail_names() -> None:
     ]
     single_scenario = load_registry_from_data(single).make_scenario("mini", "user")
     assert single_scenario is not None
-    assert isinstance(single_scenario.expected[0], platform_specs.JsonHooksEffect)
+    assert isinstance(single_scenario.expected[0], install_surface_models.JsonHooksEffect)
     single_json = single_scenario.expected[0].json_expectation
     assert single_json is not None
     assert single_json.hooks[0].detail_name == "graphify_hook_present"
@@ -110,10 +110,10 @@ def test_loader_derives_json_plugin_relative_from_paired_payload() -> None:
     assert scenario is not None
     assert isinstance(
         next(entry for entry in scenario.expected if entry.relative == ".mini/plugins/graphify.js"),
-        platform_specs.FileEffect,
+        install_surface_models.FileEffect,
     )
     config = next(entry for entry in scenario.expected if entry.relative == ".mini/config.json")
-    assert isinstance(config, platform_specs.JsonPluginEffect)
+    assert isinstance(config, install_surface_models.JsonPluginEffect)
     assert config.json_expectation is not None
     assert config.json_expectation.plugin is not None
     assert config.json_expectation.plugin.expected_entry == ".mini/plugins/graphify.js"

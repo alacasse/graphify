@@ -30,9 +30,6 @@ PLATFORM_SPECS_DIRECT_TEST_IMPORT_SURFACE = {
     "tests/install_sandbox/test_platform_specs_facade.py": [
         "tools.install_sandbox.platform_specs",
     ],
-    "tests/install_sandbox/test_spec_effect_derivation.py": [
-        "tools.install_sandbox.platform_specs",
-    ],
 }
 
 

@@ -341,12 +341,12 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
 
 def test_root_topology_closeout_keeps_runner_runtime_and_lifecycle_aliases_pruned() -> None:
     sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
-    reporting_status = importlib.import_module("tools.install_sandbox.reporting.status")
 
     pruned_alias_names = {
         *SANDBOX_RUNNER_PRUNING_CANDIDATES["runtime_globals"],
         *SANDBOX_RUNNER_PRUNING_CANDIDATES["sentinel_aliases"],
         *SANDBOX_RUNNER_PRUNING_CANDIDATES["lifecycle_aliases"],
+        *SANDBOX_RUNNER_PRUNING_CANDIDATES["status_aliases"],
     }
     for public_name in pruned_alias_names:
         assert not hasattr(sandbox_runner, public_name)
@@ -361,15 +361,12 @@ def test_root_topology_closeout_keeps_runner_runtime_and_lifecycle_aliases_prune
     for public_name in SANDBOX_RUNNER_PRUNING_CANDIDATES["wrapper_functions"]:
         assert not hasattr(sandbox_runner, public_name)
 
-    status_aliases = {
-        "RISK_GRAPHIFY_FAILED": reporting_status.RISK_GRAPHIFY_FAILED,
-        "RISK_GRAPHIFY_VERIFIED": reporting_status.RISK_GRAPHIFY_VERIFIED,
-        "combined_status": reporting_status.combined_status,
-        "known_status_values": reporting_status.known_status_values,
+    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["status_aliases"]) == {
+        "RISK_GRAPHIFY_FAILED",
+        "RISK_GRAPHIFY_VERIFIED",
+        "combined_status",
+        "known_status_values",
     }
-    assert set(SANDBOX_RUNNER_PRUNING_CANDIDATES["status_aliases"]) == set(status_aliases)
-    for public_name, owner_value in status_aliases.items():
-        assert getattr(sandbox_runner, public_name) is owner_value
 
     ordinary_imported_dependencies = {
         "harness_run": "tools.install_sandbox.reporting.harness_run",

@@ -9,7 +9,6 @@ try:
     # Public adapter owners.
     from . import validation_plan
     from .reporting import harness_run
-    from .reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
     from .runtime import harness_orchestration
     from .runtime.sandbox_run_environment import SandboxRunEnvironment
 except ImportError:
@@ -17,7 +16,6 @@ except ImportError:
     # Public adapter owners.
     from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
     from tools.install_sandbox.reporting import harness_run  # type: ignore[no-redef]
-    from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values  # type: ignore[no-redef]
     from tools.install_sandbox.runtime import harness_orchestration  # type: ignore[no-redef]
     from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment  # type: ignore[no-redef]
 

@@ -12,8 +12,6 @@ INSTALL_SANDBOX_TESTS_ROOT = Path(__file__).parents[1] / "install_sandbox"
 
 PURE_COMPATIBILITY_FACADE_MODULES = {
     "tools.install_sandbox.expected_effects",
-    "tools.install_sandbox.spec_loader",
-    "tools.install_sandbox.spec_normalize",
     "tools.install_sandbox.status",
 }
 
@@ -58,6 +56,8 @@ def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> Non
         "install_target_models",
         "install_target_scenarios",
         "install_target_selection",
+        "spec_loader",
+        "spec_normalize",
     )
     for module_name in removed_root_implementation_modules:
         assert not (INSTALL_SANDBOX_ROOT / f"{module_name}.py").exists()
@@ -67,8 +67,6 @@ def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> Non
 def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> None:
     assert PURE_COMPATIBILITY_FACADE_MODULES == {
         "tools.install_sandbox.expected_effects",
-        "tools.install_sandbox.spec_loader",
-        "tools.install_sandbox.spec_normalize",
         "tools.install_sandbox.status",
     }
     assert DEFERRED_BROAD_COMPATIBILITY_FACADE_MODULES == {
@@ -98,34 +96,14 @@ def test_root_topology_closeout_keeps_root_worthy_and_deferred_facades_importabl
     assert root_platform_specs.InstallTargetCatalog is owner_install_target_catalog.InstallTargetCatalog
 
 
-def test_root_topology_closeout_characterizes_pure_facades_as_test_compatibility() -> None:
-    root_spec_loader = importlib.import_module("tools.install_sandbox.spec_loader")
-    owner_spec_loader = importlib.import_module("tools.install_sandbox.registry.spec_loader")
-    root_spec_normalize = importlib.import_module("tools.install_sandbox.spec_normalize")
-    owner_spec_normalize = importlib.import_module("tools.install_sandbox.registry.spec_normalize")
+def test_root_topology_closeout_characterizes_remaining_pure_facades_as_test_compatibility() -> None:
     root_expected_effects = importlib.import_module("tools.install_sandbox.expected_effects")
     owner_install_surface_models = importlib.import_module("tools.install_sandbox.surfaces.install_surface_models")
     root_status = importlib.import_module("tools.install_sandbox.status")
     owner_status = importlib.import_module("tools.install_sandbox.reporting.status")
 
-    assert (INSTALL_SANDBOX_ROOT / "spec_loader.py").exists()
-    assert (INSTALL_SANDBOX_ROOT / "spec_normalize.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "expected_effects.py").exists()
     assert (INSTALL_SANDBOX_ROOT / "status.py").exists()
-    assert root_spec_loader.load_default_registry is owner_spec_loader.load_default_registry
-    assert set(root_spec_loader.__all__) == {
-        "DEFAULT_REGISTRY_PATH",
-        "SCHEMA_VERSION",
-        "InstallTargetCatalog",
-        "ScenarioRegistry",
-        "SpecLoaderError",
-        "load_default_registry",
-        "load_registry_from_data",
-        "load_registry_from_dir",
-        "load_registry_from_yaml",
-    }
-    assert root_spec_normalize.normalize_registry is owner_spec_normalize.normalize_registry
-    assert root_spec_normalize.__all__ == ["normalize_registry"]
     assert root_expected_effects.InstallSurface is owner_install_surface_models.InstallSurface
     assert root_status.known_status_values is owner_status.known_status_values
 
@@ -135,8 +113,6 @@ def test_root_topology_closeout_lists_pure_facade_direct_test_import_surface() -
         "tests/install_sandbox/test_platform_specs_facade.py": ["tools.install_sandbox.expected_effects"],
         "tests/install_sandbox/test_reports.py": ["tools.install_sandbox.status"],
         "tests/install_sandbox/test_sandbox_runner.py": ["tools.install_sandbox.status"],
-        "tests/install_sandbox/test_spec_loader_core.py": ["tools.install_sandbox.spec_loader"],
-        "tests/install_sandbox/test_spec_normalize.py": ["tools.install_sandbox.spec_normalize"],
     }
     discovered_imports: dict[str, list[str]] = {}
 

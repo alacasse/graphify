@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from tools.install_sandbox.registry.spec_loader import load_default_registry
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
-from tools.install_sandbox.spec_normalize import normalize_registry as root_normalize_registry
 
 
 FORBIDDEN_TARGET_ALIAS_KEYS = {
@@ -16,10 +15,6 @@ FORBIDDEN_TARGET_ALIAS_KEYS = {
 
 def normalize_default_registry() -> dict[str, object]:
     return normalize_registry(load_default_registry())
-
-
-def test_root_spec_normalize_reexports_registry_owner() -> None:
-    assert root_normalize_registry is normalize_registry
 
 
 def test_normalized_default_registry_is_deterministic() -> None:

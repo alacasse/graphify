@@ -74,7 +74,7 @@ def make_validation_plan(
         for scenario in standard_scenarios
     )
     return validation_plan.ValidationPlan(
-        platforms=platforms,
+        selected_targets=platforms,
         requested_scope=scope,
         standard_scenarios=standard_scenarios,
         universal_uninstall=universal_uninstall,

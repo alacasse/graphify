@@ -53,7 +53,7 @@ def _validation_work_items(
 
 @dataclass(frozen=True, init=False)
 class ValidationPlan:
-    platforms: tuple[str, ...]
+    selected_target_names: tuple[str, ...]
     requested_scope: str
     standard_scenarios: tuple[Scenario, ...]
     universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...]
@@ -71,51 +71,38 @@ class ValidationPlan:
         standard_scenarios: tuple[Scenario, ...],
         platform_coverage_summary: dict[str, object],
         selected_targets: tuple[str, ...] | None = None,
-        platforms: tuple[str, ...] | None = None,
-        selected_platforms: tuple[str, ...] | None = None,
         universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...] | None = None,
-        universal_uninstall_scenarios: tuple[SelectedUniversalUninstallScenario, ...] | None = None,
         disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...] | None = None,
-        disposable_artifact_scenarios: tuple[DisposableArtifactScenarioSpec, ...] | None = None,
         coverage_records: tuple[dict[str, object], ...] | None = None,
-        platform_coverage: tuple[dict[str, object], ...] | None = None,
         target_runtime_validation_sections: tuple[dict[str, object], ...] | None = None,
-        runtime_limitation_sections: tuple[dict[str, object], ...] | None = None,
         target_runtime_verification: dict[str, object] | None = None,
     ) -> None:
-        resolved_platforms = selected_targets if selected_targets is not None else platforms
-        if resolved_platforms is None:
-            resolved_platforms = selected_platforms
-        resolved_universal = universal_uninstall if universal_uninstall is not None else universal_uninstall_scenarios
-        resolved_disposable = disposable_artifacts if disposable_artifacts is not None else disposable_artifact_scenarios
-        resolved_coverage = coverage_records if coverage_records is not None else platform_coverage
-        resolved_runtime = target_runtime_validation_sections if target_runtime_validation_sections is not None else runtime_limitation_sections
-        if resolved_platforms is None:
-            raise TypeError("ValidationPlan requires selected_targets, platforms, or selected_platforms")
-        if resolved_universal is None:
-            raise TypeError("ValidationPlan requires universal_uninstall or universal_uninstall_scenarios")
-        if resolved_disposable is None:
-            raise TypeError("ValidationPlan requires disposable_artifacts or disposable_artifact_scenarios")
-        if resolved_coverage is None:
-            raise TypeError("ValidationPlan requires coverage_records or platform_coverage")
-        if resolved_runtime is None:
-            raise TypeError("ValidationPlan requires target_runtime_validation_sections or runtime_limitation_sections")
-        object.__setattr__(self, "platforms", resolved_platforms)
+        if selected_targets is None:
+            raise TypeError("ValidationPlan requires selected_targets")
+        if universal_uninstall is None:
+            raise TypeError("ValidationPlan requires universal_uninstall")
+        if disposable_artifacts is None:
+            raise TypeError("ValidationPlan requires disposable_artifacts")
+        if coverage_records is None:
+            raise TypeError("ValidationPlan requires coverage_records")
+        if target_runtime_validation_sections is None:
+            raise TypeError("ValidationPlan requires target_runtime_validation_sections")
+        object.__setattr__(self, "selected_target_names", selected_targets)
         object.__setattr__(self, "requested_scope", requested_scope)
         object.__setattr__(self, "standard_scenarios", standard_scenarios)
-        object.__setattr__(self, "universal_uninstall", resolved_universal)
-        object.__setattr__(self, "disposable_artifacts", resolved_disposable)
+        object.__setattr__(self, "universal_uninstall", universal_uninstall)
+        object.__setattr__(self, "disposable_artifacts", disposable_artifacts)
         object.__setattr__(
             self,
             "validation_work_items",
             _validation_work_items(
                 standard_scenarios=standard_scenarios,
-                universal_uninstall=resolved_universal,
-                disposable_artifacts=resolved_disposable,
+                universal_uninstall=universal_uninstall,
+                disposable_artifacts=disposable_artifacts,
             ),
         )
-        object.__setattr__(self, "coverage_records", resolved_coverage)
-        object.__setattr__(self, "target_runtime_validation_sections", resolved_runtime)
+        object.__setattr__(self, "coverage_records", coverage_records)
+        object.__setattr__(self, "target_runtime_validation_sections", target_runtime_validation_sections)
         object.__setattr__(self, "platform_coverage_summary", platform_coverage_summary)
         object.__setattr__(
             self,
@@ -124,28 +111,8 @@ class ValidationPlan:
         )
 
     @property
-    def selected_platforms(self) -> tuple[str, ...]:
-        return self.platforms
-
-    @property
     def selected_targets(self) -> tuple[str, ...]:
-        return self.platforms
-
-    @property
-    def universal_uninstall_scenarios(self) -> tuple[SelectedUniversalUninstallScenario, ...]:
-        return self.universal_uninstall
-
-    @property
-    def disposable_artifact_scenarios(self) -> tuple[DisposableArtifactScenarioSpec, ...]:
-        return self.disposable_artifacts
-
-    @property
-    def runtime_limitation_sections(self) -> tuple[dict[str, object], ...]:
-        return self.target_runtime_validation_sections
-
-    @property
-    def platform_coverage(self) -> tuple[dict[str, object], ...]:
-        return self.coverage_records
+        return self.selected_target_names
 
     @property
     def synthetic_scenario_count(self) -> int:
@@ -186,21 +153,6 @@ def selected_targets(
     if target_name is None or target_name not in registry.specs:
         raise RuntimeError(f"unknown sandbox platform(s): {target_name}")
     return (target_name,)
-
-
-def selected_platforms(
-    registry: InstallTargetCatalog,
-    *,
-    all_platforms: bool,
-    platform_name: str | None,
-    selected_platform_names: Iterable[str] | None = None,
-) -> tuple[str, ...]:
-    return selected_targets(
-        registry,
-        all_targets=all_platforms,
-        target_name=platform_name,
-        selected_target_names=selected_platform_names,
-    )
 
 
 def _standard_scenarios(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
@@ -285,9 +237,6 @@ def build_validation_plan(
     all_targets: bool | None = None,
     target_name: str | None = None,
     selected_target_names: Iterable[str] | None = None,
-    all_platforms: bool | None = None,
-    platform_name: str | None = None,
-    selected_platform_names: Iterable[str] | None = None,
     scope: str = "both",
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
     root_registry: SandboxRootRegistry = DEFAULT_SANDBOX_ROOT_REGISTRY,
@@ -299,17 +248,14 @@ def build_validation_plan(
         registry.validate_roots(declared_roots)
     validate_policy_owned_roots(registry, policy, _selected_policy_root_names(root_registry))
 
-    resolved_all_targets = all_targets if all_targets is not None else all_platforms
-    if resolved_all_targets is None:
-        raise TypeError("build_validation_plan requires all_targets or all_platforms")
-    resolved_target_name = target_name if target_name is not None else platform_name
-    resolved_selected_target_names = selected_target_names if selected_target_names is not None else selected_platform_names
+    if all_targets is None:
+        raise TypeError("build_validation_plan requires all_targets")
 
     selected_target_names_tuple = selected_targets(
         registry,
-        all_targets=resolved_all_targets,
-        target_name=resolved_target_name,
-        selected_target_names=resolved_selected_target_names,
+        all_targets=all_targets,
+        target_name=target_name,
+        selected_target_names=selected_target_names,
     )
     standard = _standard_scenarios(registry, selected_target_names_tuple, scope)
     universal = universal_uninstall_scenarios(registry, selected_target_names_tuple, scope, policy)

@@ -273,6 +273,4 @@ def test_validation_plan_accepts_owner_named_selected_targets_constructor_input(
         platform_coverage_summary={"requested_scope": "project"},
     )
 
-    assert plan.platforms == ("codex",)
     assert plan.selected_targets == ("codex",)
-    assert plan.selected_platforms == ("codex",)

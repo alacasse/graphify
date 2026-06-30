@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib
 import importlib.util
+import inspect
 import types
 from pathlib import Path
 
@@ -101,6 +102,7 @@ VALIDATION_PLAN_ROOT_SEAM_APIS = {
 
 VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
     "constructor_aliases": {
+        "platforms",
         "selected_platforms",
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
@@ -108,6 +110,7 @@ VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
         "runtime_limitation_sections",
     },
     "property_aliases": {
+        "platforms",
         "selected_platforms",
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
@@ -377,21 +380,21 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
 
 def test_root_topology_closeout_characterizes_validation_plan_alias_surface() -> None:
     validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
+    plan_signature = inspect.signature(validation_plan.ValidationPlan)
+    target_selector_signature = inspect.signature(validation_plan.selected_targets)
 
     for public_name in VALIDATION_PLAN_ROOT_SEAM_APIS:
         assert hasattr(validation_plan, public_name)
-
-    for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["property_aliases"]:
-        assert isinstance(getattr(validation_plan.ValidationPlan, public_name), property)
-
-    for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["helper_aliases"]:
-        assert callable(getattr(validation_plan, public_name))
 
     assert VALIDATION_PLAN_ROOT_SEAM_APIS.isdisjoint(
         VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["constructor_aliases"]
         | VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["property_aliases"]
         | VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["helper_aliases"]
     )
+    assert not set(plan_signature.parameters) & VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["constructor_aliases"]
+    assert not any(hasattr(validation_plan.ValidationPlan, public_name) for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["property_aliases"])
+    assert not any(hasattr(validation_plan, public_name) for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["helper_aliases"])
+    assert set(target_selector_signature.parameters) >= {"all_targets", "target_name", "selected_target_names"}
     assert VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS == {
         "platform_coverage",
         "platform_coverage_summary",

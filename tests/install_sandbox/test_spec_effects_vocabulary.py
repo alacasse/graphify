@@ -28,11 +28,19 @@ def test_loader_rejects_scope_with_expected_and_effects() -> None:
     user_scope = data["platforms"]["mini"]["scopes"]["user"]
     user_scope["expected"] = list(user_scope["effects"])
 
-    _expect_invalid(data, "declare only one of expected or effects")
+    _expect_invalid(data, "invalid legacy expected input; runnable scope must declare effects only")
+
+
+def test_loader_rejects_scope_with_expected_input() -> None:
+    data = _valid_data()
+    user_scope = data["platforms"]["mini"]["scopes"]["user"]
+    user_scope["expected"] = list(user_scope.pop("effects"))
+
+    _expect_invalid(data, "invalid legacy expected input; runnable scope must declare effects")
 
 
 def test_loader_rejects_scope_without_expected_or_effects() -> None:
     data = _valid_data()
     data["platforms"]["mini"]["scopes"]["user"].pop("effects")
 
-    _expect_invalid(data, "runnable scope must declare expected or effects")
+    _expect_invalid(data, "runnable scope must declare effects")

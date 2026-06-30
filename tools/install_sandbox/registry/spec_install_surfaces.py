@@ -252,16 +252,12 @@ def _scope_effect_values(data: Mapping[str, Any], context: str) -> tuple[str, li
     has_expected = "expected" in data
     has_effects = "effects" in data
     if has_expected and has_effects:
-        _fail(context, "declare only one of expected or effects")
+        _fail(context, "invalid legacy expected input; runnable scope must declare effects only")
     if has_effects:
         return "effects", _sequence(data.get("effects"), f"{context}.effects")
     if has_expected:
-        return _legacy_expected_effect_values(data, context)
-    _fail(context, "runnable scope must declare expected or effects")
-
-
-def _legacy_expected_effect_values(data: Mapping[str, Any], context: str) -> tuple[str, list[Any]]:
-    return "expected", _sequence(data.get("expected"), f"{context}.expected")
+        _fail(context, "invalid legacy expected input; runnable scope must declare effects")
+    _fail(context, "runnable scope must declare effects")
 
 
 def derive_scope_install_surfaces(data: Mapping[str, Any], context: str) -> tuple[InstallSurface, ...]:

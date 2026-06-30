@@ -11,7 +11,6 @@ from tools.install_sandbox.registry.spec_loader import load_registry_from_data
 
 def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
     assert DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names() == {"home", "project", "user_cwd"}
-    assert DEFAULT_SANDBOX_ROOT_REGISTRY.declared_expected_root_names() == DEFAULT_SANDBOX_ROOT_REGISTRY.install_surface_root_names()
 
 
 def test_loader_root_validation_also_uses_all_sandbox_roots_for_harness_policy() -> None:

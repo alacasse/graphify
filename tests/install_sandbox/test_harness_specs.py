@@ -6,7 +6,7 @@ from pathlib import Path
 from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SANDBOX_ALIAS_NAMES = {"declared_expected_root_names", "scenario_roots"}
+SANDBOX_ALIAS_NAMES = {"scenario_roots"}
 ROLE_NAMED_ROOT_APIS = {
     "env_roots",
     "install_surface_root_names",
@@ -82,7 +82,6 @@ def test_default_sandbox_root_registry_characterizes_current_role_groups() -> No
     assert registry.install_surface_root_names() == {"home", "project", "user_cwd"}
     assert registry.scenario_root_names() == ("home", "project", "user_cwd")
     assert registry.policy_cwd_root_names() == registry.root_names()
-    assert registry.declared_expected_root_names() == registry.install_surface_root_names()
     assert registry.scenario_root_paths(registry.runtime_paths()) == registry.scenario_roots(registry.runtime_paths())
     assert tuple(registry.scenario_roots(registry.runtime_paths())) == ("home", "project", "user_cwd")
     assert tuple(root.name for root in registry.reset_roots()) == ("home", "project", "user_cwd")
@@ -150,24 +149,13 @@ def test_default_sandbox_root_registry_runtime_paths_use_env_overrides_only_for_
     }
 
 
-def test_sandbox_root_alias_callers_are_temporary_test_evidence_only() -> None:
+def test_scenario_root_alias_callers_are_temporary_test_evidence_only() -> None:
     calls, definitions = _attribute_calls_and_definitions(SANDBOX_ALIAS_NAMES)
 
     assert definitions == {
-        ("declared_expected_root_names", "tools/install_sandbox/harness_specs.py"),
         ("scenario_roots", "tools/install_sandbox/harness_specs.py"),
     }
     assert calls == {
-        (
-            "declared_expected_root_names",
-            "tests/install_sandbox/test_harness_specs.py",
-            "test_default_sandbox_root_registry_characterizes_current_role_groups",
-        ),
-        (
-            "declared_expected_root_names",
-            "tests/install_sandbox/test_spec_loader_validation.py",
-            "test_loader_root_validation_uses_install_surface_root_vocabulary",
-        ),
         (
             "scenario_roots",
             "tests/install_sandbox/test_harness_specs.py",

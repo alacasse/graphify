@@ -37,9 +37,6 @@ NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES = {
     Path("tools/install_sandbox/registry/spec_loader.py"),
     Path("tools/install_sandbox/registry/spec_normalize.py"),
     Path("tools/install_sandbox/registry/spec_target_facts.py"),
-    Path("tools/install_sandbox/reporting/reports.py"),
-    Path("tools/install_sandbox/runtime/harness_orchestration.py"),
-    Path("tools/install_sandbox/runtime/sandbox_run_environment.py"),
     Path("tools/install_sandbox/surfaces/install_surface_generated.py"),
     Path("tools/install_sandbox/surfaces/install_surface_sidecars.py"),
     Path("tools/install_sandbox/surfaces/install_surface_state.py"),
@@ -51,6 +48,12 @@ NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES = {
     Path("tools/install_sandbox/targets/install_target_models.py"),
     Path("tools/install_sandbox/targets/install_target_scenarios.py"),
     Path("tools/install_sandbox/targets/install_target_selection.py"),
+}
+
+REMOVED_RUNTIME_REPORTING_FALLBACKS = {
+    Path("tools/install_sandbox/reporting/reports.py"),
+    Path("tools/install_sandbox/runtime/harness_orchestration.py"),
+    Path("tools/install_sandbox/runtime/sandbox_run_environment.py"),
 }
 
 
@@ -125,3 +128,12 @@ def test_non_entrypoint_fallbacks_are_cleanup_candidates_not_supported_contracts
     for relative_path in NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES:
         text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "except ImportError" in text or "except ModuleNotFoundError" in text
+
+
+def test_runtime_reporting_owner_fallbacks_removed_from_cleanup_candidates() -> None:
+    assert REMOVED_RUNTIME_REPORTING_FALLBACKS.isdisjoint(NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES)
+    for relative_path in REMOVED_RUNTIME_REPORTING_FALLBACKS:
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "except ImportError" not in text
+        assert "direct script import fallback" not in text
+        assert "from tools.install_sandbox" not in text

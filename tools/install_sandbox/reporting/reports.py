@@ -5,12 +5,8 @@ import shlex
 from pathlib import Path
 from typing import Iterable, cast
 
-try:
-    from tools.install_sandbox.reporting.artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
-    from tools.install_sandbox.reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
-except ImportError:
-    from reporting.artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
-    from status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
+from .artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
+from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 
 
 def object_dict(value: object) -> dict[str, object]:

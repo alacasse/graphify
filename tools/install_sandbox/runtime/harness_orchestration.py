@@ -4,16 +4,10 @@ import platform as platform_mod
 import sys
 from pathlib import Path
 
-try:
-    from .. import validation_plan
-    from ..lifecycle import scenario_lifecycle_plan
-    from ..reporting import harness_run
-    from .sandbox_run_environment import SandboxRunEnvironment
-except ImportError:  # pragma: no cover - direct script import fallback
-    from tools.install_sandbox import validation_plan  # type: ignore[no-redef]
-    from tools.install_sandbox.lifecycle import scenario_lifecycle_plan  # type: ignore[no-redef]
-    from tools.install_sandbox.reporting import harness_run  # type: ignore[no-redef]
-    from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment  # type: ignore[no-redef]
+from .. import validation_plan
+from ..lifecycle import scenario_lifecycle_plan
+from ..reporting import harness_run
+from .sandbox_run_environment import SandboxRunEnvironment
 
 
 def read_os_release() -> dict[str, str]:

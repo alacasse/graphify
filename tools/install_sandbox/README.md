@@ -97,6 +97,10 @@ scenarios/<scenario-id>/risk.json
 
 `manifest.json` includes Python, OS, architecture, Graphify version, package direct URL provenance, source snapshot details, scenario counts, and risk status values.
 
+Generated report and manifest coverage vocabulary is target-named. New artifacts emit `target_coverage`, `target_coverage_summary`, `target_runtime_validation_sections`, and `target_runtime_verification`; `report.md` renders those rows under `Target Coverage`. Legacy `platform_coverage` and `platform_coverage_summary` are not current output fields.
+
+The product CLI still uses `--platform`, and checked-in specs still use YAML `platforms` as their registry container. Those command and YAML names are LR-B9 product CLI flag and YAML product-contract vocabulary, not generated report or manifest coverage fields.
+
 Skill installs assert the installed `SKILL.md`, `.graphify_version`, `references/` sidecar, exact packaged reference fragment names, live `references/<file>.md` pointers, and absence of leftover `references.tmp`. Progressive scenarios also run a dedicated stale-sidecar repair reinstall after the clean repeat-install idempotency check.
 
 ## Statuses

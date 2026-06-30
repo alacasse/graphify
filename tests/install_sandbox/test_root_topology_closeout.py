@@ -138,6 +138,54 @@ DELETED_INSTALL_TARGET_MODEL_NAMES = {
     "Platform" "Spec",
 }
 
+ARTIFACT_VOCABULARY_DOCS = (
+    INSTALL_SANDBOX_ROOT / "README.md",
+    INSTALL_SANDBOX_ROOT / "specs" / "README.md",
+)
+
+PUBLIC_ARTIFACT_OUTPUT_PATHS = (
+    INSTALL_SANDBOX_ROOT / "reporting",
+    TESTS_ROOT / "install_sandbox" / "test_agent_summary.py",
+    TESTS_ROOT / "install_sandbox" / "test_reports.py",
+    TESTS_ROOT / "install_sandbox" / "test_sandbox_runner.py",
+    TESTS_ROOT / "install_sandbox" / "test_validation_plan_compatibility.py",
+)
+
+ARTIFACT_OUTPUT_LEGACY_VOCABULARY = {
+    "platform_coverage",
+    "platform_coverage_summary",
+    "Platform Coverage",
+}
+
+TARGET_NAMED_ARTIFACT_VOCABULARY = {
+    "target_coverage",
+    "target_coverage_summary",
+    "Target Coverage",
+}
+
+ALLOWED_ARTIFACT_LEGACY_VOCABULARY_LINES = {
+    'coverage_source = manifest.get("target_coverage") if "target_coverage" in manifest else manifest.get("platform_coverage")',
+    'def test_report_reads_legacy_platform_coverage_as_transitional_input_only() -> None:',
+    '"platform_coverage": [',
+    'assert "## Platform Coverage" not in markdown',
+    'def test_report_prefers_explicit_empty_target_coverage_over_stale_legacy_rows() -> None:',
+    '"platform_coverage" not in manifest',
+    '"platform_coverage_summary" not in manifest',
+    '"platform_coverage" not in projected',
+    '"platform_coverage_summary" not in projected',
+    '"platform_coverage",',
+    '"platform_coverage_summary",',
+    'platform_coverage = ({"platform": "legacy-alias", "status": "must-not-project"},)',
+    'platform_coverage = ({"platform": "internal-alias", "status": "must-not-project"},)',
+    'platform_coverage_summary = {"requested_scope": "legacy"}',
+    'kwargs[alias_name] = () if alias_name != "platform_coverage" else ()',
+}
+
+DEFERRED_PRODUCT_PLATFORM_VOCABULARY = {
+    "--platform": "LR-B9 product CLI flag",
+    "platforms": "YAML",
+}
+
 
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
@@ -240,6 +288,53 @@ def _install_target_model_name_surface(model_names: set[str]) -> dict[str, list[
                 discovered_names[relative] = sorted(names)
 
     return discovered_names
+
+
+def _text_files(paths: tuple[Path, ...]) -> list[Path]:
+    files: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            files.extend(sorted(child for child in path.rglob("*") if child.suffix in {".py", ".md"}))
+        else:
+            files.append(path)
+    return files
+
+
+def test_root_topology_closeout_documents_target_named_artifact_vocabulary() -> None:
+    for path in ARTIFACT_VOCABULARY_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert "target_coverage" in text
+        assert "target_coverage_summary" in text
+        assert "Target Coverage" in text or path.name == "README.md" and path.parent.name == "specs"
+        assert "Platform Coverage" not in text
+
+
+def test_root_topology_closeout_keeps_legacy_platform_coverage_out_of_current_artifact_outputs() -> None:
+    offenders: list[str] = []
+
+    for path in _text_files(PUBLIC_ARTIFACT_OUTPUT_PATHS):
+        relative = path.relative_to(Path(__file__).parents[2]).as_posix()
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not any(term in line for term in ARTIFACT_OUTPUT_LEGACY_VOCABULARY):
+                continue
+            stripped = line.strip()
+            if stripped in ALLOWED_ARTIFACT_LEGACY_VOCABULARY_LINES:
+                continue
+            if "transitional input" in stripped or "must-not-project" in stripped:
+                continue
+            if "not in" in stripped:
+                continue
+            offenders.append(f"{relative}:{lineno}: {stripped}")
+
+    assert offenders == []
+
+
+def test_root_topology_closeout_classifies_deferred_platform_vocabulary_as_product_contract() -> None:
+    docs_text = "\n".join(path.read_text(encoding="utf-8") for path in ARTIFACT_VOCABULARY_DOCS)
+
+    for vocabulary, classification in DEFERRED_PRODUCT_PLATFORM_VOCABULARY.items():
+        assert vocabulary in docs_text
+        assert classification in docs_text
 
 
 def test_root_topology_closeout_keeps_moved_implementation_packages_importable() -> None:

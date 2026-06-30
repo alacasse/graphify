@@ -136,7 +136,7 @@ class ReferenceBundle:
 
 
 @dataclass(frozen=True)
-class PlatformSpec:
+class InstallTargetSpec:
     name: str
     display_name: str | None = None
     target_kind: str = "product"
@@ -149,3 +149,7 @@ class PlatformSpec:
     simulated_linux_layout: bool = False
     universal_uninstall_scopes: tuple[str, ...] = ()
     target_runtime_validation: tuple[TargetRuntimeValidationSpec, ...] = ()
+
+
+# Temporary in-batch bridge while callers migrate to InstallTargetSpec.
+PlatformSpec = InstallTargetSpec

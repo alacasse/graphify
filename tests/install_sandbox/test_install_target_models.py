@@ -36,11 +36,11 @@ def test_install_target_models_use_canonical_surfaces_and_specs() -> None:
 
     assert scenario is not None
     assert not hasattr(install_target_models, "InstallEffect")
-    assert not hasattr(install_target_models, "InstallTargetSpec")
+    assert install_target_models.PlatformSpec is install_target_models.InstallTargetSpec
     assert not hasattr(scenario, "effects")
     assert not hasattr(scope, "effects")
     assert all(isinstance(entry, install_target_models.InstallSurface) for entry in scenario.expected)
-    assert isinstance(REGISTRY.target_spec("codex"), install_target_models.PlatformSpec)
+    assert isinstance(REGISTRY.target_spec("codex"), install_target_models.InstallTargetSpec)
 
 
 def test_json_effects_declare_behavior_expectations() -> None:
@@ -232,7 +232,7 @@ def test_sandbox_registry_defines_all_install_targets() -> None:
 
     assert list(specs) == REGISTRY.target_names
     for target_name, spec in specs.items():
-        assert isinstance(spec, install_target_models.PlatformSpec)
+        assert isinstance(spec, install_target_models.InstallTargetSpec)
         assert spec.name == target_name
         assert bool(spec.scopes or spec.unsupported_scopes)
 

@@ -29,9 +29,9 @@ def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:
     assert not hasattr(user, "effects")
     assert not hasattr(project, "effects")
     normalized_user = normalize_registry(registry)["platforms"]["mini"]["scopes"]["user"]
-    # LR-B7 owns removal of normalized output aliases; LR-B6 only removes
-    # legacy `expected` from registry input.
-    assert normalized_user["effects"] == normalized_user["expected"]
+    assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in normalized_user["effects"]] == [
+        ("skill", "home", ".mini/skills/graphify/SKILL.md"),
+    ]
 
 
 def test_loader_rejects_scope_with_expected_and_effects() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from tests.install_sandbox.install_target_test_support import normalize_default_registry
 
 
-def test_normalized_simple_migrated_effects_match_expected_for_both_scopes() -> None:
+def test_normalized_simple_effects_for_both_scopes() -> None:
     normalized = normalize_default_registry()
     expected_surfaces = {
         "aider": {
@@ -69,5 +69,4 @@ def test_normalized_simple_migrated_effects_match_expected_for_both_scopes() -> 
         normalized_scopes = normalized["platforms"][platform_name]["scopes"]
         for scope_name, surfaces in scopes.items():
             scope = normalized_scopes[scope_name]
-            assert scope["effects"] == scope["expected"]
             assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in scope["effects"]] == surfaces

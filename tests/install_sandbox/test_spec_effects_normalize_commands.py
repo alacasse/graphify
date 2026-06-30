@@ -3,7 +3,7 @@ from __future__ import annotations
 from tests.install_sandbox.install_target_test_support import normalize_default_registry
 
 
-def test_normalized_command_migrated_effects_match_expected_and_commands() -> None:
+def test_normalized_command_effects_and_commands() -> None:
     normalized = normalize_default_registry()
     expected = {
         "copilot": {
@@ -83,7 +83,6 @@ def test_normalized_command_migrated_effects_match_expected_and_commands() -> No
         for scope_name, scope_expected in scopes.items():
             scope = normalized_scopes[scope_name]
 
-            assert scope["effects"] == scope["expected"]
             assert scope["install_command"] == scope_expected["install"]
             assert scope["uninstall_command"] == scope_expected["uninstall"]
             assert scope["equivalent_install_command"] == scope_expected["equivalent"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from tests.install_sandbox.install_target_test_support import normalize_default_registry
 
 
-def test_normalized_hook_migrated_effects_match_expected_for_runnable_scopes() -> None:
+def test_normalized_hook_effects_for_runnable_scopes() -> None:
     normalized = normalize_default_registry()
     expected_hooks = {
         "codex": {
@@ -53,11 +53,10 @@ def test_normalized_hook_migrated_effects_match_expected_for_runnable_scopes() -
         for scope_name, hooks in scopes.items():
             scope = normalized_scopes[scope_name]
             json_effect = next(entry for entry in scope["effects"] if entry["effect_type"] == "json_hooks")
-            assert scope["effects"] == scope["expected"]
             assert json_effect["json_expectation"]["hooks"] == hooks
 
 
-def test_normalized_plugin_migrated_effects_match_expected_entries() -> None:
+def test_normalized_plugin_effect_entries() -> None:
     normalized = normalize_default_registry()
     expected_plugins = {
         "kilo": {
@@ -94,7 +93,6 @@ def test_normalized_plugin_migrated_effects_match_expected_entries() -> None:
                 if entry["effect_type"] == "json_plugin" and entry["relative"] == plugin["config"]
             )
 
-            assert scope["effects"] == scope["expected"]
             assert json_effect["json_expectation"]["schema_name"] == plugin["schema"]
             assert json_effect["json_expectation"]["plugin"]["expected_entry"] == plugin["entry"]
             assert json_effect["json_expectation"]["plugin"]["allow_file_uri"] is plugin["allow_file_uri"]

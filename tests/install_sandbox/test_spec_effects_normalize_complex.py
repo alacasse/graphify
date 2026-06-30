@@ -3,14 +3,12 @@ from __future__ import annotations
 from tests.install_sandbox.install_target_test_support import normalize_default_registry
 
 
-def test_normalized_complex_migrated_effects_match_expected_for_claude_and_vscode() -> None:
+def test_normalized_complex_effects_for_claude_and_vscode() -> None:
     normalized = normalize_default_registry()
     claude_platform = normalized["platforms"]["claude"]
     claude = claude_platform["scopes"]
     vscode = normalized["platforms"]["vscode"]
 
-    assert claude["user"]["effects"] == claude["user"]["expected"]
-    assert claude["project"]["effects"] == claude["project"]["expected"]
     assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in claude["user"]["effects"]] == [
         ("skill", "home", ".claude/skills/graphify/SKILL.md"),
         ("text_section", "home", ".claude/CLAUDE.md"),
@@ -43,11 +41,23 @@ def test_normalized_complex_migrated_effects_match_expected_for_claude_and_vscod
         {"name": "copilot", "required_package_relative": None},
     ]
     assert vscode["uses_packaged_references"] is False
-    assert vscode["scopes"]["user"]["effects"] == vscode["scopes"]["user"]["expected"]
-    assert vscode["scopes"]["project"]["effects"] == vscode["scopes"]["project"]["expected"]
+    assert [
+        (entry["effect_type"], entry["root"], entry["relative"])
+        for entry in vscode["scopes"]["user"]["effects"]
+    ] == [
+        ("skill", "home", ".copilot/skills/graphify/SKILL.md"),
+        ("text_section", "user_cwd", ".github/copilot-instructions.md"),
+    ]
+    assert [
+        (entry["effect_type"], entry["root"], entry["relative"])
+        for entry in vscode["scopes"]["project"]["effects"]
+    ] == [
+        ("skill", "home", ".copilot/skills/graphify/SKILL.md"),
+        ("text_section", "project", ".github/copilot-instructions.md"),
+    ]
 
 
-def test_normalized_simulated_layout_migrated_effects_match_expected_and_policies() -> None:
+def test_normalized_simulated_layout_effects_and_policies() -> None:
     normalized = normalize_default_registry()
     expected = {
         "antigravity": {
@@ -133,7 +143,6 @@ def test_normalized_simulated_layout_migrated_effects_match_expected_and_policie
             scope = platform["scopes"][scope_name]
             scope_expected = platform_expected[scope_name]
 
-            assert scope["effects"] == scope["expected"]
             assert scope["install_command"] == scope_expected["install"]
             assert scope["uninstall_command"] == scope_expected["uninstall"]
             assert scope["equivalent_install_command"] == scope_expected["equivalent"]

@@ -9,7 +9,7 @@ from tools.install_sandbox.targets import install_target_catalog, install_target
 from tests.install_sandbox.validation_plan_test_support import planner_registry, scope
 
 
-def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
+def test_validation_plan_orders_all_targets_and_standard_scenarios() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
             "zeta": install_target_models.PlatformSpec(
@@ -46,7 +46,7 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
 
     plan = validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="both")
 
-    assert plan.platforms == ("alpha", "zeta")
+    assert plan.selected_targets == ("alpha", "zeta")
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("alpha", "project"),
         ("zeta", "user"),
@@ -72,7 +72,7 @@ def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents(
         scope="project",
     )
 
-    assert plan.platforms == ("gemini", "claude", "codex")
+    assert plan.selected_targets == ("gemini", "claude", "codex")
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("gemini", "project"),
         ("claude", "project"),
@@ -209,7 +209,7 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
         scope="both",
     )
 
-    assert plan.platforms == ("beta", "alpha")
+    assert plan.selected_targets == ("beta", "alpha")
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("beta", "user"),
         ("beta", "project"),

@@ -460,9 +460,9 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     monkeypatch.setattr(sandbox_runner, "RUN_ENVIRONMENT", run_environment)
     plan = SimpleNamespace(requested_scope="project")
 
-    def build_plan(registry, *, all_platforms, platform_name=None, scope="both", **kwargs):
+    def build_plan(registry, *, all_targets, target_name=None, scope="both", **kwargs):
         assert registry is run_environment.scenario_registry
-        calls.append(f"plan:{platform_name}:{scope}:{all_platforms}")
+        calls.append(f"plan:{target_name}:{scope}:{all_targets}")
         return plan
 
     monkeypatch.setattr(harness_orchestration.validation_plan, "build_validation_plan", build_plan)

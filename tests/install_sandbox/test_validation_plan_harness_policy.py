@@ -10,18 +10,18 @@ from tests.install_sandbox.validation_plan_test_support import planner_registry,
 def test_validation_plan_derives_universal_uninstall_from_policy_and_target_facts() -> None:
     registry = planner_registry()
 
-    single = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="project")
+    single = validation_plan.build_validation_plan(registry, all_targets=False, target_name="codex", scope="project")
     selected = validation_plan.build_validation_plan(
         registry,
-        all_platforms=False,
-        platform_name="codex",
+        all_targets=False,
+        target_name="codex",
         scope="project",
     )
     multi = validation_plan.build_validation_plan(
         registry,
-        all_platforms=False,
-        platform_name=None,
-        selected_platform_names=("codex", "claude", "gemini"),
+        all_targets=False,
+        target_name=None,
+        selected_target_names=("codex", "claude", "gemini"),
         scope="project",
     )
 
@@ -38,8 +38,8 @@ def test_validation_plan_derives_universal_uninstall_from_policy_and_target_fact
 def test_validation_plan_derives_disposable_artifacts_by_scope() -> None:
     registry = planner_registry()
 
-    user = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="user")
-    project = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="project")
+    user = validation_plan.build_validation_plan(registry, all_targets=False, target_name="codex", scope="user")
+    project = validation_plan.build_validation_plan(registry, all_targets=False, target_name="codex", scope="project")
 
     assert user.disposable_artifacts == ()
     assert len(project.disposable_artifacts) == 1
@@ -50,7 +50,7 @@ def test_validation_plan_derives_disposable_artifacts_by_scope() -> None:
 def test_validation_plan_derives_runtime_limitation_sections_from_policy() -> None:
     registry = planner_registry()
 
-    plan = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="windows", scope="project")
+    plan = validation_plan.build_validation_plan(registry, all_targets=False, target_name="windows", scope="project")
     sections = plan.target_runtime_validation_sections
 
     assert [section["section_title"] for section in sections] == ["Windows Validation"]
@@ -59,7 +59,7 @@ def test_validation_plan_derives_runtime_limitation_sections_from_policy() -> No
     assert "Windows runtime/path semantics" in sections[0]["strategy"]
 
 
-def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() -> None:
+def test_validation_plan_runtime_sections_are_limited_to_selected_targets() -> None:
     selected_runtime = install_target_models.TargetRuntimeValidationSpec(
         section_title="Selected Runtime",
         status="runtime_validated",
@@ -92,8 +92,8 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() ->
         }
     )
 
-    selected = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="codex", scope="project")
-    all_platforms = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
+    selected = validation_plan.build_validation_plan(registry, all_targets=False, target_name="codex", scope="project")
+    all_targets = validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="project")
 
     assert selected.target_runtime_validation_sections == (
         {
@@ -105,7 +105,7 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_platforms() ->
             "notes": ["captures runtime-only integration behavior", "keeps report metadata explicit"],
         },
     )
-    assert all_platforms.target_runtime_validation_sections == (
+    assert all_targets.target_runtime_validation_sections == (
         {
             "section_title": "Selected Runtime",
             "status": "runtime_validated",
@@ -139,7 +139,7 @@ def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
         }
     )
 
-    plan = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
+    plan = validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="project")
     sections = plan.target_runtime_validation_sections
 
     assert len(sections) == 1
@@ -148,7 +148,7 @@ def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
 
 def test_validation_plan_coverage_records_unsupported_scopes() -> None:
     registry = planner_registry()
-    plan = validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="cursor", scope="both")
+    plan = validation_plan.build_validation_plan(registry, all_targets=False, target_name="cursor", scope="both")
     records = plan.coverage_records
     user = next(record for record in records if record["scope"] == "user")
     project = next(record for record in records if record["scope"] == "project")

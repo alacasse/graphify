@@ -36,8 +36,8 @@ def run_harness(args, run_environment: SandboxRunEnvironment) -> harness_run.Har
     hooks = run_environment.scenario_lifecycle_hooks()
     plan = validation_plan.build_validation_plan(
         run_environment.scenario_registry,
-        all_platforms=args.all,
-        platform_name=args.platform,
+        all_targets=args.all,
+        target_name=args.platform,
         scope=args.scope,
     )
 

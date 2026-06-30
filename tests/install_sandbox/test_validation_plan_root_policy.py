@@ -51,8 +51,8 @@ def test_build_validation_plan_validates_target_roots_before_selected_policy_roo
     with pytest.raises(RuntimeError, match="repo_mount"):
         validation_plan.build_validation_plan(
             Registry(),
-            all_platforms=False,
-            platform_name="codex",
+            all_targets=False,
+            target_name="codex",
             scope="project",
             policy=policy,
             root_registry=DEFAULT_SANDBOX_ROOT_REGISTRY,
@@ -74,13 +74,13 @@ def test_build_validation_plan_consumes_install_surface_root_role_for_validation
 
     plan = validation_plan.build_validation_plan(
         planner_registry(),
-        all_platforms=False,
-        platform_name="codex",
+        all_targets=False,
+        target_name="codex",
         scope="project",
         root_registry=root_registry,  # type: ignore[arg-type]
     )
 
-    assert plan.platforms == ("codex",)
+    assert plan.selected_targets == ("codex",)
     assert root_registry.calls == 2
 
 
@@ -102,7 +102,7 @@ def test_build_validation_plan_keeps_target_roots_limited_to_install_surface_roo
     )
 
     with pytest.raises(RuntimeError, match="repo_mount"):
-        validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
+        validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="project")
 
 
 def test_build_validation_plan_policy_validation_uses_install_surface_roots_not_all_runtime_roots() -> None:
@@ -132,8 +132,8 @@ def test_build_validation_plan_policy_validation_uses_install_surface_roots_not_
     with pytest.raises(RuntimeError, match="policy_cwd"):
         validation_plan.build_validation_plan(
             planner_registry(),
-            all_platforms=False,
-            platform_name="codex",
+            all_targets=False,
+            target_name="codex",
             scope="project",
             policy=policy,
             root_registry=root_registry,
@@ -177,7 +177,7 @@ def test_build_validation_plan_validates_registry_specific_synthetic_policy_root
     )
 
     with pytest.raises(RuntimeError) as excinfo:
-        validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="project")
+        validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="project")
 
     message = str(excinfo.value)
     assert "unknown harness policy root declaration" in message

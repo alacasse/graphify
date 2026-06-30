@@ -66,20 +66,6 @@ def resolve_target_packaged_references(
     return _classify_refs_dir(Path(refs_dir), detail_prefix=f"{target_name} legacy packaged references")
 
 
-def resolve_packaged_references(
-    platform_name: str,
-    *,
-    graphify_main: object,
-    platform_spec: TargetReferenceFacts,
-) -> PackagedReferenceResolution:
-    """Compatibility wrapper for callers still using platform vocabulary."""
-    return resolve_target_packaged_references(
-        platform_name,
-        graphify_main=graphify_main,
-        target_reference_facts=platform_spec,
-    )
-
-
 def _resolve_bundled_references(
     graphify_main: object,
     target_reference_facts: TargetReferenceFacts,

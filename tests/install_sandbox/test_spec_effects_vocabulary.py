@@ -20,8 +20,8 @@ def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:
 
     assert user is not None
     assert project is not None
-    assert user.effects == user.expected
-    assert project.effects == project.expected
+    assert not hasattr(user, "effects")
+    assert not hasattr(project, "effects")
     normalized_user = normalize_registry(registry)["platforms"]["mini"]["scopes"]["user"]
     assert normalized_user["effects"] == normalized_user["expected"]
 

@@ -34,8 +34,6 @@ except ImportError:  # pragma: no cover - direct script import fallback
         TextSectionEffect,
     )
 
-
-InstallEffect = InstallSurface
 GRAPHIFY_MARKER = "## graphify"
 PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE = "public_cli_lacks_user_skill_uninstall"
 MIXED_SCOPE_PROJECT_WIRING_NOTE = "mixed_scope_project_wiring"
@@ -130,10 +128,6 @@ class Scenario:
     allowed_roots: tuple[str, ...] = ()
     generated_file_expectation: GeneratedFileExpectation = field(default_factory=GeneratedFileExpectation)
 
-    @property
-    def effects(self) -> tuple[InstallEffect, ...]:
-        return self.expected
-
 
 @dataclass(frozen=True)
 class ScopeSpec:
@@ -146,10 +140,6 @@ class ScopeSpec:
     install_variants: tuple[InstallCommandVariant, ...] = ()
     allowed_roots: tuple[str, ...] = ()
     generated_file_expectation: GeneratedFileExpectation = field(default_factory=GeneratedFileExpectation)
-
-    @property
-    def effects(self) -> tuple[InstallEffect, ...]:
-        return self.expected
 
 
 @dataclass(frozen=True)
@@ -175,6 +165,3 @@ class PlatformSpec:
     simulated_linux_layout: bool = False
     universal_uninstall_scopes: tuple[str, ...] = ()
     target_runtime_validation: tuple[TargetRuntimeValidationSpec, ...] = ()
-
-
-InstallTargetSpec = PlatformSpec

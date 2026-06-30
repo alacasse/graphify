@@ -30,17 +30,17 @@ def test_expected_path_manifest_logic() -> None:
     assert any(entry.relative == ".codebuddy/settings.json" for entry in codebuddy.expected)
 
 
-def test_current_model_aliases_are_migration_retention_not_output_contracts() -> None:
+def test_install_target_models_use_canonical_surfaces_and_specs() -> None:
     scenario = REGISTRY.make_scenario("codex", "project")
     scope = REGISTRY.target_spec("codex").scopes["project"]
 
     assert scenario is not None
-    # These internal aliases characterize the current migration surface only.
-    # Public expected/effects output compatibility is covered by spec-normalize tests.
-    assert install_target_models.InstallEffect is install_target_models.InstallSurface
-    assert install_target_models.InstallTargetSpec is install_target_models.PlatformSpec
-    assert scenario.effects is scenario.expected
-    assert scope.effects is scope.expected
+    assert not hasattr(install_target_models, "InstallEffect")
+    assert not hasattr(install_target_models, "InstallTargetSpec")
+    assert not hasattr(scenario, "effects")
+    assert not hasattr(scope, "effects")
+    assert all(isinstance(entry, install_target_models.InstallSurface) for entry in scenario.expected)
+    assert isinstance(REGISTRY.target_spec("codex"), install_target_models.PlatformSpec)
 
 
 def test_json_effects_declare_behavior_expectations() -> None:

@@ -155,17 +155,17 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "alpha": install_target_models.InstallTargetSpec(
+            "alpha": install_target_models.PlatformSpec(
                 name="alpha",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "beta": install_target_models.InstallTargetSpec(
+            "beta": install_target_models.PlatformSpec(
                 name="beta",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "unsupported": install_target_models.InstallTargetSpec(
+            "unsupported": install_target_models.PlatformSpec(
                 name="unsupported",
                 unsupported_scopes={"project": "project install is not supported"},
             ),
@@ -213,7 +213,7 @@ def test_catalog_target_selection_boundary_uses_target_named_accessors() -> None
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "alpha": install_target_models.InstallTargetSpec(
+            "alpha": install_target_models.PlatformSpec(
                 name="alpha",
                 scopes={"project": installable_scope},
             ),
@@ -260,12 +260,12 @@ def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> No
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "alpha": install_target_models.InstallTargetSpec(
+            "alpha": install_target_models.PlatformSpec(
                 name="alpha",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "beta": install_target_models.InstallTargetSpec(
+            "beta": install_target_models.PlatformSpec(
                 name="beta",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
@@ -309,7 +309,7 @@ def test_catalog_runtime_and_risk_note_wrappers_preserve_compatibility_behavior(
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "runtime": install_target_models.InstallTargetSpec(
+            "runtime": install_target_models.PlatformSpec(
                 name="runtime",
                 target_runtime_validation=(validation,),
                 simulated_linux_layout=True,

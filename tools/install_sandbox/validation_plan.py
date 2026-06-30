@@ -156,8 +156,6 @@ def selected_targets(
 
 
 def _standard_scenarios(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
-    if not hasattr(registry, "make_scenario") and hasattr(registry, "platform_scenarios"):
-        return tuple(scenario for platform_name in platforms for scenario in registry.platform_scenarios(platform_name, scope))
     scenarios: list[Scenario] = []
     for platform_name in platforms:
         for one_scope in _selected_scopes(scope):

@@ -13,7 +13,6 @@ try:
         SIMULATED_LINUX_LAYOUT_NOTE,
         GeneratedFileExpectation,
         InstallCommandVariant,
-        InstallTargetSpec,
         PlatformSpec,
         ReferenceBundle,
         ScopeSpec,
@@ -31,7 +30,6 @@ except ImportError:  # pragma: no cover - direct script import fallback
         SIMULATED_LINUX_LAYOUT_NOTE,
         GeneratedFileExpectation,
         InstallCommandVariant,
-        InstallTargetSpec,
         PlatformSpec,
         ReferenceBundle,
         ScopeSpec,
@@ -285,7 +283,7 @@ def _platform_runtime_validations(data: Mapping[str, Any], context: str) -> tupl
     )
 
 
-def target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
+def target_spec(platform_key: str, value: object, context: str) -> PlatformSpec:
     data = _mapping(value, context)
     name = platform_key
     if "name" in data:
@@ -341,7 +339,3 @@ def target_spec(platform_key: str, value: object, context: str) -> InstallTarget
         universal_uninstall_scopes=_string_list(data.get("universal_uninstall_scopes", []), f"{context}.universal_uninstall_scopes"),
         target_runtime_validation=_platform_runtime_validations(data, context),
     )
-
-
-def platform_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
-    return target_spec(platform_key, value, context)

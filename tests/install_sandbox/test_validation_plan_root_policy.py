@@ -24,9 +24,6 @@ def test_build_validation_plan_validates_target_roots_before_selected_policy_roo
         def validate_roots(self, declared_roots: set[str]) -> None:
             raise AssertionError("build_validation_plan should use the target-root owner when available")
 
-        def platform_spec(self, platform_name: str) -> install_target_models.PlatformSpec:
-            return self.specs[platform_name]
-
         def make_scenario(self, platform_name: str, scope: str):
             return None
 

@@ -453,7 +453,7 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     class Registry:
         specs = {"codex": object()}
 
-        def platform_scenarios(self, platform_name: str, scope: str):
+        def target_scenarios(self, platform_name: str, scope: str):
             return [scenario]
 
     run_environment = RunEnvironmentDouble()

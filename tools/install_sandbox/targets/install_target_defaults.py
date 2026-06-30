@@ -27,10 +27,8 @@ except ImportError:  # pragma: no cover - direct script import fallback
 _DEFAULT_SCENARIO_REGISTRY: ScenarioRegistry | None = None
 _LAZY_DEFAULT_NAMES = {
     "DEFAULT_SCENARIO_REGISTRY",
-    "SANDBOX_PLATFORM_SPECS",
     "DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS",
     "DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS",
-    "ALL_PLATFORMS",
 }
 
 
@@ -53,14 +51,10 @@ def _default_export(name: str):
     registry = _load_default_scenario_registry()
     if name == "DEFAULT_SCENARIO_REGISTRY":
         return registry
-    if name == "SANDBOX_PLATFORM_SPECS":
-        return registry.specs
     if name == "DEFAULT_UNIVERSAL_UNINSTALL_SCENARIOS":
         return registry.universal_uninstall_specs
     if name == "DEFAULT_DISPOSABLE_ARTIFACT_SCENARIOS":
         return registry.disposable_artifact_specs
-    if name == "ALL_PLATFORMS":
-        return list(registry.specs)
     raise AttributeError(name)
 
 
@@ -70,10 +64,6 @@ def __getattr__(name: str):
         globals()[name] = value
         return value
     raise AttributeError(name)
-
-
-def sandbox_platform_specs() -> dict[str, PlatformSpec]:
-    return install_target_specs()
 
 
 def default_install_target_catalog() -> ScenarioRegistry:
@@ -90,10 +80,6 @@ def install_target_spec(target_name: str) -> PlatformSpec:
 
 def install_target_scenarios(target_name: str, scope: str) -> list[Scenario]:
     return _load_default_scenario_registry().target_scenarios(target_name, scope)
-
-
-def platform_spec(platform_name: str) -> PlatformSpec:
-    return _load_default_scenario_registry().target_spec(platform_name)
 
 
 def user_skill(platform_name: str) -> InstallSurface:
@@ -132,10 +118,6 @@ def equivalent_install_variants(
 
 def equivalence_status(scenario: Scenario) -> dict[str, object]:
     return _load_default_scenario_registry().equivalence_status(scenario)
-
-
-def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
-    return _load_default_scenario_registry().target_scenarios(platform_name, scope)
 
 
 def make_scenario(platform_name: str, scope: str) -> Scenario | None:

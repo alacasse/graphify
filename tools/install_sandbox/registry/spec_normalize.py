@@ -17,7 +17,7 @@ try:
     from ..targets.install_target_models import (
         GeneratedFileExpectation,
         InstallCommandVariant,
-        InstallTargetSpec,
+        PlatformSpec,
         ReferenceBundle,
         ScopeSpec,
         TargetRuntimeValidationSpec,
@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
     from targets.install_target_models import (  # type: ignore[no-redef]
         GeneratedFileExpectation,
         InstallCommandVariant,
-        InstallTargetSpec,
+        PlatformSpec,
         ReferenceBundle,
         ScopeSpec,
         TargetRuntimeValidationSpec,
@@ -124,7 +124,7 @@ def _install_variant(variant: InstallCommandVariant) -> dict[str, object]:
 
 
 def _scope_spec(scope: ScopeSpec) -> dict[str, object]:
-    effects = [_install_surface(surface) for surface in scope.effects]
+    effects = [_install_surface(surface) for surface in scope.expected]
     return {
         "install_command": list(scope.install_command),
         "uninstall_command": _command(scope.uninstall_command),
@@ -158,7 +158,7 @@ def _runtime_validation(validation: TargetRuntimeValidationSpec) -> dict[str, ob
     }
 
 
-def _platform_spec(platform: InstallTargetSpec) -> dict[str, object]:
+def _platform_spec(platform: PlatformSpec) -> dict[str, object]:
     return {
         "name": platform.name,
         "display_name": platform.display_name,

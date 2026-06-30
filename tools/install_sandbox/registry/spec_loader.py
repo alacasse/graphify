@@ -19,7 +19,7 @@ try:
         parse_top_level_policy_inputs,
     )
     from .spec_target_facts import SpecTargetFactError, target_spec
-    from ..targets.install_target_models import InstallTargetSpec
+    from ..targets.install_target_models import PlatformSpec
 except ImportError:  # pragma: no cover - direct script import fallback
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
     from registry.spec_harness_policy_inputs import (  # type: ignore[no-redef]
@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
     )
     from registry.spec_target_facts import SpecTargetFactError, target_spec  # type: ignore[no-redef]
     from targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry  # type: ignore[no-redef]
-    from targets.install_target_models import InstallTargetSpec  # type: ignore[no-redef]
+    from targets.install_target_models import PlatformSpec  # type: ignore[no-redef]
 
 
 SCHEMA_VERSION = 1
@@ -49,7 +49,7 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     return value
 
 
-def _target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
+def _target_spec(platform_key: str, value: object, context: str) -> PlatformSpec:
     try:
         return target_spec(platform_key, value, context)
     except SpecTargetFactError as exc:

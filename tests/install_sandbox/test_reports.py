@@ -177,10 +177,6 @@ def test_report_command_artifact_summary_characterizes_command_text_precedence(t
     )
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 3 must render target coverage and target scenario labels; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_report_markdown_generation() -> None:
     manifest = {
         "graphify_file_effect_pass_count": 1,
@@ -323,10 +319,6 @@ def test_target_runtime_validation_sections_are_registry_declared_manifest_data(
     assert "declared note" in markdown
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 3 must render target_coverage manifest fields and drop platform coverage labels; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> None:
     manifest = {
         "results": [],
@@ -369,6 +361,49 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
     assert "must-not-render" not in markdown
     assert "Must Not Render" not in markdown
     assert "legacy alias" not in markdown
+
+
+def test_report_reads_legacy_platform_coverage_as_transitional_input_only() -> None:
+    markdown = reports.render_report_md(
+        {
+            "results": [{"id": "legacy-project", "platform": "legacy", "scope": "project", "passed": True}],
+            "platform_coverage": [
+                {
+                    "platform": "legacy",
+                    "scope": "project",
+                    "status": "runnable",
+                    "install_command": ["graphify", "install", "--platform", "legacy"],
+                }
+            ],
+        }
+    )
+
+    assert "## Target Coverage" in markdown
+    assert "| Target | Scope | Coverage | Graphify Installer Command |" in markdown
+    assert "| legacy | project | runnable | graphify install --platform legacy |" in markdown
+    assert "## Platform Coverage" not in markdown
+
+
+def test_report_prefers_explicit_empty_target_coverage_over_stale_legacy_rows() -> None:
+    markdown = reports.render_report_md(
+        {
+            "results": [],
+            "target_coverage": [],
+            "platform_coverage": [
+                {
+                    "platform": "stale",
+                    "scope": "project",
+                    "status": "must-not-render",
+                    "install_command": ["graphify", "install", "--platform", "stale"],
+                }
+            ],
+        }
+    )
+
+    assert "## Target Coverage" in markdown
+    assert "stale" not in markdown
+    assert "must-not-render" not in markdown
+    assert "graphify install --platform stale" not in markdown
 
 
 def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:

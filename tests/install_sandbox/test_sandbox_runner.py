@@ -592,10 +592,6 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     assert manifest["graphify_file_effect_fail_count"] == 1
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must project target_coverage_summary into runner manifests; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
 

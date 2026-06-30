@@ -129,7 +129,7 @@ def failure_summary(item: dict[str, Any], *, output_dir: Path, max_checks: int) 
     checks = failed_checks(output_dir, scenario_id, limit=max_checks) if scenario_id else []
     failure: dict[str, Any] = {
         "scenario": scenario_id,
-        "platform": item.get("platform"),
+        "target": item.get("target") or item.get("platform"),
         "scope": item.get("scope"),
         "reproduce": item.get("reproduction_command") or artifact.get("command"),
         "exit": artifact.get("exit_code"),

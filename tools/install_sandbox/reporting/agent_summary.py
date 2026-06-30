@@ -173,7 +173,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
             if not isinstance(failure, dict):
                 continue
             lines.append(
-                f"- `{failure.get('scenario')}` ({failure.get('platform')}/{failure.get('scope')}): reproduce `{failure.get('reproduce')}`; exit {failure.get('exit')}; transcript `{failure.get('transcript')}`"
+                f"- `{failure.get('scenario')}` ({failure.get('target')}/{failure.get('scope')}): reproduce `{failure.get('reproduce')}`; exit {failure.get('exit')}; transcript `{failure.get('transcript')}`"
             )
             checks = failure.get("failed_checks") if isinstance(failure.get("failed_checks"), list) else []
             for check in checks:

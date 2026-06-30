@@ -133,10 +133,6 @@ def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
     assert "target_tool_runtime" not in json.dumps(summary)
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 3 must expose target, not platform, in failure summaries; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
     output = tmp_path / "out"
     write_json(
@@ -187,6 +183,34 @@ def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
     ) == summary["failures"][0]
     assert "AGENTS.md: missing Graphify block" in markdown
     assert "scenarios/codex-project/assertions.json" in markdown
+
+
+def test_fail_manifest_reads_legacy_platform_as_transitional_target_input(tmp_path: Path) -> None:
+    output = tmp_path / "out"
+    write_json(
+        output / "manifest.json",
+        {
+            "results": [
+                {
+                    "id": "legacy-project",
+                    "platform": "legacy",
+                    "scope": "project",
+                    "passed": False,
+                    "command_artifact": {
+                        "command": "graphify install --platform legacy",
+                        "exit_code": 1,
+                        "transcript_path": "scenarios/legacy-project/transcript.txt",
+                    },
+                }
+            ],
+        },
+    )
+    write_json(output / "scenarios" / "legacy-project" / "assertions.json", {"checks": []})
+
+    summary = agent_summary.summarize_output(output)
+
+    assert summary["failures"][0]["target"] == "legacy"
+    assert "platform" not in summary["failures"][0]
 
 
 def test_fail_manifest_uses_command_snippets_when_assertions_have_no_failed_checks(tmp_path: Path) -> None:

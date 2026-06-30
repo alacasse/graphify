@@ -69,7 +69,8 @@ def render_report_md(manifest: dict[str, object]) -> str:
     os_release = object_dict(manifest.get("os_release"))
     source_snapshot = object_dict(manifest.get("source_snapshot"))
     results = object_dicts(manifest.get("results"))
-    coverage = object_dicts(manifest.get("platform_coverage"))
+    coverage_source = manifest.get("target_coverage") if "target_coverage" in manifest else manifest.get("platform_coverage")
+    coverage = object_dicts(coverage_source)
     validation_sections = object_dicts(manifest.get("target_runtime_validation_sections"))
     risk_status_values = object_list(manifest.get("risk_status_values")) or list(known_status_values())
 
@@ -116,7 +117,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
         transcript = command_artifact.get("transcript_path") or item.get("transcript_path") or ""
         scenario_rows.append(
             (
-                item.get("platform"),
+                item.get("target") or item.get("platform"),
                 item.get("scope"),
                 item.get("id"),
                 graphify_status,
@@ -125,15 +126,15 @@ def render_report_md(manifest: dict[str, object]) -> str:
                 transcript,
             )
         )
-    lines.extend(md_table(["Platform", "Scope", "Scenario", "Graphify File Effects", "Overall Status", "Duration", "Transcript"], scenario_rows, right_align={5}))
+    lines.extend(md_table(["Target", "Scope", "Scenario", "Graphify File Effects", "Overall Status", "Duration", "Transcript"], scenario_rows, right_align={5}))
 
-    lines.extend(["", "## Platform Coverage", ""])
+    lines.extend(["", "## Target Coverage", ""])
     coverage_rows = []
     for record in coverage:
         command = record.get("install_command")
         command_text = shlex.join([str(part) for part in command]) if isinstance(command, list) else record.get("reason", "")
-        coverage_rows.append((record.get("platform"), record.get("scope"), record.get("status"), command_text))
-    lines.extend(md_table(["Platform", "Scope", "Coverage", "Graphify Installer Command"], coverage_rows))
+        coverage_rows.append((record.get("target") or record.get("platform"), record.get("scope"), record.get("status"), command_text))
+    lines.extend(md_table(["Target", "Scope", "Coverage", "Graphify Installer Command"], coverage_rows))
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])
 

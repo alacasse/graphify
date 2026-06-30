@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
-from tools.install_sandbox.reference_resolution import resolve_packaged_references, resolve_target_packaged_references
+from tools.install_sandbox.reference_resolution import (
+    PackagedReferenceResolution,
+    resolve_packaged_references,
+    resolve_target_packaged_references,
+)
 from tools.install_sandbox.targets.install_target_models import PlatformSpec, ReferenceBundle
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class GraphifyMain:
@@ -22,6 +30,63 @@ def bundled_spec(*bundles: ReferenceBundle) -> PlatformSpec:
         uses_packaged_references=False,
         reference_bundles=bundles,
     )
+
+
+def _call_sites(root: Path, function_name: str) -> set[str]:
+    call_sites: set[str] = set()
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        visitor = _CallSiteVisitor(path.relative_to(REPO_ROOT), function_name)
+        visitor.visit(tree)
+        call_sites.update(visitor.call_sites)
+    return call_sites
+
+
+class _CallSiteVisitor(ast.NodeVisitor):
+    def __init__(self, relative_path: Path, function_name: str) -> None:
+        self.relative_path = relative_path
+        self.function_name = function_name
+        self.call_sites: set[str] = set()
+        self._function_stack: list[str] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._function_stack.append(node.name)
+        self.generic_visit(node)
+        self._function_stack.pop()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if _call_name(node.func) == self.function_name:
+            scope = self._function_stack[-1] if self._function_stack else "<module>"
+            self.call_sites.add(f"{self.relative_path}::{scope}")
+        self.generic_visit(node)
+
+
+def _call_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def test_platform_named_resolver_is_only_temporary_compatibility_caller() -> None:
+    wrapper_call_sites = _call_sites(REPO_ROOT / "tools" / "install_sandbox", "resolve_packaged_references")
+    wrapper_call_sites |= _call_sites(REPO_ROOT / "tests" / "install_sandbox", "resolve_packaged_references")
+
+    assert wrapper_call_sites == {
+        "tests/install_sandbox/test_reference_resolution.py::test_legacy_platform_named_resolver_delegates_to_target_facts",
+    }
+
+
+def test_runtime_uses_target_named_reference_resolver() -> None:
+    runtime_call_sites = _call_sites(
+        REPO_ROOT / "tools" / "install_sandbox" / "runtime",
+        "resolve_target_packaged_references",
+    )
+
+    assert runtime_call_sites == {
+        "tools/install_sandbox/runtime/sandbox_run_environment.py::packaged_reference_resolution",
+    }
 
 
 def test_reference_bundle_eligibility_comes_from_target_reference_facts(tmp_path: Path) -> None:
@@ -43,6 +108,7 @@ def test_reference_bundle_eligibility_comes_from_target_reference_facts(tmp_path
     )
 
     assert resolution.status == "available"
+    assert isinstance(resolution, PackagedReferenceResolution)
     assert resolution.refs_dir == fallback_refs
     assert resolution.expected_names == ("fallback.md",)
 

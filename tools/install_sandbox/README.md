@@ -65,7 +65,7 @@ The sandbox validates real Graphify installer behavior today. It installs Graphi
 
 Keep YAML focused on target-local facts. Python derives roots, default installer commands, schema validation, harness policy, runtime limitations, safety checks, and idempotency rules from those facts plus sandbox-owned policy. This keeps the specs shaped for a future shared Installer Core without making that future core part of the current installer.
 
-Checked-in default runnable scopes declare `effects`. Legacy `expected` registry input has been removed for runnable scopes; use `effects` for the files and configuration entries the sandbox should validate. Normalized registry output still emits both `expected` and `effects` aliases for compatibility until the LR-B7 output-alias cleanup. This vocabulary migration does not make the product installer consume YAML.
+Checked-in default runnable scopes declare `effects`. Legacy `expected` registry input has been removed for runnable scopes; use `effects` for the files and configuration entries the sandbox should validate. Normalized registry output also emits `effects` only; internal Python scenario models may still name their loaded install-surface tuple `expected`. This vocabulary migration does not make the product installer consume YAML.
 
 ## Execution Order
 

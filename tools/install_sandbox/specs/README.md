@@ -8,7 +8,6 @@ The sandbox validates real Graphify installer behavior by running Graphify insta
 
 Keep the YAML as target-local facts. Python derives root selection, defaults, schema validation, harness policy, runtime limitations, generated-file handling, safety checks, and idempotency rules. The shape is intended to be consumable by a future Installer Core, but current PRs should not claim that installer consumption exists until product code uses it.
 
-Normalized registry output still emits both `expected` and `effects` aliases for
-compatibility until the LR-B7 output-alias cleanup. The default registry
-migration is complete; checked-in default runnable scopes must use `effects`
-only.
+Normalized registry output emits `effects` only. The default registry migration
+is complete; checked-in default runnable scopes and normalized output must use
+`effects` rather than preserving a normalized-output `expected` alias.

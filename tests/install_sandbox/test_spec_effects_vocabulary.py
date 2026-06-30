@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,
     valid_registry_data as _valid_data,
 )
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
+
+
+INSTALL_SANDBOX_DOCS = (
+    "tools/install_sandbox/README.md",
+    "tools/install_sandbox/specs/README.md",
+)
 
 
 def test_registry_input_fixture_uses_effects_only_for_runnable_scopes() -> None:
@@ -32,6 +40,23 @@ def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:
     assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in normalized_user["effects"]] == [
         ("skill", "home", ".mini/skills/graphify/SKILL.md"),
     ]
+
+
+def test_install_sandbox_docs_do_not_preserve_normalized_expected_alias() -> None:
+    stale_lines: list[str] = []
+    stale_promises = (
+        "emits both `expected` and `effects`",
+        "still emits both `expected` and `effects`",
+        "`expected` and `effects` aliases for compatibility",
+        "normalized registry output still emits",
+    )
+    for relative in INSTALL_SANDBOX_DOCS:
+        for line_number, line in enumerate(Path(relative).read_text(encoding="utf-8").splitlines(), start=1):
+            normalized_output_line = "normalized" in line.lower() and "output" in line.lower()
+            if normalized_output_line and any(promise in line for promise in stale_promises):
+                stale_lines.append(f"{relative}:{line_number}:{line.strip()}")
+
+    assert stale_lines == []
 
 
 def test_loader_rejects_scope_with_expected_and_effects() -> None:

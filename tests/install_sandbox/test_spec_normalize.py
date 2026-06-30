@@ -92,6 +92,23 @@ def test_normalized_scope_emits_effects_only() -> None:
     assert effects_hook["json_expectation"]["hooks"][0]["required_fragments"] == ["graphify", "hook-check"]
 
 
+def test_normalized_registry_does_not_emit_expected_keys() -> None:
+    def expected_key_paths(value: object, path: tuple[str, ...] = ()) -> list[str]:
+        if isinstance(value, dict):
+            paths = ["/".join((*path, "expected")) for key in value if key == "expected"]
+            for key, child in value.items():
+                paths.extend(expected_key_paths(child, (*path, str(key))))
+            return paths
+        if isinstance(value, list):
+            paths: list[str] = []
+            for index, child in enumerate(value):
+                paths.extend(expected_key_paths(child, (*path, str(index))))
+            return paths
+        return []
+
+    assert expected_key_paths(normalize_default_registry()) == []
+
+
 def test_normalized_registry_does_not_emit_install_target_alias_keys() -> None:
     def walk(value: object) -> None:
         if isinstance(value, dict):

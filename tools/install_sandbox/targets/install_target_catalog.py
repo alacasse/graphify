@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import install_target_harness_policy as _harness_policy
 from . import install_target_selection as _selection
 from .install_target_models import (
     DisposableArtifactScenarioSpec,
@@ -10,7 +9,6 @@ from .install_target_models import (
     InstallSurface,
     PlatformSpec,
     Scenario,
-    SelectedUniversalUninstallScenario,
     UniversalUninstallScenarioSpec,
 )
 from .install_target_scenarios import (
@@ -85,29 +83,8 @@ class ScenarioRegistry:
     def scenario_id(self, platform_name: str, scope: str) -> str:
         return _selection.scenario_id(platform_name, scope)
 
-    def universal_uninstall_scenario_id(self, scope: str) -> str:
-        return _harness_policy.universal_uninstall_scenario_id(self.universal_uninstall_specs, scope)
-
-    def purge_disposable_graphify_out_scenario_id(self) -> str:
-        return _harness_policy.purge_disposable_graphify_out_scenario_id(self.disposable_artifact_specs)
-
     def coverage_records(self, platforms: list[str], scope: str) -> list[dict[str, object]]:
         return _selection.coverage_records(self.specs, platforms, scope)
-
-    def universal_uninstall_spec_for_scope(self, scope: str) -> UniversalUninstallScenarioSpec | None:
-        return _harness_policy.universal_uninstall_spec_for_scope(self.universal_uninstall_specs, scope)
-
-    def universal_uninstall_scenarios(self, platforms: list[str], scope: str) -> list[SelectedUniversalUninstallScenario]:
-        return _harness_policy.universal_uninstall_scenarios(self.specs, self.universal_uninstall_specs, platforms, scope)
-
-    def universal_uninstall_groups(self, platforms: list[str], scope: str) -> list[tuple[str, list[Scenario]]]:
-        return _harness_policy.universal_uninstall_groups(self.specs, self.universal_uninstall_specs, platforms, scope)
-
-    def disposable_artifact_scenarios(self, scope: str) -> list[DisposableArtifactScenarioSpec]:
-        return _harness_policy.disposable_artifact_scenarios(self.disposable_artifact_specs, scope)
-
-    def target_runtime_validation_sections(self) -> list[dict[str, object]]:
-        return _harness_policy.target_runtime_validation_sections(self.specs)
 
     def validate_target_roots(self, declared_roots: set[str]) -> None:
         unknown: set[str] = set()
@@ -118,18 +95,6 @@ class ScenarioRegistry:
                 unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)
         if unknown:
             raise RuntimeError(f"unknown sandbox root declaration(s): {', '.join(sorted(unknown))}")
-
-    def validate_roots(self, declared_roots: set[str]) -> None:
-        self.validate_target_roots(declared_roots)
-        _harness_policy.validate_roots(
-            self.specs,
-            self.universal_uninstall_specs,
-            self.disposable_artifact_specs,
-            declared_roots,
-        )
-
-    def risk_notes(self, *notes: str, platform_name: str | None = None) -> tuple[str, ...]:
-        return _harness_policy.risk_notes(self.specs, *notes, platform_name=platform_name)
 
 
 InstallTargetCatalog = ScenarioRegistry

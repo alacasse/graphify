@@ -28,17 +28,19 @@ def test_synthetic_policy_scenario_ids_are_owned_by_harness_policy() -> None:
     )
 
 
-def test_catalog_synthetic_policy_id_wrappers_are_removable_facade_tail() -> None:
-    owner_uninstall_id = install_target_harness_policy.universal_uninstall_scenario_id(
-        REGISTRY.universal_uninstall_specs,
-        "project",
-    )
-    owner_disposable_id = install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
-        REGISTRY.disposable_artifact_specs,
-    )
-
-    assert REGISTRY.universal_uninstall_scenario_id("project") == owner_uninstall_id
-    assert REGISTRY.purge_disposable_graphify_out_scenario_id() == owner_disposable_id
+def test_catalog_policy_wrappers_are_not_supported_accessors() -> None:
+    for name in (
+        "universal_uninstall_scenario_id",
+        "purge_disposable_graphify_out_scenario_id",
+        "universal_uninstall_spec_for_scope",
+        "universal_uninstall_scenarios",
+        "universal_uninstall_groups",
+        "disposable_artifact_scenarios",
+        "target_runtime_validation_sections",
+        "validate_roots",
+        "risk_notes",
+    ):
+        assert not hasattr(REGISTRY, name)
 
 
 def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
@@ -229,7 +231,7 @@ def test_catalog_target_selection_boundary_uses_target_named_accessors() -> None
     assert not hasattr(registry, "platform_scenarios")
 
 
-def test_catalog_policy_selection_wrappers_are_removable_after_caller_migration() -> None:
+def test_harness_policy_owner_selects_policy_scenarios_after_catalog_wrapper_deletion() -> None:
     installable_scope = install_target_models.ScopeSpec(
         install_command=("tool", "install"),
         uninstall_command=("tool", "uninstall"),
@@ -275,28 +277,23 @@ def test_catalog_policy_selection_wrappers_are_removable_after_caller_migration(
         disposable_artifact_specs=(disposable,),
     )
 
-    owner_selected = install_target_harness_policy.universal_uninstall_scenarios(
+    selected = install_target_harness_policy.universal_uninstall_scenarios(
         registry.specs,
         registry.universal_uninstall_specs,
         ["alpha", "beta"],
         "project",
     )
 
-    selected = registry.universal_uninstall_scenarios(["alpha", "beta"], "project")
-    assert selected == owner_selected
     assert len(selected) == 1
     assert selected[0].spec is universal
     assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
-    assert registry.disposable_artifact_scenarios(
-        "project"
-    ) == install_target_harness_policy.disposable_artifact_scenarios(
+    assert install_target_harness_policy.disposable_artifact_scenarios(
         registry.disposable_artifact_specs,
         "project",
-    )
-    assert registry.disposable_artifact_scenarios("project") == [disposable]
+    ) == [disposable]
 
 
-def test_catalog_runtime_and_risk_note_wrappers_are_removable_facade_tail() -> None:
+def test_harness_policy_owner_projects_runtime_sections_and_risk_notes_after_catalog_wrapper_deletion() -> None:
     validation = install_target_models.TargetRuntimeValidationSpec(
         section_title="Synthetic Runtime Validation",
         status="declared-only",
@@ -314,17 +311,21 @@ def test_catalog_runtime_and_risk_note_wrappers_are_removable_facade_tail() -> N
         }
     )
 
-    assert (
-        registry.target_runtime_validation_sections()
-        == install_target_harness_policy.target_runtime_validation_sections(registry.specs)
-    )
-    assert registry.risk_notes(
-        "declared", platform_name="runtime"
-    ) == install_target_harness_policy.risk_notes(
+    assert install_target_harness_policy.target_runtime_validation_sections(registry.specs) == [
+        {
+            "section_title": "Synthetic Runtime Validation",
+            "status": "declared-only",
+            "evidence_path": None,
+            "strategy": "inspect generated payloads",
+            "targets": ["runtime"],
+            "notes": ["synthetic policy wrapper check"],
+        }
+    ]
+    assert install_target_harness_policy.risk_notes(
         registry.specs,
         "declared",
         platform_name="runtime",
-    )
+    ) == ("declared", install_target_models.SIMULATED_LINUX_LAYOUT_NOTE)
 
 
 def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> None:
@@ -422,7 +423,6 @@ def test_harness_policy_validate_roots_covers_scenarios_and_synthetic_policies()
 
 
 def test_catalog_universal_uninstall_group_wrapper_is_removable_facade_tail() -> None:
-    assert REGISTRY.universal_uninstall_groups(["codex", "claude", "gemini"], "project") == []
     assert install_target_harness_policy.universal_uninstall_groups(
         REGISTRY.specs,
         REGISTRY.universal_uninstall_specs,

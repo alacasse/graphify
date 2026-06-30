@@ -56,24 +56,14 @@ class ScenarioRegistry:
     def target_names(self) -> list[str]:
         return list(self.specs)
 
-    @property
-    def platform_names(self) -> list[str]:
-        return self.target_names
-
     def target_spec(self, target_name: str) -> PlatformSpec:
         return _selection.target_spec(self.specs, target_name)
-
-    def platform_spec(self, platform_name: str) -> PlatformSpec:
-        return self.target_spec(platform_name)
 
     def selected_scopes(self, scope: str) -> list[str]:
         return _selection.selected_scopes(scope)
 
     def selected_targets(self, *, all_platforms: bool, target_name: str | None) -> list[str]:
         return _selection.selected_targets(self.specs, all_platforms=all_platforms, target_name=target_name)
-
-    def selected_platforms(self, *, all_platforms: bool, platform_name: str | None) -> list[str]:
-        return self.selected_targets(all_platforms=all_platforms, target_name=platform_name)
 
     def user_skill(self, platform_name: str) -> InstallSurface:
         return _selection.user_skill(self.specs, platform_name)
@@ -104,10 +94,6 @@ class ScenarioRegistry:
 
     def target_scenarios(self, target_name: str, scope: str) -> list[Scenario]:
         return _selection.target_scenarios(self.specs, target_name, scope)
-
-    def platform_scenarios(self, platform_name: str, scope: str) -> list[Scenario]:
-        self.platform_spec(platform_name)
-        return self.target_scenarios(platform_name, scope)
 
     def equivalent_install_command(self, scenario: Scenario) -> tuple[str, ...] | None:
         return _selection.equivalent_install_command(self.specs, scenario)

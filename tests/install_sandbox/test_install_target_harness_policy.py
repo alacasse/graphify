@@ -204,7 +204,7 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
     ]
 
 
-def test_catalog_platform_selection_aliases_preserve_compatibility_behavior() -> None:
+def test_catalog_target_selection_boundary_uses_target_named_accessors() -> None:
     installable_scope = install_target_models.ScopeSpec(
         install_command=("tool", "install"),
         uninstall_command=("tool", "uninstall"),
@@ -220,15 +220,13 @@ def test_catalog_platform_selection_aliases_preserve_compatibility_behavior() ->
         }
     )
 
-    assert registry.selected_platforms(
-        all_platforms=False, platform_name="alpha"
-    ) == registry.selected_targets(
-        all_platforms=False,
-        target_name="alpha",
-    )
-    assert registry.platform_scenarios("alpha", "project") == registry.target_scenarios(
-        "alpha", "project"
-    )
+    assert registry.selected_targets(all_platforms=False, target_name="alpha") == ["alpha"]
+    assert [
+        (scenario.platform, scenario.scope)
+        for scenario in registry.target_scenarios("alpha", "project")
+    ] == [("alpha", "project")]
+    assert not hasattr(registry, "selected_platforms")
+    assert not hasattr(registry, "platform_scenarios")
 
 
 def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> None:

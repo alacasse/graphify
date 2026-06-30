@@ -36,10 +36,16 @@ def test_install_target_module_helpers_use_default_catalog_seam() -> None:
     assert install_target_defaults.install_target_specs() is catalog.specs
     assert install_target_defaults.install_target_spec("codex") is catalog.target_spec("codex")
     assert install_target_defaults.install_target_scenarios("cursor", "both") == catalog.target_scenarios("cursor", "both")
+    assert install_target_defaults.platform_spec("codex") is catalog.target_spec("codex")
+    assert install_target_defaults.platform_scenarios("cursor", "both") == catalog.target_scenarios("cursor", "both")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         install_target_defaults.install_target_spec("missing-target")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         install_target_defaults.install_target_scenarios("missing-target", "both")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        install_target_defaults.platform_spec("missing-target")
+    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+        install_target_defaults.platform_scenarios("missing-target", "both")
 
 
 def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,6 +70,11 @@ def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest
     assert install_target_defaults.install_target_specs() is registry.specs
     assert install_target_defaults.install_target_spec("cached-target") is registry.target_spec("cached-target")
     assert install_target_defaults.install_target_scenarios("cached-target", "project") == registry.target_scenarios(
+        "cached-target",
+        "project",
+    )
+    assert install_target_defaults.platform_spec("cached-target") is registry.target_spec("cached-target")
+    assert install_target_defaults.platform_scenarios("cached-target", "project") == registry.target_scenarios(
         "cached-target",
         "project",
     )

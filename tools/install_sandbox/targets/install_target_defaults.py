@@ -93,7 +93,7 @@ def install_target_scenarios(target_name: str, scope: str) -> list[Scenario]:
 
 
 def platform_spec(platform_name: str) -> PlatformSpec:
-    return _load_default_scenario_registry().platform_spec(platform_name)
+    return _load_default_scenario_registry().target_spec(platform_name)
 
 
 def user_skill(platform_name: str) -> InstallSurface:
@@ -135,7 +135,7 @@ def equivalence_status(scenario: Scenario) -> dict[str, object]:
 
 
 def platform_scenarios(platform_name: str, scope: str) -> list[Scenario]:
-    return _load_default_scenario_registry().platform_scenarios(platform_name, scope)
+    return _load_default_scenario_registry().target_scenarios(platform_name, scope)
 
 
 def make_scenario(platform_name: str, scope: str) -> Scenario | None:

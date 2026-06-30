@@ -23,21 +23,14 @@ def test_catalog_preferred_target_accessors_select_target_facts() -> None:
     ]
 
 
-def test_catalog_platform_aliases_are_current_migration_retention() -> None:
-    # Internal target APIs above are the preferred contract. These platform
-    # accessors describe the current migration surface, not permanent output
-    # compatibility.
-    assert REGISTRY.platform_names == REGISTRY.target_names
-    assert REGISTRY.platform_spec("codex") is REGISTRY.target_spec("codex")
-    assert REGISTRY.selected_platforms(all_platforms=True, platform_name=None) == REGISTRY.selected_targets(
-        all_platforms=True,
-        target_name=None,
-    )
-    assert REGISTRY.selected_platforms(all_platforms=False, platform_name="codex") == REGISTRY.selected_targets(
-        all_platforms=False,
-        target_name="codex",
-    )
-    assert REGISTRY.platform_scenarios("cursor", "both") == REGISTRY.target_scenarios("cursor", "both")
+def test_catalog_platform_aliases_are_not_supported_accessors() -> None:
+    for name in (
+        "platform_names",
+        "platform_spec",
+        "selected_platforms",
+        "platform_scenarios",
+    ):
+        assert not hasattr(REGISTRY, name)
 
 
 def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:
@@ -45,16 +38,10 @@ def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording()
     # from the internal accessor migration.
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         REGISTRY.target_spec("missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
-        REGISTRY.platform_spec("missing-target")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
         REGISTRY.selected_targets(all_platforms=False, target_name="missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
-        REGISTRY.selected_platforms(all_platforms=False, platform_name="missing-target")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         REGISTRY.target_scenarios("missing-target", "both")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
-        REGISTRY.platform_scenarios("missing-target", "both")
 
 
 def test_every_catalog_scope_is_runnable_or_explained() -> None:

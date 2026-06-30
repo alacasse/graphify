@@ -32,7 +32,7 @@ def test_default_registry_skill_effects_declare_sidecar_expectation() -> None:
 def test_loader_derives_scope_locality_and_simulated_notes() -> None:
     data = _valid_data()
     data["platforms"]["mini"]["simulated_linux_layout"] = True
-    data["platforms"]["mini"]["scopes"]["user"]["expected"].append(
+    data["platforms"]["mini"]["scopes"]["user"]["effects"].append(
         {"root": "user_cwd", "relative": "GEMINI.md", "kind": "text_section"}
     )
 

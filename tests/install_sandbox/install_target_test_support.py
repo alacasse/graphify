@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 import yaml
@@ -32,12 +31,12 @@ def valid_registry_data() -> dict[str, Any]:
                 "project_skill": ".mini/skills/graphify/SKILL.md",
                 "scopes": {
                     "user": {
-                        "expected": [skill_effect_data()],
+                        "effects": [skill_effect_data()],
                         "uninstall_command": None,
                         "risk_notes": [PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE],
                     },
                     "project": {
-                        "expected": [
+                        "effects": [
                             {"root": "project", "relative": ".mini/skills/graphify/SKILL.md"},
                             {"kind": "text_section", "root": "project", "relative": "AGENTS.md"},
                         ],
@@ -65,13 +64,6 @@ def valid_registry_data() -> dict[str, Any]:
             }
         ],
     }
-
-
-def valid_effects_registry_data() -> dict[str, Any]:
-    data = deepcopy(valid_registry_data())
-    for scope in data["platforms"]["mini"]["scopes"].values():
-        scope["effects"] = scope.pop("expected")
-    return data
 
 
 def expect_invalid_registry(data: dict[str, Any], match: str) -> None:

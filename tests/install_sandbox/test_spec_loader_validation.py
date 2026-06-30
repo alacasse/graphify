@@ -125,7 +125,7 @@ def test_loader_rejects_unknown_policy_cwd_root_before_catalog_validation() -> N
 
 def test_loader_rejects_unknown_expected_root() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["root"] = "repo_mount"
+    data["platforms"]["mini"]["scopes"]["user"]["effects"][0]["root"] = "repo_mount"
 
     _expect_invalid(data, "unknown expected root")
 
@@ -166,11 +166,11 @@ def test_loader_rejects_invalid_commands() -> None:
 
 def test_loader_rejects_invalid_relative_paths() -> None:
     absolute = _valid_data()
-    absolute["platforms"]["mini"]["scopes"]["user"]["expected"][0]["relative"] = "/tmp/SKILL.md"
+    absolute["platforms"]["mini"]["scopes"]["user"]["effects"][0]["relative"] = "/tmp/SKILL.md"
     _expect_invalid(absolute, "must not be absolute")
 
     escaping = _valid_data()
-    escaping["platforms"]["mini"]["scopes"]["user"]["expected"][0]["relative"] = "../SKILL.md"
+    escaping["platforms"]["mini"]["scopes"]["user"]["effects"][0]["relative"] = "../SKILL.md"
     _expect_invalid(escaping, "must not escape")
 
 

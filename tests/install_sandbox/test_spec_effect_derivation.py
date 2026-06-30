@@ -17,14 +17,14 @@ def test_loader_derives_skill_sidecar_kind_and_rejects_explicit_wrong_kind() -> 
     assert derived.expected[0].skill_sidecar_expectation == install_surface_models.SkillSidecarExpectation()
 
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["kind"] = "file"
+    data["platforms"]["mini"]["scopes"]["user"]["effects"][0]["kind"] = "file"
 
     _expect_invalid(data, "SKILL.md effects must use kind: skill or omit kind")
 
 
 def test_loader_derives_plain_file_effect_from_non_skill_relative_path() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         {"root": "home", "relative": ".mini/config.toml", "remove_on_uninstall": False}
     ]
 
@@ -43,7 +43,7 @@ def test_loader_derives_plain_file_effect_from_non_skill_relative_path() -> None
 
 def test_loader_rejects_removed_plugin_file_kind() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"][0] = {
+    data["platforms"]["mini"]["scopes"]["user"]["effects"][0] = {
         "kind": "plugin_file",
         "root": "home",
         "relative": ".mini/plugins/graphify.js",
@@ -54,14 +54,14 @@ def test_loader_rejects_removed_plugin_file_kind() -> None:
 
 def test_loader_rejects_unknown_effect_kind() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"][0]["kind"] = "mystery"
+    data["platforms"]["mini"]["scopes"]["user"]["effects"][0]["kind"] = "mystery"
 
     _expect_invalid(data, "unknown effect kind")
 
 
 def test_loader_derives_json_hook_detail_names() -> None:
     single = _valid_data()
-    single["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    single["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         {
             "kind": "json_hooks",
             "root": "home",
@@ -78,7 +78,7 @@ def test_loader_derives_json_hook_detail_names() -> None:
     assert single_json.hooks[0].detail_name == "graphify_hook_present"
 
     multiple = _valid_data()
-    multiple["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    multiple["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         {
             "kind": "json_hooks",
             "root": "home",
@@ -99,7 +99,7 @@ def test_loader_derives_json_hook_detail_names() -> None:
 
 def test_loader_derives_json_plugin_relative_from_paired_payload() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         _skill(),
         {"root": "home", "relative": ".mini/plugins/graphify.js"},
         {"kind": "json_plugin", "root": "home", "relative": ".mini/config.json", "schema_name": "mini_config"},
@@ -121,14 +121,14 @@ def test_loader_derives_json_plugin_relative_from_paired_payload() -> None:
 
 def test_loader_rejects_unpaired_or_ambiguous_json_plugin_payloads() -> None:
     missing_plugin = _valid_data()
-    missing_plugin["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    missing_plugin["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         _skill(),
         {"kind": "json_plugin", "root": "home", "relative": ".mini/config.json", "schema_name": "mini_config"},
     ]
     _expect_invalid(missing_plugin, "one paired JavaScript plugin payload")
 
     ambiguous_plugin = _valid_data()
-    ambiguous_plugin["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    ambiguous_plugin["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         _skill(),
         {"root": "home", "relative": ".mini/plugins/graphify.js"},
         {"root": "home", "relative": ".mini/plugins/extra.js"},
@@ -139,7 +139,7 @@ def test_loader_rejects_unpaired_or_ambiguous_json_plugin_payloads() -> None:
 
 def test_loader_derives_text_section_policies() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["expected"] = [
+    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
         _skill(),
         {"kind": "text_section", "root": "home", "relative": ".claude/CLAUDE.md", "marker": "# graphify"},
     ]

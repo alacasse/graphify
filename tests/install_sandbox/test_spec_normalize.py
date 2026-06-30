@@ -84,6 +84,8 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
 
 
 def test_normalized_scope_emits_legacy_expected_compatibility_alias() -> None:
+    # LR-B7 owns removal of this normalized output alias. Registry input is
+    # already effects-only, but reports/summary consumers still see both keys.
     normalized = normalize_default_registry()
     codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
     effects_hook = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")

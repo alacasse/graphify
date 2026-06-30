@@ -55,5 +55,7 @@ def test_default_yaml_runnable_scopes_use_effects_key(spec_path: Path) -> None:
 
     assert data["scopes"]
     for scope in data["scopes"].values():
+        # Checked-in runnable scopes are registry input, so LR-B6 requires
+        # effects-only vocabulary here. Normalized output aliases are LR-B7.
         assert "effects" in scope
         assert "expected" not in scope

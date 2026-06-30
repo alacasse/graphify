@@ -8,6 +8,15 @@ from tools.install_sandbox.registry.spec_loader import load_registry_from_data
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
 
+def test_registry_input_fixture_uses_effects_only_for_runnable_scopes() -> None:
+    data = _valid_data()
+
+    for platform in data["platforms"].values():
+        for scope in platform["scopes"].values():
+            assert "effects" in scope
+            assert "expected" not in scope
+
+
 def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:
     effects_data = _valid_data()
 
@@ -20,6 +29,8 @@ def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:
     assert not hasattr(user, "effects")
     assert not hasattr(project, "effects")
     normalized_user = normalize_registry(registry)["platforms"]["mini"]["scopes"]["user"]
+    # LR-B7 owns removal of normalized output aliases; LR-B6 only removes
+    # legacy `expected` from registry input.
     assert normalized_user["effects"] == normalized_user["expected"]
 
 

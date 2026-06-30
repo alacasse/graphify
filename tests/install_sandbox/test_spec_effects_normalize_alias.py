@@ -4,6 +4,8 @@ from tests.install_sandbox.install_target_test_support import normalize_default_
 
 
 def test_normalized_registry_exposes_effects_alias_without_dropping_expected() -> None:
+    # LR-B7 owns removal of normalized-output `expected`; LR-B6 keeps this
+    # compatibility alias while banning `expected` as registry input.
     normalized = normalize_default_registry()
     codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
 

@@ -536,8 +536,8 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
                         "reason": "Tier 1 sandbox validates Graphify-owned installer file effects only.",
                     },
                     "target_runtime_validation_sections": [{"section_title": "Synthetic Runtime", "status": "declared"}],
-                    "platform_coverage": [],
-                    "platform_coverage_summary": {},
+                    "target_coverage": [],
+                    "target_coverage_summary": {},
                     "scenario_count": 1,
                     "graphify_file_effect_pass_count": 0,
                     "graphify_file_effect_fail_count": 1,
@@ -584,12 +584,18 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     assert "target_tool_runtime" not in manifest
     assert "platforms" not in manifest
     assert "selected_targets" not in manifest
+    assert "platform_coverage" not in manifest
+    assert "platform_coverage_summary" not in manifest
     assert "coverage_records" not in manifest
     assert "runtime_limitation_sections" not in manifest
     assert manifest["scenario_count"] == len(manifest["results"])
     assert manifest["graphify_file_effect_fail_count"] == 1
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must project target_coverage_summary into runner manifests; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
 
@@ -616,8 +622,8 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
             },
         )
         target_runtime_validation_sections = ()
-        platform_coverage_summary = {
-            "registered_platform_count": 1,
+        target_coverage_summary = {
+            "registered_target_count": 1,
             "requested_scope": "project",
             "runnable_scope_count": 1,
             "universal_scenario_count": 0,
@@ -683,7 +689,7 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
     assert manifest["graphify_file_effect_fail_count"] == 1
     assert manifest["pass_count"] == 1
     assert manifest["fail_count"] == 1
-    assert manifest["platform_coverage_summary"]["universal_scenario_count"] == 1
+    assert manifest["target_coverage_summary"]["universal_scenario_count"] == 1
 
 
 def test_install_graphify_version_probe_failure_is_precondition(monkeypatch, tmp_path) -> None:

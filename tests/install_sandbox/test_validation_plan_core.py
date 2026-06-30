@@ -61,6 +61,10 @@ def test_validation_plan_rejects_unknown_platform() -> None:
         validation_plan.build_validation_plan(registry, all_targets=False, target_name="missing", scope="project")
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must rename the public plan summary to target_coverage_summary; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents() -> None:
     registry = planner_registry()
 
@@ -125,8 +129,8 @@ def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents(
         },
     )
     assert plan.target_runtime_validation_sections == ()
-    assert plan.platform_coverage_summary == {
-        "registered_platform_count": 3,
+    assert plan.target_coverage_summary == {
+        "registered_target_count": 3,
         "requested_scope": "project",
         "runnable_scope_count": 3,
         "universal_scenario_count": 2,
@@ -180,6 +184,10 @@ def test_validation_work_item_is_frozen_plan_owned_model() -> None:
         work_item.kind = "disposable_artifact"  # type: ignore[misc]
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must rename the public plan summary to target_coverage_summary; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
@@ -230,8 +238,8 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
     assert [scenario.scenario_id for scenario in plan.disposable_artifacts] == ["purge-disposable-graphify-out"]
     assert plan.synthetic_scenario_count == 3
     assert plan.scenario_count == 7
-    assert plan.platform_coverage_summary == {
-        "registered_platform_count": 2,
+    assert plan.target_coverage_summary == {
+        "registered_target_count": 2,
         "requested_scope": "both",
         "runnable_scope_count": 4,
         "universal_scenario_count": 3,
@@ -261,6 +269,10 @@ def test_validation_plan_rejects_unknown_explicit_target_names() -> None:
         )
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must accept target_coverage_summary constructor input; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_accepts_owner_named_selected_targets_constructor_input() -> None:
     plan = validation_plan.ValidationPlan(
         selected_targets=("codex",),
@@ -270,7 +282,7 @@ def test_validation_plan_accepts_owner_named_selected_targets_constructor_input(
         disposable_artifacts=(),
         coverage_records=(),
         target_runtime_validation_sections=(),
-        platform_coverage_summary={"requested_scope": "project"},
+        target_coverage_summary={"requested_scope": "project"},
     )
 
     assert plan.selected_targets == ("codex",)

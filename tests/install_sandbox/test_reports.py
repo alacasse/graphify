@@ -177,6 +177,10 @@ def test_report_command_artifact_summary_characterizes_command_text_precedence(t
     )
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 3 must render target coverage and target scenario labels; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_report_markdown_generation() -> None:
     manifest = {
         "graphify_file_effect_pass_count": 1,
@@ -196,9 +200,9 @@ def test_report_markdown_generation() -> None:
         "preflight": {"project": "/tmp/graphify-project"},
         "risk_status_values": reports.known_status_values(),
         "target_runtime_verification": {"performed": False},
-        "platform_coverage": [
+        "target_coverage": [
             {
-                "platform": "codex",
+                "target": "codex",
                 "scope": "project",
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--project", "--platform", "codex"],
@@ -217,7 +221,7 @@ def test_report_markdown_generation() -> None:
         "results": [
             {
                 "id": "codex-project",
-                "platform": "codex",
+                "target": "codex",
                 "scope": "project",
                 "passed": True,
                 "graphify_file_effects_passed": True,
@@ -233,7 +237,7 @@ def test_report_markdown_generation() -> None:
             },
             {
                 "id": "cursor-project",
-                "platform": "cursor",
+                "target": "cursor",
                 "scope": "project",
                 "passed": False,
                 "graphify_file_effects_passed": False,
@@ -259,12 +263,12 @@ def test_report_markdown_generation() -> None:
         "# Graphify Install Sandbox Report",
         "## Environment",
         "Synthetic Linux",
-        "| Platform | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |",
+        "| Target | Scope | Scenario | Graphify File Effects | Overall Status | Duration | Transcript |",
         "codex-project",
         "- Scenario count: 2.",
         "Target runtime verification: not performed by this Tier 1 file-effect sandbox.",
-        "## Platform Coverage",
-        "| Platform | Scope | Coverage | Graphify Installer Command |",
+        "## Target Coverage",
+        "| Target | Scope | Coverage | Graphify Installer Command |",
         "| codex | project | runnable | graphify install --project --platform codex |",
         "graphify cursor install",
         "boom",
@@ -283,7 +287,7 @@ def test_report_markdown_omits_target_runtime_validation_sections_when_metadata_
     markdown = reports.render_report_md(
         {
             "results": [],
-            "platform_coverage": [],
+            "target_coverage": [],
             "windows_validation": {
                 "status": "legacy_payload_consistency_only",
                 "strategy": "legacy field must not render",
@@ -310,7 +314,7 @@ def test_target_runtime_validation_sections_are_registry_declared_manifest_data(
         }
     ]
 
-    markdown = reports.render_report_md({"results": [], "platform_coverage": [], "target_runtime_validation_sections": sections})
+    markdown = reports.render_report_md({"results": [], "target_coverage": [], "target_runtime_validation_sections": sections})
 
     assert "## Arbitrary Target Runtime" in markdown
     assert "declared synthetic strategy" in markdown
@@ -319,12 +323,16 @@ def test_target_runtime_validation_sections_are_registry_declared_manifest_data(
     assert "declared note" in markdown
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 3 must render target_coverage manifest fields and drop platform coverage labels; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> None:
     manifest = {
         "results": [],
-        "platform_coverage": [
+        "target_coverage": [
             {
-                "platform": "codex",
+                "target": "codex",
                 "scope": "project",
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--platform", "codex"],
@@ -354,7 +362,7 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
 
     markdown = reports.render_report_md(manifest)
 
-    assert "## Platform Coverage" in markdown
+    assert "## Target Coverage" in markdown
     assert "| codex | project | runnable | graphify install --platform codex |" in markdown
     assert "## Projected Runtime Boundary" in markdown
     assert "render manifest projection only" in markdown
@@ -363,16 +371,24 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
     assert "legacy alias" not in markdown
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must rename manifest projection input to target_coverage_summary; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
     assert set(manifest_projection.ManifestProjectionPlan.__annotations__) == {
         "standard_validation_count",
         "coverage_records",
         "target_runtime_validation_sections",
-        "platform_coverage_summary",
+        "target_coverage_summary",
         "target_runtime_verification",
     }
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must emit target_coverage manifest primitives; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_manifest_projection_returns_manifest_primitives() -> None:
     class Plan:
         standard_validation_count = 1
@@ -385,8 +401,8 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
             },
         )
         target_runtime_validation_sections = ({"section_title": "Projected Runtime", "status": "declared"},)
-        platform_coverage_summary = {
-            "registered_platform_count": 1,
+        target_coverage_summary = {
+            "registered_target_count": 1,
             "requested_scope": "project",
             "runnable_scope_count": 1,
             "universal_scenario_count": 0,
@@ -408,16 +424,16 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
     assert projected == {
         "target_runtime_verification": {"performed": False, "reason": "file effects only"},
         "target_runtime_validation_sections": [{"section_title": "Projected Runtime", "status": "declared"}],
-        "platform_coverage": [
+        "target_coverage": [
             {
-                "platform": "codex",
+                "target": "codex",
                 "scope": "project",
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--platform", "codex"],
             }
         ],
-        "platform_coverage_summary": {
-            "registered_platform_count": 1,
+        "target_coverage_summary": {
+            "registered_target_count": 1,
             "requested_scope": "project",
             "runnable_scope_count": 1,
             "universal_scenario_count": 1,
@@ -439,8 +455,8 @@ def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> N
         return {
             "target_runtime_verification": {"performed": False},
             "target_runtime_validation_sections": [],
-            "platform_coverage": [],
-            "platform_coverage_summary": {"universal_scenario_count": 1},
+            "target_coverage": [],
+            "target_coverage_summary": {"universal_scenario_count": 1},
             "scenario_count": len(results_list),
         }
 
@@ -465,7 +481,7 @@ def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> N
     assert run_result.failed == 1
     assert manifest["graphify_version"] == "9.9.9"
     assert manifest["scenario_count"] == 2
-    assert manifest["platform_coverage_summary"] == {"universal_scenario_count": 1}
+    assert manifest["target_coverage_summary"] == {"universal_scenario_count": 1}
     assert manifest["graphify_file_effect_pass_count"] == 1
     assert manifest["graphify_file_effect_fail_count"] == 1
     assert manifest["risk_status_values"] == reporting_status.known_status_values()
@@ -482,7 +498,7 @@ def test_harness_run_output_writer_preserves_summary_order(monkeypatch, tmp_path
 
         def manifest(self) -> dict[str, object]:
             calls.append("manifest")
-            return {"results": [], "platform_coverage": [], "pass_count": 1, "fail_count": 0}
+            return {"results": [], "target_coverage": [], "pass_count": 1, "fail_count": 0}
 
     def write_manifest(path, manifest):
         calls.append("write-manifest")
@@ -529,7 +545,7 @@ def test_harness_run_output_writer_preserves_summary_order(monkeypatch, tmp_path
 def test_write_report_markdown(tmp_path) -> None:
     path = tmp_path / "report.md"
 
-    reports.write_report_md(path, {"results": [], "platform_coverage": []})
+    reports.write_report_md(path, {"results": [], "target_coverage": []})
 
     assert "Graphify Install Sandbox Report" in path.read_text(encoding="utf-8")
 

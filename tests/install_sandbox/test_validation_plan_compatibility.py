@@ -10,8 +10,8 @@ from tests.install_sandbox.validation_plan_test_support import planner_registry
 
 
 PUBLIC_COMPATIBILITY_OUTPUT_KEYS = {
-    "platform_coverage",
-    "platform_coverage_summary",
+    "target_coverage",
+    "target_coverage_summary",
     "target_runtime_validation_sections",
     "target_runtime_verification",
 }
@@ -23,6 +23,7 @@ VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES = {
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
         "platform_coverage",
+        "platform_coverage_summary",
         "runtime_limitation_sections",
     },
     "properties": {
@@ -31,6 +32,7 @@ VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES = {
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
         "platform_coverage",
+        "platform_coverage_summary",
         "runtime_limitation_sections",
     },
     "helpers": {
@@ -40,6 +42,10 @@ VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES = {
 }
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must replace platform_coverage_summary with target_coverage_summary; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape() -> None:
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
     target_selector_signature = inspect.signature(validation_plan.selected_targets)
@@ -52,7 +58,7 @@ def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape
         "disposable_artifacts",
         "coverage_records",
         "target_runtime_validation_sections",
-        "platform_coverage_summary",
+        "target_coverage_summary",
         "target_runtime_verification",
     }
     assert not set(plan_signature.parameters) & VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES["constructor"]
@@ -61,24 +67,29 @@ def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape
     assert set(target_selector_signature.parameters) >= {"all_targets", "target_name", "selected_target_names"}
     assert callable(validation_plan.selected_targets)
     assert PUBLIC_COMPATIBILITY_OUTPUT_KEYS == {
-        "platform_coverage",
-        "platform_coverage_summary",
+        "target_coverage",
+        "target_coverage_summary",
         "target_runtime_validation_sections",
         "target_runtime_verification",
     }
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must emit target_coverage fields and drop platform_coverage output; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:
     class Plan:
         standard_validation_count = 1
         coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
         target_runtime_validation_sections = ({"section_title": "Target Runtime", "status": "declared"},)
-        platform_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
+        target_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
         target_runtime_verification = {"performed": False}
 
         selected_platforms = ("legacy-platform-property",)
         selected_targets = ("future-target-property",)
         platform_coverage = ({"platform": "internal-alias", "status": "must-not-project"},)
+        platform_coverage_summary = {"requested_scope": "legacy"}
         runtime_limitation_sections = ({"section_title": "Internal Alias", "status": "must-not-project"},)
 
     projected = manifest_projection.validation_plan_manifest_projection(
@@ -87,14 +98,21 @@ def test_validation_plan_manifest_projection_preserves_public_output_names_not_i
     )
 
     assert set(projected) == PUBLIC_COMPATIBILITY_OUTPUT_KEYS | {"scenario_count"}
-    assert projected["platform_coverage"] == [{"platform": "codex", "scope": "project", "status": "runnable"}]
+    assert projected["target_coverage"] == [{"target": "codex", "scope": "project", "status": "runnable"}]
+    assert projected["target_coverage_summary"] == {"requested_scope": "project", "universal_scenario_count": 1}
     assert projected["target_runtime_validation_sections"] == [{"section_title": "Target Runtime", "status": "declared"}]
+    assert "platform_coverage" not in projected
+    assert "platform_coverage_summary" not in projected
     assert "selected_platforms" not in projected
     assert "selected_targets" not in projected
     assert "coverage_records" not in projected
     assert "runtime_limitation_sections" not in projected
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must make target_coverage_summary the constructor field; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_validation_plan_constructor_rejects_pruned_compatibility_aliases() -> None:
     required = {
         "selected_targets": ("codex",),
@@ -104,7 +122,7 @@ def test_validation_plan_constructor_rejects_pruned_compatibility_aliases() -> N
         "disposable_artifacts": (),
         "coverage_records": (),
         "target_runtime_validation_sections": (),
-        "platform_coverage_summary": {"requested_scope": "project"},
+        "target_coverage_summary": {"requested_scope": "project"},
     }
 
     for alias_name in VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES["constructor"] | {

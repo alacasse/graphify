@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tools.install_sandbox.reporting import artifacts
 from tools.install_sandbox.reporting import agent_summary
 
@@ -131,6 +133,10 @@ def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
     assert "target_tool_runtime" not in json.dumps(summary)
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 3 must expose target, not platform, in failure summaries; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
     output = tmp_path / "out"
     write_json(
@@ -142,7 +148,7 @@ def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
             "results": [
                 {
                     "id": "codex-project",
-                    "platform": "codex",
+                    "target": "codex",
                     "scope": "project",
                     "passed": False,
                     "reproduction_command": "graphify install --project --platform codex",
@@ -169,6 +175,8 @@ def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
 
     assert summary["status"] == "FAIL"
     assert summary["failure_count"] == 1
+    assert summary["failures"][0]["target"] == "codex"
+    assert "platform" not in summary["failures"][0]
     assert summary["failures"][0]["failed_checks"] == [
         {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"}
     ]
@@ -189,7 +197,7 @@ def test_fail_manifest_uses_command_snippets_when_assertions_have_no_failed_chec
             "results": [
                 {
                     "id": "cursor-project",
-                    "platform": "cursor",
+                    "target": "cursor",
                     "scope": "project",
                     "passed": False,
                     "command_artifact": {

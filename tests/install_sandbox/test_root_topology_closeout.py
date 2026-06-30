@@ -7,6 +7,8 @@ import inspect
 import types
 from pathlib import Path
 
+import pytest
+
 
 INSTALL_SANDBOX_ROOT = Path(__file__).parents[2] / "tools" / "install_sandbox"
 TESTS_ROOT = Path(__file__).parents[2] / "tests"
@@ -108,6 +110,7 @@ VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
         "platform_coverage",
+        "platform_coverage_summary",
         "runtime_limitation_sections",
     },
     "property_aliases": {
@@ -116,6 +119,7 @@ VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
         "platform_coverage",
+        "platform_coverage_summary",
         "runtime_limitation_sections",
     },
     "helper_aliases": {
@@ -124,8 +128,8 @@ VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
 }
 
 VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS = {
-    "platform_coverage",
-    "platform_coverage_summary",
+    "target_coverage",
+    "target_coverage_summary",
     "target_runtime_validation_sections",
     "target_runtime_verification",
 }
@@ -423,6 +427,10 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
         assert callable(getattr(sandbox_runner, public_name))
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must prune platform_coverage_summary and expose target_coverage_summary; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_root_topology_closeout_characterizes_validation_plan_alias_surface() -> None:
     validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
@@ -441,8 +449,8 @@ def test_root_topology_closeout_characterizes_validation_plan_alias_surface() ->
     assert not any(hasattr(validation_plan, public_name) for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["helper_aliases"])
     assert set(target_selector_signature.parameters) >= {"all_targets", "target_name", "selected_target_names"}
     assert VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS == {
-        "platform_coverage",
-        "platform_coverage_summary",
+        "target_coverage",
+        "target_coverage_summary",
         "target_runtime_validation_sections",
         "target_runtime_verification",
     }
@@ -516,6 +524,10 @@ def test_root_topology_closeout_names_slice2_runtime_orchestration_owner() -> No
     assert slice2_owner_module.rsplit(".", 1)[0] == "tools.install_sandbox.runtime"
 
 
+@pytest.mark.xfail(
+    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must project target_coverage fields through harness manifests; not permanent compatibility preservation.",
+    strict=True,
+)
 def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fields() -> None:
     harness_run = importlib.import_module("tools.install_sandbox.reporting.harness_run")
 
@@ -523,7 +535,7 @@ def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fi
         standard_validation_count = 1
         coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
         target_runtime_validation_sections = ({"section_title": "Runtime Boundary", "status": "declared"},)
-        platform_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
+        target_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
         target_runtime_verification = {"performed": False}
 
     manifest = harness_run.harness_run_result(
@@ -540,6 +552,6 @@ def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fi
 
     assert manifest["target_runtime_verification"] == {"performed": False}
     assert manifest["target_runtime_validation_sections"] == [{"section_title": "Runtime Boundary", "status": "declared"}]
-    assert manifest["platform_coverage"] == [{"platform": "codex", "scope": "project", "status": "runnable"}]
-    assert manifest["platform_coverage_summary"]["universal_scenario_count"] == 1
+    assert manifest["target_coverage"] == [{"target": "codex", "scope": "project", "status": "runnable"}]
+    assert manifest["target_coverage_summary"]["universal_scenario_count"] == 1
     assert manifest["scenario_count"] == 2

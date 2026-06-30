@@ -44,7 +44,7 @@ def test_validation_plan_orders_all_platforms_and_standard_scenarios() -> None:
         }
     )
 
-    plan = validation_plan.build_validation_plan(registry, all_platforms=True, platform_name=None, scope="both")
+    plan = validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="both")
 
     assert plan.platforms == ("alpha", "zeta")
     assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
@@ -58,17 +58,17 @@ def test_validation_plan_rejects_unknown_platform() -> None:
     registry = install_target_catalog.ScenarioRegistry({"known": install_target_models.PlatformSpec(name="known")})
 
     with pytest.raises(RuntimeError, match="unknown sandbox platform"):
-        validation_plan.build_validation_plan(registry, all_platforms=False, platform_name="missing", scope="project")
+        validation_plan.build_validation_plan(registry, all_targets=False, target_name="missing", scope="project")
 
 
-def test_validation_plan_preserves_explicit_platform_order_and_full_plan_contents() -> None:
+def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents() -> None:
     registry = planner_registry()
 
     plan = validation_plan.build_validation_plan(
         registry,
-        all_platforms=False,
-        platform_name=None,
-        selected_platform_names=("gemini", "claude", "codex"),
+        all_targets=False,
+        target_name=None,
+        selected_target_names=("gemini", "claude", "codex"),
         scope="project",
     )
 
@@ -140,9 +140,9 @@ def test_validation_plan_builds_ordered_typed_work_items_from_existing_buckets()
 
     plan = validation_plan.build_validation_plan(
         registry,
-        all_platforms=False,
-        platform_name=None,
-        selected_platform_names=("gemini", "claude", "codex"),
+        all_targets=False,
+        target_name=None,
+        selected_target_names=("gemini", "claude", "codex"),
         scope="project",
     )
 
@@ -204,8 +204,8 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
 
     plan = validation_plan.build_validation_plan(
         registry,
-        all_platforms=False,
-        selected_platform_names=("beta", "alpha"),
+        all_targets=False,
+        selected_target_names=("beta", "alpha"),
         scope="both",
     )
 
@@ -248,14 +248,31 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
     ]
 
 
-def test_validation_plan_rejects_unknown_explicit_platform_names() -> None:
+def test_validation_plan_rejects_unknown_explicit_target_names() -> None:
     registry = planner_registry()
 
     with pytest.raises(RuntimeError, match="unknown sandbox platform\\(s\\): missing, absent"):
         validation_plan.build_validation_plan(
             registry,
-            all_platforms=False,
-            platform_name=None,
-            selected_platform_names=("gemini", "missing", "absent"),
+            all_targets=False,
+            target_name=None,
+            selected_target_names=("gemini", "missing", "absent"),
             scope="project",
         )
+
+
+def test_validation_plan_accepts_owner_named_selected_targets_constructor_input() -> None:
+    plan = validation_plan.ValidationPlan(
+        selected_targets=("codex",),
+        requested_scope="project",
+        standard_scenarios=(),
+        universal_uninstall=(),
+        disposable_artifacts=(),
+        coverage_records=(),
+        target_runtime_validation_sections=(),
+        platform_coverage_summary={"requested_scope": "project"},
+    )
+
+    assert plan.platforms == ("codex",)
+    assert plan.selected_targets == ("codex",)
+    assert plan.selected_platforms == ("codex",)

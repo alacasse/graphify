@@ -7,6 +7,7 @@ import pytest
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.reporting import manifest_projection
 from tools.install_sandbox.targets import install_target_models
+from tests.install_sandbox.validation_plan_test_support import planner_registry
 
 
 PUBLIC_COMPATIBILITY_OUTPUT_KEYS = {
@@ -26,7 +27,6 @@ VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES = {
     },
     "properties": {
         "selected_platforms",
-        "selected_targets",
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
         "platform_coverage",
@@ -39,23 +39,10 @@ VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES = {
 }
 
 
-def test_validation_plan_does_not_accept_selected_targets_constructor_input() -> None:
-    with pytest.raises(TypeError, match="selected_targets"):
-        validation_plan.ValidationPlan(  # type: ignore[call-arg]
-            selected_targets=("codex",),
-            requested_scope="project",
-            standard_scenarios=(),
-            universal_uninstall=(),
-            disposable_artifacts=(),
-            coverage_records=(),
-            target_runtime_validation_sections=(),
-            platform_coverage_summary={},
-        )
-
-
 def test_validation_plan_alias_inventory_separates_output_shape_from_pruning_candidates() -> None:
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
     selector_signature = inspect.signature(validation_plan.selected_platforms)
+    target_selector_signature = inspect.signature(validation_plan.selected_targets)
 
     assert set(plan_signature.parameters) & VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["constructor"] == {
         "selected_platforms",
@@ -64,6 +51,7 @@ def test_validation_plan_alias_inventory_separates_output_shape_from_pruning_can
         "platform_coverage",
         "runtime_limitation_sections",
     }
+    assert "selected_targets" in plan_signature.parameters
     assert not (PUBLIC_COMPATIBILITY_OUTPUT_KEYS & VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["constructor"]) - {
         "platform_coverage"
     }
@@ -73,8 +61,9 @@ def test_validation_plan_alias_inventory_separates_output_shape_from_pruning_can
     assert set(selector_signature.parameters) & VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["helpers"] == {
         "selected_platform_names",
     }
+    assert set(target_selector_signature.parameters) >= {"all_targets", "target_name", "selected_target_names"}
+    assert callable(validation_plan.selected_targets)
     assert callable(validation_plan.selected_platforms)
-    assert "selected_targets" not in plan_signature.parameters
 
 
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:
@@ -144,7 +133,7 @@ def test_validation_plan_constructor_aliases_are_limited_to_supported_compatibil
         **required,
     )
     owner_constructed = validation_plan.ValidationPlan(
-        platforms=("codex",),
+        selected_targets=("codex",),
         universal_uninstall=(),
         disposable_artifacts=(),
         coverage_records=(),
@@ -154,15 +143,6 @@ def test_validation_plan_constructor_aliases_are_limited_to_supported_compatibil
 
     assert alias_constructed == owner_constructed
     assert alias_constructed.selected_targets == ("codex",)
-    with pytest.raises(TypeError, match="selected_targets"):
-        validation_plan.ValidationPlan(  # type: ignore[call-arg]
-            selected_targets=("codex",),
-            universal_uninstall=(),
-            disposable_artifacts=(),
-            coverage_records=(),
-            target_runtime_validation_sections=(),
-            **required,
-        )
     with pytest.raises(TypeError, match="scenario_count"):
         validation_plan.ValidationPlan(  # type: ignore[call-arg]
             platforms=("codex",),
@@ -228,3 +208,29 @@ def test_validation_plan_constructor_derives_work_items_without_changing_alias_p
     assert plan.standard_validation_count == 1
     assert plan.synthetic_scenario_count == 1
     assert plan.scenario_count == 2
+
+
+def test_validation_plan_platform_named_build_selection_remains_compatibility_path() -> None:
+    registry = planner_registry()
+
+    selected = validation_plan.selected_platforms(
+        registry,
+        all_platforms=False,
+        platform_name=None,
+        selected_platform_names=("gemini", "codex"),
+    )
+    plan = validation_plan.build_validation_plan(
+        registry,
+        all_platforms=False,
+        platform_name=None,
+        selected_platform_names=("gemini", "codex"),
+        scope="project",
+    )
+
+    assert selected == ("gemini", "codex")
+    assert plan.platforms == ("gemini", "codex")
+    assert plan.selected_targets == ("gemini", "codex")
+    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+        ("gemini", "project"),
+        ("codex", "project"),
+    ]

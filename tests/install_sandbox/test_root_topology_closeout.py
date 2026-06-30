@@ -92,6 +92,7 @@ SANDBOX_RUNNER_PRUNING_CANDIDATES = {
 
 VALIDATION_PLAN_ROOT_SEAM_APIS = {
     "build_validation_plan",
+    "selected_targets",
     "ValidationPlan",
     "ValidationWorkItem",
     "HarnessPolicy",
@@ -108,7 +109,6 @@ VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
     },
     "property_aliases": {
         "selected_platforms",
-        "selected_targets",
         "universal_uninstall_scenarios",
         "disposable_artifact_scenarios",
         "platform_coverage",

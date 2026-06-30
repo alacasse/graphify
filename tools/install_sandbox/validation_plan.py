@@ -70,6 +70,7 @@ class ValidationPlan:
         requested_scope: str,
         standard_scenarios: tuple[Scenario, ...],
         platform_coverage_summary: dict[str, object],
+        selected_targets: tuple[str, ...] | None = None,
         platforms: tuple[str, ...] | None = None,
         selected_platforms: tuple[str, ...] | None = None,
         universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...] | None = None,
@@ -82,13 +83,15 @@ class ValidationPlan:
         runtime_limitation_sections: tuple[dict[str, object], ...] | None = None,
         target_runtime_verification: dict[str, object] | None = None,
     ) -> None:
-        resolved_platforms = platforms if platforms is not None else selected_platforms
+        resolved_platforms = selected_targets if selected_targets is not None else platforms
+        if resolved_platforms is None:
+            resolved_platforms = selected_platforms
         resolved_universal = universal_uninstall if universal_uninstall is not None else universal_uninstall_scenarios
         resolved_disposable = disposable_artifacts if disposable_artifacts is not None else disposable_artifact_scenarios
         resolved_coverage = coverage_records if coverage_records is not None else platform_coverage
         resolved_runtime = target_runtime_validation_sections if target_runtime_validation_sections is not None else runtime_limitation_sections
         if resolved_platforms is None:
-            raise TypeError("ValidationPlan requires platforms or selected_platforms")
+            raise TypeError("ValidationPlan requires selected_targets, platforms, or selected_platforms")
         if resolved_universal is None:
             raise TypeError("ValidationPlan requires universal_uninstall or universal_uninstall_scenarios")
         if resolved_disposable is None:
@@ -165,6 +168,26 @@ def _selected_scopes(scope: str) -> tuple[str, ...]:
     raise RuntimeError(f"unknown sandbox scope: {scope}")
 
 
+def selected_targets(
+    registry: InstallTargetCatalog,
+    *,
+    all_targets: bool,
+    target_name: str | None,
+    selected_target_names: Iterable[str] | None = None,
+) -> tuple[str, ...]:
+    if selected_target_names is not None:
+        targets = tuple(selected_target_names)
+        unknown = [name for name in targets if name not in registry.specs]
+        if unknown:
+            raise RuntimeError(f"unknown sandbox platform(s): {', '.join(unknown)}")
+        return targets
+    if all_targets:
+        return tuple(sorted(registry.specs))
+    if target_name is None or target_name not in registry.specs:
+        raise RuntimeError(f"unknown sandbox platform(s): {target_name}")
+    return (target_name,)
+
+
 def selected_platforms(
     registry: InstallTargetCatalog,
     *,
@@ -172,17 +195,12 @@ def selected_platforms(
     platform_name: str | None,
     selected_platform_names: Iterable[str] | None = None,
 ) -> tuple[str, ...]:
-    if selected_platform_names is not None:
-        selected_targets = tuple(selected_platform_names)
-        unknown = [name for name in selected_targets if name not in registry.specs]
-        if unknown:
-            raise RuntimeError(f"unknown sandbox platform(s): {', '.join(unknown)}")
-        return selected_targets
-    if all_platforms:
-        return tuple(sorted(registry.specs))
-    if platform_name is None or platform_name not in registry.specs:
-        raise RuntimeError(f"unknown sandbox platform(s): {platform_name}")
-    return (platform_name,)
+    return selected_targets(
+        registry,
+        all_targets=all_platforms,
+        target_name=platform_name,
+        selected_target_names=selected_platform_names,
+    )
 
 
 def _standard_scenarios(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
@@ -264,7 +282,10 @@ def _coverage_summary(
 def build_validation_plan(
     registry: InstallTargetCatalog,
     *,
-    all_platforms: bool,
+    all_targets: bool | None = None,
+    target_name: str | None = None,
+    selected_target_names: Iterable[str] | None = None,
+    all_platforms: bool | None = None,
     platform_name: str | None = None,
     selected_platform_names: Iterable[str] | None = None,
     scope: str = "both",
@@ -278,26 +299,32 @@ def build_validation_plan(
         registry.validate_roots(declared_roots)
     validate_policy_owned_roots(registry, policy, _selected_policy_root_names(root_registry))
 
-    selected_targets = selected_platforms(
+    resolved_all_targets = all_targets if all_targets is not None else all_platforms
+    if resolved_all_targets is None:
+        raise TypeError("build_validation_plan requires all_targets or all_platforms")
+    resolved_target_name = target_name if target_name is not None else platform_name
+    resolved_selected_target_names = selected_target_names if selected_target_names is not None else selected_platform_names
+
+    selected_target_names_tuple = selected_targets(
         registry,
-        all_platforms=all_platforms,
-        platform_name=platform_name,
-        selected_platform_names=selected_platform_names,
+        all_targets=resolved_all_targets,
+        target_name=resolved_target_name,
+        selected_target_names=resolved_selected_target_names,
     )
-    standard = _standard_scenarios(registry, selected_targets, scope)
-    universal = universal_uninstall_scenarios(registry, selected_targets, scope, policy)
+    standard = _standard_scenarios(registry, selected_target_names_tuple, scope)
+    universal = universal_uninstall_scenarios(registry, selected_target_names_tuple, scope, policy)
     disposable = disposable_artifact_scenarios(registry, scope, policy)
-    coverage = coverage_records(registry, selected_targets, scope)
+    coverage = coverage_records(registry, selected_target_names_tuple, scope)
     return ValidationPlan(
-        platforms=selected_targets,
+        selected_targets=selected_target_names_tuple,
         requested_scope=scope,
         standard_scenarios=standard,
         universal_uninstall=universal,
         disposable_artifacts=disposable,
         coverage_records=coverage,
-        target_runtime_validation_sections=target_runtime_validation_sections(registry, selected_targets, policy),
+        target_runtime_validation_sections=target_runtime_validation_sections(registry, selected_target_names_tuple, policy),
         platform_coverage_summary=_coverage_summary(
-            platforms=selected_targets,
+            platforms=selected_target_names_tuple,
             scope=scope,
             standard_scenarios=standard,
             universal_uninstall_scenarios=universal,

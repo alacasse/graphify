@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
+
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support
+from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
 from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
@@ -135,6 +138,56 @@ def test_run_validation_plan_uses_canonical_matrix_runner_override_shapes(tmp_pa
         "universal-project",
         "purge-disposable-graphify-out",
     ]
+
+
+def test_sandbox_run_environment_exposes_canonical_disposable_override_hook(tmp_path) -> None:
+    runtime = SandboxRunEnvironment.__new__(SandboxRunEnvironment)
+    runtime.runtime_roots = {
+        "output": tmp_path / "out",
+        "project": tmp_path / "project",
+        "user_cwd": tmp_path / "user-cwd",
+    }
+    runtime.roots = {"project": runtime.project, "user_cwd": runtime.user_cwd}
+    runtime.scenario_registry = DEFAULT_SCENARIO_REGISTRY
+
+    for path in (runtime.output, runtime.project, runtime.user_cwd):
+        path.mkdir(parents=True)
+
+    class OracleDouble:
+        def root_path(self, root_name):
+            return runtime.roots[root_name]
+
+    def file_effect_oracle():
+        return OracleDouble()
+
+    def write_file_manifest(*args, **kwargs):
+        return None
+
+    def run_equivalence_check(scenario, env, artifact_dir):
+        return []
+
+    def reset_sandbox_dirs():
+        return None
+
+    def risk_report(scenario, passed):
+        return {"statuses": ["graphify_install_verified"]}
+
+    runtime.file_effect_oracle = file_effect_oracle
+    runtime.write_file_manifest = write_file_manifest
+    runtime.run_equivalence_check = run_equivalence_check
+    runtime.reset_sandbox_dirs = reset_sandbox_dirs
+    runtime.risk_report = risk_report
+
+    def run_disposable(spec, env):
+        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+
+    signature = inspect.signature(SandboxRunEnvironment.scenario_lifecycle_hooks)
+    hooks = runtime.scenario_lifecycle_hooks(run_disposable_artifact_scenario_func=run_disposable)
+
+    assert "run_disposable_artifact_scenario_func" in signature.parameters
+    assert "run_purge_scenario_func" not in signature.parameters
+    assert hooks.matrix_overrides.run_disposable_artifact_scenario is run_disposable
+    assert hooks.matrix_overrides.run_purge_scenario is None
 
 
 def test_run_validation_plan_executes_plan_buckets_in_current_order(tmp_path) -> None:

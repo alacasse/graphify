@@ -338,7 +338,7 @@ class SandboxRunEnvironment:
         *,
         run_scenario_func=None,
         run_universal_uninstall_scenario_func=None,
-        run_purge_scenario_func=None,
+        run_disposable_artifact_scenario_func=None,
     ) -> scenario_lifecycle_support.ScenarioLifecycleHooks:
         oracle = self.file_effect_oracle()
         return scenario_lifecycle_support.ScenarioLifecycleHooks(
@@ -367,7 +367,7 @@ class SandboxRunEnvironment:
             matrix_overrides=scenario_lifecycle_support.MatrixRunnerOverrides(
                 run_scenario=run_scenario_func,
                 run_universal_uninstall_scenario=run_universal_uninstall_scenario_func,
-                run_purge_scenario=run_purge_scenario_func,
+                run_disposable_artifact_scenario=run_disposable_artifact_scenario_func,
             ),
         )
 

@@ -150,18 +150,9 @@ def universal_uninstall_spec_for_scope(scope: str, *, hooks: ScenarioLifecycleHo
 
 
 def run_universal_uninstall_scenario(
-    selected_or_scope: SelectedUniversalUninstallScenario | str,
-    scenarios: list[Scenario] | None = None,
-    env: dict[str, str] | None = None,
+    selected: SelectedUniversalUninstallScenario,
+    env: dict[str, str],
     *,
     hooks: ScenarioLifecycleHooks,
 ) -> dict[str, object]:
-    if isinstance(selected_or_scope, SelectedUniversalUninstallScenario):
-        selected = selected_or_scope
-        scenario_env = env or {}
-    else:
-        if scenarios is None:
-            raise TypeError("scenarios are required when running a universal uninstall by scope")
-        selected = SelectedUniversalUninstallScenario(universal_uninstall_spec_for_scope(selected_or_scope, hooks=hooks), tuple(scenarios))
-        scenario_env = env or {}
-    return UniversalUninstallLifecycle(selected.spec, list(selected.installed_scenarios), scenario_env, hooks).run()
+    return UniversalUninstallLifecycle(selected.spec, list(selected.installed_scenarios), env, hooks).run()

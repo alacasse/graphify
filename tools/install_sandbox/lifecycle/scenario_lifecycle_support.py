@@ -12,11 +12,11 @@ from typing import Callable, Iterable, Protocol
 try:
     from ..targets.install_target_catalog import ScenarioRegistry
     from ..targets.install_target_defaults import default_install_target_catalog
-    from ..targets.install_target_models import DisposableArtifactScenarioSpec, Scenario
+    from ..targets.install_target_models import DisposableArtifactScenarioSpec, Scenario, SelectedUniversalUninstallScenario
 except ImportError:  # pragma: no cover - direct script import fallback
     from targets.install_target_catalog import ScenarioRegistry  # type: ignore[no-redef]
     from targets.install_target_defaults import default_install_target_catalog  # type: ignore[no-redef]
-    from targets.install_target_models import DisposableArtifactScenarioSpec, Scenario  # type: ignore[no-redef]
+    from targets.install_target_models import DisposableArtifactScenarioSpec, Scenario, SelectedUniversalUninstallScenario  # type: ignore[no-redef]
 
 
 DEFAULT_SCENARIO_REGISTRY = default_install_target_catalog()
@@ -396,8 +396,7 @@ class ScenarioArtifacts:
 @dataclass(frozen=True)
 class MatrixRunnerOverrides:
     run_scenario: Callable[[Scenario, dict[str, str]], dict[str, object]] | None = None
-    run_universal_uninstall_scenario: Callable[..., dict[str, object]] | None = None
-    run_purge_scenario: Callable[..., dict[str, object]] | None = None
+    run_universal_uninstall_scenario: Callable[[SelectedUniversalUninstallScenario, dict[str, str]], dict[str, object]] | None = None
     run_disposable_artifact_scenario: Callable[[DisposableArtifactScenarioSpec, dict[str, str]], dict[str, object]] | None = None
 
 

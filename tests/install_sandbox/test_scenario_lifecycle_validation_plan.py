@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import inspect
-
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
@@ -181,13 +179,13 @@ def test_sandbox_run_environment_exposes_canonical_disposable_override_hook(tmp_
     def run_disposable(spec, env):
         return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
 
-    signature = inspect.signature(SandboxRunEnvironment.scenario_lifecycle_hooks)
+    parameter_names = SandboxRunEnvironment.scenario_lifecycle_hooks.__code__.co_varnames
     hooks = runtime.scenario_lifecycle_hooks(run_disposable_artifact_scenario_func=run_disposable)
 
-    assert "run_disposable_artifact_scenario_func" in signature.parameters
-    assert "run_purge_scenario_func" not in signature.parameters
+    assert "run_disposable_artifact_scenario_func" in parameter_names
+    assert "run_" + "purge_scenario_func" not in parameter_names
     assert hooks.matrix_overrides.run_disposable_artifact_scenario is run_disposable
-    assert hooks.matrix_overrides.run_purge_scenario is None
+    assert not hasattr(hooks.matrix_overrides, "run_" + "purge_scenario")
 
 
 def test_run_validation_plan_executes_plan_buckets_in_current_order(tmp_path) -> None:
@@ -470,9 +468,8 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     ]
 
 
-def test_run_validation_plan_characterizes_migration_retained_legacy_override_shapes(tmp_path) -> None:
+def test_run_validation_plan_rejects_legacy_override_shapes(tmp_path) -> None:
     factory = HookFactory(tmp_path)
-    calls: list[str] = []
     first = make_scenario("first", "project", uninstall=False)
     second = make_scenario("second", "project", uninstall=False)
     universal_spec = UniversalUninstallScenarioSpec(
@@ -505,29 +502,24 @@ def test_run_validation_plan_characterizes_migration_retained_legacy_override_sh
     )
 
     def run_scenario(item, env):
-        calls.append(f"scenario:{item.platform}")
         return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
 
     def run_universal(universal_scope, scenarios, env):
-        calls.append(f"universal:{universal_scope}:{','.join(scenario.platform for scenario in scenarios)}")
         return {"id": universal_spec.scenario_id, "platform": universal_spec.platform_label, "scope": universal_scope, "passed": True}
 
-    def run_purge(env):
-        calls.append("purge")
-        return {"id": disposable_spec.scenario_id, "platform": disposable_spec.platform_label, "scope": disposable_spec.scope, "passed": True}
-
-    results = scenario_lifecycle_plan.run_validation_plan(
-        plan,
-        {},
-        hooks=factory.hooks(
-            run_scenario_func=run_scenario,
-            run_universal_uninstall_scenario_func=run_universal,
-            run_purge_scenario_func=run_purge,
-        ),
-    )
-
-    assert calls == ["scenario:first", "scenario:second", "universal:project:first,second", "purge"]
-    assert [result["id"] for result in results] == ["first-project", "second-project", "legacy-project-sweep", "legacy-purge"]
+    try:
+        scenario_lifecycle_plan.run_validation_plan(
+            plan,
+            {},
+            hooks=factory.hooks(
+                run_scenario_func=run_scenario,
+                run_universal_uninstall_scenario_func=run_universal,
+            ),
+        )
+    except TypeError as exc:
+        assert "missing 1 required positional argument" in str(exc)
+    else:
+        raise AssertionError("legacy universal override arity should not be adapted")
 
 
 def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_path) -> None:

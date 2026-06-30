@@ -153,46 +153,5 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
     assert undeclared_path.exists()
 
 
-def test_run_purge_scenario_characterizes_migration_retained_wrapper(tmp_path, monkeypatch) -> None:
-    factory = HookFactory(tmp_path)
-    hooks = factory.hooks()
-    env = {"HOME": str(factory.home)}
-    first = make_disposable_graphify_out_spec()
-    second = DisposableArtifactScenarioSpec(
-        scenario_id="secondary-disposable",
-        platform_label="purge",
-        scope="project",
-        command=("cleanup", "secondary"),
-        cwd_root="project",
-        artifact_subdir="secondary",
-        disposable_path_root="project",
-        disposable_path_relative="secondary",
-        seed_files=(),
-        scope_eligibility=("project",),
-        risk_note="secondary cleanup",
-    )
-    calls: list[tuple[str, object]] = []
-
-    def disposable_specs(scope, *, hooks):
-        calls.append(("select", scope, hooks))
-        return [first, second]
-
-    class FakeDisposableArtifactLifecycle:
-        def __init__(self, spec_arg, env_arg, hooks_arg) -> None:
-            calls.append(("lifecycle", spec_arg, env_arg, hooks_arg))
-
-        def run(self):
-            calls.append(("run",))
-            return {"id": first.scenario_id, "passed": True}
-
-    monkeypatch.setattr(scenario_lifecycle_disposable, "disposable_artifact_scenarios", disposable_specs)
-    monkeypatch.setattr(scenario_lifecycle_disposable, "DisposableArtifactLifecycle", FakeDisposableArtifactLifecycle)
-
-    result = scenario_lifecycle_disposable.run_purge_scenario(env, hooks=hooks)
-
-    assert result == {"id": "purge-disposable-graphify-out", "passed": True}
-    assert calls == [
-        ("select", "project", hooks),
-        ("lifecycle", first, env, hooks),
-        ("run",),
-    ]
+def test_legacy_purge_wrapper_is_absent() -> None:
+    assert not hasattr(scenario_lifecycle_disposable, "run_" + "purge_scenario")

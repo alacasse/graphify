@@ -324,7 +324,6 @@ class HookFactory:
             scenario_lifecycle_support.MatrixRunnerOverrides(
                 run_scenario=overrides.pop("run_scenario_func", None),
                 run_universal_uninstall_scenario=overrides.pop("run_universal_uninstall_scenario_func", None),
-                run_purge_scenario=overrides.pop("run_purge_scenario_func", None),
                 run_disposable_artifact_scenario=overrides.pop("run_disposable_artifact_scenario_func", None),
             ),
         )

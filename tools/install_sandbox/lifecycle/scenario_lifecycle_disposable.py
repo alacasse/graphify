@@ -110,13 +110,6 @@ class DisposableArtifactLifecycle:
         return self.hooks.artifacts.purge_result(context, self.outcome(context))
 
 
-def run_purge_scenario(env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    scenarios = disposable_artifact_scenarios("project", hooks=hooks)
-    if not scenarios:
-        raise RuntimeError("no disposable artifact scenario declaration for project scope")
-    return DisposableArtifactLifecycle(scenarios[0], env, hooks).run()
-
-
 def run_disposable_artifact_scenario(spec: DisposableArtifactScenarioSpec, env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
     return DisposableArtifactLifecycle(spec, env, hooks).run()
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 from tools.install_sandbox.lifecycle import scenario_lifecycle_support, scenario_lifecycle_universal
-from tools.install_sandbox.targets.install_target_models import UniversalUninstallScenarioSpec
 from tests.install_sandbox.scenario_lifecycle_test_support import (
     HookFactory,
     artifact_names,
@@ -137,41 +136,5 @@ def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_ri
     assert risks["notes"] == ["declared lifecycle risk"]
 
 
-def test_run_universal_uninstall_scenario_characterizes_migration_retained_scope_wrapper(tmp_path, monkeypatch) -> None:
-    factory = HookFactory(tmp_path)
-    hooks = factory.hooks()
-    env = {"HOME": str(factory.home)}
-    scenarios = [make_scenario("alpha", "project"), make_scenario("beta", "project")]
-    spec = UniversalUninstallScenarioSpec(
-        scenario_id="legacy-workspace-sweep",
-        platform_label="legacy-cleaner",
-        scope="workspace",
-        command=("cleanup", "workspace"),
-        cwd_root="project",
-        eligible_platform_scope="project",
-    )
-    calls: list[tuple[str, object]] = []
-
-    def select_spec(scope, *, hooks):
-        calls.append(("select", scope, hooks))
-        return spec
-
-    class FakeUniversalUninstallLifecycle:
-        def __init__(self, spec_arg, scenarios_arg, env_arg, hooks_arg) -> None:
-            calls.append(("lifecycle", spec_arg, scenarios_arg, env_arg, hooks_arg))
-
-        def run(self):
-            calls.append(("run",))
-            return {"id": spec.scenario_id, "passed": True}
-
-    monkeypatch.setattr(scenario_lifecycle_universal, "universal_uninstall_spec_for_scope", select_spec)
-    monkeypatch.setattr(scenario_lifecycle_universal, "UniversalUninstallLifecycle", FakeUniversalUninstallLifecycle)
-
-    result = scenario_lifecycle_universal.run_universal_uninstall_scenario("workspace", scenarios, env, hooks=hooks)
-
-    assert result == {"id": "legacy-workspace-sweep", "passed": True}
-    assert calls == [
-        ("select", "workspace", hooks),
-        ("lifecycle", spec, scenarios, env, hooks),
-        ("run",),
-    ]
+def test_run_universal_uninstall_scenario_has_no_scope_wrapper() -> None:
+    assert scenario_lifecycle_universal.run_universal_uninstall_scenario.__code__.co_varnames[:2] == ("selected", "env")

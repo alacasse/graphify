@@ -161,7 +161,7 @@ def coverage_records(specs: dict[str, InstallTargetSpec], platforms: list[str], 
             if scenario is not None:
                 records.append(
                     {
-                        "platform": platform_name,
+                        "target": platform_name,
                         "scope": one_scope,
                         "status": "runnable",
                         "scenario_id": scenario_id(platform_name, one_scope),
@@ -174,7 +174,7 @@ def coverage_records(specs: dict[str, InstallTargetSpec], platforms: list[str], 
             else:
                 records.append(
                     {
-                        "platform": platform_name,
+                        "target": platform_name,
                         "scope": one_scope,
                         "status": "unsupported",
                         "reason": reason or "no sandbox scenario is defined for this platform/scope",

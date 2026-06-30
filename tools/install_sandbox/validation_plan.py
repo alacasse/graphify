@@ -63,7 +63,7 @@ class ValidationPlan:
     validation_work_items: tuple[ValidationWorkItem, ...]
     coverage_records: tuple[dict[str, object], ...]
     target_runtime_validation_sections: tuple[dict[str, object], ...]
-    platform_coverage_summary: dict[str, object]
+    target_coverage_summary: dict[str, object]
     target_runtime_verification: dict[str, object] = field(default_factory=lambda: dict(TARGET_RUNTIME_VERIFICATION_POLICY))
 
     def __init__(
@@ -71,7 +71,7 @@ class ValidationPlan:
         *,
         requested_scope: str,
         standard_scenarios: tuple[Scenario, ...],
-        platform_coverage_summary: dict[str, object],
+        target_coverage_summary: dict[str, object],
         selected_targets: tuple[str, ...] | None = None,
         universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...] | None = None,
         disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...] | None = None,
@@ -105,7 +105,7 @@ class ValidationPlan:
         )
         object.__setattr__(self, "coverage_records", coverage_records)
         object.__setattr__(self, "target_runtime_validation_sections", target_runtime_validation_sections)
-        object.__setattr__(self, "platform_coverage_summary", platform_coverage_summary)
+        object.__setattr__(self, "target_coverage_summary", target_coverage_summary)
         object.__setattr__(
             self,
             "target_runtime_verification",
@@ -232,7 +232,7 @@ def _coverage_summary(
 ) -> dict[str, object]:
     unsupported = sum(1 for record in coverage if record["status"] == "unsupported")
     return {
-        "registered_platform_count": len(platforms),
+        "registered_target_count": len(platforms),
         "requested_scope": scope,
         "runnable_scope_count": len(standard_scenarios),
         "universal_scenario_count": len(universal_uninstall_scenarios) + len(disposable_artifact_scenarios),
@@ -275,7 +275,7 @@ def build_validation_plan(
         disposable_artifacts=disposable,
         coverage_records=coverage,
         target_runtime_validation_sections=target_runtime_validation_sections(registry, selected_target_names_tuple, policy),
-        platform_coverage_summary=_coverage_summary(
+        target_coverage_summary=_coverage_summary(
             platforms=selected_target_names_tuple,
             scope=scope,
             standard_scenarios=standard,

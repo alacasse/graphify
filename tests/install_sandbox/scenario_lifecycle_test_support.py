@@ -62,7 +62,7 @@ def make_validation_plan(
 ) -> validation_plan.ValidationPlan:
     coverage_records = tuple(
         {
-            "platform": scenario.platform,
+            "target": scenario.platform,
             "scope": scenario.scope,
             "status": "runnable",
             "scenario_id": DEFAULT_SCENARIO_REGISTRY.scenario_id(scenario.platform, scenario.scope),
@@ -81,8 +81,8 @@ def make_validation_plan(
         disposable_artifacts=disposable_artifacts,
         coverage_records=coverage_records,
         target_runtime_validation_sections=(),
-        platform_coverage_summary={
-            "registered_platform_count": len(platforms),
+        target_coverage_summary={
+            "registered_target_count": len(platforms),
             "requested_scope": scope,
             "runnable_scope_count": len(standard_scenarios),
             "universal_scenario_count": len(universal_uninstall) + len(disposable_artifacts),

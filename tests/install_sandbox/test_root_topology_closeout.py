@@ -427,10 +427,6 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
         assert callable(getattr(sandbox_runner, public_name))
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must prune platform_coverage_summary and expose target_coverage_summary; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_root_topology_closeout_characterizes_validation_plan_alias_surface() -> None:
     validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
@@ -524,16 +520,12 @@ def test_root_topology_closeout_names_slice2_runtime_orchestration_owner() -> No
     assert slice2_owner_module.rsplit(".", 1)[0] == "tools.install_sandbox.runtime"
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must project target_coverage fields through harness manifests; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_root_topology_closeout_harness_run_projects_validation_plan_manifest_fields() -> None:
     harness_run = importlib.import_module("tools.install_sandbox.reporting.harness_run")
 
     class Plan:
         standard_validation_count = 1
-        coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
+        coverage_records = ({"target": "codex", "scope": "project", "status": "runnable"},)
         target_runtime_validation_sections = ({"section_title": "Runtime Boundary", "status": "declared"},)
         target_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
         target_runtime_verification = {"performed": False}

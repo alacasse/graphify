@@ -371,10 +371,6 @@ def test_report_renders_manifest_projection_fields_not_planner_alias_names() -> 
     assert "legacy alias" not in markdown
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must rename manifest projection input to target_coverage_summary; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
     assert set(manifest_projection.ManifestProjectionPlan.__annotations__) == {
         "standard_validation_count",
@@ -385,16 +381,12 @@ def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
     }
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must emit target_coverage manifest primitives; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_validation_plan_manifest_projection_returns_manifest_primitives() -> None:
     class Plan:
         standard_validation_count = 1
         coverage_records = (
             {
-                "platform": "codex",
+                "target": "codex",
                 "scope": "project",
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--platform", "codex"],

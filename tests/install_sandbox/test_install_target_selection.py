@@ -226,13 +226,13 @@ def test_catalog_accessors_return_selection_behavior() -> None:
     assert REGISTRY.scenario_id("codex", "project") == "codex-project"
     assert REGISTRY.coverage_records(["cursor"], "both") == [
         {
-            "platform": "cursor",
+            "target": "cursor",
             "scope": "user",
             "status": "unsupported",
             "reason": "cursor install writes a project-local .cursor rule in the current working directory; sandbox covers that file effect as project scope",
         },
         {
-            "platform": "cursor",
+            "target": "cursor",
             "scope": "project",
             "status": "runnable",
             "scenario_id": "cursor-project",

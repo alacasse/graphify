@@ -42,10 +42,6 @@ VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES = {
 }
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must replace platform_coverage_summary with target_coverage_summary; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape() -> None:
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
     target_selector_signature = inspect.signature(validation_plan.selected_targets)
@@ -74,14 +70,10 @@ def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape
     }
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must emit target_coverage fields and drop platform_coverage output; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:
     class Plan:
         standard_validation_count = 1
-        coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
+        coverage_records = ({"target": "codex", "scope": "project", "status": "runnable"},)
         target_runtime_validation_sections = ({"section_title": "Target Runtime", "status": "declared"},)
         target_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
         target_runtime_verification = {"performed": False}
@@ -109,10 +101,6 @@ def test_validation_plan_manifest_projection_preserves_public_output_names_not_i
     assert "runtime_limitation_sections" not in projected
 
 
-@pytest.mark.xfail(
-    reason="Temporary LR-B8 removal-driving xfail: Slice 2 must make target_coverage_summary the constructor field; not permanent compatibility preservation.",
-    strict=True,
-)
 def test_validation_plan_constructor_rejects_pruned_compatibility_aliases() -> None:
     required = {
         "selected_targets": ("codex",),

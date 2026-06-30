@@ -185,7 +185,7 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
     ] == [("alpha", "project")]
     assert registry.coverage_records(["alpha", "unsupported"], "project") == [
         {
-            "platform": "alpha",
+            "target": "alpha",
             "scope": "project",
             "status": "runnable",
             "scenario_id": "alpha-project",
@@ -198,7 +198,7 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
             "risk_notes": [],
         },
         {
-            "platform": "unsupported",
+            "target": "unsupported",
             "scope": "project",
             "status": "unsupported",
             "reason": "project install is not supported",

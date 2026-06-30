@@ -28,7 +28,7 @@ def test_default_registry_discovers_product_yaml_files_in_filename_order() -> No
         if product_path.name != "shared.yaml"
     )
 
-    assert registry.platform_names == expected
+    assert registry.target_names == expected
 
 
 def test_load_registry_from_dir_does_not_supply_synthetic_registry_policies(tmp_path: Any) -> None:
@@ -40,7 +40,7 @@ def test_load_registry_from_dir_does_not_supply_synthetic_registry_policies(tmp_
 
     assert registry.universal_uninstall_specs == ()
     assert registry.disposable_artifact_specs == ()
-    assert registry.platform_spec("mini").target_runtime_validation == ()
+    assert registry.target_spec("mini").target_runtime_validation == ()
 
 
 def test_load_registry_from_dir_rejects_empty_product_specs(tmp_path: Any) -> None:
@@ -59,7 +59,7 @@ def test_load_registry_from_dir_discovers_added_product_yaml_files(tmp_path: Any
 
     registry = load_registry_from_dir(tmp_path)
 
-    assert registry.platform_names == ["alpha", "mini"]
+    assert registry.target_names == ["alpha", "mini"]
 
 
 def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> None:
@@ -82,7 +82,7 @@ def test_load_registry_from_dir_uses_deterministic_filename_order(tmp_path: Any)
 
     registry = load_registry_from_dir(tmp_path)
 
-    assert registry.platform_names == ["alpha", "beta"]
+    assert registry.target_names == ["alpha", "beta"]
 
 
 def test_load_registry_from_dir_ignores_shared_yaml_and_orders_by_filename_stem(
@@ -99,7 +99,7 @@ def test_load_registry_from_dir_ignores_shared_yaml_and_orders_by_filename_stem(
 
     registry = load_registry_from_dir(tmp_path)
 
-    assert registry.platform_names == ["alpha", "beta"]
+    assert registry.target_names == ["alpha", "beta"]
 
 
 def test_load_registry_from_data_uses_platform_mapping_order() -> None:
@@ -112,4 +112,4 @@ def test_load_registry_from_data_uses_platform_mapping_order() -> None:
 
     registry = load_registry_from_data(data)
 
-    assert registry.platform_names == ["zeta", "alpha"]
+    assert registry.target_names == ["zeta", "alpha"]

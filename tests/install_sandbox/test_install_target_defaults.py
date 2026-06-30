@@ -9,20 +9,23 @@ from tools.install_sandbox.targets import install_target_defaults
 from install_target_test_support import REGISTRY
 
 
-def test_default_catalog_helpers_live_in_install_target_defaults() -> None:
+def test_default_catalog_target_helpers_live_in_install_target_defaults() -> None:
     helper_names = (
         "default_install_target_catalog",
         "install_target_specs",
         "install_target_spec",
         "install_target_scenarios",
-        "platform_spec",
-        "platform_scenarios",
         "make_scenario",
         "risk_notes",
         "validate_roots",
     )
 
     for name in helper_names:
+        assert callable(getattr(install_target_defaults, name))
+
+
+def test_default_catalog_platform_helpers_are_current_migration_retention() -> None:
+    for name in ("platform_spec", "platform_scenarios", "sandbox_platform_specs"):
         assert callable(getattr(install_target_defaults, name))
 
 
@@ -66,7 +69,7 @@ def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest
     )
 
 
-def test_lazy_default_catalog_exports_share_one_cache_for_compatibility_names(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lazy_default_catalog_exports_share_one_cache_for_migration_names(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
     registry = install_target_catalog.ScenarioRegistry(
         {

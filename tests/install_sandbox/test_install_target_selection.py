@@ -23,7 +23,10 @@ def test_catalog_preferred_target_accessors_select_target_facts() -> None:
     ]
 
 
-def test_catalog_legacy_platform_aliases_preserve_target_accessor_compatibility() -> None:
+def test_catalog_platform_aliases_are_current_migration_retention() -> None:
+    # Internal target APIs above are the preferred contract. These platform
+    # accessors describe the current migration surface, not permanent output
+    # compatibility.
     assert REGISTRY.platform_names == REGISTRY.target_names
     assert REGISTRY.platform_spec("codex") is REGISTRY.target_spec("codex")
     assert REGISTRY.selected_platforms(all_platforms=True, platform_name=None) == REGISTRY.selected_targets(
@@ -38,6 +41,8 @@ def test_catalog_legacy_platform_aliases_preserve_target_accessor_compatibility(
 
 
 def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:
+    # Error wording is user-visible today and intentionally remains separate
+    # from the internal accessor migration.
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
         REGISTRY.target_spec("missing-target")
     with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):

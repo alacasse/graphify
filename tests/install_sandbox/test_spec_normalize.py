@@ -24,14 +24,14 @@ def test_normalized_default_registry_is_deterministic() -> None:
     assert first == second
 
 
-def test_normalized_registry_includes_platforms_in_registry_order() -> None:
+def test_normalized_registry_preserves_public_platforms_output_key_in_target_order() -> None:
     registry = load_default_registry()
     normalized = normalize_registry(registry)
 
-    assert list(normalized["platforms"]) == registry.platform_names
+    assert list(normalized["platforms"]) == registry.target_names
 
 
-def test_normalized_registry_top_level_key_set_is_stable() -> None:
+def test_normalized_registry_public_top_level_key_set_is_stable() -> None:
     normalized = normalize_default_registry()
 
     assert set(normalized) == {"platforms"}

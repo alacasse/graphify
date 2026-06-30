@@ -30,11 +30,13 @@ def test_expected_path_manifest_logic() -> None:
     assert any(entry.relative == ".codebuddy/settings.json" for entry in codebuddy.expected)
 
 
-def test_effects_alias_preserves_expected_model_compatibility() -> None:
+def test_current_model_aliases_are_migration_retention_not_output_contracts() -> None:
     scenario = REGISTRY.make_scenario("codex", "project")
     scope = REGISTRY.target_spec("codex").scopes["project"]
 
     assert scenario is not None
+    # These internal aliases characterize the current migration surface only.
+    # Public expected/effects output compatibility is covered by spec-normalize tests.
     assert install_target_models.InstallEffect is install_target_models.InstallSurface
     assert install_target_models.InstallTargetSpec is install_target_models.PlatformSpec
     assert scenario.effects is scenario.expected
@@ -219,16 +221,16 @@ def test_skill_sidecar_policy_is_declared_on_skill_entries() -> None:
             assert entry.skill_sidecar_expectation is not None, f"{target_name}/{scope}/{entry.relative}"
 
 
-def test_registry_mirrors_install_surface() -> None:
+def test_registry_target_names_mirror_install_surface() -> None:
     cli_platforms = set(graphify_main._PLATFORM_CONFIG) | {"gemini", "cursor", "vscode"}
 
-    assert set(install_target_defaults.ALL_PLATFORMS) == cli_platforms
+    assert set(REGISTRY.target_names) == cli_platforms
 
 
-def test_sandbox_registry_defines_all_platforms() -> None:
+def test_sandbox_registry_defines_all_install_targets() -> None:
     specs = REGISTRY.specs
 
-    assert list(specs) == install_target_defaults.ALL_PLATFORMS
+    assert list(specs) == REGISTRY.target_names
     for target_name, spec in specs.items():
         assert isinstance(spec, install_target_models.PlatformSpec)
         assert spec.name == target_name

@@ -1,8 +1,61 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SANDBOX_ALIAS_NAMES = {"declared_expected_root_names", "scenario_roots"}
+ROLE_NAMED_ROOT_APIS = {
+    "env_roots",
+    "install_surface_root_names",
+    "policy_cwd_root_names",
+    "root_names",
+    "scenario_root_paths",
+}
+
+
+def _sandbox_python_files() -> list[Path]:
+    return sorted(
+        [
+            *Path("tools/install_sandbox").glob("**/*.py"),
+            *Path("tests/install_sandbox").glob("**/*.py"),
+        ]
+    )
+
+
+class _AttributeCallVisitor(ast.NodeVisitor):
+    def __init__(self, names: set[str], relpath: str) -> None:
+        self.names = names
+        self.relpath = relpath
+        self.calls: set[tuple[str, str, str]] = set()
+        self.definitions: set[tuple[str, str]] = set()
+        self._scope: list[str] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if node.name in self.names:
+            self.definitions.add((node.name, self.relpath))
+        self._scope.append(node.name)
+        self.generic_visit(node)
+        self._scope.pop()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and node.func.attr in self.names:
+            self.calls.add((node.func.attr, self.relpath, self._scope[-1] if self._scope else "<module>"))
+        self.generic_visit(node)
+
+
+def _attribute_calls_and_definitions(names: set[str]) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]]]:
+    calls: set[tuple[str, str, str]] = set()
+    definitions: set[tuple[str, str]] = set()
+    for relpath in _sandbox_python_files():
+        tree = ast.parse((REPO_ROOT / relpath).read_text(encoding="utf-8"))
+        visitor = _AttributeCallVisitor(names, relpath.as_posix())
+        visitor.visit(tree)
+        calls.update(visitor.calls)
+        definitions.update(visitor.definitions)
+    return calls, definitions
 
 
 def test_default_sandbox_root_registry_characterizes_current_role_groups() -> None:
@@ -95,3 +148,36 @@ def test_default_sandbox_root_registry_runtime_paths_use_env_overrides_only_for_
         "src": Path("/custom/src"),
         "output": Path("/custom/out"),
     }
+
+
+def test_sandbox_root_alias_callers_are_temporary_test_evidence_only() -> None:
+    calls, definitions = _attribute_calls_and_definitions(SANDBOX_ALIAS_NAMES)
+
+    assert definitions == {
+        ("declared_expected_root_names", "tools/install_sandbox/harness_specs.py"),
+        ("scenario_roots", "tools/install_sandbox/harness_specs.py"),
+    }
+    assert calls == {
+        (
+            "declared_expected_root_names",
+            "tests/install_sandbox/test_harness_specs.py",
+            "test_default_sandbox_root_registry_characterizes_current_role_groups",
+        ),
+        (
+            "declared_expected_root_names",
+            "tests/install_sandbox/test_spec_loader_validation.py",
+            "test_loader_root_validation_uses_install_surface_root_vocabulary",
+        ),
+        (
+            "scenario_roots",
+            "tests/install_sandbox/test_harness_specs.py",
+            "test_default_sandbox_root_registry_characterizes_current_role_groups",
+        ),
+    }
+
+
+def test_production_sandbox_root_callers_use_role_named_apis() -> None:
+    calls, _definitions = _attribute_calls_and_definitions(ROLE_NAMED_ROOT_APIS)
+    production_calls = {name for name, relpath, _scope in calls if relpath.startswith("tools/install_sandbox/")}
+
+    assert ROLE_NAMED_ROOT_APIS <= production_calls

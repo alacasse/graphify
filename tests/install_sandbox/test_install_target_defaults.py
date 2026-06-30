@@ -45,7 +45,7 @@ def test_install_target_module_helpers_use_default_catalog_seam() -> None:
 def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
-            "cached-target": install_target_models.PlatformSpec(
+            "cached-target": install_target_models.InstallTargetSpec(
                 name="cached-target",
                 scopes={
                     "project": install_target_models.ScopeSpec(
@@ -73,7 +73,7 @@ def test_lazy_default_catalog_exports_share_one_cache_for_supported_names(monkey
     calls = 0
     registry = install_target_catalog.ScenarioRegistry(
         {
-            "cached-target": install_target_models.PlatformSpec(
+            "cached-target": install_target_models.InstallTargetSpec(
                 name="cached-target",
                 scopes={
                     "project": install_target_models.ScopeSpec(

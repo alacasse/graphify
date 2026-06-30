@@ -53,10 +53,10 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
         evidence_path="evidence/synthetic.md",
     )
     specs = {
-        "runtime-one": install_target_models.PlatformSpec(
+        "runtime-one": install_target_models.InstallTargetSpec(
             name="runtime-one", target_runtime_validation=(validation,)
         ),
-        "runtime-two": install_target_models.PlatformSpec(
+        "runtime-two": install_target_models.InstallTargetSpec(
             name="runtime-two", target_runtime_validation=(validation,)
         ),
     }
@@ -76,7 +76,7 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
     )
     assert (
         install_target_harness_policy.target_runtime_validation_sections(
-            {"plain": install_target_models.PlatformSpec(name="plain")},
+            {"plain": install_target_models.InstallTargetSpec(name="plain")},
         )
         == []
     )
@@ -124,12 +124,12 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
         risk_note="synthetic universal uninstall policy",
     )
     specs = {
-        "alpha": install_target_models.PlatformSpec(
+        "alpha": install_target_models.InstallTargetSpec(
             name="alpha",
             scopes={"project": installable_scope},
             universal_uninstall_scopes=("project",),
         ),
-        "beta": install_target_models.PlatformSpec(
+        "beta": install_target_models.InstallTargetSpec(
             name="beta", scopes={"project": installable_scope}
         ),
     }
@@ -157,17 +157,17 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "alpha": install_target_models.PlatformSpec(
+            "alpha": install_target_models.InstallTargetSpec(
                 name="alpha",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "beta": install_target_models.PlatformSpec(
+            "beta": install_target_models.InstallTargetSpec(
                 name="beta",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "unsupported": install_target_models.PlatformSpec(
+            "unsupported": install_target_models.InstallTargetSpec(
                 name="unsupported",
                 unsupported_scopes={"project": "project install is not supported"},
             ),
@@ -215,7 +215,7 @@ def test_catalog_target_selection_boundary_uses_target_named_accessors() -> None
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "alpha": install_target_models.PlatformSpec(
+            "alpha": install_target_models.InstallTargetSpec(
                 name="alpha",
                 scopes={"project": installable_scope},
             ),
@@ -262,12 +262,12 @@ def test_harness_policy_owner_selects_policy_scenarios_after_catalog_wrapper_del
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "alpha": install_target_models.PlatformSpec(
+            "alpha": install_target_models.InstallTargetSpec(
                 name="alpha",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
             ),
-            "beta": install_target_models.PlatformSpec(
+            "beta": install_target_models.InstallTargetSpec(
                 name="beta",
                 scopes={"project": installable_scope},
                 universal_uninstall_scopes=("project",),
@@ -303,7 +303,7 @@ def test_harness_policy_owner_projects_runtime_sections_and_risk_notes_after_cat
     )
     registry = install_target_catalog.InstallTargetCatalog(
         {
-            "runtime": install_target_models.PlatformSpec(
+            "runtime": install_target_models.InstallTargetSpec(
                 name="runtime",
                 target_runtime_validation=(validation,),
                 simulated_linux_layout=True,
@@ -331,7 +331,7 @@ def test_harness_policy_owner_projects_runtime_sections_and_risk_notes_after_cat
 def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         specs={
-            "rooted": install_target_models.PlatformSpec(
+            "rooted": install_target_models.InstallTargetSpec(
                 name="rooted",
                 scopes={
                     "project": install_target_models.ScopeSpec(
@@ -369,7 +369,7 @@ def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> Non
 
 def test_harness_policy_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
     specs = {
-        "rooted": install_target_models.PlatformSpec(
+        "rooted": install_target_models.InstallTargetSpec(
             name="rooted",
             scopes={
                 "project": install_target_models.ScopeSpec(

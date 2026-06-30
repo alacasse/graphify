@@ -117,7 +117,7 @@ def test_direct_equivalence_uses_catalog_scope_specs() -> None:
 
 def test_install_variants_are_declared_and_preserve_arbitrary_labels() -> None:
     specs = {
-        "strange-tool": install_target_models.PlatformSpec(
+        "strange-tool": install_target_models.InstallTargetSpec(
             name="strange-tool",
             scopes={
                 "project": install_target_models.ScopeSpec(
@@ -149,7 +149,7 @@ def test_install_variants_are_declared_and_preserve_arbitrary_labels() -> None:
 
 def test_install_variant_fallback_uses_neutral_labels_for_unrecognized_commands() -> None:
     specs = {
-        "neutral": install_target_models.PlatformSpec(
+        "neutral": install_target_models.InstallTargetSpec(
             name="neutral",
             scopes={
                 "project": install_target_models.ScopeSpec(

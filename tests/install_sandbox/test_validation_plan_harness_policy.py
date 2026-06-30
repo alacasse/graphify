@@ -78,12 +78,12 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_targets() -> N
     )
     registry = install_target_catalog.ScenarioRegistry(
         {
-            "codex": install_target_models.PlatformSpec(
+            "codex": install_target_models.InstallTargetSpec(
                 name="codex",
                 scopes={"project": scope("codex.txt")},
                 target_runtime_validation=(selected_runtime,),
             ),
-            "windows": install_target_models.PlatformSpec(
+            "windows": install_target_models.InstallTargetSpec(
                 name="windows",
                 scopes={"project": scope("windows.txt")},
                 simulated_linux_layout=True,
@@ -130,12 +130,12 @@ def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
     validation = validation_plan.DEFAULT_HARNESS_POLICY.runtime_limitation_sections[0]
     registry = install_target_catalog.ScenarioRegistry(
         {
-            "one": install_target_models.PlatformSpec(
+            "one": install_target_models.InstallTargetSpec(
                 name="one",
                 simulated_linux_layout=True,
                 target_runtime_validation=(validation,),
             ),
-            "two": install_target_models.PlatformSpec(name="two", simulated_linux_layout=True),
+            "two": install_target_models.InstallTargetSpec(name="two", simulated_linux_layout=True),
         }
     )
 

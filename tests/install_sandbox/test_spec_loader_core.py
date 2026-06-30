@@ -22,7 +22,7 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     spec = registry.target_spec("mini")
 
     assert isinstance(registry, install_target_catalog.ScenarioRegistry)
-    assert isinstance(spec, install_target_models.PlatformSpec)
+    assert isinstance(spec, install_target_models.InstallTargetSpec)
     assert spec.display_name is None
     assert spec.target_kind == "product"
     assert user is not None

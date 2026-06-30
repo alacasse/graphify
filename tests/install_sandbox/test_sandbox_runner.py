@@ -23,7 +23,7 @@ from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvi
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
 from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
-    PlatformSpec,
+    InstallTargetSpec,
     Scenario,
     ScopeSpec,
     UniversalUninstallScenarioSpec,
@@ -267,7 +267,7 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
     )
     registry = validation_plan.InstallTargetCatalog(
         {
-            "alpha": PlatformSpec(
+            "alpha": InstallTargetSpec(
                 name="alpha",
                 scopes={
                     "project": ScopeSpec(
@@ -379,7 +379,7 @@ def test_preflight_current_policy_validation_uses_install_surface_roots_not_all_
     )
     registry = validation_plan.InstallTargetCatalog(
         {
-            "alpha": PlatformSpec(
+            "alpha": InstallTargetSpec(
                 name="alpha",
                 scopes={
                     "project": ScopeSpec(

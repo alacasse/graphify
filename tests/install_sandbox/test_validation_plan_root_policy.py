@@ -14,7 +14,7 @@ def test_build_validation_plan_validates_target_roots_before_selected_policy_roo
     calls: list[tuple[str, set[str]]] = []
 
     class Registry:
-        specs = {"codex": install_target_models.PlatformSpec(name="codex")}
+        specs = {"codex": install_target_models.InstallTargetSpec(name="codex")}
         universal_uninstall_specs = ()
         disposable_artifact_specs = ()
 
@@ -84,7 +84,7 @@ def test_build_validation_plan_consumes_install_surface_root_role_for_validation
 def test_build_validation_plan_keeps_target_roots_limited_to_install_surface_roots() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
-            "repo-mounted": install_target_models.PlatformSpec(
+            "repo-mounted": install_target_models.InstallTargetSpec(
                 name="repo-mounted",
                 scopes={
                     "project": install_target_models.ScopeSpec(
@@ -140,7 +140,7 @@ def test_build_validation_plan_policy_validation_uses_install_surface_roots_not_
 def test_build_validation_plan_validates_registry_specific_synthetic_policy_roots() -> None:
     registry = install_target_catalog.ScenarioRegistry(
         {
-            "alpha": install_target_models.PlatformSpec(
+            "alpha": install_target_models.InstallTargetSpec(
                 name="alpha",
                 scopes={"project": scope("alpha.txt")},
                 universal_uninstall_scopes=("project",),

@@ -7,7 +7,7 @@ from tools.install_sandbox.reference_resolution import (
     PackagedReferenceResolution,
     resolve_target_packaged_references,
 )
-from tools.install_sandbox.targets.install_target_models import PlatformSpec, ReferenceBundle
+from tools.install_sandbox.targets.install_target_models import InstallTargetSpec, ReferenceBundle
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,8 +23,8 @@ class GraphifyMain:
         return self._refs_dir
 
 
-def bundled_spec(*bundles: ReferenceBundle) -> PlatformSpec:
-    return PlatformSpec(
+def bundled_spec(*bundles: ReferenceBundle) -> InstallTargetSpec:
+    return InstallTargetSpec(
         name="unit",
         uses_packaged_references=False,
         reference_bundles=bundles,
@@ -139,7 +139,7 @@ def test_reference_bundles_take_precedence_over_uses_packaged_references(tmp_pat
     resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir, legacy_refs),
-        target_reference_facts=PlatformSpec(
+        target_reference_facts=InstallTargetSpec(
             name="unit",
             uses_packaged_references=True,
             reference_bundles=(ReferenceBundle("bundle"),),
@@ -195,7 +195,7 @@ def test_legacy_packaged_skill_refs_dir_path_returns_available_names(tmp_path: P
     resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir, refs_dir),
-        target_reference_facts=PlatformSpec(name="unit", uses_packaged_references=True),
+        target_reference_facts=InstallTargetSpec(name="unit", uses_packaged_references=True),
     )
 
     assert resolution.status == "available"
@@ -209,7 +209,7 @@ def test_legacy_packaged_skill_refs_dir_none_returns_intentionally_absent(tmp_pa
     resolution = resolve_target_packaged_references(
         "unit",
         graphify_main=GraphifyMain(package_dir, None),
-        target_reference_facts=PlatformSpec(name="unit", uses_packaged_references=True),
+        target_reference_facts=InstallTargetSpec(name="unit", uses_packaged_references=True),
     )
 
     assert resolution.status == "intentionally_absent"

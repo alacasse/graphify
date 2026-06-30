@@ -15,27 +15,27 @@ def scope(relative: str = "graphify.txt") -> install_target_models.ScopeSpec:
 def planner_registry() -> install_target_catalog.ScenarioRegistry:
     return install_target_catalog.ScenarioRegistry(
         {
-            "claude": install_target_models.PlatformSpec(
+            "claude": install_target_models.InstallTargetSpec(
                 name="claude",
                 scopes={"project": scope("claude.txt")},
                 universal_uninstall_scopes=("project",),
             ),
-            "codex": install_target_models.PlatformSpec(
+            "codex": install_target_models.InstallTargetSpec(
                 name="codex",
                 scopes={"project": scope("codex.txt")},
                 universal_uninstall_scopes=("project",),
             ),
-            "cursor": install_target_models.PlatformSpec(
+            "cursor": install_target_models.InstallTargetSpec(
                 name="cursor",
                 scopes={"project": scope("cursor.txt")},
                 unsupported_scopes={"user": "user install is not supported"},
             ),
-            "gemini": install_target_models.PlatformSpec(
+            "gemini": install_target_models.InstallTargetSpec(
                 name="gemini",
                 scopes={"project": scope("gemini.txt")},
                 universal_uninstall_scopes=("project",),
             ),
-            "windows": install_target_models.PlatformSpec(
+            "windows": install_target_models.InstallTargetSpec(
                 name="windows",
                 scopes={"project": scope("windows.txt")},
                 simulated_linux_layout=True,

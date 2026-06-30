@@ -4,36 +4,20 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
-try:
-    from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from ..surfaces.install_surface_models import (
-        FileEffect,
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonHooksEffect,
-        JsonPluginEffect,
-        JsonPluginExpectation,
-        SkillEffect,
-        TextExpectation,
-        TextSectionEffect,
-    )
-    from ..targets.install_target_models import GRAPHIFY_MARKER
-except ImportError:  # pragma: no cover - direct script import fallback
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
-    from surfaces.install_surface_models import (  # type: ignore[no-redef]
-        FileEffect,
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonHooksEffect,
-        JsonPluginEffect,
-        JsonPluginExpectation,
-        SkillEffect,
-        TextExpectation,
-        TextSectionEffect,
-    )
-    from targets.install_target_models import GRAPHIFY_MARKER  # type: ignore[no-redef]
+from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..surfaces.install_surface_models import (
+    FileEffect,
+    InstallSurface,
+    JsonExpectation,
+    JsonHookExpectation,
+    JsonHooksEffect,
+    JsonPluginEffect,
+    JsonPluginExpectation,
+    SkillEffect,
+    TextExpectation,
+    TextSectionEffect,
+)
+from ..targets.install_target_models import GRAPHIFY_MARKER
 
 
 _EFFECT_KINDS = {"file", "skill", "text_section", "json_hooks", "json_plugin"}

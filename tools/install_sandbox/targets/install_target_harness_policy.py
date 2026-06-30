@@ -3,32 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
-try:
-    from . import install_target_selection as _selection
-    from .install_target_models import (
-        SIMULATED_LINUX_LAYOUT_NOTE,
-        DisposableArtifactScenarioSpec,
-        DisposableSeedFile,
-        PlatformSpec,
-        Scenario,
-        SelectedUniversalUninstallScenario,
-        TargetRuntimeValidationSpec,
-        UniversalUninstallScenarioSpec,
-    )
-    from .install_target_scenarios import _dedupe_notes
-except ImportError:  # pragma: no cover - direct script import fallback
-    from targets import install_target_selection as _selection  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        SIMULATED_LINUX_LAYOUT_NOTE,
-        DisposableArtifactScenarioSpec,
-        DisposableSeedFile,
-        PlatformSpec,
-        Scenario,
-        SelectedUniversalUninstallScenario,
-        TargetRuntimeValidationSpec,
-        UniversalUninstallScenarioSpec,
-    )
-    from targets.install_target_scenarios import _dedupe_notes  # type: ignore[no-redef]
+from . import install_target_selection as _selection
+from .install_target_models import (
+    SIMULATED_LINUX_LAYOUT_NOTE,
+    DisposableArtifactScenarioSpec,
+    DisposableSeedFile,
+    PlatformSpec,
+    Scenario,
+    SelectedUniversalUninstallScenario,
+    TargetRuntimeValidationSpec,
+    UniversalUninstallScenarioSpec,
+)
+from .install_target_scenarios import _dedupe_notes
 
 
 TARGET_RUNTIME_VERIFICATION_POLICY = {

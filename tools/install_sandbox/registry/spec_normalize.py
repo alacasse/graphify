@@ -3,44 +3,24 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-try:
-    from ..surfaces.install_surface_models import (
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonPluginExpectation,
-        SkillSidecarExpectation,
-        TextExpectation,
-        effect_type_name,
-    )
-    from ..targets.install_target_catalog import InstallTargetCatalog
-    from ..targets.install_target_models import (
-        GeneratedFileExpectation,
-        InstallCommandVariant,
-        PlatformSpec,
-        ReferenceBundle,
-        ScopeSpec,
-        TargetRuntimeValidationSpec,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import (  # type: ignore[no-redef]
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonPluginExpectation,
-        SkillSidecarExpectation,
-        TextExpectation,
-        effect_type_name,
-    )
-    from targets.install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        GeneratedFileExpectation,
-        InstallCommandVariant,
-        PlatformSpec,
-        ReferenceBundle,
-        ScopeSpec,
-        TargetRuntimeValidationSpec,
-    )
+from ..surfaces.install_surface_models import (
+    InstallSurface,
+    JsonExpectation,
+    JsonHookExpectation,
+    JsonPluginExpectation,
+    SkillSidecarExpectation,
+    TextExpectation,
+    effect_type_name,
+)
+from ..targets.install_target_catalog import InstallTargetCatalog
+from ..targets.install_target_models import (
+    GeneratedFileExpectation,
+    InstallCommandVariant,
+    PlatformSpec,
+    ReferenceBundle,
+    ScopeSpec,
+    TargetRuntimeValidationSpec,
+)
 
 
 def _command(command: tuple[str, ...] | None) -> list[str] | None:

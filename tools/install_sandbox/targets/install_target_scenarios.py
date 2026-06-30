@@ -2,24 +2,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-try:
-    from .install_target_models import (
-        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
-        MIXED_SCOPE_PROJECT_WIRING_NOTE,
-        InstallCommandVariant,
-        InstallSurface,
-        ScopeSpec,
-        SkillEffect,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
-        MIXED_SCOPE_PROJECT_WIRING_NOTE,
-        InstallCommandVariant,
-        InstallSurface,
-        ScopeSpec,
-        SkillEffect,
-    )
+from .install_target_models import (
+    MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+    MIXED_SCOPE_PROJECT_WIRING_NOTE,
+    InstallCommandVariant,
+    InstallSurface,
+    ScopeSpec,
+    SkillEffect,
+)
 
 
 def _dedupe_notes(*notes: str) -> tuple[str, ...]:

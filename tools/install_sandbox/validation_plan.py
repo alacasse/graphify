@@ -12,11 +12,11 @@ try:
         Scenario,
         SelectedUniversalUninstallScenario,
     )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry  # type: ignore[no-redef]
-    from targets.install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
-    from targets import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover - direct import contract
+    from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry  # type: ignore[no-redef]
+    from tools.install_sandbox.targets import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
+    from tools.install_sandbox.targets.install_target_catalog import InstallTargetCatalog  # type: ignore[no-redef]
+    from tools.install_sandbox.targets.install_target_models import (  # type: ignore[no-redef]
         DisposableArtifactScenarioSpec,
         Scenario,
         SelectedUniversalUninstallScenario,

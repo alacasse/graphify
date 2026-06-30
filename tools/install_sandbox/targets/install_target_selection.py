@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import re
 
-try:
-    from .install_target_models import InstallCommandVariant, InstallSurface, PlatformSpec, Scenario
-    from .install_target_scenarios import _generic_install_command, _skill
-except ImportError:  # pragma: no cover - direct script import fallback
-    from targets.install_target_models import InstallCommandVariant, InstallSurface, PlatformSpec, Scenario  # type: ignore[no-redef]
-    from targets.install_target_scenarios import _generic_install_command, _skill  # type: ignore[no-redef]
+from .install_target_models import InstallCommandVariant, InstallSurface, PlatformSpec, Scenario
+from .install_target_scenarios import _generic_install_command, _skill
 
 
 def selected_scopes(scope: str) -> list[str]:

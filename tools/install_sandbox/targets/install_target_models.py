@@ -3,36 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-try:
-    from ..surfaces.install_surface_models import (
-        ExpectedPath,
-        FileEffect,
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonHooksEffect,
-        JsonPluginEffect,
-        JsonPluginExpectation,
-        SkillEffect,
-        SkillSidecarExpectation,
-        TextExpectation,
-        TextSectionEffect,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import (  # type: ignore[no-redef]
-        ExpectedPath,
-        FileEffect,
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonHooksEffect,
-        JsonPluginEffect,
-        JsonPluginExpectation,
-        SkillEffect,
-        SkillSidecarExpectation,
-        TextExpectation,
-        TextSectionEffect,
-    )
+from ..surfaces.install_surface_models import (
+    ExpectedPath,
+    FileEffect,
+    InstallSurface,
+    JsonExpectation,
+    JsonHookExpectation,
+    JsonHooksEffect,
+    JsonPluginEffect,
+    JsonPluginExpectation,
+    SkillEffect,
+    SkillSidecarExpectation,
+    TextExpectation,
+    TextSectionEffect,
+)
 
 GRAPHIFY_MARKER = "## graphify"
 PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE = "public_cli_lacks_user_skill_uninstall"

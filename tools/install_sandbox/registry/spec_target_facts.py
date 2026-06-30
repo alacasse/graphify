@@ -3,43 +3,22 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any, Mapping
 
-try:
-    from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from ..surfaces.install_surface_models import InstallSurface
-    from ..targets.install_target_models import (
-        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
-        MIXED_SCOPE_PROJECT_WIRING_NOTE,
-        PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
-        SIMULATED_LINUX_LAYOUT_NOTE,
-        GeneratedFileExpectation,
-        InstallCommandVariant,
-        PlatformSpec,
-        ReferenceBundle,
-        ScopeSpec,
-        TargetRuntimeValidationSpec,
-    )
-    from ..targets.install_target_scenarios import _scenario
-    from .spec_install_surfaces import SpecInstallSurfaceError, derive_scope_install_surfaces
-except ImportError:  # pragma: no cover - direct script import fallback
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
-    from surfaces.install_surface_models import InstallSurface  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
-        MIXED_SCOPE_PROJECT_WIRING_NOTE,
-        PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
-        SIMULATED_LINUX_LAYOUT_NOTE,
-        GeneratedFileExpectation,
-        InstallCommandVariant,
-        PlatformSpec,
-        ReferenceBundle,
-        ScopeSpec,
-        TargetRuntimeValidationSpec,
-    )
-    from targets.install_target_scenarios import _scenario  # type: ignore[no-redef]
-    from registry.spec_install_surfaces import (  # type: ignore[no-redef]
-        SpecInstallSurfaceError,
-        derive_scope_install_surfaces,
-    )
+from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..surfaces.install_surface_models import InstallSurface
+from ..targets.install_target_models import (
+    MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,
+    MIXED_SCOPE_PROJECT_WIRING_NOTE,
+    PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
+    SIMULATED_LINUX_LAYOUT_NOTE,
+    GeneratedFileExpectation,
+    InstallCommandVariant,
+    PlatformSpec,
+    ReferenceBundle,
+    ScopeSpec,
+    TargetRuntimeValidationSpec,
+)
+from ..targets.install_target_scenarios import _scenario
+from .spec_install_surfaces import SpecInstallSurfaceError, derive_scope_install_surfaces
 
 
 _SCOPE_NAMES = {"user", "project"}

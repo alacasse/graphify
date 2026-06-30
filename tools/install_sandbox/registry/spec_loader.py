@@ -11,24 +11,14 @@ except ImportError as exc:  # pragma: no cover - dependency is declared for dev/
 else:
     _YAML_IMPORT_ERROR = None
 
-try:
-    from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
-    from .spec_harness_policy_inputs import (
-        SpecHarnessPolicyInputError,
-        parse_top_level_policy_inputs,
-    )
-    from .spec_target_facts import SpecTargetFactError, target_spec
-    from ..targets.install_target_models import PlatformSpec
-except ImportError:  # pragma: no cover - direct script import fallback
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
-    from registry.spec_harness_policy_inputs import (  # type: ignore[no-redef]
-        SpecHarnessPolicyInputError,
-        parse_top_level_policy_inputs,
-    )
-    from registry.spec_target_facts import SpecTargetFactError, target_spec  # type: ignore[no-redef]
-    from targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry  # type: ignore[no-redef]
-    from targets.install_target_models import PlatformSpec  # type: ignore[no-redef]
+from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
+from ..targets.install_target_models import PlatformSpec
+from .spec_harness_policy_inputs import (
+    SpecHarnessPolicyInputError,
+    parse_top_level_policy_inputs,
+)
+from .spec_target_facts import SpecTargetFactError, target_spec
 
 
 SCHEMA_VERSION = 1

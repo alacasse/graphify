@@ -2,48 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from . import install_target_harness_policy as _harness_policy
-    from .install_target_models import (
-        DisposableArtifactScenarioSpec,
-        InstallCommandVariant,
-        InstallSurface,
-        PlatformSpec,
-        Scenario,
-        SelectedUniversalUninstallScenario,
-        UniversalUninstallScenarioSpec,
-    )
-    from .install_target_scenarios import (
-        _declared_install_variants,
-        _dedupe_notes,
-        _direct_project_install,
-        _generic_install_command,
-        _generic_uninstall_command,
-        _scenario,
-        _skill,
-    )
-    from . import install_target_selection as _selection
-except ImportError:  # pragma: no cover - direct script import fallback
-    from targets import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        DisposableArtifactScenarioSpec,
-        InstallCommandVariant,
-        InstallSurface,
-        PlatformSpec,
-        Scenario,
-        SelectedUniversalUninstallScenario,
-        UniversalUninstallScenarioSpec,
-    )
-    from targets.install_target_scenarios import (  # type: ignore[no-redef]
-        _declared_install_variants,
-        _dedupe_notes,
-        _direct_project_install,
-        _generic_install_command,
-        _generic_uninstall_command,
-        _scenario,
-        _skill,
-    )
-    from targets import install_target_selection as _selection  # type: ignore[no-redef]
+from . import install_target_harness_policy as _harness_policy
+from . import install_target_selection as _selection
+from .install_target_models import (
+    DisposableArtifactScenarioSpec,
+    InstallCommandVariant,
+    InstallSurface,
+    PlatformSpec,
+    Scenario,
+    SelectedUniversalUninstallScenario,
+    UniversalUninstallScenarioSpec,
+)
+from .install_target_scenarios import (
+    _declared_install_variants,
+    _dedupe_notes,
+    _direct_project_install,
+    _generic_install_command,
+    _generic_uninstall_command,
+    _scenario,
+    _skill,
+)
 
 
 @dataclass(frozen=True)

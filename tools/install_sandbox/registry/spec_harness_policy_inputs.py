@@ -2,30 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-try:
-    from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
-    from ..targets.install_target_models import (
-        DisposableArtifactScenarioSpec,
-        DisposableSeedFile,
-        UniversalUninstallScenarioSpec,
-    )
-    from .spec_install_surfaces import (
-        SpecInstallSurfaceError,
-        validate_install_surface_root,
-        validate_relative_path,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        DisposableArtifactScenarioSpec,
-        DisposableSeedFile,
-        UniversalUninstallScenarioSpec,
-    )
-    from registry.spec_install_surfaces import (  # type: ignore[no-redef]
-        SpecInstallSurfaceError,
-        validate_install_surface_root,
-        validate_relative_path,
-    )
+from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..targets.install_target_models import (
+    DisposableArtifactScenarioSpec,
+    DisposableSeedFile,
+    UniversalUninstallScenarioSpec,
+)
+from .spec_install_surfaces import (
+    SpecInstallSurfaceError,
+    validate_install_surface_root,
+    validate_relative_path,
+)
 
 
 TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS = frozenset(

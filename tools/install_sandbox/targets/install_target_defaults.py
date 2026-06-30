@@ -1,27 +1,15 @@
 from __future__ import annotations
 
-try:
-    from . import install_target_harness_policy as _harness_policy
-    from .install_target_catalog import ScenarioRegistry
-    from .install_target_models import (
-        DisposableArtifactScenarioSpec,
-        InstallCommandVariant,
-        InstallSurface,
-        PlatformSpec,
-        Scenario,
-        SelectedUniversalUninstallScenario,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from targets import install_target_harness_policy as _harness_policy  # type: ignore[no-redef]
-    from targets.install_target_catalog import ScenarioRegistry  # type: ignore[no-redef]
-    from targets.install_target_models import (  # type: ignore[no-redef]
-        DisposableArtifactScenarioSpec,
-        InstallCommandVariant,
-        InstallSurface,
-        PlatformSpec,
-        Scenario,
-        SelectedUniversalUninstallScenario,
-    )
+from . import install_target_harness_policy as _harness_policy
+from .install_target_catalog import ScenarioRegistry
+from .install_target_models import (
+    DisposableArtifactScenarioSpec,
+    InstallCommandVariant,
+    InstallSurface,
+    PlatformSpec,
+    Scenario,
+    SelectedUniversalUninstallScenario,
+)
 
 
 _DEFAULT_SCENARIO_REGISTRY: ScenarioRegistry | None = None
@@ -33,10 +21,8 @@ _LAZY_DEFAULT_NAMES = {
 
 
 def _import_load_default_registry():
-    try:
-        from ..registry.spec_loader import load_default_registry
-    except ImportError:  # pragma: no cover - direct script import fallback
-        from registry.spec_loader import load_default_registry  # type: ignore[no-redef]
+    from ..registry.spec_loader import load_default_registry
+
     return load_default_registry
 
 

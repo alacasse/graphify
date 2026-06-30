@@ -90,6 +90,42 @@ SANDBOX_RUNNER_PRUNING_CANDIDATES = {
     },
 }
 
+VALIDATION_PLAN_ROOT_SEAM_APIS = {
+    "build_validation_plan",
+    "ValidationPlan",
+    "ValidationWorkItem",
+    "HarnessPolicy",
+    "validate_policy_owned_roots",
+}
+
+VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES = {
+    "constructor_aliases": {
+        "selected_platforms",
+        "universal_uninstall_scenarios",
+        "disposable_artifact_scenarios",
+        "platform_coverage",
+        "runtime_limitation_sections",
+    },
+    "property_aliases": {
+        "selected_platforms",
+        "selected_targets",
+        "universal_uninstall_scenarios",
+        "disposable_artifact_scenarios",
+        "platform_coverage",
+        "runtime_limitation_sections",
+    },
+    "helper_aliases": {
+        "selected_platforms",
+    },
+}
+
+VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS = {
+    "platform_coverage",
+    "platform_coverage_summary",
+    "target_runtime_validation_sections",
+    "target_runtime_verification",
+}
+
 
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
@@ -337,6 +373,34 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
         assert getattr(sandbox_runner, public_name).__module__ == owner_module_name
         assert callable(getattr(sandbox_runner, public_name))
     assert root_agent_summary.summarize_output is agent_summary.summarize_output
+
+
+def test_root_topology_closeout_characterizes_validation_plan_alias_surface() -> None:
+    validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
+
+    for public_name in VALIDATION_PLAN_ROOT_SEAM_APIS:
+        assert hasattr(validation_plan, public_name)
+
+    for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["property_aliases"]:
+        assert isinstance(getattr(validation_plan.ValidationPlan, public_name), property)
+
+    for public_name in VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["helper_aliases"]:
+        assert callable(getattr(validation_plan, public_name))
+
+    assert VALIDATION_PLAN_ROOT_SEAM_APIS.isdisjoint(
+        VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["constructor_aliases"]
+        | VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["property_aliases"]
+        | VALIDATION_PLAN_ALIAS_PRUNING_CANDIDATES["helper_aliases"]
+    )
+    assert VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS == {
+        "platform_coverage",
+        "platform_coverage_summary",
+        "target_runtime_validation_sections",
+        "target_runtime_verification",
+    }
+    assert "selected_targets" not in VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS
+    assert "coverage_records" not in VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS
+    assert "runtime_limitation_sections" not in VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS
 
 
 def test_root_topology_closeout_keeps_runner_runtime_and_lifecycle_aliases_pruned() -> None:

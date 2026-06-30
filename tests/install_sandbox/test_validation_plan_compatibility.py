@@ -1,9 +1,42 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from tools.install_sandbox import validation_plan
+from tools.install_sandbox.reporting import manifest_projection
 from tools.install_sandbox.targets import install_target_models
+
+
+PUBLIC_COMPATIBILITY_OUTPUT_KEYS = {
+    "platform_coverage",
+    "platform_coverage_summary",
+    "target_runtime_validation_sections",
+    "target_runtime_verification",
+}
+
+VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES = {
+    "constructor": {
+        "selected_platforms",
+        "universal_uninstall_scenarios",
+        "disposable_artifact_scenarios",
+        "platform_coverage",
+        "runtime_limitation_sections",
+    },
+    "properties": {
+        "selected_platforms",
+        "selected_targets",
+        "universal_uninstall_scenarios",
+        "disposable_artifact_scenarios",
+        "platform_coverage",
+        "runtime_limitation_sections",
+    },
+    "helpers": {
+        "selected_platforms",
+        "selected_platform_names",
+    },
+}
 
 
 def test_validation_plan_does_not_accept_selected_targets_constructor_input() -> None:
@@ -18,6 +51,57 @@ def test_validation_plan_does_not_accept_selected_targets_constructor_input() ->
             target_runtime_validation_sections=(),
             platform_coverage_summary={},
         )
+
+
+def test_validation_plan_alias_inventory_separates_output_shape_from_pruning_candidates() -> None:
+    plan_signature = inspect.signature(validation_plan.ValidationPlan)
+    selector_signature = inspect.signature(validation_plan.selected_platforms)
+
+    assert set(plan_signature.parameters) & VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["constructor"] == {
+        "selected_platforms",
+        "universal_uninstall_scenarios",
+        "disposable_artifact_scenarios",
+        "platform_coverage",
+        "runtime_limitation_sections",
+    }
+    assert not (PUBLIC_COMPATIBILITY_OUTPUT_KEYS & VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["constructor"]) - {
+        "platform_coverage"
+    }
+    assert {
+        name for name in VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["properties"] if isinstance(getattr(validation_plan.ValidationPlan, name), property)
+    } == VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["properties"]
+    assert set(selector_signature.parameters) & VALIDATION_PLAN_INTERNAL_ALIAS_CANDIDATES["helpers"] == {
+        "selected_platform_names",
+    }
+    assert callable(validation_plan.selected_platforms)
+    assert "selected_targets" not in plan_signature.parameters
+
+
+def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:
+    class Plan:
+        standard_validation_count = 1
+        coverage_records = ({"platform": "codex", "scope": "project", "status": "runnable"},)
+        target_runtime_validation_sections = ({"section_title": "Target Runtime", "status": "declared"},)
+        platform_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
+        target_runtime_verification = {"performed": False}
+
+        selected_platforms = ("legacy-platform-property",)
+        selected_targets = ("future-target-property",)
+        platform_coverage = ({"platform": "internal-alias", "status": "must-not-project"},)
+        runtime_limitation_sections = ({"section_title": "Internal Alias", "status": "must-not-project"},)
+
+    projected = manifest_projection.validation_plan_manifest_projection(
+        Plan(),
+        [{"id": "codex-project", "passed": True}, {"id": "universal-cleanup", "passed": True}],
+    )
+
+    assert set(projected) == PUBLIC_COMPATIBILITY_OUTPUT_KEYS | {"scenario_count"}
+    assert projected["platform_coverage"] == [{"platform": "codex", "scope": "project", "status": "runnable"}]
+    assert projected["target_runtime_validation_sections"] == [{"section_title": "Target Runtime", "status": "declared"}]
+    assert "selected_platforms" not in projected
+    assert "selected_targets" not in projected
+    assert "coverage_records" not in projected
+    assert "runtime_limitation_sections" not in projected
 
 
 def test_validation_plan_keeps_target_and_report_aliases_as_compatibility_paths() -> None:

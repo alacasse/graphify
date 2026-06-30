@@ -47,9 +47,6 @@ class SandboxRootRegistry:
     def scenario_root_paths(self, paths: dict[str, Path]) -> dict[str, Path]:
         return {name: paths[name] for name in self.scenario_root_names()}
 
-    def scenario_roots(self, paths: dict[str, Path]) -> dict[str, Path]:
-        return self.scenario_root_paths(paths)
-
     def env_entries(self) -> dict[str, str]:
         return {root.env_var: root.container_path for root in self.roots if root.env_var is not None}
 
@@ -73,10 +70,6 @@ class SandboxRootRegistry:
 
     def sandbox_path_assertion_roots(self) -> tuple[SandboxRootSpec, ...]:
         return tuple(root for root in self.roots if root.sandbox_path_required is not None)
-
-    def declared_expected_root_names(self) -> set[str]:
-        """Compatibility name for install-surface roots."""
-        return self.install_surface_root_names()
 
 
 DEFAULT_SANDBOX_ROOT_REGISTRY = SandboxRootRegistry(

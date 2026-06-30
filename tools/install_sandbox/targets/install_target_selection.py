@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .install_target_models import InstallCommandVariant, InstallSurface, PlatformSpec, Scenario
+from .install_target_models import InstallCommandVariant, InstallSurface, InstallTargetSpec, Scenario
 from .install_target_scenarios import _generic_install_command, _skill
 
 
@@ -10,14 +10,14 @@ def selected_scopes(scope: str) -> list[str]:
     return ["user", "project"] if scope == "both" else [scope]
 
 
-def target_spec(specs: dict[str, PlatformSpec], target_name: str) -> PlatformSpec:
+def target_spec(specs: dict[str, InstallTargetSpec], target_name: str) -> InstallTargetSpec:
     try:
         return specs[target_name]
     except KeyError as exc:
         raise RuntimeError(f"unknown sandbox platform: {target_name}") from exc
 
 
-def selected_targets(specs: dict[str, PlatformSpec], *, all_platforms: bool, target_name: str | None) -> list[str]:
+def selected_targets(specs: dict[str, InstallTargetSpec], *, all_platforms: bool, target_name: str | None) -> list[str]:
     targets = list(specs) if all_platforms else [target_name]
     unknown = [name for name in targets if name not in specs]
     if unknown:
@@ -25,25 +25,25 @@ def selected_targets(specs: dict[str, PlatformSpec], *, all_platforms: bool, tar
     return [str(name) for name in targets]
 
 
-def user_skill(specs: dict[str, PlatformSpec], platform_name: str) -> InstallSurface:
+def user_skill(specs: dict[str, InstallTargetSpec], platform_name: str) -> InstallSurface:
     skill = target_spec(specs, platform_name).user_skill
     if skill is None:
         raise RuntimeError(f"sandbox platform has no user skill path: {platform_name}")
     return _skill("home", skill)
 
 
-def project_skill(specs: dict[str, PlatformSpec], platform_name: str) -> InstallSurface:
+def project_skill(specs: dict[str, InstallTargetSpec], platform_name: str) -> InstallSurface:
     skill = target_spec(specs, platform_name).project_skill
     if skill is None:
         raise RuntimeError(f"sandbox platform has no project skill path: {platform_name}")
     return _skill("project", skill)
 
 
-def unsupported_scope_reason(specs: dict[str, PlatformSpec], platform_name: str, scope: str) -> str | None:
+def unsupported_scope_reason(specs: dict[str, InstallTargetSpec], platform_name: str, scope: str) -> str | None:
     return target_spec(specs, platform_name).unsupported_scopes.get(scope)
 
 
-def direct_uninstall_command(specs: dict[str, PlatformSpec], platform_name: str) -> tuple[str, ...] | None:
+def direct_uninstall_command(specs: dict[str, InstallTargetSpec], platform_name: str) -> tuple[str, ...] | None:
     scope = target_spec(specs, platform_name).scopes.get("user")
     return None if scope is None else scope.uninstall_command
 
@@ -53,7 +53,7 @@ def generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
 
 
 def install_variants_for_scope(
-    specs: dict[str, PlatformSpec],
+    specs: dict[str, InstallTargetSpec],
     platform_name: str,
     scope: str,
 ) -> tuple[InstallCommandVariant, ...]:
@@ -68,11 +68,11 @@ def install_variants_for_scope(
     return tuple(variants)
 
 
-def install_variants(specs: dict[str, PlatformSpec], scenario: Scenario) -> tuple[InstallCommandVariant, ...]:
+def install_variants(specs: dict[str, InstallTargetSpec], scenario: Scenario) -> tuple[InstallCommandVariant, ...]:
     return install_variants_for_scope(specs, scenario.platform, scenario.scope)
 
 
-def direct_install_command(specs: dict[str, PlatformSpec], platform_name: str, scope: str) -> tuple[str, ...] | None:
+def direct_install_command(specs: dict[str, InstallTargetSpec], platform_name: str, scope: str) -> tuple[str, ...] | None:
     scope_spec = target_spec(specs, platform_name).scopes.get(scope)
     if scope_spec is None:
         return None
@@ -82,7 +82,7 @@ def direct_install_command(specs: dict[str, PlatformSpec], platform_name: str, s
     return None
 
 
-def make_scenario(specs: dict[str, PlatformSpec], platform_name: str, scope: str) -> Scenario | None:
+def make_scenario(specs: dict[str, InstallTargetSpec], platform_name: str, scope: str) -> Scenario | None:
     spec = target_spec(specs, platform_name)
     if scope in spec.unsupported_scopes:
         return None
@@ -102,7 +102,7 @@ def make_scenario(specs: dict[str, PlatformSpec], platform_name: str, scope: str
     )
 
 
-def target_scenarios(specs: dict[str, PlatformSpec], target_name: str, scope: str) -> list[Scenario]:
+def target_scenarios(specs: dict[str, InstallTargetSpec], target_name: str, scope: str) -> list[Scenario]:
     target_spec(specs, target_name)
     return [
         scenario
@@ -111,7 +111,7 @@ def target_scenarios(specs: dict[str, PlatformSpec], target_name: str, scope: st
     ]
 
 
-def equivalent_install_command(specs: dict[str, PlatformSpec], scenario: Scenario) -> tuple[str, ...] | None:
+def equivalent_install_command(specs: dict[str, InstallTargetSpec], scenario: Scenario) -> tuple[str, ...] | None:
     variants = install_variants(specs, scenario)
     if len(variants) < 2:
         return None
@@ -122,7 +122,7 @@ def equivalent_install_command(specs: dict[str, PlatformSpec], scenario: Scenari
 
 
 def equivalent_install_variants(
-    specs: dict[str, PlatformSpec],
+    specs: dict[str, InstallTargetSpec],
     scenario: Scenario,
 ) -> tuple[InstallCommandVariant, InstallCommandVariant] | None:
     variants = install_variants(specs, scenario)
@@ -135,7 +135,7 @@ def equivalent_install_variants(
     return primary, alternate
 
 
-def equivalence_status(specs: dict[str, PlatformSpec], scenario: Scenario) -> dict[str, object]:
+def equivalence_status(specs: dict[str, InstallTargetSpec], scenario: Scenario) -> dict[str, object]:
     equivalent = equivalent_install_command(specs, scenario)
     if equivalent is not None:
         return {"status": "runnable", "command": list(equivalent)}
@@ -152,7 +152,7 @@ def scenario_id(platform_name: str, scope: str) -> str:
     return safe or "scenario"
 
 
-def coverage_records(specs: dict[str, PlatformSpec], platforms: list[str], scope: str) -> list[dict[str, object]]:
+def coverage_records(specs: dict[str, InstallTargetSpec], platforms: list[str], scope: str) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for platform_name in platforms:
         for one_scope in selected_scopes(scope):

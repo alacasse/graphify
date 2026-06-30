@@ -8,7 +8,7 @@ from .install_target_models import (
     SIMULATED_LINUX_LAYOUT_NOTE,
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
-    PlatformSpec,
+    InstallTargetSpec,
     Scenario,
     SelectedUniversalUninstallScenario,
     TargetRuntimeValidationSpec,
@@ -127,7 +127,7 @@ def purge_disposable_graphify_out_scenario_id(
 
 
 def universal_uninstall_scenarios(
-    specs: dict[str, PlatformSpec],
+    specs: dict[str, InstallTargetSpec],
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...],
     target_names: list[str],
     scope: str,
@@ -150,7 +150,7 @@ def universal_uninstall_scenarios(
 
 
 def universal_uninstall_groups(
-    specs: dict[str, PlatformSpec],
+    specs: dict[str, InstallTargetSpec],
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...],
     target_names: list[str],
     scope: str,
@@ -191,7 +191,7 @@ def _select_universal_uninstall_scenarios(
     target_names: Iterable[str],
     scope: str,
     *,
-    target_spec_for: Callable[[str], PlatformSpec],
+    target_spec_for: Callable[[str], InstallTargetSpec],
     make_scenario: Callable[[str, str], Scenario | None],
 ) -> tuple[SelectedUniversalUninstallScenario, ...]:
     selected_scopes = set(_selection.selected_scopes(scope))
@@ -233,11 +233,11 @@ def validate_selected_harness_policy_roots(
     selected_policy.validate_roots(declared_roots)
 
 
-def target_runtime_validation_sections(specs: dict[str, PlatformSpec]) -> list[dict[str, object]]:
+def target_runtime_validation_sections(specs: dict[str, InstallTargetSpec]) -> list[dict[str, object]]:
     return _dedupe_runtime_sections(
         validation
-        for platform in specs.values()
-        for validation in platform.target_runtime_validation
+        for target in specs.values()
+        for validation in target.target_runtime_validation
     )
 
 
@@ -285,14 +285,14 @@ def validate_harness_policy_roots(policy: HarnessPolicy, declared_roots: Iterabl
 
 
 def validate_roots(
-    specs: dict[str, PlatformSpec],
+    specs: dict[str, InstallTargetSpec],
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...],
     disposable_artifact_specs: tuple[DisposableArtifactScenarioSpec, ...],
     declared_roots: set[str],
 ) -> None:
     unknown: set[str] = set()
-    for platform in specs.values():
-        for scope in platform.scopes.values():
+    for target in specs.values():
+        for scope in target.scopes.values():
             if scope.cwd_root not in declared_roots:
                 unknown.add(scope.cwd_root)
             unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)
@@ -307,7 +307,7 @@ def validate_roots(
 
 
 def risk_notes(
-    specs: dict[str, PlatformSpec],
+    specs: dict[str, InstallTargetSpec],
     *notes: str,
     platform_name: str | None = None,
 ) -> tuple[str, ...]:

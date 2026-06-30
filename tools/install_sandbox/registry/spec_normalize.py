@@ -16,7 +16,7 @@ from ..targets.install_target_catalog import InstallTargetCatalog
 from ..targets.install_target_models import (
     GeneratedFileExpectation,
     InstallCommandVariant,
-    PlatformSpec,
+    InstallTargetSpec,
     ReferenceBundle,
     ScopeSpec,
     TargetRuntimeValidationSpec,
@@ -138,20 +138,20 @@ def _runtime_validation(validation: TargetRuntimeValidationSpec) -> dict[str, ob
     }
 
 
-def _platform_spec(platform: PlatformSpec) -> dict[str, object]:
+def _target_spec(target: InstallTargetSpec) -> dict[str, object]:
     return {
-        "name": platform.name,
-        "display_name": platform.display_name,
-        "target_kind": platform.target_kind,
-        "user_skill": platform.user_skill,
-        "project_skill": platform.project_skill,
-        "uses_packaged_references": platform.uses_packaged_references,
-        "simulated_linux_layout": platform.simulated_linux_layout,
-        "scopes": {scope: _scope_spec(platform.scopes[scope]) for scope in sorted(platform.scopes)},
-        "unsupported_scopes": dict(sorted(platform.unsupported_scopes.items())),
-        "reference_bundles": [_reference_bundle(bundle) for bundle in platform.reference_bundles],
-        "universal_uninstall_scopes": list(platform.universal_uninstall_scopes),
-        "target_runtime_validation": [_runtime_validation(validation) for validation in platform.target_runtime_validation],
+        "name": target.name,
+        "display_name": target.display_name,
+        "target_kind": target.target_kind,
+        "user_skill": target.user_skill,
+        "project_skill": target.project_skill,
+        "uses_packaged_references": target.uses_packaged_references,
+        "simulated_linux_layout": target.simulated_linux_layout,
+        "scopes": {scope: _scope_spec(target.scopes[scope]) for scope in sorted(target.scopes)},
+        "unsupported_scopes": dict(sorted(target.unsupported_scopes.items())),
+        "reference_bundles": [_reference_bundle(bundle) for bundle in target.reference_bundles],
+        "universal_uninstall_scopes": list(target.universal_uninstall_scopes),
+        "target_runtime_validation": [_runtime_validation(validation) for validation in target.target_runtime_validation],
     }
 
 
@@ -159,5 +159,5 @@ def normalize_registry(registry: InstallTargetCatalog) -> dict[str, Any]:
     """Return deterministic primitive data for registry equivalence tests."""
 
     return {
-        "platforms": {name: _platform_spec(registry.specs[name]) for name in registry.target_names},
+        "platforms": {name: _target_spec(registry.specs[name]) for name in registry.target_names},
     }

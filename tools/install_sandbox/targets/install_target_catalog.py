@@ -7,7 +7,7 @@ from .install_target_models import (
     DisposableArtifactScenarioSpec,
     InstallCommandVariant,
     InstallSurface,
-    PlatformSpec,
+    InstallTargetSpec,
     Scenario,
     UniversalUninstallScenarioSpec,
 )
@@ -24,7 +24,7 @@ from .install_target_scenarios import (
 
 @dataclass(frozen=True)
 class ScenarioRegistry:
-    specs: dict[str, PlatformSpec]
+    specs: dict[str, InstallTargetSpec]
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...] = ()
     disposable_artifact_specs: tuple[DisposableArtifactScenarioSpec, ...] = ()
 
@@ -32,7 +32,7 @@ class ScenarioRegistry:
     def target_names(self) -> list[str]:
         return list(self.specs)
 
-    def target_spec(self, target_name: str) -> PlatformSpec:
+    def target_spec(self, target_name: str) -> InstallTargetSpec:
         return _selection.target_spec(self.specs, target_name)
 
     def selected_scopes(self, scope: str) -> list[str]:
@@ -88,8 +88,8 @@ class ScenarioRegistry:
 
     def validate_target_roots(self, declared_roots: set[str]) -> None:
         unknown: set[str] = set()
-        for platform in self.specs.values():
-            for scope in platform.scopes.values():
+        for target in self.specs.values():
+            for scope in target.scopes.values():
                 if scope.cwd_root not in declared_roots:
                     unknown.add(scope.cwd_root)
                 unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)

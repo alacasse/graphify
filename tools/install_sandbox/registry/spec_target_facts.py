@@ -12,7 +12,7 @@ from ..targets.install_target_models import (
     SIMULATED_LINUX_LAYOUT_NOTE,
     GeneratedFileExpectation,
     InstallCommandVariant,
-    PlatformSpec,
+    InstallTargetSpec,
     ReferenceBundle,
     ScopeSpec,
     TargetRuntimeValidationSpec,
@@ -262,7 +262,7 @@ def _platform_runtime_validations(data: Mapping[str, Any], context: str) -> tupl
     )
 
 
-def target_spec(platform_key: str, value: object, context: str) -> PlatformSpec:
+def target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
     data = _mapping(value, context)
     name = platform_key
     if "name" in data:
@@ -304,7 +304,7 @@ def target_spec(platform_key: str, value: object, context: str) -> PlatformSpec:
         _reference_bundle(bundle, f"{context}.reference_bundles[{index}]")
         for index, bundle in enumerate(_sequence(data.get("reference_bundles", []), f"{context}.reference_bundles"))
     )
-    return PlatformSpec(
+    return InstallTargetSpec(
         name=name,
         display_name=None if data.get("display_name") is None else _string(data.get("display_name"), f"{context}.display_name"),
         target_kind=_string(data.get("target_kind", "product"), f"{context}.target_kind"),

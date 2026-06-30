@@ -14,7 +14,7 @@ else:
 from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
 from .. import validation_plan
 from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
-from ..targets.install_target_models import PlatformSpec
+from ..targets.install_target_models import InstallTargetSpec
 from .spec_harness_policy_inputs import (
     SpecHarnessPolicyInputError,
     parse_top_level_policy_inputs,
@@ -40,7 +40,7 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     return value
 
 
-def _target_spec(platform_key: str, value: object, context: str) -> PlatformSpec:
+def _target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
     try:
         return target_spec(platform_key, value, context)
     except SpecTargetFactError as exc:

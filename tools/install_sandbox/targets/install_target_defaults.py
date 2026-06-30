@@ -6,7 +6,7 @@ from .install_target_models import (
     DisposableArtifactScenarioSpec,
     InstallCommandVariant,
     InstallSurface,
-    PlatformSpec,
+    InstallTargetSpec,
     Scenario,
     SelectedUniversalUninstallScenario,
 )
@@ -56,11 +56,11 @@ def default_install_target_catalog() -> ScenarioRegistry:
     return _load_default_scenario_registry()
 
 
-def install_target_specs() -> dict[str, PlatformSpec]:
+def install_target_specs() -> dict[str, InstallTargetSpec]:
     return _load_default_scenario_registry().specs
 
 
-def install_target_spec(target_name: str) -> PlatformSpec:
+def install_target_spec(target_name: str) -> InstallTargetSpec:
     return _load_default_scenario_registry().target_spec(target_name)
 
 

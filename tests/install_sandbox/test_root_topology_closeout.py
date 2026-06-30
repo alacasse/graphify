@@ -130,6 +130,10 @@ VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS = {
     "target_runtime_verification",
 }
 
+DELETED_INSTALL_TARGET_MODEL_NAMES = {
+    "Platform" "Spec",
+}
+
 
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
@@ -207,6 +211,33 @@ def _direct_repo_import_surface(module_names: set[str], fallback_names: dict[str
     return discovered_imports
 
 
+def _install_target_model_name_surface(model_names: set[str]) -> dict[str, list[str]]:
+    discovered_names: dict[str, list[str]] = {}
+
+    for root in (INSTALL_SANDBOX_ROOT, TESTS_ROOT / "install_sandbox"):
+        for path in sorted(root.rglob("*.py")):
+            relative = path.relative_to(Path(__file__).parents[2]).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            names: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    names.update(alias.name for alias in node.names if alias.name in model_names)
+                elif isinstance(node, ast.Import):
+                    names.update(alias.name for alias in node.names if alias.name in model_names)
+                elif isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                    if node.name in model_names:
+                        names.add(node.name)
+                elif isinstance(node, ast.Name) and node.id in model_names:
+                    names.add(node.id)
+                elif isinstance(node, ast.Attribute) and node.attr in model_names:
+                    names.add(node.attr)
+
+            if names:
+                discovered_names[relative] = sorted(names)
+
+    return discovered_names
+
+
 def test_root_topology_closeout_keeps_moved_implementation_packages_importable() -> None:
     for module_name in (
         "tools.install_sandbox.registry.spec_loader",
@@ -220,6 +251,15 @@ def test_root_topology_closeout_keeps_moved_implementation_packages_importable()
         "tools.install_sandbox.runtime.source_snapshot",
     ):
         assert importlib.import_module(module_name).__name__ == module_name
+
+
+def test_root_topology_closeout_keeps_deleted_install_target_model_names_absent() -> None:
+    install_target_models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
+
+    for model_name in DELETED_INSTALL_TARGET_MODEL_NAMES:
+        assert not hasattr(install_target_models, model_name)
+
+    assert _install_target_model_name_surface(DELETED_INSTALL_TARGET_MODEL_NAMES) == {}
 
 
 def test_root_topology_closeout_keeps_old_implementation_modules_absent() -> None:

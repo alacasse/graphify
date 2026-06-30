@@ -36,7 +36,7 @@ def test_install_target_models_use_canonical_surfaces_and_specs() -> None:
 
     assert scenario is not None
     assert not hasattr(install_target_models, "InstallEffect")
-    assert install_target_models.PlatformSpec is install_target_models.InstallTargetSpec
+    assert not hasattr(install_target_models, "Platform" "Spec")
     assert not hasattr(scenario, "effects")
     assert not hasattr(scope, "effects")
     assert all(isinstance(entry, install_target_models.InstallSurface) for entry in scenario.expected)

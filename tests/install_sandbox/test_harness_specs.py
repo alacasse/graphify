@@ -6,7 +6,6 @@ from pathlib import Path
 from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SANDBOX_ALIAS_NAMES = {"scenario_roots"}
 ROLE_NAMED_ROOT_APIS = {
     "env_roots",
     "install_surface_root_names",
@@ -82,8 +81,13 @@ def test_default_sandbox_root_registry_characterizes_current_role_groups() -> No
     assert registry.install_surface_root_names() == {"home", "project", "user_cwd"}
     assert registry.scenario_root_names() == ("home", "project", "user_cwd")
     assert registry.policy_cwd_root_names() == registry.root_names()
-    assert registry.scenario_root_paths(registry.runtime_paths()) == registry.scenario_roots(registry.runtime_paths())
-    assert tuple(registry.scenario_roots(registry.runtime_paths())) == ("home", "project", "user_cwd")
+    scenario_root_paths = registry.scenario_root_paths(registry.runtime_paths({}))
+    assert scenario_root_paths == {
+        "home": Path("/tmp/graphify-home"),
+        "project": Path("/tmp/graphify-project"),
+        "user_cwd": Path("/tmp/graphify-user-cwd"),
+    }
+    assert tuple(scenario_root_paths) == ("home", "project", "user_cwd")
     assert tuple(root.name for root in registry.reset_roots()) == ("home", "project", "user_cwd")
     assert tuple(root.name for root in registry.preflight_roots()) == (
         "home",
@@ -147,22 +151,6 @@ def test_default_sandbox_root_registry_runtime_paths_use_env_overrides_only_for_
         "src": Path("/custom/src"),
         "output": Path("/custom/out"),
     }
-
-
-def test_scenario_root_alias_callers_are_temporary_test_evidence_only() -> None:
-    calls, definitions = _attribute_calls_and_definitions(SANDBOX_ALIAS_NAMES)
-
-    assert definitions == {
-        ("scenario_roots", "tools/install_sandbox/harness_specs.py"),
-    }
-    assert calls == {
-        (
-            "scenario_roots",
-            "tests/install_sandbox/test_harness_specs.py",
-            "test_default_sandbox_root_registry_characterizes_current_role_groups",
-        ),
-    }
-
 
 def test_production_sandbox_root_callers_use_role_named_apis() -> None:
     calls, _definitions = _attribute_calls_and_definitions(ROLE_NAMED_ROOT_APIS)

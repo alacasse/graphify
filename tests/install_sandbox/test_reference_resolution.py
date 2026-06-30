@@ -5,7 +5,6 @@ from pathlib import Path
 
 from tools.install_sandbox.reference_resolution import (
     PackagedReferenceResolution,
-    resolve_packaged_references,
     resolve_target_packaged_references,
 )
 from tools.install_sandbox.targets.install_target_models import PlatformSpec, ReferenceBundle
@@ -67,15 +66,6 @@ def _call_name(node: ast.expr) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
-
-
-def test_platform_named_resolver_is_only_temporary_compatibility_caller() -> None:
-    wrapper_call_sites = _call_sites(REPO_ROOT / "tools" / "install_sandbox", "resolve_packaged_references")
-    wrapper_call_sites |= _call_sites(REPO_ROOT / "tests" / "install_sandbox", "resolve_packaged_references")
-
-    assert wrapper_call_sites == {
-        "tests/install_sandbox/test_reference_resolution.py::test_legacy_platform_named_resolver_delegates_to_target_facts",
-    }
 
 
 def test_runtime_uses_target_named_reference_resolver() -> None:
@@ -261,19 +251,3 @@ def test_eligible_bundle_dir_with_missing_references_child_returns_missing(tmp_p
     assert resolution.refs_dir == bundle_dir / "references"
     assert resolution.expected_names == ()
     assert resolution.expects_references is True
-
-
-def test_legacy_platform_named_resolver_delegates_to_target_facts(tmp_path: Path) -> None:
-    package_dir = tmp_path / "graphify"
-    refs_dir = tmp_path / "refs"
-    refs_dir.mkdir()
-    (refs_dir / "legacy.md").write_text("legacy\n", encoding="utf-8")
-
-    resolution = resolve_packaged_references(
-        "unit",
-        graphify_main=GraphifyMain(package_dir, refs_dir),
-        platform_spec=PlatformSpec(name="unit", uses_packaged_references=True),
-    )
-
-    assert resolution.status == "available"
-    assert resolution.expected_names == ("legacy.md",)

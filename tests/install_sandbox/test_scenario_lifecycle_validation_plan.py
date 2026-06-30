@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from tools.install_sandbox import validation_plan
-from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support
+from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support, scenario_lifecycle_universal
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
 from tools.install_sandbox.targets import install_target_harness_policy
@@ -573,6 +575,29 @@ def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_pat
     assert command_artifact_dir(results[-1]) == str(artifact_dir / "selected-artifacts")
     assert factory.command_records[-1]["command"] == ("selected", "remove")
     assert factory.command_records[-1]["cwd"] == factory.user_cwd
+
+
+def test_universal_uninstall_spec_lookup_uses_validation_plan_owner(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    universal_spec = UniversalUninstallScenarioSpec(
+        scenario_id="registry-selected-sweep",
+        platform_label="selected",
+        scope="project",
+        command=("selected", "uninstall"),
+        cwd_root="project",
+        eligible_platform_scope="project",
+    )
+
+    hooks = factory.hooks(
+        scenario_registry=SimpleNamespace(
+            universal_uninstall_specs=(universal_spec,),
+            universal_uninstall_spec_for_scope=lambda scope: (_ for _ in ()).throw(
+                AssertionError("lifecycle should not use the catalog policy lookup wrapper")
+            ),
+        )
+    )
+
+    assert scenario_lifecycle_universal.universal_uninstall_spec_for_scope("project", hooks=hooks) is universal_spec
 
 
 def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_branching(tmp_path) -> None:

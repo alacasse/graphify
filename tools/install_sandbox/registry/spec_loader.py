@@ -12,6 +12,7 @@ else:
     _YAML_IMPORT_ERROR = None
 
 from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from .. import validation_plan
 from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
 from ..targets.install_target_models import PlatformSpec
 from .spec_harness_policy_inputs import (
@@ -71,7 +72,13 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallT
     }
     universal, disposable = _top_level_policy_inputs(registry, source)
     loaded = ScenarioRegistry(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
-    loaded.validate_roots(DEFAULT_SANDBOX_ROOT_REGISTRY.root_names())
+    declared_roots = DEFAULT_SANDBOX_ROOT_REGISTRY.root_names()
+    loaded.validate_target_roots(declared_roots)
+    validation_plan.validate_policy_owned_roots(
+        loaded,
+        validation_plan.DEFAULT_HARNESS_POLICY,
+        declared_roots,
+    )
     return loaded
 
 

@@ -11,6 +11,7 @@ try:
         DisposableArtifactScenarioSpec,
         Scenario,
         SelectedUniversalUninstallScenario,
+        UniversalUninstallScenarioSpec,
     )
 except ImportError:  # pragma: no cover - direct import contract
     from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry  # type: ignore[no-redef]
@@ -20,6 +21,7 @@ except ImportError:  # pragma: no cover - direct import contract
         DisposableArtifactScenarioSpec,
         Scenario,
         SelectedUniversalUninstallScenario,
+        UniversalUninstallScenarioSpec,
     )
 
 
@@ -178,6 +180,15 @@ def universal_uninstall_scenarios(
     return _harness_policy.selected_universal_uninstall_scenarios(registry, platforms, scope, policy)
 
 
+def universal_uninstall_spec_for_scope(
+    registry: InstallTargetCatalog,
+    scope: str,
+    policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
+) -> UniversalUninstallScenarioSpec | None:
+    specs = getattr(registry, "universal_uninstall_specs", ()) or policy.universal_uninstall_specs
+    return _harness_policy.universal_uninstall_spec_for_scope(specs, scope)
+
+
 def disposable_artifact_scenarios(
     registry: InstallTargetCatalog,
     scope: str,
@@ -240,10 +251,7 @@ def build_validation_plan(
     root_registry: SandboxRootRegistry = DEFAULT_SANDBOX_ROOT_REGISTRY,
 ) -> ValidationPlan:
     declared_roots = _target_fact_root_names(root_registry)
-    if hasattr(registry, "validate_target_roots"):
-        registry.validate_target_roots(declared_roots)
-    elif hasattr(registry, "validate_roots"):
-        registry.validate_roots(declared_roots)
+    registry.validate_target_roots(declared_roots)
     validate_policy_owned_roots(registry, policy, _selected_policy_root_names(root_registry))
 
     if all_targets is None:

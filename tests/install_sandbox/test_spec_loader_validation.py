@@ -4,6 +4,7 @@ from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,
     valid_registry_data as _valid_data,
 )
+from tools.install_sandbox import validation_plan
 from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
 from tools.install_sandbox.registry import spec_harness_policy_inputs, spec_loader, spec_target_facts
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data
@@ -79,6 +80,35 @@ def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
 
     assert registry.universal_uninstall_specs[0].cwd_root == "repo_mount"
     assert registry.disposable_artifact_specs[0].cwd_root == "repo_mount"
+
+
+def test_loader_splits_catalog_target_root_and_policy_root_validation(monkeypatch) -> None:
+    calls: list[tuple[str, set[str]]] = []
+    original_validate_target_roots = spec_loader.ScenarioRegistry.validate_target_roots
+    original_validate_policy_owned_roots = validation_plan.validate_policy_owned_roots
+
+    def validate_target_roots(self, declared_roots):
+        calls.append(("target", set(declared_roots)))
+        original_validate_target_roots(self, declared_roots)
+
+    def validate_roots(self, declared_roots):
+        raise AssertionError("spec loader should not use the catalog combined policy wrapper")
+
+    def validate_policy_owned_roots(registry, policy, declared_roots):
+        calls.append(("policy", set(declared_roots)))
+        original_validate_policy_owned_roots(registry, policy, declared_roots)
+
+    monkeypatch.setattr(spec_loader.ScenarioRegistry, "validate_target_roots", validate_target_roots)
+    monkeypatch.setattr(spec_loader.ScenarioRegistry, "validate_roots", validate_roots)
+    monkeypatch.setattr(validation_plan, "validate_policy_owned_roots", validate_policy_owned_roots)
+
+    registry = load_registry_from_data(_valid_data())
+
+    assert registry.target_names == ["mini"]
+    assert calls == [
+        ("target", DEFAULT_SANDBOX_ROOT_REGISTRY.root_names()),
+        ("policy", DEFAULT_SANDBOX_ROOT_REGISTRY.root_names()),
+    ]
 
 
 def test_loader_rejects_unknown_policy_cwd_root_before_catalog_validation() -> None:

@@ -131,9 +131,7 @@ class UniversalUninstallLifecycle:
 
 
 def universal_uninstall_spec_for_scope(scope: str, *, hooks: ScenarioLifecycleHooks) -> UniversalUninstallScenarioSpec:
-    spec = hooks.scenario_registry.universal_uninstall_spec_for_scope(scope)
-    if spec is None:
-        spec = next((policy_spec for policy_spec in validation_plan.DEFAULT_HARNESS_POLICY.universal_uninstall_specs if policy_spec.scope == scope), None)
+    spec = validation_plan.universal_uninstall_spec_for_scope(hooks.scenario_registry, scope)
     if spec is None:
         raise RuntimeError(f"no universal uninstall scenario declaration for scope: {scope}")
     return spec

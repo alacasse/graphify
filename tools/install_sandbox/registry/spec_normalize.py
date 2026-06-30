@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from ..surfaces.install_surface_models import (
@@ -109,7 +108,6 @@ def _scope_spec(scope: ScopeSpec) -> dict[str, object]:
         "install_command": list(scope.install_command),
         "uninstall_command": _command(scope.uninstall_command),
         "cwd_root": scope.cwd_root,
-        "expected": _legacy_expected_effects(effects),
         "effects": effects,
         "risk_notes": list(scope.risk_notes),
         "equivalent_install_command": _command(scope.equivalent_install_command),
@@ -117,10 +115,6 @@ def _scope_spec(scope: ScopeSpec) -> dict[str, object]:
         "allowed_roots": list(scope.allowed_roots),
         "generated_file_expectation": _generated_file_expectation(scope.generated_file_expectation),
     }
-
-
-def _legacy_expected_effects(effects: list[dict[str, object]]) -> list[dict[str, object]]:
-    return deepcopy(effects)
 
 
 def _reference_bundle(bundle: ReferenceBundle) -> dict[str, object]:

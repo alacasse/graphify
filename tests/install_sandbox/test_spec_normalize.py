@@ -41,7 +41,7 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
     normalized = normalize_default_registry()
     codex_platform = normalized["platforms"]["codex"]
     codex_project = codex_platform["scopes"]["project"]
-    hooks = next(entry for entry in codex_project["expected"] if entry["relative"] == ".codex/hooks.json")
+    hooks = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
 
     assert set(codex_platform) == {
         "name",
@@ -61,7 +61,6 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
         "install_command",
         "uninstall_command",
         "cwd_root",
-        "expected",
         "effects",
         "risk_notes",
         "equivalent_install_command",
@@ -83,24 +82,14 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
     }
 
 
-def test_normalized_scope_emits_legacy_expected_compatibility_alias() -> None:
-    # LR-B7 owns removal of this normalized output alias. Registry input is
-    # already effects-only, but reports/summary consumers still see both keys.
+def test_normalized_scope_emits_effects_only() -> None:
     normalized = normalize_default_registry()
     codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
     effects_hook = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
-    expected_hook = next(entry for entry in codex_project["expected"] if entry["relative"] == ".codex/hooks.json")
 
-    assert codex_project["effects"] == codex_project["expected"]
-    assert codex_project["effects"] is not codex_project["expected"]
-    assert effects_hook is not expected_hook
-    assert effects_hook["json_expectation"] is not expected_hook["json_expectation"]
-    assert effects_hook["json_expectation"]["hooks"] is not expected_hook["json_expectation"]["hooks"]
-    assert effects_hook["json_expectation"]["hooks"][0] is not expected_hook["json_expectation"]["hooks"][0]
-    assert (
-        effects_hook["json_expectation"]["hooks"][0]["required_fragments"]
-        is not expected_hook["json_expectation"]["hooks"][0]["required_fragments"]
-    )
+    assert "expected" not in codex_project
+    assert effects_hook["json_expectation"]["schema_name"] == "codex_hooks"
+    assert effects_hook["json_expectation"]["hooks"][0]["required_fragments"] == ["graphify", "hook-check"]
 
 
 def test_normalized_registry_does_not_emit_install_target_alias_keys() -> None:
@@ -125,11 +114,11 @@ def test_normalized_registry_includes_target_metadata() -> None:
     assert normalized["platforms"]["codex"]["target_kind"] == "product"
 
 
-def test_normalized_registry_includes_nested_expected_path_policies() -> None:
+def test_normalized_registry_includes_nested_install_surface_policies() -> None:
     normalized = normalize_default_registry()
     codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
-    hooks = next(entry for entry in codex_project["expected"] if entry["relative"] == ".codex/hooks.json")
-    skill = next(entry for entry in codex_project["expected"] if entry["relative"].endswith("SKILL.md"))
+    hooks = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
+    skill = next(entry for entry in codex_project["effects"] if entry["relative"].endswith("SKILL.md"))
 
     assert codex_project["install_variants"] == [
         {"label": "generic", "command": ["graphify", "install", "--project", "--platform", "codex"]},
@@ -154,7 +143,7 @@ def test_normalized_registry_includes_high_risk_platform_policies() -> None:
     windows = normalized["platforms"]["windows"]
 
     assert kilo_project["allowed_roots"] == ["home", "project", "user_cwd"]
-    assert any(entry["root"] == "home" for entry in kilo_project["expected"])
+    assert any(entry["root"] == "home" for entry in kilo_project["effects"])
     assert gemini_user["allowed_roots"] == ["home", "project", "user_cwd"]
     assert vscode["uses_packaged_references"] is False
     assert vscode["reference_bundles"] == [

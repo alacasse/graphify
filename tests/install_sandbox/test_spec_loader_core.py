@@ -19,7 +19,7 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     registry = load_registry_from_data(_valid_data())
     user = registry.make_scenario("mini", "user")
     project = registry.make_scenario("mini", "project")
-    spec = registry.platform_spec("mini")
+    spec = registry.target_spec("mini")
 
     assert isinstance(registry, install_target_catalog.ScenarioRegistry)
     assert isinstance(spec, install_target_models.PlatformSpec)
@@ -49,7 +49,7 @@ def test_loader_preserves_explicit_target_metadata() -> None:
     data["platforms"]["mini"]["display_name"] = "Mini Target"
     data["platforms"]["mini"]["target_kind"] = "generic_standard"
 
-    spec = load_registry_from_data(data).platform_spec("mini")
+    spec = load_registry_from_data(data).target_spec("mini")
 
     assert spec.display_name == "Mini Target"
     assert spec.target_kind == "generic_standard"

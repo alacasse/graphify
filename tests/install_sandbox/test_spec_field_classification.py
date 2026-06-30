@@ -151,12 +151,12 @@ def test_default_registry_explicit_project_equivalent_nulls_are_meaningful_runti
             registry_dir.mkdir()
             write_registry_dir(registry_dir, {"platforms": {path.stem: data}})
             explicit = load_registry_from_dir(registry_dir)
-            explicit_project = explicit.platform_spec(path.stem).scopes["project"]
+            explicit_project = explicit.target_spec(path.stem).scopes["project"]
 
             project_scope.pop("equivalent_install_command")
             write_registry_dir(registry_dir, {"platforms": {path.stem: data}})
             derived = load_registry_from_dir(registry_dir)
-            derived_project = derived.platform_spec(path.stem).scopes["project"]
+            derived_project = derived.target_spec(path.stem).scopes["project"]
 
             assert explicit_project.equivalent_install_command is None
             assert derived_project.equivalent_install_command == ("graphify", path.stem, "install", "--project")

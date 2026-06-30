@@ -18,7 +18,7 @@ try:
         SpecHarnessPolicyInputError,
         parse_top_level_policy_inputs,
     )
-    from .spec_target_facts import SpecTargetFactError, platform_spec
+    from .spec_target_facts import SpecTargetFactError, target_spec
     from ..targets.install_target_models import InstallTargetSpec
 except ImportError:  # pragma: no cover - direct script import fallback
     from harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY  # type: ignore[no-redef]
@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover - direct script import fallback
         SpecHarnessPolicyInputError,
         parse_top_level_policy_inputs,
     )
-    from registry.spec_target_facts import SpecTargetFactError, platform_spec  # type: ignore[no-redef]
+    from registry.spec_target_facts import SpecTargetFactError, target_spec  # type: ignore[no-redef]
     from targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry  # type: ignore[no-redef]
     from targets.install_target_models import InstallTargetSpec  # type: ignore[no-redef]
 
@@ -49,9 +49,9 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     return value
 
 
-def _platform_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
+def _target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
     try:
-        return platform_spec(platform_key, value, context)
+        return target_spec(platform_key, value, context)
     except SpecTargetFactError as exc:
         raise SpecLoaderError(str(exc)) from exc
 
@@ -72,7 +72,7 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallT
     platform_names = tuple(platforms_value.keys())
 
     specs = {
-        platform_name: _platform_spec(
+        platform_name: _target_spec(
             platform_name,
             platforms_value[platform_name],
             f"{source}.platforms.{platform_name}",

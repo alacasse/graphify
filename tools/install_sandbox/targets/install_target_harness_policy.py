@@ -143,20 +143,20 @@ def purge_disposable_graphify_out_scenario_id(
 def universal_uninstall_scenarios(
     specs: dict[str, PlatformSpec],
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...],
-    platforms: list[str],
+    target_names: list[str],
     scope: str,
 ) -> list[SelectedUniversalUninstallScenario]:
-    requested = set(platforms)
-    ordered_platforms = tuple(platform_name for platform_name in specs if platform_name in requested)
+    requested = set(target_names)
+    ordered_targets = tuple(target_name for target_name in specs if target_name in requested)
     return list(
         _select_universal_uninstall_scenarios(
             universal_uninstall_specs,
-            ordered_platforms,
+            ordered_targets,
             scope,
-            platform_spec_for=lambda platform_name: specs[platform_name],
-            make_scenario=lambda platform_name, scenario_scope: _selection.make_scenario(
+            target_spec_for=lambda target_name: specs[target_name],
+            make_scenario=lambda target_name, scenario_scope: _selection.make_scenario(
                 specs,
-                platform_name,
+                target_name,
                 scenario_scope,
             ),
         )
@@ -166,12 +166,12 @@ def universal_uninstall_scenarios(
 def universal_uninstall_groups(
     specs: dict[str, PlatformSpec],
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...],
-    platforms: list[str],
+    target_names: list[str],
     scope: str,
 ) -> list[tuple[str, list[Scenario]]]:
     return [
         (selected.spec.scope, list(selected.installed_scenarios))
-        for selected in universal_uninstall_scenarios(specs, universal_uninstall_specs, platforms, scope)
+        for selected in universal_uninstall_scenarios(specs, universal_uninstall_specs, target_names, scope)
     ]
 
 
@@ -184,7 +184,7 @@ def disposable_artifact_scenarios(
 
 def selected_universal_uninstall_scenarios(
     registry: object,
-    platforms: tuple[str, ...],
+    target_names: tuple[str, ...],
     scope: str,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[SelectedUniversalUninstallScenario, ...]:
@@ -193,19 +193,19 @@ def selected_universal_uninstall_scenarios(
     specs = getattr(registry, "universal_uninstall_specs", ()) or policy.universal_uninstall_specs
     return _select_universal_uninstall_scenarios(
         specs,
-        platforms,
+        target_names,
         scope,
-        platform_spec_for=registry.platform_spec,
+        target_spec_for=registry.target_spec,
         make_scenario=registry.make_scenario,
     )
 
 
 def _select_universal_uninstall_scenarios(
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...],
-    platforms: Iterable[str],
+    target_names: Iterable[str],
     scope: str,
     *,
-    platform_spec_for: Callable[[str], PlatformSpec],
+    target_spec_for: Callable[[str], PlatformSpec],
     make_scenario: Callable[[str, str], Scenario | None],
 ) -> tuple[SelectedUniversalUninstallScenario, ...]:
     selected_scopes = set(_selection.selected_scopes(scope))
@@ -214,9 +214,9 @@ def _select_universal_uninstall_scenarios(
         if universal_spec.scope not in selected_scopes:
             continue
         scenarios = [
-            make_scenario(platform_name, universal_spec.eligible_platform_scope)
-            for platform_name in platforms
-            if universal_spec.eligible_platform_scope in platform_spec_for(platform_name).universal_uninstall_scopes
+            make_scenario(target_name, universal_spec.eligible_platform_scope)
+            for target_name in target_names
+            if universal_spec.eligible_platform_scope in target_spec_for(target_name).universal_uninstall_scopes
         ]
         runnable = tuple(scenario for scenario in scenarios if scenario is not None)
         if len(runnable) >= universal_spec.minimum_installed_scenarios:
@@ -257,7 +257,7 @@ def target_runtime_validation_sections(specs: dict[str, PlatformSpec]) -> list[d
 
 def selected_target_runtime_validation_sections(
     registry: object,
-    platforms: tuple[str, ...] | None = None,
+    target_names: tuple[str, ...] | None = None,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[dict[str, object], ...]:
     specs = getattr(registry, "specs")
@@ -265,9 +265,9 @@ def selected_target_runtime_validation_sections(
         if hasattr(registry, "target_runtime_validation_sections"):
             return tuple(registry.target_runtime_validation_sections())
         return ()
-    if platforms is None:
-        platforms = tuple(specs)
-    selected = [registry.platform_spec(platform_name) for platform_name in platforms]
+    if target_names is None:
+        target_names = tuple(specs)
+    selected = [registry.target_spec(target_name) for target_name in target_names]
     declared_sections = [section for platform in selected for section in platform.target_runtime_validation]
     policy_sections = policy.runtime_limitation_sections if any(platform.simulated_linux_layout for platform in selected) else ()
     return tuple(_dedupe_runtime_sections([*declared_sections, *policy_sections]))

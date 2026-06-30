@@ -1,46 +1,27 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
 
-from tools.install_sandbox import agent_summary as root_agent_summary
 from tools.install_sandbox.reporting import artifacts
 from tools.install_sandbox.reporting import agent_summary
 
 
-def test_root_agent_summary_wrapper_preserves_module_entrypoint_compatibility() -> None:
-    assert root_agent_summary.main is agent_summary.main
-    assert root_agent_summary.summarize_output is agent_summary.summarize_output
-    # Root __all__ is the compatibility surface. Helper behavior below is
-    # migration characterization, not new public API.
-    assert root_agent_summary.__all__ == [
-        "USAGE_GUIDANCE",
-        "artifact_relpath",
-        "compact_path",
-        "failed_checks",
-        "load_json",
-        "main",
-        "parse_args",
-        "render_json",
-        "render_markdown",
-        "summarize_incomplete",
-        "summarize_output",
-        "tail_file",
-        "text_snippet",
-        "write_summary",
-    ]
+def test_root_agent_summary_shim_is_absent() -> None:
+    assert not (Path(__file__).parents[2] / "tools" / "install_sandbox" / "agent_summary.py").exists()
+    assert importlib.util.find_spec("tools.install_sandbox.agent_summary") is None
 
 
-def test_root_agent_summary_wrapper_stays_thin_public_facade() -> None:
-    tree = ast.parse(Path(root_agent_summary.__file__).read_text(encoding="utf-8"))
-
-    assert [node.name for node in tree.body if isinstance(node, ast.FunctionDef)] == []
-    assert [node.name for node in tree.body if isinstance(node, ast.ClassDef)] == []
-    assert root_agent_summary.main is agent_summary.main
-    assert root_agent_summary.write_summary is agent_summary.write_summary
+def test_reporting_agent_summary_owner_exports_supported_behavior() -> None:
+    assert callable(agent_summary.main)
+    assert callable(agent_summary.summarize_output)
+    assert callable(agent_summary.write_summary)
+    assert callable(agent_summary.render_markdown)
+    assert callable(agent_summary.render_json)
 
 
 def test_agent_summary_public_helpers_delegate_to_artifact_owner() -> None:
@@ -80,7 +61,7 @@ def write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def test_agent_summary_artifact_helpers_characterize_current_contract(tmp_path: Path) -> None:
+def test_agent_summary_owner_helpers_characterize_current_contract(tmp_path: Path) -> None:
     output = tmp_path / "out"
     scenario_dir = output / "scenarios" / "codex-project"
     scenario_dir.mkdir(parents=True)
@@ -104,16 +85,16 @@ def test_agent_summary_artifact_helpers_characterize_current_contract(tmp_path: 
     assert agent_summary.load_json(output / "missing.json") == {}
     assert agent_summary.load_json(output / "array.json") == {"_error": "json root is not an object"}
     assert agent_summary.load_json(output / "invalid.json")["_error"].startswith("invalid json:")
-    assert agent_summary.artifact_relpath(scenario_dir / "assertions.json", output) == "scenarios/codex-project/assertions.json"
-    assert agent_summary.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
-    assert agent_summary.compact_path("/tmp/graphify-project/AGENTS.md") == "project/AGENTS.md"
-    assert agent_summary.compact_path("/tmp/graphify-home/.codex/AGENTS.md") == "home/.codex/AGENTS.md"
-    assert agent_summary.compact_path("/tmp/graphify-user-cwd/file.txt") == "user_cwd/file.txt"
-    assert agent_summary.compact_path(123) == ""
+    assert artifacts.artifact_relpath(scenario_dir / "assertions.json", output) == "scenarios/codex-project/assertions.json"
+    assert artifacts.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
+    assert artifacts.compact_path("/tmp/graphify-project/AGENTS.md") == "project/AGENTS.md"
+    assert artifacts.compact_path("/tmp/graphify-home/.codex/AGENTS.md") == "home/.codex/AGENTS.md"
+    assert artifacts.compact_path("/tmp/graphify-user-cwd/file.txt") == "user_cwd/file.txt"
+    assert artifacts.compact_path(123) == ""
     assert agent_summary.text_snippet(" alpha\n\n beta\tgamma ", limit=20) == "alpha beta gamma"
     assert agent_summary.text_snippet("abcdefghij", limit=8) == "abcde..."
-    assert agent_summary.tail_file(output / "tail.txt", limit=4) == "6789"
-    assert agent_summary.tail_file(output / "missing-tail.txt") == ""
+    assert artifacts.tail_file(output / "tail.txt", limit=4) == "6789"
+    assert artifacts.tail_file(output / "missing-tail.txt") == ""
     assert agent_summary.failed_checks(output, "codex-project", limit=2) == [
         {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"},
         {"path": "home/.codex/AGENTS.md", "detail": "missing local block", "root": "home"},

@@ -31,17 +31,18 @@ DELETED_ROOT_HELPER_MODULES = {
     DELETED_JSON_HELPER_MODULE,
 }
 
-ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS = {
-    "tools.install_sandbox.agent_summary",
-}
+ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS: set[str] = set()
 
 ROOT_HELPER_DELETION_CANDIDATES: set[str] = set()
+
+DELETED_AGENT_SUMMARY_SHIM_MODULES = {
+    "tools.install_sandbox.agent_summary",
+}
 
 ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS = {
 }
 
 ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
-    "tools.install_sandbox.agent_summary",
     "tools.install_sandbox.harness_specs",
     "tools.install_sandbox.reference_resolution",
     "tools.install_sandbox.run",
@@ -268,12 +269,14 @@ def test_root_topology_closeout_characterizes_compatibility_facade_buckets() -> 
     assert DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES == {
         "tools.install_sandbox.install_surface_core",
     }
-    assert ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS == {
+    assert ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS == set()
+    assert DELETED_AGENT_SUMMARY_SHIM_MODULES == {
         "tools.install_sandbox.agent_summary",
     }
     assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_PURE_ROOT_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
     assert DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
+    assert DELETED_AGENT_SUMMARY_SHIM_MODULES.isdisjoint(ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS)
 
 
 def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -> None:
@@ -284,7 +287,6 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
     assert ROOT_HELPER_DELETION_CANDIDATES == set()
     assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {}
     assert ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS == {
-        "tools.install_sandbox.agent_summary",
         "tools.install_sandbox.harness_specs",
         "tools.install_sandbox.reference_resolution",
         "tools.install_sandbox.run",
@@ -296,6 +298,7 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_HELPER_DELETION_CANDIDATES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+    assert DELETED_AGENT_SUMMARY_SHIM_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
 
 
 def test_root_topology_closeout_keeps_deleted_root_helpers_absent() -> None:
@@ -306,12 +309,16 @@ def test_root_topology_closeout_keeps_deleted_root_helpers_absent() -> None:
         assert importlib.util.find_spec(module_name) is None
 
 
-def test_root_topology_closeout_keeps_root_worthy_facades_importable() -> None:
-    root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
+def test_root_topology_closeout_keeps_agent_summary_shim_absent() -> None:
     owner_agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
 
-    assert (INSTALL_SANDBOX_ROOT / "agent_summary.py").exists()
-    assert root_agent_summary.summarize_output is owner_agent_summary.summarize_output
+    for module_name in DELETED_AGENT_SUMMARY_SHIM_MODULES:
+        root_file_name = module_name.rsplit(".", maxsplit=1)[-1]
+
+        assert not (INSTALL_SANDBOX_ROOT / f"{root_file_name}.py").exists()
+        assert importlib.util.find_spec(module_name) is None
+    assert callable(owner_agent_summary.summarize_output)
+    assert callable(owner_agent_summary.write_summary)
 
 
 def test_root_topology_closeout_keeps_deleted_install_surface_core_facade_absent() -> None:
@@ -358,7 +365,6 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     agent_summary = importlib.import_module("tools.install_sandbox.reporting.agent_summary")
     harness_orchestration = importlib.import_module("tools.install_sandbox.runtime.harness_orchestration")
     sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
-    root_agent_summary = importlib.import_module("tools.install_sandbox.agent_summary")
 
     assert callable(validation_plan.build_validation_plan)
     assert validation_plan.HarnessPolicy
@@ -375,7 +381,6 @@ def test_root_topology_closeout_names_validation_reporting_and_runner_public_api
     for public_name, owner_module_name in SUPPORTED_SANDBOX_RUNNER_APIS.items():
         assert getattr(sandbox_runner, public_name).__module__ == owner_module_name
         assert callable(getattr(sandbox_runner, public_name))
-    assert root_agent_summary.summarize_output is agent_summary.summarize_output
 
 
 def test_root_topology_closeout_characterizes_validation_plan_alias_surface() -> None:

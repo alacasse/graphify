@@ -137,7 +137,7 @@ def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_ri
     assert risks["notes"] == ["declared lifecycle risk"]
 
 
-def test_run_universal_uninstall_scenario_preserves_legacy_scope_wrapper(tmp_path, monkeypatch) -> None:
+def test_run_universal_uninstall_scenario_characterizes_migration_retained_scope_wrapper(tmp_path, monkeypatch) -> None:
     factory = HookFactory(tmp_path)
     hooks = factory.hooks()
     env = {"HOME": str(factory.home)}

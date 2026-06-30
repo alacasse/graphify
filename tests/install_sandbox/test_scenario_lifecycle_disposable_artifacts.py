@@ -153,7 +153,7 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
     assert undeclared_path.exists()
 
 
-def test_run_purge_scenario_preserves_legacy_wrapper(tmp_path, monkeypatch) -> None:
+def test_run_purge_scenario_characterizes_migration_retained_wrapper(tmp_path, monkeypatch) -> None:
     factory = HookFactory(tmp_path)
     hooks = factory.hooks()
     env = {"HOME": str(factory.home)}

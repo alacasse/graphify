@@ -64,7 +64,7 @@ def test_run_validation_plan_consumes_work_items_without_bucket_access(tmp_path)
     assert [result["id"] for result in results] == ["first-project", "purge-disposable-graphify-out"]
 
 
-def test_run_validation_plan_preserves_matrix_runner_overrides(tmp_path) -> None:
+def test_run_validation_plan_uses_canonical_matrix_runner_override_shapes(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     env = {"HOME": str(factory.home)}
     calls: list[str] = []
@@ -89,6 +89,8 @@ def test_run_validation_plan_preserves_matrix_runner_overrides(tmp_path) -> None
         }
 
     def run_universal(selected, scenario_env):
+        assert isinstance(selected, SelectedUniversalUninstallScenario)
+        assert scenario_env is env
         scenario_platforms = ",".join(scenario.platform for scenario in selected.installed_scenarios)
         calls.append(f"universal:{selected.spec.scope}:{scenario_platforms}:{scenario_env['HOME']}")
         return {
@@ -99,6 +101,8 @@ def test_run_validation_plan_preserves_matrix_runner_overrides(tmp_path) -> None
         }
 
     def run_disposable(spec, scenario_env):
+        assert isinstance(spec, DisposableArtifactScenarioSpec)
+        assert scenario_env is env
         calls.append(f"disposable:{spec.scenario_id}:{scenario_env['HOME']}")
         return {
             "id": spec.scenario_id,
@@ -253,7 +257,7 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
         hooks=factory.hooks(
             run_scenario_func=run_scenario,
             run_universal_uninstall_scenario_func=unexpected_synthetic,
-            run_purge_scenario_func=unexpected_synthetic,
+            run_disposable_artifact_scenario_func=unexpected_synthetic,
         ),
     )
 
@@ -390,8 +394,9 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
             "passed": False,
         }
 
-    def run_purge(spec, env):
-        calls.append("purge")
+    def run_disposable(spec, env):
+        assert isinstance(spec, DisposableArtifactScenarioSpec)
+        calls.append("disposable")
         return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": False}
 
     results = scenario_lifecycle_plan.run_validation_plan(
@@ -400,11 +405,11 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         hooks=factory.hooks(
             run_scenario_func=run_scenario,
             run_universal_uninstall_scenario_func=run_universal,
-            run_purge_scenario_func=run_purge,
+            run_disposable_artifact_scenario_func=run_disposable,
         ),
     )
 
-    assert calls == ["scenario:first", "scenario:second", "universal:user", "universal:project", "purge"]
+    assert calls == ["scenario:first", "scenario:second", "universal:user", "universal:project", "disposable"]
     assert [result["id"] for result in results][-3:] == [
         DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenario_id("user"),
         DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenario_id("project"),
@@ -412,7 +417,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     ]
 
 
-def test_run_validation_plan_preserves_legacy_matrix_runner_override_shapes(tmp_path) -> None:
+def test_run_validation_plan_characterizes_migration_retained_legacy_override_shapes(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     calls: list[str] = []
     first = make_scenario("first", "project", uninstall=False)

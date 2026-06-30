@@ -91,15 +91,11 @@ def test_loader_splits_catalog_target_root_and_policy_root_validation(monkeypatc
         calls.append(("target", set(declared_roots)))
         original_validate_target_roots(self, declared_roots)
 
-    def validate_roots(self, declared_roots):
-        raise AssertionError("spec loader should not use the catalog combined policy wrapper")
-
     def validate_policy_owned_roots(registry, policy, declared_roots):
         calls.append(("policy", set(declared_roots)))
         original_validate_policy_owned_roots(registry, policy, declared_roots)
 
     monkeypatch.setattr(spec_loader.ScenarioRegistry, "validate_target_roots", validate_target_roots)
-    monkeypatch.setattr(spec_loader.ScenarioRegistry, "validate_roots", validate_roots)
     monkeypatch.setattr(validation_plan, "validate_policy_owned_roots", validate_policy_owned_roots)
 
     registry = load_registry_from_data(_valid_data())

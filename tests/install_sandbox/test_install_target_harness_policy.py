@@ -28,7 +28,7 @@ def test_synthetic_policy_scenario_ids_are_owned_by_harness_policy() -> None:
     )
 
 
-def test_catalog_synthetic_policy_ids_are_compatibility_wrappers() -> None:
+def test_catalog_synthetic_policy_id_wrappers_are_removable_facade_tail() -> None:
     owner_uninstall_id = install_target_harness_policy.universal_uninstall_scenario_id(
         REGISTRY.universal_uninstall_specs,
         "project",
@@ -229,7 +229,7 @@ def test_catalog_target_selection_boundary_uses_target_named_accessors() -> None
     assert not hasattr(registry, "platform_scenarios")
 
 
-def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> None:
+def test_catalog_policy_selection_wrappers_are_removable_after_caller_migration() -> None:
     installable_scope = install_target_models.ScopeSpec(
         install_command=("tool", "install"),
         uninstall_command=("tool", "uninstall"),
@@ -294,12 +294,9 @@ def test_catalog_harness_policy_wrappers_preserve_compatibility_behavior() -> No
         "project",
     )
     assert registry.disposable_artifact_scenarios("project") == [disposable]
-    registry.validate_roots({"project"})
-    with pytest.raises(RuntimeError, match=r"unknown sandbox root declaration\(s\): project"):
-        registry.validate_roots({"home"})
 
 
-def test_catalog_runtime_and_risk_note_wrappers_preserve_compatibility_behavior() -> None:
+def test_catalog_runtime_and_risk_note_wrappers_are_removable_facade_tail() -> None:
     validation = install_target_models.TargetRuntimeValidationSpec(
         section_title="Synthetic Runtime Validation",
         status="declared-only",
@@ -361,11 +358,15 @@ def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> Non
     )
 
     registry.validate_target_roots({"declared-cwd", "declared-output"})
-    with pytest.raises(RuntimeError, match=r"unknown sandbox root declaration\(s\): policy-cwd"):
-        registry.validate_roots({"declared-cwd", "declared-output"})
+    with pytest.raises(RuntimeError, match=r"unknown harness policy root declaration\(s\): policy-cwd"):
+        install_target_harness_policy.validate_selected_harness_policy_roots(
+            registry,
+            install_target_harness_policy.DEFAULT_HARNESS_POLICY,
+            {"declared-cwd", "declared-output"},
+        )
 
 
-def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
+def test_harness_policy_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
     specs = {
         "rooted": install_target_models.PlatformSpec(
             name="rooted",
@@ -420,5 +421,11 @@ def test_validate_roots_covers_scenarios_and_synthetic_policies() -> None:
         )
 
 
-def test_default_registry_does_not_own_universal_uninstall_selection() -> None:
+def test_catalog_universal_uninstall_group_wrapper_is_removable_facade_tail() -> None:
     assert REGISTRY.universal_uninstall_groups(["codex", "claude", "gemini"], "project") == []
+    assert install_target_harness_policy.universal_uninstall_groups(
+        REGISTRY.specs,
+        REGISTRY.universal_uninstall_specs,
+        ["codex", "claude", "gemini"],
+        "project",
+    ) == []

@@ -4,6 +4,7 @@ from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
 from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets import install_target_harness_policy
 from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
@@ -409,7 +410,9 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         eligible_platform_scope="project",
     )
     disposable_spec = DisposableArtifactScenarioSpec(
-        scenario_id=DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(),
+        scenario_id=install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
+            DEFAULT_SCENARIO_REGISTRY.disposable_artifact_specs
+        ),
         platform_label="purge",
         scope="project",
         command=("graphify", "uninstall", "--purge"),
@@ -462,9 +465,17 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
 
     assert calls == ["scenario:first", "scenario:second", "universal:user", "universal:project", "disposable"]
     assert [result["id"] for result in results][-3:] == [
-        DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenario_id("user"),
-        DEFAULT_SCENARIO_REGISTRY.universal_uninstall_scenario_id("project"),
-        DEFAULT_SCENARIO_REGISTRY.purge_disposable_graphify_out_scenario_id(),
+        install_target_harness_policy.universal_uninstall_scenario_id(
+            DEFAULT_SCENARIO_REGISTRY.universal_uninstall_specs,
+            "user",
+        ),
+        install_target_harness_policy.universal_uninstall_scenario_id(
+            DEFAULT_SCENARIO_REGISTRY.universal_uninstall_specs,
+            "project",
+        ),
+        install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
+            DEFAULT_SCENARIO_REGISTRY.disposable_artifact_specs
+        ),
     ]
 
 

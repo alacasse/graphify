@@ -20,7 +20,9 @@ SUPPORTED_DIRECT_ENTRYPOINTS = {
     "validation_plan_direct_import": Path("tools/install_sandbox/validation_plan.py"),
 }
 
-NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES = {
+NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES: set[Path] = set()
+
+REMOVED_LIFECYCLE_EFFECTS_SURFACE_FALLBACKS = {
     Path("tools/install_sandbox/effects/file_effect_generated_artifacts.py"),
     Path("tools/install_sandbox/effects/file_effect_oracle.py"),
     Path("tools/install_sandbox/effects/file_effect_sidecars.py"),
@@ -131,6 +133,15 @@ def test_non_entrypoint_fallbacks_are_cleanup_candidates_not_supported_contracts
     for relative_path in NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES:
         text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "except ImportError" in text or "except ModuleNotFoundError" in text
+
+
+def test_lifecycle_effects_surface_owner_fallbacks_removed_from_cleanup_candidates() -> None:
+    assert REMOVED_LIFECYCLE_EFFECTS_SURFACE_FALLBACKS.isdisjoint(NON_ENTRYPOINT_FALLBACK_CLEANUP_CANDIDATES)
+    for relative_path in REMOVED_LIFECYCLE_EFFECTS_SURFACE_FALLBACKS:
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "except ImportError" not in text
+        assert "except ModuleNotFoundError" not in text
+        assert "direct script import fallback" not in text
 
 
 def test_runtime_reporting_owner_fallbacks_removed_from_cleanup_candidates() -> None:

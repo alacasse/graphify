@@ -5,30 +5,17 @@ import shutil
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
-try:
-    from ..surfaces.install_surface_generated import (
-        GeneratedFileDecision,
-        decide_generated_file_observation,
-        generated_artifact_copy_plan,
-        generated_file_observation,
-        is_excluded_generated_path,
-        text_mentions_expected_generated_marker,
-    )
-    from ..surfaces.install_surface_state import expected_generated_relative_keys
-    from ..targets.install_target_models import Scenario
-    from ..reference_resolution import PackagedReferenceResolution
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_generated import (  # type: ignore[no-redef]
-        GeneratedFileDecision,
-        decide_generated_file_observation,
-        generated_artifact_copy_plan,
-        generated_file_observation,
-        is_excluded_generated_path,
-        text_mentions_expected_generated_marker,
-    )
-    from surfaces.install_surface_state import expected_generated_relative_keys  # type: ignore[no-redef]
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
-    from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
+from ..reference_resolution import PackagedReferenceResolution
+from ..surfaces.install_surface_generated import (
+    GeneratedFileDecision,
+    decide_generated_file_observation,
+    generated_artifact_copy_plan,
+    generated_file_observation,
+    is_excluded_generated_path,
+    text_mentions_expected_generated_marker,
+)
+from ..surfaces.install_surface_state import expected_generated_relative_keys
+from ..targets.install_target_models import Scenario
 
 
 GENERATED_COPY_EXCLUDES = (

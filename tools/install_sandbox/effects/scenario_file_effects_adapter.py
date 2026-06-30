@@ -4,15 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
-try:
-    from . import file_effect_state
-    from ..targets.install_target_models import Scenario
-except ImportError:
-    try:
-        from effects import file_effect_state  # type: ignore[no-redef]
-    except ImportError:
-        import file_effect_state  # type: ignore[no-redef]
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
+from . import file_effect_state
+from ..targets.install_target_models import Scenario
 
 
 def check_record(

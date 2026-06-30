@@ -4,24 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
-try:
-    from .install_surface_models import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect
-    from .install_surface_sidecars import (
-        expected_skill_sidecar_relatives,
-        reference_sidecar_expectation,
-        skill_references_relative,
-        skill_references_tmp_relative,
-    )
-    from ..reference_resolution import PackagedReferenceResolution
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect  # type: ignore[no-redef]
-    from surfaces.install_surface_sidecars import (  # type: ignore[no-redef]
-        expected_skill_sidecar_relatives,
-        reference_sidecar_expectation,
-        skill_references_relative,
-        skill_references_tmp_relative,
-    )
-    from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
+from ..reference_resolution import PackagedReferenceResolution
+from .install_surface_models import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect
+from .install_surface_sidecars import (
+    expected_skill_sidecar_relatives,
+    reference_sidecar_expectation,
+    skill_references_relative,
+    skill_references_tmp_relative,
+)
 
 
 USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"

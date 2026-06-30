@@ -4,32 +4,18 @@ import json
 from pathlib import Path
 from typing import Callable, Mapping
 
-try:
-    from ..surfaces.install_surface_models import InstallSurface, TextExpectation, is_json_effect
-    from ..surfaces.path_resolution import resolve_install_surface_path
-    from ..surfaces.install_surface_statuses import (
-        FileFingerprintObservation,
-        InstallSurfaceObservation,
-        UninstallSurfaceObservation,
-        file_fingerprint_from_observation,
-        install_surface_kind_status_from_observation,
-        installed_surface_status_from_observation,
-        uninstalled_surface_status_from_observation,
-    )
-    from ..targets.install_target_models import Scenario
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import InstallSurface, TextExpectation, is_json_effect  # type: ignore[no-redef]
-    from surfaces.path_resolution import resolve_install_surface_path  # type: ignore[no-redef]
-    from surfaces.install_surface_statuses import (  # type: ignore[no-redef]
-        FileFingerprintObservation,
-        InstallSurfaceObservation,
-        UninstallSurfaceObservation,
-        file_fingerprint_from_observation,
-        install_surface_kind_status_from_observation,
-        installed_surface_status_from_observation,
-        uninstalled_surface_status_from_observation,
-    )
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
+from ..surfaces.install_surface_models import InstallSurface, TextExpectation, is_json_effect
+from ..surfaces.install_surface_statuses import (
+    FileFingerprintObservation,
+    InstallSurfaceObservation,
+    UninstallSurfaceObservation,
+    file_fingerprint_from_observation,
+    install_surface_kind_status_from_observation,
+    installed_surface_status_from_observation,
+    uninstalled_surface_status_from_observation,
+)
+from ..surfaces.path_resolution import resolve_install_surface_path
+from ..targets.install_target_models import Scenario
 
 
 def _check_record(

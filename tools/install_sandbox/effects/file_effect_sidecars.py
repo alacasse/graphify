@@ -3,44 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Mapping
 
-try:
-    from ..surfaces.install_surface_models import InstallSurface, is_skill_effect
-    from ..surfaces.install_surface_sidecars import (
-        expected_skill_sidecar_relatives,
-        installed_reference_sidecar_status,
-        reference_sidecar_expectation,
-        references_tmp_absence_status,
-        skill_dir_for_entry,
-        skill_reference_pointer_status,
-        skill_references_relative,
-        skill_references_tmp_relative,
-        skill_sidecar_expectation,
-        skill_version_relative,
-        skill_version_status,
-        uninstalled_skill_sidecar_status,
-    )
-    from ..surfaces.install_surface_state import stale_sidecar_seed_plans
-    from ..targets.install_target_models import Scenario
-    from ..reference_resolution import PackagedReferenceResolution
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import InstallSurface, is_skill_effect  # type: ignore[no-redef]
-    from surfaces.install_surface_sidecars import (  # type: ignore[no-redef]
-        expected_skill_sidecar_relatives,
-        installed_reference_sidecar_status,
-        reference_sidecar_expectation,
-        references_tmp_absence_status,
-        skill_dir_for_entry,
-        skill_reference_pointer_status,
-        skill_references_relative,
-        skill_references_tmp_relative,
-        skill_sidecar_expectation,
-        skill_version_relative,
-        skill_version_status,
-        uninstalled_skill_sidecar_status,
-    )
-    from surfaces.install_surface_state import stale_sidecar_seed_plans  # type: ignore[no-redef]
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
-    from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
+from ..reference_resolution import PackagedReferenceResolution
+from ..surfaces.install_surface_models import InstallSurface, is_skill_effect
+from ..surfaces.install_surface_sidecars import (
+    expected_skill_sidecar_relatives,
+    installed_reference_sidecar_status,
+    reference_sidecar_expectation,
+    references_tmp_absence_status,
+    skill_dir_for_entry,
+    skill_reference_pointer_status,
+    skill_references_relative,
+    skill_references_tmp_relative,
+    skill_sidecar_expectation,
+    skill_version_relative,
+    skill_version_status,
+    uninstalled_skill_sidecar_status,
+)
+from ..surfaces.install_surface_state import stale_sidecar_seed_plans
+from ..targets.install_target_models import Scenario
 
 
 STALE_SIDECAR_SEED_DETAILS = {

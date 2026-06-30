@@ -5,36 +5,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-try:
-    from .install_surface_models import (
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonPluginExpectation,
-        TextExpectation,
-        is_json_effect,
-    )
-    from .install_surface_state import (
-        STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL,
-        expects_stale_graphify_section_repaired,
-        expects_user_content_preserved,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import (  # type: ignore[no-redef]
-        InstallSurface,
-        JsonExpectation,
-        JsonHookExpectation,
-        JsonPluginExpectation,
-        TextExpectation,
-        is_json_effect,
-    )
-    from surfaces.install_surface_state import (  # type: ignore[no-redef]
-        STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL,
-        expects_stale_graphify_section_repaired,
-        expects_user_content_preserved,
-    )
+from .install_surface_models import (
+    InstallSurface,
+    JsonExpectation,
+    JsonHookExpectation,
+    JsonPluginExpectation,
+    TextExpectation,
+    is_json_effect,
+)
+from .install_surface_state import (
+    STALE_GRAPHIFY_SENTINEL,
+    USER_SENTINEL,
+    expects_stale_graphify_section_repaired,
+    expects_user_content_preserved,
+)
 
 
 def object_dict(value: object) -> dict[str, object]:

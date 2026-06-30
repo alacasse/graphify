@@ -3,32 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Mapping
 
-try:
-    from ..surfaces.install_surface_models import InstallSurface, TextExpectation, is_skill_effect
-    from ..surfaces.install_surface_state import (
-        STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL,
-        expected_generated_relative_keys,
-        expected_manifest_relatives,
-        idempotency_state_changes,
-        planned_state_entries,
-        user_content_seed_plans,
-    )
-    from ..targets.install_target_models import Scenario
-    from ..reference_resolution import PackagedReferenceResolution
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import InstallSurface, TextExpectation, is_skill_effect  # type: ignore[no-redef]
-    from surfaces.install_surface_state import (  # type: ignore[no-redef]
-        STALE_GRAPHIFY_SENTINEL,
-        USER_SENTINEL,
-        expected_generated_relative_keys,
-        expected_manifest_relatives,
-        idempotency_state_changes,
-        planned_state_entries,
-        user_content_seed_plans,
-    )
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
-    from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
+from ..reference_resolution import PackagedReferenceResolution
+from ..surfaces.install_surface_models import InstallSurface, TextExpectation, is_skill_effect
+from ..surfaces.install_surface_state import (
+    STALE_GRAPHIFY_SENTINEL,
+    USER_SENTINEL,
+    expected_generated_relative_keys,
+    expected_manifest_relatives,
+    idempotency_state_changes,
+    planned_state_entries,
+    user_content_seed_plans,
+)
+from ..targets.install_target_models import Scenario
 
 
 def _check_record(

@@ -4,38 +4,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
-try:
-    from . import file_effect_generated_artifacts
-    from . import file_effect_sidecars
-    from . import file_effect_state
-    from . import file_effect_surfaces
-    from ..surfaces.path_resolution import (
-        resolve_install_root,
-        resolve_install_surface_path,
-    )
-    from ..surfaces.install_surface_generated import GeneratedFileDecision
-    from ..surfaces.install_surface_models import InstallSurface, TextExpectation
-    from ..targets.install_target_models import Scenario
-    from ..reference_resolution import PackagedReferenceResolution
-except ImportError:  # pragma: no cover - direct script import fallback
-    try:
-        from effects import file_effect_generated_artifacts  # type: ignore[no-redef]
-        from effects import file_effect_sidecars  # type: ignore[no-redef]
-        from effects import file_effect_state  # type: ignore[no-redef]
-        from effects import file_effect_surfaces  # type: ignore[no-redef]
-    except ImportError:
-        import file_effect_generated_artifacts  # type: ignore[no-redef]
-        import file_effect_sidecars  # type: ignore[no-redef]
-        import file_effect_state  # type: ignore[no-redef]
-        import file_effect_surfaces  # type: ignore[no-redef]
-    from surfaces.path_resolution import (  # type: ignore[no-redef]
-        resolve_install_root,
-        resolve_install_surface_path,
-    )
-    from surfaces.install_surface_generated import GeneratedFileDecision  # type: ignore[no-redef]
-    from surfaces.install_surface_models import InstallSurface, TextExpectation  # type: ignore[no-redef]
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
-    from reference_resolution import PackagedReferenceResolution  # type: ignore[no-redef]
+from . import file_effect_generated_artifacts
+from . import file_effect_sidecars
+from . import file_effect_state
+from . import file_effect_surfaces
+from ..reference_resolution import PackagedReferenceResolution
+from ..surfaces.install_surface_generated import GeneratedFileDecision
+from ..surfaces.install_surface_models import InstallSurface, TextExpectation
+from ..surfaces.path_resolution import (
+    resolve_install_root,
+    resolve_install_surface_path,
+)
+from ..targets.install_target_models import Scenario
 
 
 GENERATED_COPY_EXCLUDES = file_effect_generated_artifacts.GENERATED_COPY_EXCLUDES

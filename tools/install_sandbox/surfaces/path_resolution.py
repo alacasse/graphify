@@ -3,10 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping
 
-try:
-    from .install_surface_models import InstallSurface
-except ImportError:  # pragma: no cover - direct script import fallback
-    from surfaces.install_surface_models import InstallSurface  # type: ignore[no-redef]
+from .install_surface_models import InstallSurface
 
 
 def resolve_install_root(root: str, roots: Mapping[str, Path]) -> Path:

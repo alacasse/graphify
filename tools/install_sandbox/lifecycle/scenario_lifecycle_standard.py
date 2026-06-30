@@ -4,22 +4,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    from ..targets.install_target_models import Scenario
-    from .scenario_lifecycle_support import (
-        ScenarioLifecycleHooks,
-        ScenarioRunContext,
-        StandardScenarioStages,
-        prepare_scenario_run,
-    )
-except ImportError:  # pragma: no cover - direct script import fallback
-    from targets.install_target_models import Scenario  # type: ignore[no-redef]
-    from .scenario_lifecycle_support import (  # type: ignore[no-redef]
-        ScenarioLifecycleHooks,
-        ScenarioRunContext,
-        StandardScenarioStages,
-        prepare_scenario_run,
-    )
+from ..targets.install_target_models import Scenario
+from .scenario_lifecycle_support import (
+    ScenarioLifecycleHooks,
+    ScenarioRunContext,
+    StandardScenarioStages,
+    prepare_scenario_run,
+)
 
 
 @dataclass(frozen=True)

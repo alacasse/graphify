@@ -384,6 +384,36 @@ def test_report_reads_legacy_platform_coverage_as_transitional_input_only() -> N
     assert "## Platform Coverage" not in markdown
 
 
+def test_report_target_coverage_prefers_target_identity_over_stale_platform_alias() -> None:
+    markdown = reports.render_report_md(
+        {
+            "results": [],
+            "target_coverage": [
+                {
+                    "target": "codex",
+                    "platform": "stale-platform-alias",
+                    "scope": "project",
+                    "status": "runnable",
+                    "install_command": ["graphify", "install", "--platform", "codex"],
+                }
+            ],
+            "platform_coverage": [
+                {
+                    "platform": "must-not-render",
+                    "scope": "project",
+                    "status": "stale-legacy-input",
+                    "install_command": ["graphify", "install", "--platform", "must-not-render"],
+                }
+            ],
+        }
+    )
+
+    assert "| codex | project | runnable | graphify install --platform codex |" in markdown
+    assert "stale-platform-alias" not in markdown
+    assert "must-not-render" not in markdown
+    assert "stale-legacy-input" not in markdown
+
+
 def test_report_prefers_explicit_empty_target_coverage_over_stale_legacy_rows() -> None:
     markdown = reports.render_report_md(
         {
@@ -422,6 +452,7 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
         coverage_records = (
             {
                 "target": "codex",
+                "platform": "stale-record-alias",
                 "scope": "project",
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--platform", "codex"],
@@ -468,6 +499,8 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
         },
         "scenario_count": 2,
     }
+    assert "stale-record-alias" not in json.dumps(projected)
+    assert "platform_coverage" not in projected
 
 
 def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> None:

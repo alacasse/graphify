@@ -163,6 +163,59 @@ def test_sandbox_runner_main_composes_runtime_run_and_reporting_write(monkeypatc
     assert calls == ["run-selected-target:codex", "write"]
 
 
+def test_harness_run_manifest_projects_target_coverage_without_platform_aliases() -> None:
+    plan = SimpleNamespace(
+        standard_validation_count=1,
+        coverage_records=[
+            {
+                "target": "codex",
+                "platform": "stale-record-alias",
+                "scope": "project",
+                "status": "runnable",
+                "install_command": ["graphify", "install", "--project", "--platform", "codex"],
+            }
+        ],
+        target_runtime_validation_sections=[],
+        target_coverage_summary={
+            "registered_target_count": 1,
+            "requested_scope": "project",
+            "runnable_scope_count": 1,
+            "universal_scenario_count": 0,
+            "unsupported_scope_count": 0,
+        },
+        target_runtime_verification={"performed": False},
+    )
+
+    run_result = harness_run.harness_run_result(
+        harness_version="test-harness",
+        python_version="3.12 synthetic",
+        os_release={"PRETTY_NAME": "Synthetic Linux"},
+        architecture="x86_64",
+        package_install={"version": "9.9.9"},
+        source_snapshot={"root": "/tmp/src"},
+        preflight={"project": "/tmp/project"},
+        plan=plan,
+        results=[
+            {"id": "codex-project", "target": "codex", "scope": "project", "passed": True},
+            {"id": "cleanup", "target": "universal", "scope": "project", "passed": True},
+        ],
+    )
+
+    manifest = run_result.manifest()
+
+    assert manifest["target_coverage"] == [
+        {
+            "target": "codex",
+            "scope": "project",
+            "status": "runnable",
+            "install_command": ["graphify", "install", "--project", "--platform", "codex"],
+        }
+    ]
+    assert manifest["target_coverage_summary"]["universal_scenario_count"] == 1
+    assert "stale-record-alias" not in json.dumps(manifest)
+    assert "platform_coverage" not in manifest
+
+
 def test_sandbox_runner_direct_script_help_works() -> None:
     result = subprocess.run(
         [sys.executable, "tools/install_sandbox/sandbox_runner.py", "--help"],

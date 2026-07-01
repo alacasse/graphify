@@ -213,6 +213,37 @@ def test_fail_manifest_reads_legacy_platform_as_transitional_target_input(tmp_pa
     assert "platform" not in summary["failures"][0]
 
 
+def test_fail_manifest_prefers_target_over_legacy_platform_artifact_input(tmp_path: Path) -> None:
+    output = tmp_path / "out"
+    write_json(
+        output / "manifest.json",
+        {
+            "results": [
+                {
+                    "id": "codex-project",
+                    "target": "codex",
+                    "platform": "stale-platform-alias",
+                    "scope": "project",
+                    "passed": False,
+                    "command_artifact": {
+                        "command": "graphify install --project --platform codex",
+                        "exit_code": 1,
+                        "transcript_path": "scenarios/codex-project/transcript.txt",
+                    },
+                }
+            ],
+        },
+    )
+    write_json(output / "scenarios" / "codex-project" / "assertions.json", {"checks": []})
+
+    summary = agent_summary.summarize_output(output)
+    rendered = json.dumps(summary)
+
+    assert summary["failures"][0]["target"] == "codex"
+    assert "platform" not in summary["failures"][0]
+    assert "stale-platform-alias" not in rendered
+
+
 def test_fail_manifest_uses_command_snippets_when_assertions_have_no_failed_checks(tmp_path: Path) -> None:
     output = tmp_path / "out"
     write_json(

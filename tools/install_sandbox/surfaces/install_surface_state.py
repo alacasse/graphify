@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
-from ..reference_resolution import PackagedReferenceResolution
 from .install_surface_models import InstallSurface, TextExpectation, is_skill_effect, is_text_section_effect
 from .install_surface_sidecars import (
     expected_skill_sidecar_relatives,
@@ -12,6 +11,7 @@ from .install_surface_sidecars import (
     skill_references_relative,
     skill_references_tmp_relative,
 )
+from ..targets.reference_resolution import PackagedReferenceResolution
 
 
 USER_SENTINEL = "USER_OWNED_CONTENT_DO_NOT_REMOVE"

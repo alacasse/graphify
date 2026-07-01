@@ -7,7 +7,7 @@ import pytest
 from tools.install_sandbox.effects import file_effect_generated_artifacts
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import scenario_file_effects_adapter
-from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.targets.install_target_models import ExpectedPath, InstallSurface, Scenario
 
 # ScenarioFileEffectsAdapter coverage lives here. Lifecycle sequencing and

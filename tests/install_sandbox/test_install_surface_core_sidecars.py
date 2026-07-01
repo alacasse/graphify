@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_generated
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_sidecars

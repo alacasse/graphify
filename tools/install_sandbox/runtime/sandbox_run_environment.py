@@ -10,7 +10,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .. import reference_resolution
 from .. import validation_plan
 from ..effects import file_effect_generated_artifacts
 from ..effects import file_effect_oracle as file_effect_oracle_module
@@ -22,6 +21,7 @@ from ..reporting import artifacts as reporting_artifacts
 from ..reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values
 from ..targets.install_target_defaults import default_install_target_catalog
 from ..targets.install_target_models import Scenario
+from ..targets import reference_resolution
 from . import command_runner
 from . import source_snapshot
 

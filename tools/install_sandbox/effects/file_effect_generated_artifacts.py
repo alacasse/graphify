@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
-from ..reference_resolution import PackagedReferenceResolution
 from ..surfaces.install_surface_generated import (
     GeneratedFileDecision,
     decide_generated_file_observation,
@@ -15,6 +14,7 @@ from ..surfaces.install_surface_generated import (
     text_mentions_expected_generated_marker,
 )
 from ..surfaces.install_surface_state import expected_generated_relative_keys
+from ..targets.reference_resolution import PackagedReferenceResolution
 from ..targets.install_target_models import Scenario
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces import install_surface_state
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath, InstallSurface

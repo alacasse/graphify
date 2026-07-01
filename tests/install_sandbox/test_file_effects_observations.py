@@ -11,7 +11,7 @@ from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox.effects import file_effect_surfaces
 from tools.install_sandbox.surfaces import install_surface_statuses
-from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.targets import install_target_models
 from tools.install_sandbox.targets.install_target_models import ExpectedPath, InstallSurface, Scenario
 

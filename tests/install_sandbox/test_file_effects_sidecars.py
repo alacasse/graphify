@@ -9,7 +9,7 @@ from tools.install_sandbox.effects import file_effect_generated_artifacts
 from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_sidecars
 from tools.install_sandbox.effects import file_effect_state
-from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.targets import install_target_models
 from tools.install_sandbox.targets.install_target_models import InstallSurface, Scenario
 

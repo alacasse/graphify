@@ -11,7 +11,7 @@ from tools.install_sandbox.effects import scenario_file_effects_adapter
 from tools.install_sandbox.surfaces import install_surface_generated
 from tools.install_sandbox.surfaces import install_surface_models
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath, InstallSurface
-from tools.install_sandbox.reference_resolution import PackagedReferenceResolution
+from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.targets import install_target_models
 from tools.install_sandbox.targets.install_target_models import Scenario
 

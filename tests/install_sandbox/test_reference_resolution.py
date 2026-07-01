@@ -97,12 +97,12 @@ def test_effects_and_surfaces_consume_reference_resolution_status_model() -> Non
     }
 
     assert imports == {
-        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": {"..reference_resolution"},
-        "tools/install_sandbox/effects/file_effect_oracle.py": {"..reference_resolution"},
-        "tools/install_sandbox/effects/file_effect_sidecars.py": {"..reference_resolution"},
-        "tools/install_sandbox/effects/file_effect_state.py": {"..reference_resolution"},
-        "tools/install_sandbox/surfaces/install_surface_sidecars.py": {"..reference_resolution"},
-        "tools/install_sandbox/surfaces/install_surface_state.py": {"..reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": {"..targets.reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_oracle.py": {"..targets.reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_sidecars.py": {"..targets.reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_state.py": {"..targets.reference_resolution"},
+        "tools/install_sandbox/surfaces/install_surface_sidecars.py": {"..targets.reference_resolution"},
+        "tools/install_sandbox/surfaces/install_surface_state.py": {"..targets.reference_resolution"},
     }
 
 

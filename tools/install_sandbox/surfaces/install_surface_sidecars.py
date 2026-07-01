@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
-from ..reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
+from ..targets.reference_resolution import PackagedReferenceResolution, ReferenceResolutionStatus
 from .install_surface_models import InstallSurface, SkillSidecarExpectation
 
 

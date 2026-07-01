@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Mapping
 
-from ..reference_resolution import PackagedReferenceResolution
 from ..surfaces.install_surface_models import InstallSurface, TextExpectation, is_skill_effect
 from ..surfaces.install_surface_state import (
     STALE_GRAPHIFY_SENTINEL,
@@ -14,6 +13,7 @@ from ..surfaces.install_surface_state import (
     planned_state_entries,
     user_content_seed_plans,
 )
+from ..targets.reference_resolution import PackagedReferenceResolution
 from ..targets.install_target_models import Scenario
 
 

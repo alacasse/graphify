@@ -8,13 +8,13 @@ from . import file_effect_generated_artifacts
 from . import file_effect_sidecars
 from . import file_effect_state
 from . import file_effect_surfaces
-from ..reference_resolution import PackagedReferenceResolution
 from ..surfaces.install_surface_generated import GeneratedFileDecision
 from ..surfaces.install_surface_models import InstallSurface, TextExpectation
 from ..surfaces.path_resolution import (
     resolve_install_root,
     resolve_install_surface_path,
 )
+from ..targets.reference_resolution import PackagedReferenceResolution
 from ..targets.install_target_models import Scenario
 
 

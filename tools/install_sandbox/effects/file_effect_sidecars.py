@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Mapping
 
-from ..reference_resolution import PackagedReferenceResolution
 from ..surfaces.install_surface_models import InstallSurface, is_skill_effect
 from ..surfaces.install_surface_sidecars import (
     expected_skill_sidecar_relatives,
@@ -20,6 +19,7 @@ from ..surfaces.install_surface_sidecars import (
     uninstalled_skill_sidecar_status,
 )
 from ..surfaces.install_surface_state import stale_sidecar_seed_plans
+from ..targets.reference_resolution import PackagedReferenceResolution
 from ..targets.install_target_models import Scenario
 
 

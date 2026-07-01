@@ -68,6 +68,17 @@ def _call_name(node: ast.expr) -> str | None:
     return None
 
 
+def _imports_symbol(root: Path, symbol_name: str) -> dict[str, set[str]]:
+    imports: dict[str, set[str]] = {}
+    for path in root.rglob("*.py"):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and any(alias.name == symbol_name for alias in node.names):
+                imports.setdefault(relative, set()).add(f"{'.' * node.level}{node.module or ''}")
+    return imports
+
+
 def test_runtime_uses_target_named_reference_resolver() -> None:
     runtime_call_sites = _call_sites(
         REPO_ROOT / "tools" / "install_sandbox" / "runtime",
@@ -76,6 +87,22 @@ def test_runtime_uses_target_named_reference_resolver() -> None:
 
     assert runtime_call_sites == {
         "tools/install_sandbox/runtime/sandbox_run_environment.py::packaged_reference_resolution",
+    }
+
+
+def test_effects_and_surfaces_consume_reference_resolution_status_model() -> None:
+    imports = {
+        **_imports_symbol(REPO_ROOT / "tools" / "install_sandbox" / "effects", "PackagedReferenceResolution"),
+        **_imports_symbol(REPO_ROOT / "tools" / "install_sandbox" / "surfaces", "PackagedReferenceResolution"),
+    }
+
+    assert imports == {
+        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": {"..reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_oracle.py": {"..reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_sidecars.py": {"..reference_resolution"},
+        "tools/install_sandbox/effects/file_effect_state.py": {"..reference_resolution"},
+        "tools/install_sandbox/surfaces/install_surface_sidecars.py": {"..reference_resolution"},
+        "tools/install_sandbox/surfaces/install_surface_state.py": {"..reference_resolution"},
     }
 
 

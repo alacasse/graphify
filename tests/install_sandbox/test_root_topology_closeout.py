@@ -46,11 +46,16 @@ ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS = {
 
 ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
     "tools.install_sandbox.harness_specs",
-    "tools.install_sandbox.reference_resolution",
     "tools.install_sandbox.run",
     "tools.install_sandbox.sandbox_runner",
     "tools.install_sandbox.validation_plan",
 }
+
+ROOT_MODULE_RELOCATION_CANDIDATES = {
+    "tools.install_sandbox.reference_resolution": "tools.install_sandbox.targets.reference_resolution",
+}
+
+SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS: dict[str, tuple[str, ...]] = {}
 
 SUPPORTED_SANDBOX_RUNNER_APIS = {
     "main": "tools.install_sandbox.sandbox_runner",
@@ -428,6 +433,34 @@ def _text_files(paths: tuple[Path, ...]) -> list[Path]:
         else:
             files.append(path)
     return files
+
+
+def _documented_reference_resolution_contracts() -> dict[str, list[str]]:
+    repo_root = Path(__file__).parents[2]
+    documented_imports: dict[str, list[str]] = {}
+    documentation_paths = (
+        repo_root / "README.md",
+        repo_root / "AGENTS.md",
+        repo_root / "docs",
+        INSTALL_SANDBOX_ROOT / "README.md",
+        INSTALL_SANDBOX_ROOT / "specs" / "README.md",
+    )
+    patterns = (
+        "tools.install_sandbox.reference_resolution",
+        "tools/install_sandbox/reference_resolution.py",
+        "from tools.install_sandbox import reference_resolution",
+        "from tools.install_sandbox.reference_resolution import",
+        "import tools.install_sandbox.reference_resolution",
+    )
+
+    for path in _text_files(documentation_paths):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        matches = sorted(pattern for pattern in patterns if pattern in text)
+        if matches:
+            documented_imports[path.relative_to(repo_root).as_posix()] = matches
+    return documented_imports
 
 
 def _source_occurrence_counts(predicate) -> dict[str, int]:
@@ -860,17 +893,25 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
     assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {}
     assert ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS == {
         "tools.install_sandbox.harness_specs",
-        "tools.install_sandbox.reference_resolution",
         "tools.install_sandbox.run",
         "tools.install_sandbox.sandbox_runner",
         "tools.install_sandbox.validation_plan",
     }
+    assert ROOT_MODULE_RELOCATION_CANDIDATES == {
+        "tools.install_sandbox.reference_resolution": "tools.install_sandbox.targets.reference_resolution",
+    }
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+    assert set(ROOT_MODULE_RELOCATION_CANDIDATES).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_PURE_ROOT_FACADE_MODULES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_HELPER_DELETION_CANDIDATES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert DELETED_AGENT_SUMMARY_SHIM_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+
+
+def test_root_topology_closeout_finds_no_supported_reference_resolution_root_import_contract() -> None:
+    assert SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS == {}
+    assert _documented_reference_resolution_contracts() == SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS
 
 
 def test_root_topology_closeout_keeps_deleted_root_helpers_absent() -> None:

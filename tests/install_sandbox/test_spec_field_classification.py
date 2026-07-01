@@ -19,6 +19,9 @@ FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY = "transitional_sandbox_policy_data"
 FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
 FIELD_CLASS_HARNESS_POLICY = "harness_policy"
 FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
+FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL = "synthetic_output_label"
+FIELD_CLASS_SELECTED_TARGET_ELIGIBILITY = "selected_target_eligibility"
+FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY = "yaml_input_edge_vocabulary"
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -49,6 +52,21 @@ SPEC_WEIGHT_FIELD_EXAMPLES = {
 REGISTRY_FIELD_EXAMPLES = {
     "universal_uninstall_specs": {"<registry>"},
     "disposable_artifact_specs": {"<registry>"},
+}
+
+HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
+    "universal_uninstall_specs[].platform_label": {
+        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+        FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+    },
+    "universal_uninstall_specs[].eligible_platform_scope": {
+        FIELD_CLASS_SELECTED_TARGET_ELIGIBILITY,
+        FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+    },
+    "disposable_artifact_specs[].platform_label": {
+        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+        FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+    },
 }
 
 DEFAULT_YAML_STRUCTURAL_TARGET_FIELDS = {
@@ -109,6 +127,23 @@ def test_registry_field_classification_vocabulary_is_explicit() -> None:
     assert REGISTRY_FIELD_CLASSIFICATION == {
         "universal_uninstall_specs": FIELD_CLASS_HARNESS_POLICY,
         "disposable_artifact_specs": FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY,
+    }
+
+
+def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
+    assert HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION == {
+        "universal_uninstall_specs[].platform_label": {
+            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+            FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        },
+        "universal_uninstall_specs[].eligible_platform_scope": {
+            FIELD_CLASS_SELECTED_TARGET_ELIGIBILITY,
+            FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        },
+        "disposable_artifact_specs[].platform_label": {
+            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+            FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        },
     }
 
 

@@ -186,6 +186,55 @@ DEFERRED_PRODUCT_PLATFORM_VOCABULARY = {
     "platforms": "YAML",
 }
 
+TARGET_OWNER_API_PARAMETER_GUARDS = {
+    "tools.install_sandbox.targets.install_target_selection": {
+        "coverage_records": {"target_names"},
+        "direct_install_command": {"target_name"},
+        "direct_uninstall_command": {"target_name"},
+        "generic_install_command": {"target_name"},
+        "install_variants_for_scope": {"target_name"},
+        "make_scenario": {"target_name"},
+        "project_skill": {"target_name"},
+        "scenario_id": {"target_name"},
+        "selected_targets": {"target_name"},
+        "target_scenarios": {"target_name"},
+        "target_spec": {"target_name"},
+        "unsupported_scope_reason": {"target_name"},
+        "user_skill": {"target_name"},
+    },
+    "tools.install_sandbox.targets.install_target_catalog.ScenarioRegistry": {
+        "coverage_records": {"target_names"},
+        "direct_install_command": {"target_name"},
+        "direct_uninstall_command": {"target_name"},
+        "generic_install_command": {"target_name"},
+        "install_variants_for_scope": {"target_name"},
+        "make_scenario": {"target_name"},
+        "project_skill": {"target_name"},
+        "scenario_id": {"target_name"},
+        "selected_targets": {"target_name"},
+        "target_scenarios": {"target_name"},
+        "target_spec": {"target_name"},
+        "unsupported_scope_reason": {"target_name"},
+        "user_skill": {"target_name"},
+    },
+    "tools.install_sandbox.targets.install_target_defaults": {
+        "direct_install_command": {"target_name"},
+        "direct_uninstall_command": {"target_name"},
+        "generic_install_command": {"target_name"},
+        "install_target_scenarios": {"target_name"},
+        "install_target_spec": {"target_name"},
+        "make_scenario": {"target_name"},
+        "project_skill": {"target_name"},
+        "unsupported_scope_reason": {"target_name"},
+        "user_skill": {"target_name"},
+    },
+}
+
+DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS = {
+    "tools.install_sandbox.targets.install_target_defaults.risk_notes": {"platform_name"},
+    "tools.install_sandbox.targets.install_target_defaults.universal_uninstall_scenarios": {"platforms"},
+}
+
 RUNNER_INTAKE_FRONTIER_MODULES = (
     "tools.install_sandbox.run",
     "tools.install_sandbox.sandbox_runner",
@@ -313,6 +362,32 @@ def _function_node(module: types.ModuleType, function_name: str) -> ast.Function
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == function_name
     )
+
+
+def _resolve_dotted_owner(dotted_name: str) -> object:
+    module_name, separator, _ = dotted_name.partition(".ScenarioRegistry")
+    owner = importlib.import_module(module_name)
+    if separator:
+        owner = getattr(owner, "ScenarioRegistry")
+    return owner
+
+
+def test_root_topology_closeout_guards_target_owner_parameter_vocabulary() -> None:
+    legacy_parameter_names = {"platform_name", "platforms"}
+    for owner_name, api_parameters in TARGET_OWNER_API_PARAMETER_GUARDS.items():
+        owner = _resolve_dotted_owner(owner_name)
+        for api_name, target_parameters in api_parameters.items():
+            signature = inspect.signature(getattr(owner, api_name))
+
+            assert set(signature.parameters) >= target_parameters
+            assert not (set(signature.parameters) & legacy_parameter_names)
+
+    for owner_api_name, deferred_parameters in DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS.items():
+        module_name, api_name = owner_api_name.rsplit(".", maxsplit=1)
+        owner = importlib.import_module(module_name)
+        signature = inspect.signature(getattr(owner, api_name))
+
+        assert set(signature.parameters) >= deferred_parameters
 
 
 def test_root_topology_closeout_documents_target_named_artifact_vocabulary() -> None:

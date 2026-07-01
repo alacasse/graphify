@@ -26,6 +26,8 @@ FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_scen
 FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY = "serialized_artifact_vocabulary"
 FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY = "public_product_edge_vocabulary"
 FIELD_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
+FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
+FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -100,6 +102,49 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     },
     "legacy_manifest_input.platform_coverage": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+}
+
+REPORTING_PROJECTION_ROLE_CLASSIFICATION = {
+    "manifest_projection.target_coverage": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+    },
+    "manifest_projection.target_coverage_summary": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+    },
+    "report_rendering.target_coverage": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+    },
+    "agent_summary.failure.target": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+    },
+    "legacy_manifest_input.platform": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "legacy_manifest_input.platform_coverage": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "legacy_result_input.platform": {
+        FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "product_command.--platform": {
+        FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
+    },
+    "registry_yaml.platforms": {
+        FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+    },
+    "UniversalUninstallScenarioSpec.platform_label": {
+        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+    },
+    "DisposableArtifactScenarioSpec.platform_label": {
+        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
     },
 }
 
@@ -214,6 +259,78 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
     }
+
+
+def test_reporting_projection_role_classification_names_exemplar_boundary() -> None:
+    assert REPORTING_PROJECTION_ROLE_CLASSIFICATION == {
+        "manifest_projection.target_coverage": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+        },
+        "manifest_projection.target_coverage_summary": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+        },
+        "report_rendering.target_coverage": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+        },
+        "agent_summary.failure.target": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
+        },
+        "legacy_manifest_input.platform": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+        "legacy_manifest_input.platform_coverage": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+        "legacy_result_input.platform": {
+            FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR,
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+        "product_command.--platform": {
+            FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
+        },
+        "registry_yaml.platforms": {
+            FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        },
+        "UniversalUninstallScenarioSpec.platform_label": {
+            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+        },
+        "DisposableArtifactScenarioSpec.platform_label": {
+            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+        },
+    }
+
+
+def test_reporting_projection_classification_keeps_legacy_platform_vocabulary_input_only() -> None:
+    current_output_fields = {
+        field
+        for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+        if FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT in classes
+    }
+    legacy_reader_fields = {
+        field
+        for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+        if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
+    }
+
+    assert current_output_fields == {
+        "manifest_projection.target_coverage",
+        "manifest_projection.target_coverage_summary",
+        "report_rendering.target_coverage",
+        "agent_summary.failure.target",
+    }
+    assert legacy_reader_fields == {
+        "legacy_manifest_input.platform",
+        "legacy_manifest_input.platform_coverage",
+        "legacy_result_input.platform",
+    }
+    assert current_output_fields.isdisjoint(legacy_reader_fields)
+    assert all("platform_coverage" not in field for field in current_output_fields)
 
 
 def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:

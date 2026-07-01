@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tools.install_sandbox.reference_resolution import (
+from tools.install_sandbox.targets.reference_resolution import (
     PackagedReferenceResolution,
     resolve_target_packaged_references,
 )

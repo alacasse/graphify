@@ -9,17 +9,17 @@ from tools.install_sandbox.targets import install_target_models, install_target_
 from install_target_test_support import REGISTRY, scenario_for
 
 
-TARGET_SELECTION_PLATFORM_NAMED_PARAMETER_DEBT = {
-    "coverage_records": {"platforms"},
-    "direct_install_command": {"platform_name"},
-    "direct_uninstall_command": {"platform_name"},
-    "generic_install_command": {"platform_name"},
-    "install_variants_for_scope": {"platform_name"},
-    "make_scenario": {"platform_name"},
-    "scenario_id": {"platform_name"},
-    "unsupported_scope_reason": {"platform_name"},
-    "user_skill": {"platform_name"},
-    "project_skill": {"platform_name"},
+TARGET_SELECTION_TARGET_OWNER_PARAMETERS = {
+    "coverage_records": {"target_names"},
+    "direct_install_command": {"target_name"},
+    "direct_uninstall_command": {"target_name"},
+    "generic_install_command": {"target_name"},
+    "install_variants_for_scope": {"target_name"},
+    "make_scenario": {"target_name"},
+    "scenario_id": {"target_name"},
+    "unsupported_scope_reason": {"target_name"},
+    "user_skill": {"target_name"},
+    "project_skill": {"target_name"},
 }
 
 DEFERRED_SELECTION_EDGE_VOCABULARY = {
@@ -55,16 +55,18 @@ def test_catalog_platform_aliases_are_not_supported_accessors() -> None:
         assert not hasattr(REGISTRY, name)
 
 
-def test_target_selection_classifies_remaining_platform_parameters_as_internal_debt() -> None:
+def test_target_selection_uses_target_owned_parameters_for_install_targets() -> None:
     assert DEFERRED_SELECTION_EDGE_VOCABULARY == {
         "Scenario.platform",
         "--platform command argument",
         "YAML platforms registry key",
     }
-    for helper_name, debt_parameters in TARGET_SELECTION_PLATFORM_NAMED_PARAMETER_DEBT.items():
+    legacy_parameter_names = {"platform_name", "platforms"}
+    for helper_name, target_parameters in TARGET_SELECTION_TARGET_OWNER_PARAMETERS.items():
         signature = inspect.signature(getattr(install_target_selection, helper_name))
 
-        assert set(signature.parameters) >= debt_parameters
+        assert set(signature.parameters) >= target_parameters
+        assert not (set(signature.parameters) & legacy_parameter_names)
 
     assert "platform" in install_target_models.Scenario.__dataclass_fields__
 

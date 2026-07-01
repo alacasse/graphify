@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any, Mapping
 
-from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from ..surfaces.install_surface_models import InstallSurface
 from ..targets.install_target_models import (
     MIXED_SCOPE_GLOBAL_SKILL_PROJECT_WIRING_NOTE,

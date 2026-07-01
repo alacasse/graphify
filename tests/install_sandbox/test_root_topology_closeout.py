@@ -45,19 +45,19 @@ ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS = {
 }
 
 ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
-    "tools.install_sandbox.harness_specs",
+    "tools.install_sandbox.sandbox_roots",
     "tools.install_sandbox.run",
     "tools.install_sandbox.sandbox_runner",
     "tools.install_sandbox.validation_plan",
 }
 
-ROOT_WORTHY_DESIRED_RENAME_SEAMS = {
-    "tools.install_sandbox.sandbox_roots",
-}
+ROOT_WORTHY_DESIRED_RENAME_SEAMS: set[str] = set()
 
 ROOT_MODULE_RELOCATION_CANDIDATES: dict[str, str] = {}
 
-ROOT_MODULE_RENAME_CANDIDATES = {
+ROOT_MODULE_RENAME_CANDIDATES: dict[str, str] = {}
+
+CLOSED_ROOT_MODULE_RENAMES = {
     "tools.install_sandbox.harness_specs": "tools.install_sandbox.sandbox_roots",
 }
 
@@ -920,16 +920,15 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
     assert ROOT_HELPER_DELETION_CANDIDATES == set()
     assert ROOT_HELPER_DIRECT_SCRIPT_FALLBACKS == {}
     assert ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS == {
-        "tools.install_sandbox.harness_specs",
+        "tools.install_sandbox.sandbox_roots",
         "tools.install_sandbox.run",
         "tools.install_sandbox.sandbox_runner",
         "tools.install_sandbox.validation_plan",
     }
-    assert ROOT_WORTHY_DESIRED_RENAME_SEAMS == {
-        "tools.install_sandbox.sandbox_roots",
-    }
+    assert ROOT_WORTHY_DESIRED_RENAME_SEAMS == set()
     assert ROOT_MODULE_RELOCATION_CANDIDATES == {}
-    assert ROOT_MODULE_RENAME_CANDIDATES == {
+    assert ROOT_MODULE_RENAME_CANDIDATES == {}
+    assert CLOSED_ROOT_MODULE_RENAMES == {
         "tools.install_sandbox.harness_specs": "tools.install_sandbox.sandbox_roots",
     }
     assert CLOSED_TARGET_OWNED_MODULE_RELOCATIONS == {
@@ -937,10 +936,13 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
     }
     assert set(ROOT_MODULE_RENAME_CANDIDATES) <= ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS
     assert set(ROOT_MODULE_RENAME_CANDIDATES.values()) == ROOT_WORTHY_DESIRED_RENAME_SEAMS
+    assert set(CLOSED_ROOT_MODULE_RENAMES).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+    assert set(CLOSED_ROOT_MODULE_RENAMES.values()) <= ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert set(ROOT_MODULE_RELOCATION_CANDIDATES).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert set(CLOSED_TARGET_OWNED_MODULE_RELOCATIONS).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert set(CLOSED_TARGET_OWNED_MODULE_RELOCATIONS).isdisjoint(ROOT_MODULE_RENAME_CANDIDATES)
+    assert set(CLOSED_TARGET_OWNED_MODULE_RELOCATIONS).isdisjoint(CLOSED_ROOT_MODULE_RENAMES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_PURE_ROOT_FACADE_MODULES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_HELPER_DELETION_CANDIDATES)
@@ -965,22 +967,23 @@ def test_root_topology_closeout_finds_no_supported_reference_resolution_root_imp
     assert _documented_reference_resolution_contracts() == SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS
 
 
-def test_root_topology_closeout_classifies_harness_specs_as_root_rename_candidate() -> None:
-    current_module_name, desired_module_name = next(iter(ROOT_MODULE_RENAME_CANDIDATES.items()))
-    current_file_name = current_module_name.rsplit(".", maxsplit=1)[-1]
-    desired_file_name = desired_module_name.rsplit(".", maxsplit=1)[-1]
-    current_module = importlib.import_module(current_module_name)
+def test_root_topology_closeout_classifies_sandbox_roots_as_completed_root_rename() -> None:
+    old_module_name, renamed_module_name = next(iter(CLOSED_ROOT_MODULE_RENAMES.items()))
+    old_file_name = old_module_name.rsplit(".", maxsplit=1)[-1]
+    renamed_file_name = renamed_module_name.rsplit(".", maxsplit=1)[-1]
+    renamed_module = importlib.import_module(renamed_module_name)
 
-    assert current_module.__name__ == current_module_name
-    assert hasattr(current_module, "SandboxRootRegistry")
-    assert hasattr(current_module, "SandboxRootSpec")
-    assert hasattr(current_module, "DEFAULT_SANDBOX_ROOT_REGISTRY")
-    assert (INSTALL_SANDBOX_ROOT / f"{current_file_name}.py").exists()
-    assert not (INSTALL_SANDBOX_ROOT / f"{desired_file_name}.py").exists()
-    assert desired_module_name in ROOT_WORTHY_DESIRED_RENAME_SEAMS
-    assert current_module_name not in ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS
-    assert current_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
-    assert desired_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
+    assert renamed_module.__name__ == renamed_module_name
+    assert hasattr(renamed_module, "SandboxRootRegistry")
+    assert hasattr(renamed_module, "SandboxRootSpec")
+    assert hasattr(renamed_module, "DEFAULT_SANDBOX_ROOT_REGISTRY")
+    assert not (INSTALL_SANDBOX_ROOT / f"{old_file_name}.py").exists()
+    assert importlib.util.find_spec(old_module_name) is None
+    assert (INSTALL_SANDBOX_ROOT / f"{renamed_file_name}.py").exists()
+    assert renamed_module_name in ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS
+    assert old_module_name not in ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS
+    assert old_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
+    assert renamed_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
 
 
 def test_root_topology_closeout_finds_no_supported_harness_specs_root_import_contract() -> None:

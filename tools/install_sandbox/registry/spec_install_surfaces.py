@@ -4,7 +4,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
-from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from ..surfaces.install_surface_models import (
     FileEffect,
     InstallSurface,

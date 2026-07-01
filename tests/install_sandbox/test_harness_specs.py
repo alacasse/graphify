@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tools.install_sandbox.harness_specs import (
+from tools.install_sandbox.sandbox_roots import (
     DEFAULT_SANDBOX_ROOT_REGISTRY,
     SandboxRootRegistry,
     SandboxRootSpec,
@@ -51,7 +51,7 @@ def _production_sandbox_python_files() -> list[Path]:
     return sorted(
         path
         for path in Path("tools/install_sandbox").glob("**/*.py")
-        if path.as_posix() != "tools/install_sandbox/harness_specs.py"
+        if path.as_posix() != "tools/install_sandbox/sandbox_roots.py"
     )
 
 
@@ -220,7 +220,7 @@ def test_production_sandbox_root_callers_use_role_named_apis() -> None:
         name
         for name, relpath, _scope in calls
         if relpath.startswith("tools/install_sandbox/")
-        and relpath != "tools/install_sandbox/harness_specs.py"
+        and relpath != "tools/install_sandbox/sandbox_roots.py"
     }
 
     assert PRODUCTION_CALLED_ROLE_NAMED_ROOT_APIS <= production_calls
@@ -236,7 +236,7 @@ def test_production_sandbox_root_registry_callers_stay_on_current_root_owner() -
         relpath
         for _name, relpath, _scope in calls
         if relpath.startswith("tools/install_sandbox/")
-        and relpath != "tools/install_sandbox/harness_specs.py"
+        and relpath != "tools/install_sandbox/sandbox_roots.py"
     }
 
     production_definitions = {
@@ -245,16 +245,16 @@ def test_production_sandbox_root_registry_callers_stay_on_current_root_owner() -
 
     assert caller_paths == PRODUCTION_ROOT_REGISTRY_CALLERS
     assert production_definitions == {
-        ("env_entries", "tools/install_sandbox/harness_specs.py"),
-        ("env_roots", "tools/install_sandbox/harness_specs.py"),
-        ("install_surface_root_names", "tools/install_sandbox/harness_specs.py"),
-        ("policy_cwd_root_names", "tools/install_sandbox/harness_specs.py"),
-        ("preflight_roots", "tools/install_sandbox/harness_specs.py"),
-        ("reset_roots", "tools/install_sandbox/harness_specs.py"),
-        ("root_names", "tools/install_sandbox/harness_specs.py"),
-        ("runtime_paths", "tools/install_sandbox/harness_specs.py"),
-        ("sandbox_path_assertion_roots", "tools/install_sandbox/harness_specs.py"),
-        ("scenario_root_names", "tools/install_sandbox/harness_specs.py"),
-        ("scenario_root_paths", "tools/install_sandbox/harness_specs.py"),
-        ("volume_roots", "tools/install_sandbox/harness_specs.py"),
+        ("env_entries", "tools/install_sandbox/sandbox_roots.py"),
+        ("env_roots", "tools/install_sandbox/sandbox_roots.py"),
+        ("install_surface_root_names", "tools/install_sandbox/sandbox_roots.py"),
+        ("policy_cwd_root_names", "tools/install_sandbox/sandbox_roots.py"),
+        ("preflight_roots", "tools/install_sandbox/sandbox_roots.py"),
+        ("reset_roots", "tools/install_sandbox/sandbox_roots.py"),
+        ("root_names", "tools/install_sandbox/sandbox_roots.py"),
+        ("runtime_paths", "tools/install_sandbox/sandbox_roots.py"),
+        ("sandbox_path_assertion_roots", "tools/install_sandbox/sandbox_roots.py"),
+        ("scenario_root_names", "tools/install_sandbox/sandbox_roots.py"),
+        ("scenario_root_paths", "tools/install_sandbox/sandbox_roots.py"),
+        ("volume_roots", "tools/install_sandbox/sandbox_roots.py"),
     }

@@ -11,7 +11,7 @@ except ImportError as exc:  # pragma: no cover - dependency is declared for dev/
 else:
     _YAML_IMPORT_ERROR = None
 
-from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from .. import validation_plan
 from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
 from ..targets.install_target_models import InstallTargetSpec

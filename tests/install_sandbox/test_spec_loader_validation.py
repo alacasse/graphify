@@ -5,7 +5,7 @@ from tests.install_sandbox.install_target_test_support import (
     valid_registry_data as _valid_data,
 )
 from tools.install_sandbox import validation_plan
-from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from tools.install_sandbox.sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from tools.install_sandbox.registry import spec_harness_policy_inputs, spec_loader, spec_target_facts
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data
 

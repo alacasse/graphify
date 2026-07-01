@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 
 
 HARNESS_DIR = Path(__file__).resolve().parents[1]

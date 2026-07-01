@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tools.install_sandbox import validation_plan
-from tools.install_sandbox.harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry, SandboxRootSpec
+from tools.install_sandbox.sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY, SandboxRootRegistry, SandboxRootSpec
 from tools.install_sandbox.targets import install_target_catalog, install_target_models
 from tests.install_sandbox.validation_plan_test_support import planner_registry, scope
 

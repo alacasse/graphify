@@ -12,7 +12,7 @@ import pytest
 
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox import sandbox_runner
-from tools.install_sandbox.harness_specs import SandboxRootRegistry, SandboxRootSpec
+from tools.install_sandbox.sandbox_roots import SandboxRootRegistry, SandboxRootSpec
 from tools.install_sandbox.reporting import harness_run
 from tools.install_sandbox.reporting import status as reporting_status
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from ..targets.install_target_models import (
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,

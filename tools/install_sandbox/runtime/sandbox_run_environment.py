@@ -15,7 +15,7 @@ from ..effects import file_effect_generated_artifacts
 from ..effects import file_effect_oracle as file_effect_oracle_module
 from ..effects import file_effect_state
 from ..effects import scenario_file_effects_adapter
-from ..harness_specs import DEFAULT_SANDBOX_ROOT_REGISTRY
+from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from ..lifecycle import scenario_lifecycle_support
 from ..reporting import artifacts as reporting_artifacts
 from ..reporting.status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, combined_status, known_status_values

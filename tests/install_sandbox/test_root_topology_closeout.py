@@ -51,13 +51,22 @@ ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
     "tools.install_sandbox.validation_plan",
 }
 
+ROOT_WORTHY_DESIRED_RENAME_SEAMS = {
+    "tools.install_sandbox.sandbox_roots",
+}
+
 ROOT_MODULE_RELOCATION_CANDIDATES: dict[str, str] = {}
+
+ROOT_MODULE_RENAME_CANDIDATES = {
+    "tools.install_sandbox.harness_specs": "tools.install_sandbox.sandbox_roots",
+}
 
 CLOSED_TARGET_OWNED_MODULE_RELOCATIONS = {
     "tools.install_sandbox.reference_resolution": "tools.install_sandbox.targets.reference_resolution",
 }
 
 SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS: dict[str, tuple[str, ...]] = {}
+SUPPORTED_EXTERNAL_HARNESS_SPECS_IMPORT_CONTRACTS: dict[str, tuple[str, ...]] = {}
 
 SUPPORTED_SANDBOX_RUNNER_APIS = {
     "main": "tools.install_sandbox.sandbox_runner",
@@ -438,6 +447,30 @@ def _text_files(paths: tuple[Path, ...]) -> list[Path]:
 
 
 def _documented_reference_resolution_contracts() -> dict[str, list[str]]:
+    return _documented_import_contracts(
+        (
+            "tools.install_sandbox.reference_resolution",
+            "tools/install_sandbox/reference_resolution.py",
+            "from tools.install_sandbox import reference_resolution",
+            "from tools.install_sandbox.reference_resolution import",
+            "import tools.install_sandbox.reference_resolution",
+        )
+    )
+
+
+def _documented_harness_specs_contracts() -> dict[str, list[str]]:
+    return _documented_import_contracts(
+        (
+            "tools.install_sandbox.harness_specs",
+            "tools/install_sandbox/harness_specs.py",
+            "from tools.install_sandbox import harness_specs",
+            "from tools.install_sandbox.harness_specs import",
+            "import tools.install_sandbox.harness_specs",
+        )
+    )
+
+
+def _documented_import_contracts(patterns: tuple[str, ...]) -> dict[str, list[str]]:
     repo_root = Path(__file__).parents[2]
     documented_imports: dict[str, list[str]] = {}
     documentation_paths = (
@@ -446,13 +479,6 @@ def _documented_reference_resolution_contracts() -> dict[str, list[str]]:
         repo_root / "docs",
         INSTALL_SANDBOX_ROOT / "README.md",
         INSTALL_SANDBOX_ROOT / "specs" / "README.md",
-    )
-    patterns = (
-        "tools.install_sandbox.reference_resolution",
-        "tools/install_sandbox/reference_resolution.py",
-        "from tools.install_sandbox import reference_resolution",
-        "from tools.install_sandbox.reference_resolution import",
-        "import tools.install_sandbox.reference_resolution",
     )
 
     for path in _text_files(documentation_paths):
@@ -899,13 +925,22 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
         "tools.install_sandbox.sandbox_runner",
         "tools.install_sandbox.validation_plan",
     }
+    assert ROOT_WORTHY_DESIRED_RENAME_SEAMS == {
+        "tools.install_sandbox.sandbox_roots",
+    }
     assert ROOT_MODULE_RELOCATION_CANDIDATES == {}
+    assert ROOT_MODULE_RENAME_CANDIDATES == {
+        "tools.install_sandbox.harness_specs": "tools.install_sandbox.sandbox_roots",
+    }
     assert CLOSED_TARGET_OWNED_MODULE_RELOCATIONS == {
         "tools.install_sandbox.reference_resolution": "tools.install_sandbox.targets.reference_resolution",
     }
+    assert set(ROOT_MODULE_RENAME_CANDIDATES) <= ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS
+    assert set(ROOT_MODULE_RENAME_CANDIDATES.values()) == ROOT_WORTHY_DESIRED_RENAME_SEAMS
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert set(ROOT_MODULE_RELOCATION_CANDIDATES).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert set(CLOSED_TARGET_OWNED_MODULE_RELOCATIONS).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+    assert set(CLOSED_TARGET_OWNED_MODULE_RELOCATIONS).isdisjoint(ROOT_MODULE_RENAME_CANDIDATES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_PURE_ROOT_FACADE_MODULES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_HELPER_DELETION_CANDIDATES)
@@ -928,6 +963,29 @@ def test_root_topology_closeout_classifies_reference_resolution_as_target_owned(
 def test_root_topology_closeout_finds_no_supported_reference_resolution_root_import_contract() -> None:
     assert SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS == {}
     assert _documented_reference_resolution_contracts() == SUPPORTED_EXTERNAL_REFERENCE_RESOLUTION_IMPORT_CONTRACTS
+
+
+def test_root_topology_closeout_classifies_harness_specs_as_root_rename_candidate() -> None:
+    current_module_name, desired_module_name = next(iter(ROOT_MODULE_RENAME_CANDIDATES.items()))
+    current_file_name = current_module_name.rsplit(".", maxsplit=1)[-1]
+    desired_file_name = desired_module_name.rsplit(".", maxsplit=1)[-1]
+    current_module = importlib.import_module(current_module_name)
+
+    assert current_module.__name__ == current_module_name
+    assert hasattr(current_module, "SandboxRootRegistry")
+    assert hasattr(current_module, "SandboxRootSpec")
+    assert hasattr(current_module, "DEFAULT_SANDBOX_ROOT_REGISTRY")
+    assert (INSTALL_SANDBOX_ROOT / f"{current_file_name}.py").exists()
+    assert not (INSTALL_SANDBOX_ROOT / f"{desired_file_name}.py").exists()
+    assert desired_module_name in ROOT_WORTHY_DESIRED_RENAME_SEAMS
+    assert current_module_name not in ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS
+    assert current_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
+    assert desired_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
+
+
+def test_root_topology_closeout_finds_no_supported_harness_specs_root_import_contract() -> None:
+    assert SUPPORTED_EXTERNAL_HARNESS_SPECS_IMPORT_CONTRACTS == {}
+    assert _documented_harness_specs_contracts() == SUPPORTED_EXTERNAL_HARNESS_SPECS_IMPORT_CONTRACTS
 
 
 def test_root_topology_closeout_keeps_deleted_root_helpers_absent() -> None:

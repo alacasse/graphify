@@ -51,7 +51,9 @@ ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS = {
     "tools.install_sandbox.validation_plan",
 }
 
-ROOT_MODULE_RELOCATION_CANDIDATES = {
+ROOT_MODULE_RELOCATION_CANDIDATES: dict[str, str] = {}
+
+CLOSED_TARGET_OWNED_MODULE_RELOCATIONS = {
     "tools.install_sandbox.reference_resolution": "tools.install_sandbox.targets.reference_resolution",
 }
 
@@ -897,16 +899,30 @@ def test_root_topology_closeout_characterizes_root_helper_relocation_buckets() -
         "tools.install_sandbox.sandbox_runner",
         "tools.install_sandbox.validation_plan",
     }
-    assert ROOT_MODULE_RELOCATION_CANDIDATES == {
+    assert ROOT_MODULE_RELOCATION_CANDIDATES == {}
+    assert CLOSED_TARGET_OWNED_MODULE_RELOCATIONS == {
         "tools.install_sandbox.reference_resolution": "tools.install_sandbox.targets.reference_resolution",
     }
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert set(ROOT_MODULE_RELOCATION_CANDIDATES).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+    assert set(CLOSED_TARGET_OWNED_MODULE_RELOCATIONS).isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_PURE_ROOT_FACADE_MODULES)
     assert ROOT_HELPER_DELETION_CANDIDATES.isdisjoint(DELETED_INSTALL_SURFACE_CORE_FACADE_MODULES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_HELPER_DELETION_CANDIDATES)
     assert DELETED_ROOT_HELPER_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
     assert DELETED_AGENT_SUMMARY_SHIM_MODULES.isdisjoint(ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS)
+
+
+def test_root_topology_closeout_classifies_reference_resolution_as_target_owned() -> None:
+    for root_module_name, target_module_name in CLOSED_TARGET_OWNED_MODULE_RELOCATIONS.items():
+        root_file_name = root_module_name.rsplit(".", maxsplit=1)[-1]
+        target_module = importlib.import_module(target_module_name)
+
+        assert target_module.__name__ == target_module_name
+        assert not (INSTALL_SANDBOX_ROOT / f"{root_file_name}.py").exists()
+        assert importlib.util.find_spec(root_module_name) is None
+        assert root_module_name not in ROOT_WORTHY_ENTRYPOINTS_AND_DEEP_SEAMS
+        assert root_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
 
 
 def test_root_topology_closeout_finds_no_supported_reference_resolution_root_import_contract() -> None:

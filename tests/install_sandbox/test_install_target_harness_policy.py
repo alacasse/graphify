@@ -17,6 +17,14 @@ from install_target_test_support import REGISTRY
 HARNESS_POLICY_PLATFORM_NAMED_PARAMETER_DEBT = {
 }
 
+HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETERS = {
+    "universal_uninstall_scenarios": {"target_names"},
+    "universal_uninstall_groups": {"target_names"},
+    "selected_universal_uninstall_scenarios": {"target_names"},
+    "_select_universal_uninstall_scenarios": {"target_names"},
+    "risk_notes": {"target_name"},
+}
+
 SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL = "synthetic_output_label"
 SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY = "selected_target_eligibility"
 SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY = "yaml_input_edge_vocabulary"
@@ -109,6 +117,25 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
     assert "eligible_target_scope" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
     assert "eligible_platform_scope" not in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
     assert "platform_label" in install_target_models.DisposableArtifactScenarioSpec.__dataclass_fields__
+
+
+def test_harness_policy_closeout_keeps_target_eligibility_target_named() -> None:
+    assert HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETERS == {
+        "universal_uninstall_scenarios": {"target_names"},
+        "universal_uninstall_groups": {"target_names"},
+        "selected_universal_uninstall_scenarios": {"target_names"},
+        "_select_universal_uninstall_scenarios": {"target_names"},
+        "risk_notes": {"target_name"},
+    }
+
+    legacy_parameter_names = {"platform_name", "platforms", "eligible_platform_scope"}
+    for helper_name, target_parameters in HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETERS.items():
+        signature = inspect.signature(getattr(install_target_harness_policy, helper_name))
+
+        assert set(signature.parameters) >= target_parameters
+        assert not (set(signature.parameters) & legacy_parameter_names)
+
+    assert HARNESS_POLICY_PLATFORM_NAMED_PARAMETER_DEBT == {}
 
 
 def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:

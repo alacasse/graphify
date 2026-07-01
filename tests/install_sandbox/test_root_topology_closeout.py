@@ -235,6 +235,25 @@ DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS = {
     "tools.install_sandbox.targets.install_target_defaults.universal_uninstall_scenarios": {"platforms"},
 }
 
+HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETER_GUARDS = {
+    "tools.install_sandbox.targets.install_target_harness_policy": {
+        "universal_uninstall_scenarios": {"target_names"},
+        "universal_uninstall_groups": {"target_names"},
+        "selected_universal_uninstall_scenarios": {"target_names"},
+        "_select_universal_uninstall_scenarios": {"target_names"},
+        "risk_notes": {"target_name"},
+    },
+}
+
+HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY = {
+    "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
+    "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
+    "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
+    "Scenario.platform": "PTT-B4 scenario identity",
+    "--platform": "public product command edge",
+    "platforms": "public YAML edge",
+}
+
 RUNNER_INTAKE_FRONTIER_MODULES = (
     "tools.install_sandbox.run",
     "tools.install_sandbox.sandbox_runner",
@@ -388,6 +407,47 @@ def test_root_topology_closeout_guards_target_owner_parameter_vocabulary() -> No
         signature = inspect.signature(getattr(owner, api_name))
 
         assert set(signature.parameters) >= deferred_parameters
+
+
+def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> None:
+    models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
+    harness_policy = importlib.import_module("tools.install_sandbox.targets.install_target_harness_policy")
+    spec_inputs = importlib.import_module("tools.install_sandbox.registry.spec_harness_policy_inputs")
+
+    assert HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY == {
+        "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
+        "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
+        "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
+        "Scenario.platform": "PTT-B4 scenario identity",
+        "--platform": "public product command edge",
+        "platforms": "public YAML edge",
+    }
+
+    legacy_eligibility_names = {"platform_name", "platforms", "eligible_platform_scope"}
+    for owner_name, api_parameters in HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETER_GUARDS.items():
+        owner = importlib.import_module(owner_name)
+        for api_name, target_parameters in api_parameters.items():
+            signature = inspect.signature(getattr(owner, api_name))
+
+            assert set(signature.parameters) >= target_parameters
+            assert not (set(signature.parameters) & legacy_eligibility_names)
+
+    universal_fields = models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    disposable_fields = models.DisposableArtifactScenarioSpec.__dataclass_fields__
+    assert "platform_label" in universal_fields
+    assert "platform_label" in disposable_fields
+    assert "eligible_target_scope" in universal_fields
+    assert "eligible_platform_scope" not in universal_fields
+    assert "platform" in models.Scenario.__dataclass_fields__
+
+    selection_source = inspect.getsource(harness_policy._select_universal_uninstall_scenarios)
+    assert "eligible_target_scope" in selection_source
+    assert "eligible_platform_scope" not in selection_source
+    assert "platform_label" not in selection_source
+
+    loader_source = inspect.getsource(spec_inputs._universal_uninstall)
+    assert 'data.get("eligible_platform_scope")' in loader_source
+    assert "eligible_target_scope=" in loader_source
 
 
 def test_root_topology_closeout_documents_target_named_artifact_vocabulary() -> None:

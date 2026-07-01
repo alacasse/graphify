@@ -258,6 +258,14 @@ SCENARIO_PLATFORM_CONTRACT_DECISION = "migratable_internal_identity"
 
 SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES: dict[str, int] = {}
 
+SCENARIO_PLATFORM_ALLOWED_VOCABULARY_BUCKETS = {
+    "product/public CLI": {"--platform", "args.platform", "build_container_command(platform=...)"},
+    "YAML input edge": {"platforms", "eligible_platform_scope"},
+    "serialized artifact output keys": {"scenario.platform", "scenario.platforms", "result.platform"},
+    "legacy input-only readers": {"manifest.platform", "manifest.platform_coverage"},
+    "synthetic label vocabulary": {"platform_label"},
+}
+
 SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS = {
     "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
 }
@@ -483,6 +491,7 @@ def test_root_topology_closeout_classifies_scenario_platform_as_internal_identit
     assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migratable_internal_identity"
     assert "target_name" in models.Scenario.__dataclass_fields__
     assert "platform" not in models.Scenario.__dataclass_fields__
+    assert not hasattr(models.Scenario, "platform")
     assert not isinstance(getattr(models.Scenario, "platform", None), property)
     assert SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES == {}
 
@@ -493,6 +502,21 @@ def test_root_topology_closeout_classifies_scenario_platform_as_internal_identit
     )
 
     assert attribute_references == SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES
+
+
+def test_root_topology_closeout_documents_exact_platform_vocabulary_buckets() -> None:
+    assert SCENARIO_PLATFORM_ALLOWED_VOCABULARY_BUCKETS == {
+        "product/public CLI": {"--platform", "args.platform", "build_container_command(platform=...)"},
+        "YAML input edge": {"platforms", "eligible_platform_scope"},
+        "serialized artifact output keys": {"scenario.platform", "scenario.platforms", "result.platform"},
+        "legacy input-only readers": {"manifest.platform", "manifest.platform_coverage"},
+        "synthetic label vocabulary": {"platform_label"},
+    }
+
+    bucketed_terms = set().union(*SCENARIO_PLATFORM_ALLOWED_VOCABULARY_BUCKETS.values())
+    assert "Scenario.platform" not in bucketed_terms
+    assert "scenario.platform" in SCENARIO_PLATFORM_ALLOWED_VOCABULARY_BUCKETS["serialized artifact output keys"]
+    assert "platform_label" in SCENARIO_PLATFORM_ALLOWED_VOCABULARY_BUCKETS["synthetic label vocabulary"]
 
 
 def test_root_topology_closeout_keeps_scenario_result_platform_keys_at_artifact_edges() -> None:

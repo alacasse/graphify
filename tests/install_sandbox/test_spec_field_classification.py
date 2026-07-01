@@ -25,6 +25,7 @@ FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY = "yaml_input_edge_vocabulary"
 FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_scenario_target_identity"
 FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY = "serialized_artifact_vocabulary"
 FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY = "public_product_edge_vocabulary"
+FIELD_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -93,6 +94,12 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     },
     "registry_yaml.platforms": {
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+    },
+    "legacy_manifest_input.platform": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "legacy_manifest_input.platform_coverage": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
 }
 
@@ -199,6 +206,12 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
         },
         "registry_yaml.platforms": {
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        },
+        "legacy_manifest_input.platform": {
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+        "legacy_manifest_input.platform_coverage": {
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
     }
 

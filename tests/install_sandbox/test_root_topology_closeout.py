@@ -249,9 +249,34 @@ HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY = {
     "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
     "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
     "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
-    "Scenario.platform": "PTT-B4 scenario identity",
+    "Scenario.platform": "PTT-B4 migratable internal scenario target identity",
     "--platform": "public product command edge",
     "platforms": "public YAML edge",
+}
+
+SCENARIO_PLATFORM_CONTRACT_DECISION = "migratable_internal_identity"
+
+SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES = {
+    "tools/install_sandbox/effects/file_effect_generated_artifacts.py": 2,
+    "tools/install_sandbox/effects/file_effect_oracle.py": 1,
+    "tools/install_sandbox/effects/file_effect_sidecars.py": 3,
+    "tools/install_sandbox/effects/file_effect_state.py": 1,
+    "tools/install_sandbox/effects/scenario_file_effects_adapter.py": 1,
+    "tools/install_sandbox/lifecycle/scenario_lifecycle_standard.py": 1,
+    "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 4,
+    "tools/install_sandbox/lifecycle/scenario_lifecycle_universal.py": 2,
+    "tools/install_sandbox/runtime/sandbox_run_environment.py": 1,
+    "tools/install_sandbox/targets/install_target_selection.py": 1,
+}
+
+SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS = {
+    "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
+}
+
+LEGACY_PLATFORM_INPUT_ONLY_READERS = {
+    "tools/install_sandbox/reporting/artifacts.py": 1,
+    "tools/install_sandbox/reporting/manifest_projection.py": 1,
+    "tools/install_sandbox/reporting/reports.py": 2,
 }
 
 RUNNER_INTAKE_FRONTIER_MODULES = (
@@ -374,6 +399,17 @@ def _text_files(paths: tuple[Path, ...]) -> list[Path]:
     return files
 
 
+def _source_occurrence_counts(predicate) -> dict[str, int]:
+    occurrences: dict[str, int] = {}
+    for path in sorted(INSTALL_SANDBOX_ROOT.rglob("*.py")):
+        relative = path.relative_to(Path(__file__).parents[2]).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        count = sum(1 for node in ast.walk(tree) if predicate(node))
+        if count:
+            occurrences[relative] = count
+    return occurrences
+
+
 def _function_node(module: types.ModuleType, function_name: str) -> ast.FunctionDef:
     tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
     return next(
@@ -418,7 +454,7 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
         "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
         "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
         "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
-        "Scenario.platform": "PTT-B4 scenario identity",
+        "Scenario.platform": "PTT-B4 migratable internal scenario target identity",
         "--platform": "public product command edge",
         "platforms": "public YAML edge",
     }
@@ -448,6 +484,54 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
     loader_source = inspect.getsource(spec_inputs._universal_uninstall)
     assert 'data.get("eligible_platform_scope")' in loader_source
     assert "eligible_target_scope=" in loader_source
+
+
+def test_root_topology_closeout_classifies_scenario_platform_as_internal_identity() -> None:
+    models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
+
+    assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migratable_internal_identity"
+    assert "platform" in models.Scenario.__dataclass_fields__
+    assert not isinstance(getattr(models.Scenario, "platform", None), property)
+    assert SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES == {
+        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": 2,
+        "tools/install_sandbox/effects/file_effect_oracle.py": 1,
+        "tools/install_sandbox/effects/file_effect_sidecars.py": 3,
+        "tools/install_sandbox/effects/file_effect_state.py": 1,
+        "tools/install_sandbox/effects/scenario_file_effects_adapter.py": 1,
+        "tools/install_sandbox/lifecycle/scenario_lifecycle_standard.py": 1,
+        "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 4,
+        "tools/install_sandbox/lifecycle/scenario_lifecycle_universal.py": 2,
+        "tools/install_sandbox/runtime/sandbox_run_environment.py": 1,
+        "tools/install_sandbox/targets/install_target_selection.py": 1,
+    }
+
+    attribute_references = _source_occurrence_counts(
+        lambda node: isinstance(node, ast.Attribute)
+        and node.attr == "platform"
+        and not (isinstance(node.value, ast.Name) and node.value.id == "args")
+    )
+
+    assert attribute_references == SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES
+
+
+def test_root_topology_closeout_keeps_scenario_result_platform_keys_at_artifact_edges() -> None:
+    assert SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS == {
+        "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
+    }
+    assert LEGACY_PLATFORM_INPUT_ONLY_READERS == {
+        "tools/install_sandbox/reporting/artifacts.py": 1,
+        "tools/install_sandbox/reporting/manifest_projection.py": 1,
+        "tools/install_sandbox/reporting/reports.py": 2,
+    }
+
+    literal_platform_keys = _source_occurrence_counts(
+        lambda node: isinstance(node, ast.Constant) and node.value == "platform"
+    )
+
+    assert literal_platform_keys == {
+        **SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS,
+        **LEGACY_PLATFORM_INPUT_ONLY_READERS,
+    }
 
 
 def test_root_topology_closeout_documents_target_named_artifact_vocabulary() -> None:

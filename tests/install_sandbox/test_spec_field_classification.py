@@ -22,6 +22,9 @@ FIELD_CLASS_RUNTIME_LIMITATION = "runtime_limitation"
 FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL = "synthetic_output_label"
 FIELD_CLASS_SELECTED_TARGET_ELIGIBILITY = "selected_target_eligibility"
 FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY = "yaml_input_edge_vocabulary"
+FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_scenario_target_identity"
+FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY = "serialized_artifact_vocabulary"
+FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY = "public_product_edge_vocabulary"
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -68,6 +71,32 @@ HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
 }
+
+SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
+    "Scenario.platform": {
+        FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY,
+    },
+    "standard_scenario_result.platform": {
+        FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
+    },
+    "synthetic_scenario_result.platform": {
+        FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
+    },
+    "UniversalUninstallScenarioSpec.platform_label": {
+        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+    },
+    "DisposableArtifactScenarioSpec.platform_label": {
+        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+    },
+    "product_command.--platform": {
+        FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
+    },
+    "registry_yaml.platforms": {
+        FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+    },
+}
+
+SCENARIO_PLATFORM_CONTRACT_DECISION = "migratable_internal_identity"
 
 DEFAULT_YAML_STRUCTURAL_TARGET_FIELDS = {
     "display_name",
@@ -142,6 +171,33 @@ def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
         },
         "disposable_artifact_specs[].platform_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+            FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        },
+    }
+
+
+def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
+    assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migratable_internal_identity"
+    assert SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION == {
+        "Scenario.platform": {
+            FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY,
+        },
+        "standard_scenario_result.platform": {
+            FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
+        },
+        "synthetic_scenario_result.platform": {
+            FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
+        },
+        "UniversalUninstallScenarioSpec.platform_label": {
+            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+        },
+        "DisposableArtifactScenarioSpec.platform_label": {
+            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
+        },
+        "product_command.--platform": {
+            FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
+        },
+        "registry_yaml.platforms": {
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
     }

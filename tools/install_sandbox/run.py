@@ -84,12 +84,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     output.mkdir(parents=True, exist_ok=True)
 
+    selected_install_target_input = args.platform
     host_command = build_container_command(
         repo=repo,
         output=output,
         runtime=args.runtime,
         image=args.image,
-        platform=args.platform,
+        platform=selected_install_target_input,
         all_platforms=args.all,
         scope=args.scope,
         copy_source=args.copy_source,

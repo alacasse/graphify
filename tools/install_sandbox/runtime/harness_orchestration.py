@@ -22,7 +22,12 @@ def read_os_release() -> dict[str, str]:
     return data
 
 
-def run_harness(args, run_environment: SandboxRunEnvironment) -> harness_run.HarnessRunResult:
+def run_harness(
+    args,
+    run_environment: SandboxRunEnvironment,
+    *,
+    selected_target_name: str | None,
+) -> harness_run.HarnessRunResult:
     env = run_environment.sandbox_env()
     preflight_data = run_environment.preflight()
     src_data = run_environment.copy_source_tree(args.copy_source)
@@ -31,7 +36,7 @@ def run_harness(args, run_environment: SandboxRunEnvironment) -> harness_run.Har
     plan = validation_plan.build_validation_plan(
         run_environment.scenario_registry,
         all_targets=args.all,
-        target_name=args.platform,
+        target_name=selected_target_name,
         scope=args.scope,
     )
 

@@ -36,7 +36,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    run_result = harness_orchestration.run_harness(args, RUN_ENVIRONMENT)
+    selected_target_name = args.platform
+    run_result = harness_orchestration.run_harness(
+        args,
+        RUN_ENVIRONMENT,
+        selected_target_name=selected_target_name,
+    )
     harness_run.write_harness_run_outputs(RUN_ENVIRONMENT.output, run_result)
     return 0 if run_result.failed == 0 else 1
 

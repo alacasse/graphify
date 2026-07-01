@@ -144,8 +144,9 @@ def test_sandbox_runner_main_composes_runtime_run_and_reporting_write(monkeypatc
     run_environment = SimpleNamespace(output=tmp_path / "out")
     run_result = SimpleNamespace(failed=0)
 
-    def run_harness(args, environment):
-        calls.append(f"run:{args.platform}")
+    def run_harness(args, environment, *, selected_target_name):
+        calls.append(f"run-selected-target:{selected_target_name}")
+        assert args.platform == "codex"
         assert environment is run_environment
         return run_result
 
@@ -159,7 +160,7 @@ def test_sandbox_runner_main_composes_runtime_run_and_reporting_write(monkeypatc
     monkeypatch.setattr(harness_run, "write_harness_run_outputs", write_harness_run_outputs)
 
     assert sandbox_runner.main(["--platform", "codex"]) == 0
-    assert calls == ["run:codex", "write"]
+    assert calls == ["run-selected-target:codex", "write"]
 
 
 def test_sandbox_runner_direct_script_help_works() -> None:
@@ -637,7 +638,7 @@ def test_public_platform_intake_selects_validation_plan_target(monkeypatch, tmp_
     monkeypatch.setattr(harness_orchestration.platform_mod, "machine", lambda: "synthetic-arch")
 
     args = sandbox_runner.parse_args(["--platform", "codex", "--scope", "project"])
-    result = harness_orchestration.run_harness(args, run_environment)
+    result = harness_orchestration.run_harness(args, run_environment, selected_target_name=args.platform)
 
     assert result.plan.selected_targets == ("codex",)
     assert calls == [

@@ -168,7 +168,7 @@ def test_harness_policy_validates_owned_roots() -> None:
                 scope="project",
                 command=("bad",),
                 cwd_root="missing-cwd",
-                eligible_platform_scope="project",
+                eligible_target_scope="project",
             ),
         ),
         disposable_artifact_specs=(),

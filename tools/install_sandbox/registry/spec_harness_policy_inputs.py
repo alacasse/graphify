@@ -94,7 +94,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
                 scope="user",
                 command=("graphify", "uninstall"),
                 cwd_root="user_cwd",
-                eligible_platform_scope="user",
+                eligible_target_scope="user",
             )
         if value == "project":
             return UniversalUninstallScenarioSpec(
@@ -103,7 +103,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
                 scope="project",
                 command=("graphify", "uninstall", "--project"),
                 cwd_root="project",
-                eligible_platform_scope="project",
+                eligible_target_scope="project",
             )
         _fail(context, f"unknown compact universal uninstall scope: {value}")
     data = _mapping(value, context)
@@ -115,7 +115,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
         scope=_string(data.get("scope"), f"{context}.scope"),
         command=_command(data.get("command"), f"{context}.command"),
         cwd_root=cwd_root,
-        eligible_platform_scope=_string(data.get("eligible_platform_scope"), f"{context}.eligible_platform_scope"),
+        eligible_target_scope=_string(data.get("eligible_platform_scope"), f"{context}.eligible_platform_scope"),
         minimum_installed_scenarios=_int(data.get("minimum_installed_scenarios", 2), f"{context}.minimum_installed_scenarios"),
         artifact_subdir=_string(data.get("artifact_subdir", "uninstall"), f"{context}.artifact_subdir"),
         risk_note=_string(data.get("risk_note", "universal uninstall covers Graphify-owned file effects after multiple installs"), f"{context}.risk_note"),

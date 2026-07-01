@@ -58,6 +58,7 @@ def test_loader_parse_path_consumes_root_name_role_apis(monkeypatch) -> None:
 
     assert registry.target_names == ["mini"]
     assert registry.make_scenario("mini", "project").cwd_root == "repo_mount"
+    assert registry.universal_uninstall_specs[0].eligible_target_scope == "project"
     assert root_registry.root_name_calls == 1
     assert root_registry.policy_cwd_root_name_calls == 3
 
@@ -79,6 +80,7 @@ def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
     registry = load_registry_from_data(data)
 
     assert registry.universal_uninstall_specs[0].cwd_root == "repo_mount"
+    assert registry.universal_uninstall_specs[0].eligible_target_scope == "project"
     assert registry.disposable_artifact_specs[0].cwd_root == "repo_mount"
 
 

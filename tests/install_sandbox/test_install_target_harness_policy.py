@@ -31,8 +31,10 @@ HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
         SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL,
         SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
-    "UniversalUninstallScenarioSpec.eligible_platform_scope": {
+    "UniversalUninstallScenarioSpec.eligible_target_scope": {
         SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
+    },
+    "registry.universal_uninstall_specs[].eligible_platform_scope": {
         SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
     "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
@@ -83,8 +85,10 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
             SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL,
             SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
-        "UniversalUninstallScenarioSpec.eligible_platform_scope": {
+        "UniversalUninstallScenarioSpec.eligible_target_scope": {
             SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
+        },
+        "registry.universal_uninstall_specs[].eligible_platform_scope": {
             SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
         "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
@@ -102,7 +106,8 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
         assert set(signature.parameters) >= debt_parameters
 
     assert "platform_label" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
-    assert "eligible_platform_scope" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    assert "eligible_target_scope" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    assert "eligible_platform_scope" not in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
     assert "platform_label" in install_target_models.DisposableArtifactScenarioSpec.__dataclass_fields__
 
 
@@ -181,7 +186,7 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
         scope="workspace",
         command=("tool", "remove", "all"),
         cwd_root="user_cwd",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
         minimum_installed_scenarios=1,
         artifact_subdir="declared-uninstall",
         risk_note="synthetic universal uninstall policy",
@@ -224,7 +229,7 @@ def test_universal_uninstall_platform_label_is_output_label_not_target_eligibili
         scope="project",
         command=("tool", "remove", "all"),
         cwd_root="project",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
         minimum_installed_scenarios=2,
     )
     specs = {
@@ -254,7 +259,7 @@ def test_universal_uninstall_platform_label_is_output_label_not_target_eligibili
 
     assert len(selected) == 1
     assert selected[0].spec.platform_label == "synthetic-cleanup-label"
-    assert selected[0].spec.eligible_platform_scope == "project"
+    assert selected[0].spec.eligible_target_scope == "project"
     assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
 
 
@@ -354,7 +359,7 @@ def test_harness_policy_owner_selects_policy_scenarios_after_catalog_wrapper_del
         scope="project",
         command=("tool", "remove", "all"),
         cwd_root="project",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
         minimum_installed_scenarios=2,
     )
     disposable = install_target_models.DisposableArtifactScenarioSpec(
@@ -462,7 +467,7 @@ def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> Non
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="policy-cwd",
-                eligible_platform_scope="project",
+                eligible_target_scope="project",
             ),
         ),
         disposable_artifact_specs=(),
@@ -500,7 +505,7 @@ def test_harness_policy_validate_roots_covers_scenarios_and_synthetic_policies()
             scope="project",
             command=("tool", "uninstall"),
             cwd_root="declared-cwd",
-            eligible_platform_scope="project",
+            eligible_target_scope="project",
         ),
     )
     disposable_specs = (

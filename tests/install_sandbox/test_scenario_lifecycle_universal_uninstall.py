@@ -112,7 +112,7 @@ def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_ri
         scope="workspace",
         command=("custom-tool", "remove", "workspace"),
         cwd_root="user_cwd",
-        eligible_platform_scope="unused-scope",
+        eligible_target_scope="unused-scope",
         artifact_subdir="declared-artifacts",
         risk_note="declared lifecycle risk",
     )

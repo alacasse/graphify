@@ -31,7 +31,7 @@ def _default_universal_uninstall_specs() -> tuple[UniversalUninstallScenarioSpec
             scope="user",
             command=("graphify", "uninstall"),
             cwd_root="user_cwd",
-            eligible_platform_scope="user",
+            eligible_target_scope="user",
         ),
         UniversalUninstallScenarioSpec(
             scenario_id="universal-uninstall-project",
@@ -39,7 +39,7 @@ def _default_universal_uninstall_specs() -> tuple[UniversalUninstallScenarioSpec
             scope="project",
             command=("graphify", "uninstall", "--project"),
             cwd_root="project",
-            eligible_platform_scope="project",
+            eligible_target_scope="project",
         ),
     )
 
@@ -200,9 +200,9 @@ def _select_universal_uninstall_scenarios(
         if universal_spec.scope not in selected_scopes:
             continue
         scenarios = [
-            make_scenario(target_name, universal_spec.eligible_platform_scope)
+            make_scenario(target_name, universal_spec.eligible_target_scope)
             for target_name in target_names
-            if universal_spec.eligible_platform_scope in target_spec_for(target_name).universal_uninstall_scopes
+            if universal_spec.eligible_target_scope in target_spec_for(target_name).universal_uninstall_scopes
         ]
         runnable = tuple(scenario for scenario in scenarios if scenario is not None)
         if len(runnable) >= universal_spec.minimum_installed_scenarios:

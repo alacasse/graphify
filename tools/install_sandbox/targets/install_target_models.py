@@ -67,7 +67,7 @@ class UniversalUninstallScenarioSpec:
     scope: str
     command: tuple[str, ...]
     cwd_root: str
-    eligible_platform_scope: str
+    eligible_target_scope: str
     minimum_installed_scenarios: int = 2
     artifact_subdir: str = "uninstall"
     risk_note: str = "universal uninstall covers Graphify-owned file effects after multiple installs"

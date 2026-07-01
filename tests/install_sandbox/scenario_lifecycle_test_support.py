@@ -99,7 +99,7 @@ def make_universal_uninstall_selection(
     scope: str = "project",
     command: tuple[str, ...] = ("graphify", "uninstall", "--project"),
     cwd_root: str = "project",
-    eligible_platform_scope: str = "project",
+    eligible_target_scope: str = "project",
     artifact_subdir: str = "uninstall",
     risk_note: str = "universal uninstall covers Graphify-owned file effects after multiple installs",
 ) -> SelectedUniversalUninstallScenario:
@@ -110,7 +110,7 @@ def make_universal_uninstall_selection(
             scope=scope,
             command=command,
             cwd_root=cwd_root,
-            eligible_platform_scope=eligible_platform_scope,
+            eligible_target_scope=eligible_target_scope,
             artifact_subdir=artifact_subdir,
             risk_note=risk_note,
         ),

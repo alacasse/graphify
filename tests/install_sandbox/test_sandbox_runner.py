@@ -288,7 +288,7 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="missing-universal-root",
-                eligible_platform_scope="project",
+                eligible_target_scope="project",
             ),
         ),
         disposable_artifact_specs=(
@@ -400,7 +400,7 @@ def test_preflight_current_policy_validation_uses_install_surface_roots_not_all_
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="repo_mount",
-                eligible_platform_scope="project",
+                eligible_target_scope="project",
             ),
         ),
         disposable_artifact_specs=(),

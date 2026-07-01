@@ -202,14 +202,14 @@ def test_run_validation_plan_executes_plan_buckets_in_current_order(tmp_path) ->
         scope="user",
         command=("cleanup", "user"),
         cwd_root="user_cwd",
-        eligible_platform_scope="user",
+        eligible_target_scope="user",
     )
     project_universal = make_universal_uninstall_selection(
         (first, second),
         scenario_id="universal-project",
         scope="project",
         command=("cleanup", "project"),
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
     )
     disposable_spec = make_disposable_graphify_out_spec()
     plan = make_validation_plan(
@@ -269,7 +269,7 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
         scope="project",
         command=("cleanup", "project"),
         cwd_root="project",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
     )
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id="purge-project-cache",
@@ -401,7 +401,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         scope="user",
         command=("graphify", "uninstall"),
         cwd_root="user_cwd",
-        eligible_platform_scope="user",
+        eligible_target_scope="user",
     )
     project_spec = UniversalUninstallScenarioSpec(
         scenario_id="universal-uninstall-project",
@@ -409,7 +409,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         scope="project",
         command=("graphify", "uninstall", "--project"),
         cwd_root="project",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
     )
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id=install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
@@ -491,7 +491,7 @@ def test_run_validation_plan_rejects_legacy_override_shapes(tmp_path) -> None:
         scope="project",
         command=("cleanup", "project"),
         cwd_root="project",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
     )
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id="legacy-purge",
@@ -545,7 +545,7 @@ def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_pat
         scope="selected-scope",
         command=("selected", "remove"),
         cwd_root="user_cwd",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
         artifact_subdir="selected-artifacts",
         risk_note="selected risk note",
     )
@@ -585,7 +585,7 @@ def test_universal_uninstall_spec_lookup_uses_validation_plan_owner(tmp_path) ->
         scope="project",
         command=("selected", "uninstall"),
         cwd_root="project",
-        eligible_platform_scope="project",
+        eligible_target_scope="project",
     )
 
     hooks = factory.hooks(

@@ -84,7 +84,7 @@ def tracked_skill_sidecar_relatives(
     roots: Mapping[str, Path],
     packaged_reference_resolution: Callable[[str], PackagedReferenceResolution],
 ) -> set[Path]:
-    return expected_skill_sidecar_relatives(entry, packaged_reference_resolution(scenario.platform)) | installed_skill_reference_relatives(entry, roots)
+    return expected_skill_sidecar_relatives(entry, packaged_reference_resolution(scenario.target_name)) | installed_skill_reference_relatives(entry, roots)
 
 
 def check_skill_version(
@@ -123,7 +123,7 @@ def check_packaged_references(
     skill_dir = skill_dir_for_entry(entry, roots)
     refs_dir = skill_dir / skill_sidecar_expectation(entry).references_dir
     refs_relative = skill_references_relative(entry)
-    expectation = reference_sidecar_expectation(packaged_reference_resolution(scenario.platform))
+    expectation = reference_sidecar_expectation(packaged_reference_resolution(scenario.target_name))
     refs_ok, refs_detail = installed_reference_sidecar_status(
         expectation,
         references_exists=refs_dir.exists(),
@@ -189,7 +189,7 @@ def seed_stale_skill_sidecars(
     seeded: list[dict[str, object]] = []
     plans = stale_sidecar_seed_plans(
         scenario.expected,
-        packaged_reference_resolution(scenario.platform),
+        packaged_reference_resolution(scenario.target_name),
     )
     for plan in plans:
         path = _root_path(plan.root_name, roots) / plan.relative

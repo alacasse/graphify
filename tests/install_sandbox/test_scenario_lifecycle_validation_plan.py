@@ -48,8 +48,8 @@ def test_run_validation_plan_consumes_work_items_without_bucket_access(tmp_path)
             raise AssertionError("lifecycle should consume validation_work_items")
 
     def run_scenario(item, env):
-        calls.append(f"standard:{item.platform}:{item.scope}")
-        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+        calls.append(f"standard:{item.target_name}:{item.scope}")
+        return {"id": f"{item.target_name}-{item.scope}", "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")
@@ -84,10 +84,10 @@ def test_run_validation_plan_uses_canonical_matrix_runner_override_shapes(tmp_pa
     )
 
     def run_scenario(item, scenario_env):
-        calls.append(f"scenario:{item.platform}:{item.scope}:{scenario_env['HOME']}")
+        calls.append(f"scenario:{item.target_name}:{item.scope}:{scenario_env['HOME']}")
         return {
-            "id": f"{item.platform}-{item.scope}",
-            "platform": item.platform,
+            "id": f"{item.target_name}-{item.scope}",
+            "platform": item.target_name,
             "scope": item.scope,
             "passed": True,
         }
@@ -95,7 +95,7 @@ def test_run_validation_plan_uses_canonical_matrix_runner_override_shapes(tmp_pa
     def run_universal(selected, scenario_env):
         assert isinstance(selected, SelectedUniversalUninstallScenario)
         assert scenario_env is env
-        scenario_platforms = ",".join(scenario.platform for scenario in selected.installed_scenarios)
+        scenario_platforms = ",".join(scenario.target_name for scenario in selected.installed_scenarios)
         calls.append(f"universal:{selected.spec.scope}:{scenario_platforms}:{scenario_env['HOME']}")
         return {
             "id": f"universal-{selected.spec.scope}",
@@ -221,8 +221,8 @@ def test_run_validation_plan_executes_plan_buckets_in_current_order(tmp_path) ->
     )
 
     def run_scenario(item, env):
-        calls.append(f"standard:{item.platform}:{item.scope}")
-        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+        calls.append(f"standard:{item.target_name}:{item.scope}")
+        return {"id": f"{item.target_name}-{item.scope}", "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_universal(selected, env):
         calls.append(f"universal:{selected.spec.scenario_id}")
@@ -293,13 +293,13 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
     )
 
     def run_scenario(item, env):
-        calls.append(f"scenario:{item.platform}")
+        calls.append(f"scenario:{item.target_name}")
         return {
-            "id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope),
-            "platform": item.platform,
+            "id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope),
+            "platform": item.target_name,
             "scope": item.scope,
-            "passed": item.platform == "second",
-            "graphify_file_effects_passed": item.platform == "second",
+            "passed": item.target_name == "second",
+            "graphify_file_effects_passed": item.target_name == "second",
         }
 
     def unexpected_synthetic(*args, **kwargs):
@@ -334,8 +334,8 @@ def test_run_validation_plan_fail_fast_only_short_circuits_standard_scenarios(tm
     )
 
     def run_scenario(item, env):
-        calls.append(f"standard:{item.platform}")
-        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+        calls.append(f"standard:{item.target_name}")
+        return {"id": f"{item.target_name}-{item.scope}", "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_universal(selected, env):
         calls.append(f"universal:{selected.spec.scenario_id}")
@@ -373,8 +373,8 @@ def test_run_validation_plan_fail_fast_stops_first_graphify_failure(tmp_path) ->
     )
 
     def run_scenario(item, env):
-        calls.append(item.platform)
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": False}
+        calls.append(item.target_name)
+        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": False}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         plan,
@@ -438,8 +438,8 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     )
 
     def run_scenario(item, env):
-        calls.append(f"scenario:{item.platform}")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
+        calls.append(f"scenario:{item.target_name}")
+        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_universal(selected, env):
         calls.append(f"universal:{selected.spec.scope}")
@@ -515,7 +515,7 @@ def test_run_validation_plan_rejects_legacy_override_shapes(tmp_path) -> None:
     )
 
     def run_scenario(item, env):
-        return {"id": f"{item.platform}-{item.scope}", "platform": item.platform, "scope": item.scope, "passed": True}
+        return {"id": f"{item.target_name}-{item.scope}", "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_universal(universal_scope, scenarios, env):
         return {"id": universal_spec.scenario_id, "platform": universal_spec.platform_label, "scope": universal_scope, "passed": True}
@@ -551,7 +551,7 @@ def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_pat
     )
 
     def run_scenario(item, env):
-        return {"id": "arbitrary-project", "platform": item.platform, "scope": item.scope, "passed": True, "graphify_file_effects_passed": True}
+        return {"id": "arbitrary-project", "platform": item.target_name, "scope": item.scope, "passed": True, "graphify_file_effects_passed": True}
 
     plan = make_validation_plan(
         platforms=("arbitrary",),
@@ -625,8 +625,8 @@ def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_br
     )
 
     def run_scenario(item, env):
-        calls.append(f"scenario:{item.platform}:{item.scope}")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.platform, item.scope), "platform": item.platform, "scope": item.scope, "passed": True}
+        calls.append(f"scenario:{item.target_name}:{item.scope}")
+        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")

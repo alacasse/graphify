@@ -101,7 +101,7 @@ class FileEffectOracle:
     def expected_manifest_relatives(self, scenario: Scenario, root_name: str) -> set[Path]:
         return file_effect_state.expected_manifest_relatives(
             scenario.expected,
-            self.packaged_reference_resolution(scenario.platform),
+            self.packaged_reference_resolution(scenario.target_name),
             root_name,
         )
 

@@ -28,7 +28,7 @@ def test_validation_plan_derives_universal_uninstall_from_policy_and_target_fact
     assert single.universal_uninstall == selected.universal_uninstall == ()
     assert len(multi.universal_uninstall) == 1
     assert multi.universal_uninstall[0].spec.scenario_id == "universal-uninstall-project"
-    assert [scenario.platform for scenario in multi.universal_uninstall[0].installed_scenarios] == [
+    assert [scenario.target_name for scenario in multi.universal_uninstall[0].installed_scenarios] == [
         "codex",
         "claude",
         "gemini",

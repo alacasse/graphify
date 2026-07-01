@@ -53,7 +53,7 @@ def oracle(roots) -> file_effect_oracle.FileEffectOracle:
 
 def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -> Scenario:
     return Scenario(
-        platform=platform,
+        target_name=platform,
         scope=scope,
         install_command=("true",),
         uninstall_command=None,
@@ -133,7 +133,7 @@ def test_install_surface_alias_is_accepted_by_scenario_and_oracle(oracle, roots)
     surface = install_target_models.InstallSurface("project", "surface.txt")
     (roots["project"] / "surface.txt").write_text("installed\n", encoding="utf-8")
     test_scenario = Scenario(
-        platform="unit",
+        target_name="unit",
         scope="project",
         install_command=("true",),
         uninstall_command=None,

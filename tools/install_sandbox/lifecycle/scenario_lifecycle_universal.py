@@ -35,7 +35,7 @@ class UniversalUninstallLifecycle:
 
     def runner_scenario(self) -> Scenario:
         return Scenario(
-            platform=self.spec.platform_label,
+            target_name=self.spec.platform_label,
             scope=self.spec.scope,
             install_command=self.uninstall_command,
             uninstall_command=None,
@@ -60,14 +60,14 @@ class UniversalUninstallLifecycle:
         self.hooks.file_effects.write_manifest(context.artifact_dir / "after-uninstall-files.json", self.hooks.paths.roots, debug_full=True)
 
     def install_artifact_dir(self, context: ScenarioRunContext, scenario: Scenario) -> Path:
-        install_scenario_id = self.hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
+        install_scenario_id = self.hooks.scenario_registry.scenario_id(scenario.target_name, scenario.scope)
         return context.artifact_dir / "installs" / install_scenario_id
 
     def run_installs(self, context: ScenarioRunContext) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         install_results: list[dict[str, object]] = []
         install_checks: list[dict[str, object]] = []
         for scenario in self.scenarios:
-            install_scenario_id = self.hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
+            install_scenario_id = self.hooks.scenario_registry.scenario_id(scenario.target_name, scenario.scope)
             result = self.hooks.commands.capture(
                 scenario.install_command,
                 cwd=self.hooks.paths.root_path(scenario.cwd_root),

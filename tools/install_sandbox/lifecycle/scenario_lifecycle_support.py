@@ -79,7 +79,7 @@ class StandardScenarioOutcome:
         return self.command_ok and all(check["ok"] for check in self.checks)
 
     def platform_name(self, context: ScenarioRunContext) -> str:
-        return context.scenario.platform
+        return context.scenario.target_name
 
     def scope(self, context: ScenarioRunContext) -> str:
         return context.scenario.scope
@@ -93,7 +93,7 @@ class StandardScenarioOutcome:
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         scenario = context.scenario
         return {
-            "scenario": {"platform": scenario.platform, "scope": scenario.scope, "id": self.scenario_name},
+            "scenario": {"platform": scenario.target_name, "scope": scenario.scope, "id": self.scenario_name},
             "passed": self.passed,
             "install_exit_code": self.stages.install_1.returncode,
             "repeat_install_exit_code": None if self.stages.install_2 is None else self.stages.install_2.returncode,
@@ -142,7 +142,7 @@ class UniversalUninstallOutcome:
 
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         return {
-            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "platforms": [scenario.platform for scenario in self.scenarios]},
+            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "platforms": [scenario.target_name for scenario in self.scenarios]},
             "passed": self.passed,
             "install_results": self.install_results,
             "uninstall_command": list(self.uninstall_command),
@@ -217,7 +217,7 @@ class SandboxPaths:
         started_at = self.utc_timestamp()
         started_monotonic = time.monotonic()
         self.reset_sandbox_dirs()
-        artifact_dir = self.scenario_artifact_dir(scenario_name or registry.scenario_id(scenario.platform, scenario.scope))
+        artifact_dir = self.scenario_artifact_dir(scenario_name or registry.scenario_id(scenario.target_name, scenario.scope))
         if artifact_dir.exists():
             shutil.rmtree(artifact_dir)
         artifact_dir.mkdir(parents=True, exist_ok=True)

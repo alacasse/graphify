@@ -188,7 +188,7 @@ class ScenarioFileEffectsAdapter:
             expected_keys.update(
                 file_effect_state.expected_generated_relative_keys(
                     scenario.expected,
-                    self.oracle.packaged_reference_resolution(scenario.platform),
+                    self.oracle.packaged_reference_resolution(scenario.target_name),
                 )
             )
         uninstall_checks: list[dict[str, object]] = []

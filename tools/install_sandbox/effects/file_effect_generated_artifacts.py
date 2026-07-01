@@ -131,7 +131,7 @@ def assert_no_unexpected_graphify_files(
     expected = (
         expected_generated_relative_keys(
             scenario.expected,
-            packaged_reference_resolution(scenario.platform),
+            packaged_reference_resolution(scenario.target_name),
         )
         if expected_keys is None
         else expected_keys
@@ -183,7 +183,7 @@ def copy_generated_files(
         shutil.rmtree(out)
     expected_keys = expected_generated_relative_keys(
         scenario.expected,
-        packaged_reference_resolution(scenario.platform),
+        packaged_reference_resolution(scenario.target_name),
     )
     for root_name, root in roots.items():
         if not root.exists():

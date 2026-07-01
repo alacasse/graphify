@@ -43,7 +43,7 @@ STANDARD_ARTIFACT_FILENAMES = {
 
 def make_scenario(platform: str = "codex", scope: str = "project", *, uninstall: bool = True) -> Scenario:
     return Scenario(
-        platform=platform,
+        target_name=platform,
         scope=scope,
         install_command=("graphify", "install", "--platform", platform),
         uninstall_command=("graphify", "uninstall", "--platform", platform) if uninstall else None,
@@ -62,10 +62,10 @@ def make_validation_plan(
 ) -> validation_plan.ValidationPlan:
     coverage_records = tuple(
         {
-            "target": scenario.platform,
+            "target": scenario.target_name,
             "scope": scenario.scope,
             "status": "runnable",
-            "scenario_id": DEFAULT_SCENARIO_REGISTRY.scenario_id(scenario.platform, scenario.scope),
+            "scenario_id": DEFAULT_SCENARIO_REGISTRY.scenario_id(scenario.target_name, scenario.scope),
             "install_command": list(scenario.install_command),
             "uninstall_command": None if scenario.uninstall_command is None else list(scenario.uninstall_command),
             "generic_direct_equivalence": {"status": "not_applicable"},
@@ -184,15 +184,15 @@ class HookFactory:
             Path(path).write_text("{}\n", encoding="utf-8")
 
         def scenario_file_state(scenario):
-            self.calls.append(f"state:{scenario.platform}")
-            return {f"{scenario.platform}/{scenario.scope}": {"exists": True}}
+            self.calls.append(f"state:{scenario.target_name}")
+            return {f"{scenario.target_name}/{scenario.scope}": {"exists": True}}
 
         def assert_expected_files(scenario):
-            self.calls.append(f"expected:{scenario.platform}")
+            self.calls.append(f"expected:{scenario.target_name}")
             return [{"ok": True, "detail": "expected"}]
 
         def assert_scope_boundaries(scenario):
-            self.calls.append(f"scope:{scenario.platform}")
+            self.calls.append(f"scope:{scenario.target_name}")
             return [{"ok": True, "detail": "scope"}]
 
         def unexpected_checks(scenario, *, phase):
@@ -206,23 +206,23 @@ class HookFactory:
             return checks
 
         def seed_stale_sidecar_repair(scenario):
-            self.calls.append(f"seed-stale:{scenario.platform}")
+            self.calls.append(f"seed-stale:{scenario.target_name}")
             return self.seeded_sidecars
 
         def stale_sidecar_repair_checks(scenario, *, phase):
-            self.calls.append(f"sidecars:{scenario.platform}")
+            self.calls.append(f"sidecars:{scenario.target_name}")
             checks = [{"ok": True, "detail": "sidecars"}]
             checks.extend(unexpected_checks(scenario, phase=phase))
             return checks
 
         def uninstall_checks(scenario, *, phase):
-            self.calls.append(f"uninstalled:{scenario.platform}")
+            self.calls.append(f"uninstalled:{scenario.target_name}")
             checks = [{"ok": True, "detail": "removed"}]
             checks.extend(unexpected_checks(scenario, phase=phase))
             return checks
 
         def run_equivalence_check(scenario, env, artifact_dir):
-            self.calls.append(f"equivalence:{scenario.platform}")
+            self.calls.append(f"equivalence:{scenario.target_name}")
             return [{"ok": True, "detail": "equivalent"}]
 
         def command_artifact_summary(artifact_dir):
@@ -232,7 +232,7 @@ class HookFactory:
 
         class ScenarioFileEffectsDouble:
             def seed_scenario_inputs(_, scenario):
-                self.calls.append(f"seed:{scenario.platform}")
+                self.calls.append(f"seed:{scenario.target_name}")
 
             def write_manifest(_, path, roots, **kwargs):
                 write_file_manifest(path, roots, **kwargs)
@@ -249,7 +249,7 @@ class HookFactory:
                 )
 
             def archive_initial_install_artifacts(_, scenario, artifact_dir):
-                self.calls.append(f"copy:{scenario.platform}")
+                self.calls.append(f"copy:{scenario.target_name}")
 
             def repeat_install_effects(_, scenario, before, *, phase):
                 state_after_repeat = scenario_file_state(scenario)
@@ -279,7 +279,7 @@ class HookFactory:
             def universal_uninstall_checks(_, runner_scenario, installed_scenarios, install_checks):
                 checks = list(install_checks)
                 for scenario in installed_scenarios:
-                    self.calls.append(f"universal-uninstalled:{scenario.platform}")
+                    self.calls.append(f"universal-uninstalled:{scenario.target_name}")
                     checks.append({"ok": True, "detail": "removed"})
                 self.calls.append("unexpected:universal_uninstall")
                 if not self.universal_check_ok:

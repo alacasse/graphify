@@ -34,7 +34,7 @@ class DisposableArtifactLifecycle:
 
     def runner_scenario(self) -> Scenario:
         return Scenario(
-            platform=self.spec.platform_label,
+            target_name=self.spec.platform_label,
             scope=self.spec.scope,
             install_command=self.command,
             uninstall_command=None,

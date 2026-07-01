@@ -58,7 +58,7 @@ def oracle(roots) -> file_effect_oracle.FileEffectOracle:
 
 def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -> Scenario:
     return Scenario(
-        platform=platform,
+        target_name=platform,
         scope=scope,
         install_command=("true",),
         uninstall_command=None,

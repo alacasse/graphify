@@ -102,7 +102,7 @@ class DisposableArtifactScenarioSpec:
 
 @dataclass(frozen=True)
 class Scenario:
-    platform: str
+    target_name: str
     scope: str
     install_command: tuple[str, ...]
     uninstall_command: tuple[str, ...] | None

@@ -249,25 +249,14 @@ HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY = {
     "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
     "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
     "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
-    "Scenario.platform": "PTT-B4 migratable internal scenario target identity",
+    "Scenario.target_name": "standard scenario target identity",
     "--platform": "public product command edge",
     "platforms": "public YAML edge",
 }
 
 SCENARIO_PLATFORM_CONTRACT_DECISION = "migratable_internal_identity"
 
-SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES = {
-    "tools/install_sandbox/effects/file_effect_generated_artifacts.py": 2,
-    "tools/install_sandbox/effects/file_effect_oracle.py": 1,
-    "tools/install_sandbox/effects/file_effect_sidecars.py": 3,
-    "tools/install_sandbox/effects/file_effect_state.py": 1,
-    "tools/install_sandbox/effects/scenario_file_effects_adapter.py": 1,
-    "tools/install_sandbox/lifecycle/scenario_lifecycle_standard.py": 1,
-    "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 4,
-    "tools/install_sandbox/lifecycle/scenario_lifecycle_universal.py": 2,
-    "tools/install_sandbox/runtime/sandbox_run_environment.py": 1,
-    "tools/install_sandbox/targets/install_target_selection.py": 1,
-}
+SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES: dict[str, int] = {}
 
 SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS = {
     "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
@@ -454,7 +443,7 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
         "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
         "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
         "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
-        "Scenario.platform": "PTT-B4 migratable internal scenario target identity",
+        "Scenario.target_name": "standard scenario target identity",
         "--platform": "public product command edge",
         "platforms": "public YAML edge",
     }
@@ -474,7 +463,9 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
     assert "platform_label" in disposable_fields
     assert "eligible_target_scope" in universal_fields
     assert "eligible_platform_scope" not in universal_fields
-    assert "platform" in models.Scenario.__dataclass_fields__
+    assert "target_name" in models.Scenario.__dataclass_fields__
+    assert "platform" not in models.Scenario.__dataclass_fields__
+    assert not isinstance(getattr(models.Scenario, "platform", None), property)
 
     selection_source = inspect.getsource(harness_policy._select_universal_uninstall_scenarios)
     assert "eligible_target_scope" in selection_source
@@ -490,20 +481,10 @@ def test_root_topology_closeout_classifies_scenario_platform_as_internal_identit
     models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
 
     assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migratable_internal_identity"
-    assert "platform" in models.Scenario.__dataclass_fields__
+    assert "target_name" in models.Scenario.__dataclass_fields__
+    assert "platform" not in models.Scenario.__dataclass_fields__
     assert not isinstance(getattr(models.Scenario, "platform", None), property)
-    assert SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES == {
-        "tools/install_sandbox/effects/file_effect_generated_artifacts.py": 2,
-        "tools/install_sandbox/effects/file_effect_oracle.py": 1,
-        "tools/install_sandbox/effects/file_effect_sidecars.py": 3,
-        "tools/install_sandbox/effects/file_effect_state.py": 1,
-        "tools/install_sandbox/effects/scenario_file_effects_adapter.py": 1,
-        "tools/install_sandbox/lifecycle/scenario_lifecycle_standard.py": 1,
-        "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 4,
-        "tools/install_sandbox/lifecycle/scenario_lifecycle_universal.py": 2,
-        "tools/install_sandbox/runtime/sandbox_run_environment.py": 1,
-        "tools/install_sandbox/targets/install_target_selection.py": 1,
-    }
+    assert SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES == {}
 
     attribute_references = _source_occurrence_counts(
         lambda node: isinstance(node, ast.Attribute)

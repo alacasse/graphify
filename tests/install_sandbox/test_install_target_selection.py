@@ -42,7 +42,6 @@ CATALOG_TARGET_OWNER_PARAMETERS = {
 }
 
 DEFERRED_SELECTION_EDGE_VOCABULARY = {
-    "Scenario.platform",
     "--platform command argument",
     "YAML platforms registry key",
 }
@@ -59,7 +58,7 @@ def test_catalog_preferred_target_accessors_select_target_facts() -> None:
     assert REGISTRY.target_spec("codex") is REGISTRY.specs["codex"]
     assert REGISTRY.selected_targets(all_platforms=True, target_name=None) == REGISTRY.target_names
     assert REGISTRY.selected_targets(all_platforms=False, target_name="codex") == ["codex"]
-    assert [(scenario.platform, scenario.scope) for scenario in REGISTRY.target_scenarios("cursor", "both")] == [
+    assert [(scenario.target_name, scenario.scope) for scenario in REGISTRY.target_scenarios("cursor", "both")] == [
         ("cursor", "project")
     ]
 
@@ -76,7 +75,6 @@ def test_catalog_platform_aliases_are_not_supported_accessors() -> None:
 
 def test_target_selection_uses_target_owned_parameters_for_install_targets() -> None:
     assert DEFERRED_SELECTION_EDGE_VOCABULARY == {
-        "Scenario.platform",
         "--platform command argument",
         "YAML platforms registry key",
     }
@@ -87,7 +85,8 @@ def test_target_selection_uses_target_owned_parameters_for_install_targets() -> 
         assert set(signature.parameters) >= target_parameters
         assert not (set(signature.parameters) & legacy_parameter_names)
 
-    assert "platform" in install_target_models.Scenario.__dataclass_fields__
+    assert "target_name" in install_target_models.Scenario.__dataclass_fields__
+    assert "platform" not in install_target_models.Scenario.__dataclass_fields__
 
 
 def test_catalog_facade_uses_target_owned_parameters_for_install_targets() -> None:
@@ -132,11 +131,11 @@ def test_agents_target_selection_includes_both_scopes_without_skills_alias_targe
 
     assert "agents" in selected
     assert "skills" not in REGISTRY.specs
-    assert [(scenario.platform, scenario.scope) for scenario in scenarios] == [
+    assert [(scenario.target_name, scenario.scope) for scenario in scenarios] == [
         ("agents", "user"),
         ("agents", "project"),
     ]
-    assert [install_target_selection.scenario_id(scenario.platform, scenario.scope) for scenario in scenarios] == [
+    assert [install_target_selection.scenario_id(scenario.target_name, scenario.scope) for scenario in scenarios] == [
         "agents-user",
         "agents-project",
     ]

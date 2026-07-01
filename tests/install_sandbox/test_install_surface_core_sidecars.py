@@ -18,7 +18,7 @@ def resolution(status: str, names: tuple[str, ...] = (), detail: str = "test det
 
 def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -> Scenario:
     return Scenario(
-        platform=platform,
+        target_name=platform,
         scope=scope,
         install_command=("true",),
         uninstall_command=None,

@@ -28,7 +28,7 @@ HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETERS = {
 SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL = "synthetic_output_label"
 SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY = "selected_target_eligibility"
 SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY = "yaml_input_edge_vocabulary"
-SURFACE_CLASS_DEFERRED_SCENARIO_IDENTITY = "deferred_scenario_identity"
+SURFACE_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_scenario_target_identity"
 
 HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
     "UniversalUninstallScenarioSpec.platform_label": {
@@ -46,8 +46,8 @@ HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
         SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
     "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
-    "SelectedUniversalUninstallScenario.installed_scenarios[].platform": {
-        SURFACE_CLASS_DEFERRED_SCENARIO_IDENTITY,
+    "SelectedUniversalUninstallScenario.installed_scenarios[].target_name": {
+        SURFACE_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY,
     },
 }
 
@@ -100,13 +100,13 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
             SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
         "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
-        "SelectedUniversalUninstallScenario.installed_scenarios[].platform": {
-            SURFACE_CLASS_DEFERRED_SCENARIO_IDENTITY,
+        "SelectedUniversalUninstallScenario.installed_scenarios[].target_name": {
+            SURFACE_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY,
         },
     }
 
-    assert SURFACE_CLASS_DEFERRED_SCENARIO_IDENTITY in HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION[
-        "SelectedUniversalUninstallScenario.installed_scenarios[].platform"
+    assert SURFACE_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY in HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION[
+        "SelectedUniversalUninstallScenario.installed_scenarios[].target_name"
     ]
     for helper_name, debt_parameters in HARNESS_POLICY_PLATFORM_NAMED_PARAMETER_DEBT.items():
         signature = inspect.signature(getattr(install_target_harness_policy, helper_name))
@@ -240,7 +240,7 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
     assert selected[0].spec is universal
     assert selected[0].spec.command == ("tool", "remove", "all")
     assert selected[0].spec.cwd_root == "user_cwd"
-    assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha"]
+    assert [scenario.target_name for scenario in selected[0].installed_scenarios] == ["alpha"]
 
 
 def test_universal_uninstall_platform_label_is_output_label_not_target_eligibility() -> None:
@@ -287,7 +287,7 @@ def test_universal_uninstall_platform_label_is_output_label_not_target_eligibili
     assert len(selected) == 1
     assert selected[0].spec.platform_label == "synthetic-cleanup-label"
     assert selected[0].spec.eligible_target_scope == "project"
-    assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
+    assert [scenario.target_name for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
 
 
 def test_catalog_boundary_preserves_target_selection_behavior() -> None:
@@ -322,7 +322,7 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
         "unsupported",
     ]
     assert [
-        (scenario.platform, scenario.scope)
+        (scenario.target_name, scenario.scope)
         for scenario in registry.target_scenarios("alpha", "project")
     ] == [("alpha", "project")]
     assert registry.coverage_records(["alpha", "unsupported"], "project") == [
@@ -366,7 +366,7 @@ def test_catalog_target_selection_boundary_uses_target_named_accessors() -> None
 
     assert registry.selected_targets(all_platforms=False, target_name="alpha") == ["alpha"]
     assert [
-        (scenario.platform, scenario.scope)
+        (scenario.target_name, scenario.scope)
         for scenario in registry.target_scenarios("alpha", "project")
     ] == [("alpha", "project")]
     assert not hasattr(registry, "selected_platforms")
@@ -428,7 +428,7 @@ def test_harness_policy_owner_selects_policy_scenarios_after_catalog_wrapper_del
 
     assert len(selected) == 1
     assert selected[0].spec is universal
-    assert [scenario.platform for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
+    assert [scenario.target_name for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
     assert install_target_harness_policy.disposable_artifact_scenarios(
         registry.disposable_artifact_specs,
         "project",

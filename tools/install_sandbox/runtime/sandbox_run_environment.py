@@ -304,7 +304,7 @@ class SandboxRunEnvironment:
         (equivalence_dir / "equivalence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return [
             {
-                "path": f"{scenario.platform}/{scenario.scope}",
+                "path": f"{scenario.target_name}/{scenario.scope}",
                 "ok": passed,
                 "detail": f"generic_direct_equivalent={same_effects}; primary_exit={primary['exit_code']}; alternate_exit={alternate_result['exit_code']}",
             }

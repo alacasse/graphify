@@ -59,7 +59,7 @@ def oracle(roots) -> file_effect_oracle.FileEffectOracle:
 
 def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -> Scenario:
     return Scenario(
-        platform=platform,
+        target_name=platform,
         scope=scope,
         install_command=("true",),
         uninstall_command=None,
@@ -332,7 +332,7 @@ def test_copy_generated_files_filters_relevance_and_preserves_root_relative_layo
     excluded_project.parent.mkdir(parents=True)
     excluded_project.write_text("graphify cache\n", encoding="utf-8")
     test_scenario = Scenario(
-        platform="claude",
+        target_name="claude",
         scope="user",
         install_command=("true",),
         uninstall_command=None,
@@ -404,7 +404,7 @@ def test_copy_generated_files_keeps_walking_decisions_and_copying_in_oracle(orac
         ):
             self.decisions.append(
                 {
-                    "scenario": scenario_arg.platform,
+                    "scenario": scenario_arg.target_name,
                     "root": root_name,
                     "relative": relative.as_posix(),
                     "path": path,
@@ -486,7 +486,7 @@ def test_universal_uninstall_derives_expected_keys_through_installer_core(oracle
             return []
 
         def assert_no_unexpected_graphify_files(self, scenario_arg, *, phase, expected_keys=None):
-            self.unexpected_calls.append((scenario_arg.platform, phase, expected_keys))
+            self.unexpected_calls.append((scenario_arg.target_name, phase, expected_keys))
             return []
 
     recording_oracle = RecordingOracle(oracle)

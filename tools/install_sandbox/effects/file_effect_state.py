@@ -60,7 +60,7 @@ def scenario_file_state(
     }
     plan = planned_state_entries(
         scenario.expected,
-        packaged_reference_resolution(scenario.platform),
+        packaged_reference_resolution(scenario.target_name),
         installed_skill_reference_relatives=installed_reference_relatives,
     )
     for entry in plan:

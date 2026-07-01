@@ -47,7 +47,7 @@ def test_validation_plan_orders_all_targets_and_standard_scenarios() -> None:
     plan = validation_plan.build_validation_plan(registry, all_targets=True, target_name=None, scope="both")
 
     assert plan.selected_targets == ("alpha", "zeta")
-    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+    assert [(scenario.target_name, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("alpha", "project"),
         ("zeta", "user"),
         ("zeta", "project"),
@@ -73,7 +73,7 @@ def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents(
     )
 
     assert plan.selected_targets == ("gemini", "claude", "codex")
-    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+    assert [(scenario.target_name, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("gemini", "project"),
         ("claude", "project"),
         ("codex", "project"),
@@ -82,7 +82,7 @@ def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents(
     assert plan.scenario_count == 5
     assert len(plan.universal_uninstall) == 1
     assert plan.universal_uninstall[0].spec.scenario_id == "universal-uninstall-project"
-    assert [scenario.platform for scenario in plan.universal_uninstall[0].installed_scenarios] == [
+    assert [scenario.target_name for scenario in plan.universal_uninstall[0].installed_scenarios] == [
         "gemini",
         "claude",
         "codex",
@@ -165,7 +165,7 @@ def test_validation_plan_builds_ordered_typed_work_items_from_existing_buckets()
 
 def test_validation_work_item_is_frozen_plan_owned_model() -> None:
     scenario = install_target_models.Scenario(
-        platform="codex",
+        target_name="codex",
         scope="project",
         install_command=("graphify", "install"),
         uninstall_command=("graphify", "uninstall"),
@@ -210,7 +210,7 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
     )
 
     assert plan.selected_targets == ("beta", "alpha")
-    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+    assert [(scenario.target_name, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("beta", "user"),
         ("beta", "project"),
         ("alpha", "user"),
@@ -221,7 +221,7 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
         "universal-uninstall-project",
     ]
     assert [
-        [(scenario.platform, scenario.scope) for scenario in selected.installed_scenarios]
+        [(scenario.target_name, scenario.scope) for scenario in selected.installed_scenarios]
         for selected in plan.universal_uninstall
     ] == [
         [("beta", "user"), ("alpha", "user")],

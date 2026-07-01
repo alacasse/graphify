@@ -416,7 +416,7 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     calls: list[str] = []
 
     scenario = Scenario(
-        platform="codex",
+        target_name="codex",
         scope="project",
         install_command=("graphify", "install", "--project", "--platform", "codex"),
         uninstall_command=None,
@@ -651,7 +651,7 @@ def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_pa
     output = tmp_path / "out"
 
     scenario = Scenario(
-        platform="codex",
+        target_name="codex",
         scope="project",
         install_command=("graphify", "install", "--project", "--platform", "codex"),
         uninstall_command=None,
@@ -802,7 +802,7 @@ def test_install_graphify_rejects_wrong_package_provenance_after_probe(monkeypat
 def test_runner_status_helpers_use_reporting_status_owner() -> None:
     run_environment = SandboxRunEnvironment()
     scenario = Scenario(
-        platform="codex",
+        target_name="codex",
         scope="project",
         install_command=("graphify", "install", "--platform", "codex"),
         uninstall_command=None,

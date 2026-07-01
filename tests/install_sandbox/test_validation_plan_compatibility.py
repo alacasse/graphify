@@ -144,7 +144,7 @@ def test_validation_plan_target_named_build_selection_is_owner_path() -> None:
 
     assert selected == ("gemini", "codex")
     assert plan.selected_targets == ("gemini", "codex")
-    assert [(scenario.platform, scenario.scope) for scenario in plan.standard_scenarios] == [
+    assert [(scenario.target_name, scenario.scope) for scenario in plan.standard_scenarios] == [
         ("gemini", "project"),
         ("codex", "project"),
     ]

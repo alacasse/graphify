@@ -69,7 +69,7 @@ def install_variants_for_scope(
 
 
 def install_variants(specs: dict[str, InstallTargetSpec], scenario: Scenario) -> tuple[InstallCommandVariant, ...]:
-    return install_variants_for_scope(specs, scenario.platform, scenario.scope)
+    return install_variants_for_scope(specs, scenario.target_name, scenario.scope)
 
 
 def direct_install_command(specs: dict[str, InstallTargetSpec], target_name: str, scope: str) -> tuple[str, ...] | None:
@@ -90,7 +90,7 @@ def make_scenario(specs: dict[str, InstallTargetSpec], target_name: str, scope: 
     if scope_spec is None:
         return None
     return Scenario(
-        platform=spec.name,
+        target_name=spec.name,
         scope=scope,
         install_command=scope_spec.install_command,
         uninstall_command=scope_spec.uninstall_command,

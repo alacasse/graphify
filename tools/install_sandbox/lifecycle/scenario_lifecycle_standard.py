@@ -165,7 +165,7 @@ def standard_scenario_command_ok(stages: StandardScenarioStages) -> bool:
 
 def finalize_standard_scenario(context: ScenarioRunContext, stages: StandardScenarioStages, *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
     scenario = context.scenario
-    scenario_name = hooks.scenario_registry.scenario_id(scenario.platform, scenario.scope)
+    scenario_name = hooks.scenario_registry.scenario_id(scenario.target_name, scenario.scope)
     checks = standard_scenario_checks(stages)
     return hooks.artifacts.standard_result(
         context,

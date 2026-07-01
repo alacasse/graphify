@@ -73,7 +73,7 @@ HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
 }
 
 SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
-    "Scenario.platform": {
+    "Scenario.target_name": {
         FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY,
     },
     "standard_scenario_result.platform": {
@@ -179,7 +179,7 @@ def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
 def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
     assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migratable_internal_identity"
     assert SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION == {
-        "Scenario.platform": {
+        "Scenario.target_name": {
             FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY,
         },
         "standard_scenario_result.platform": {

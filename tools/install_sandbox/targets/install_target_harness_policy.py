@@ -309,10 +309,10 @@ def validate_roots(
 def risk_notes(
     specs: dict[str, InstallTargetSpec],
     *notes: str,
-    platform_name: str | None = None,
+    target_name: str | None = None,
 ) -> tuple[str, ...]:
     ordered = list(notes)
-    spec = specs.get(platform_name or "")
+    spec = specs.get(target_name or "")
     if spec is not None and spec.simulated_linux_layout:
         ordered.append(SIMULATED_LINUX_LAYOUT_NOTE)
     return _dedupe_notes(*ordered)

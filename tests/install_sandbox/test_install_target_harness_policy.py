@@ -15,7 +15,6 @@ from install_target_test_support import REGISTRY
 
 
 HARNESS_POLICY_PLATFORM_NAMED_PARAMETER_DEBT = {
-    "risk_notes": {"platform_name"},
 }
 
 SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL = "synthetic_output_label"
@@ -36,7 +35,7 @@ HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
         SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
         SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
-    "risk_notes.platform_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
+    "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
     "SelectedUniversalUninstallScenario.installed_scenarios[].platform": {
         SURFACE_CLASS_DEFERRED_SCENARIO_IDENTITY,
     },
@@ -88,7 +87,7 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
             SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
             SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
-        "risk_notes.platform_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
+        "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
         "SelectedUniversalUninstallScenario.installed_scenarios[].platform": {
             SURFACE_CLASS_DEFERRED_SCENARIO_IDENTITY,
         },
@@ -435,7 +434,7 @@ def test_harness_policy_owner_projects_runtime_sections_and_risk_notes_after_cat
     assert install_target_harness_policy.risk_notes(
         registry.specs,
         "declared",
-        platform_name="runtime",
+        target_name="runtime",
     ) == ("declared", install_target_models.SIMULATED_LINUX_LAYOUT_NOTE)
 
 

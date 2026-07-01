@@ -142,6 +142,6 @@ def validate_roots(declared_roots: set[str]) -> None:
     )
 
 
-def risk_notes(*notes: str, platform_name: str | None = None) -> tuple[str, ...]:
+def risk_notes(*notes: str, target_name: str | None = None) -> tuple[str, ...]:
     registry = _load_default_scenario_registry()
-    return _harness_policy.risk_notes(registry.specs, *notes, platform_name=platform_name)
+    return _harness_policy.risk_notes(registry.specs, *notes, target_name=target_name)

@@ -19,12 +19,12 @@ DEFAULT_TARGET_HELPER_TARGET_OWNER_PARAMETERS = {
     "install_target_spec": {"target_name"},
     "make_scenario": {"target_name"},
     "project_skill": {"target_name"},
+    "risk_notes": {"target_name"},
     "unsupported_scope_reason": {"target_name"},
     "user_skill": {"target_name"},
 }
 
 DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT = {
-    "risk_notes": {"platform_name"},
     "universal_uninstall_scenarios": {"platforms"},
 }
 

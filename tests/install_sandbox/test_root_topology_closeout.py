@@ -225,13 +225,13 @@ TARGET_OWNER_API_PARAMETER_GUARDS = {
         "install_target_spec": {"target_name"},
         "make_scenario": {"target_name"},
         "project_skill": {"target_name"},
+        "risk_notes": {"target_name"},
         "unsupported_scope_reason": {"target_name"},
         "user_skill": {"target_name"},
     },
 }
 
 DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS = {
-    "tools.install_sandbox.targets.install_target_defaults.risk_notes": {"platform_name"},
     "tools.install_sandbox.targets.install_target_defaults.universal_uninstall_scenarios": {"platforms"},
 }
 

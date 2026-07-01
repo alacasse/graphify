@@ -984,6 +984,20 @@ def test_root_topology_closeout_classifies_sandbox_roots_as_completed_root_renam
     assert old_module_name not in ROOT_WORTHY_COMPATIBILITY_ENTRYPOINTS
     assert old_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
     assert renamed_module_name not in ROOT_MODULE_RELOCATION_CANDIDATES
+    assert _direct_repo_import_surface({old_module_name}, {}) == {}
+    assert _direct_repo_import_surface({renamed_module_name}, {}) == {
+        "tests/install_sandbox/test_harness_specs.py": [renamed_module_name],
+        "tests/install_sandbox/test_sandbox_runner.py": [renamed_module_name],
+        "tests/install_sandbox/test_spec_loader_validation.py": [renamed_module_name],
+        "tests/install_sandbox/test_validation_plan_root_policy.py": [renamed_module_name],
+        "tools/install_sandbox/registry/spec_harness_policy_inputs.py": [renamed_module_name],
+        "tools/install_sandbox/registry/spec_install_surfaces.py": [renamed_module_name],
+        "tools/install_sandbox/registry/spec_loader.py": [renamed_module_name],
+        "tools/install_sandbox/registry/spec_target_facts.py": [renamed_module_name],
+        "tools/install_sandbox/runtime/container_runtime.py": [renamed_module_name],
+        "tools/install_sandbox/runtime/sandbox_run_environment.py": [renamed_module_name],
+        "tools/install_sandbox/validation_plan.py": [renamed_module_name],
+    }
 
 
 def test_root_topology_closeout_finds_no_supported_harness_specs_root_import_contract() -> None:

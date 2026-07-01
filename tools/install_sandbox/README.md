@@ -67,6 +67,31 @@ Keep YAML focused on target-local facts. Python derives roots, default installer
 
 Checked-in default runnable scopes declare `effects`. Legacy `expected` registry input has been removed for runnable scopes; use `effects` for the files and configuration entries the sandbox should validate. Normalized registry output also emits `effects` only; internal Python scenario models may still name their loaded install-surface tuple `expected`. This vocabulary migration does not make the product installer consume YAML.
 
+## Target And Platform Vocabulary
+
+Use `target` for install-sandbox internals when the concept is a destination
+Graphify can install into and validate. Earlier code used `platform` for too
+many different boundaries: install destinations, product CLI selectors, YAML
+registry shape, generated report fields, and sometimes runtime or OS behavior.
+That made it hard to tell target-local facts from harness policy and product
+installer decisions.
+
+The current split is intentional:
+
+- `InstallTargetSpec`, `InstallTargetCatalog`, `selected_targets`, and
+  `target_coverage` describe install-sandbox domain concepts and generated
+  sandbox artifacts.
+- `--platform` remains the supported product CLI selector for `graphify install`
+  and `graphify uninstall`; generated sandbox commands must keep using it until
+  the product CLI contract changes.
+- The checked-in YAML registry still uses the top-level `platforms` container as
+  schema vocabulary. Do not treat that name as permission to reintroduce
+  platform-named internal APIs or generated `platform_coverage*` output fields.
+
+In short: prefer target vocabulary for internal sandbox models, planner data,
+and generated artifacts; keep platform vocabulary only where it is a current
+product CLI or YAML schema contract.
+
 ## Execution Order
 
 The harness should fail immediately when Graphify cannot be installed into the sandbox or the Graphify command infrastructure is broken. Once that precondition passes, Graphify file-effect scenarios should continue across selected platforms/scopes so the run reports all Tier 1 failures instead of hiding later platform regressions.

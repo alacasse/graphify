@@ -11,16 +11,21 @@ from tools.install_sandbox.targets import install_target_defaults
 from install_target_test_support import REGISTRY
 
 
+DEFAULT_TARGET_HELPER_TARGET_OWNER_PARAMETERS = {
+    "direct_install_command": {"target_name"},
+    "direct_uninstall_command": {"target_name"},
+    "generic_install_command": {"target_name"},
+    "install_target_scenarios": {"target_name"},
+    "install_target_spec": {"target_name"},
+    "make_scenario": {"target_name"},
+    "project_skill": {"target_name"},
+    "unsupported_scope_reason": {"target_name"},
+    "user_skill": {"target_name"},
+}
+
 DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT = {
-    "direct_install_command": {"platform_name"},
-    "direct_uninstall_command": {"platform_name"},
-    "generic_install_command": {"platform_name"},
-    "make_scenario": {"platform_name"},
-    "project_skill": {"platform_name"},
     "risk_notes": {"platform_name"},
     "universal_uninstall_scenarios": {"platforms"},
-    "unsupported_scope_reason": {"platform_name"},
-    "user_skill": {"platform_name"},
 }
 
 DEFERRED_DEFAULT_EDGE_VOCABULARY = {
@@ -49,11 +54,20 @@ def test_default_catalog_platform_helpers_are_removed() -> None:
         assert not hasattr(install_target_defaults, name)
 
 
-def test_default_target_helpers_classify_remaining_platform_parameters_as_internal_debt() -> None:
+def test_default_target_helpers_use_target_owned_parameters_for_install_targets() -> None:
     assert DEFERRED_DEFAULT_EDGE_VOCABULARY == {
         "normalized YAML platforms output",
         "--platform command argument",
     }
+    legacy_parameter_names = {"platform_name", "platforms"}
+    for helper_name, target_parameters in DEFAULT_TARGET_HELPER_TARGET_OWNER_PARAMETERS.items():
+        signature = inspect.signature(getattr(install_target_defaults, helper_name))
+
+        assert set(signature.parameters) >= target_parameters
+        assert not (set(signature.parameters) & legacy_parameter_names)
+
+
+def test_default_target_helpers_classify_remaining_platform_parameters_as_internal_debt() -> None:
     for helper_name, debt_parameters in DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT.items():
         signature = inspect.signature(getattr(install_target_defaults, helper_name))
 

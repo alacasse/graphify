@@ -22,6 +22,22 @@ TARGET_SELECTION_TARGET_OWNER_PARAMETERS = {
     "project_skill": {"target_name"},
 }
 
+CATALOG_TARGET_OWNER_PARAMETERS = {
+    "coverage_records": {"target_names"},
+    "direct_install_command": {"target_name"},
+    "direct_uninstall_command": {"target_name"},
+    "generic_install_command": {"target_name"},
+    "install_variants_for_scope": {"target_name"},
+    "make_scenario": {"target_name"},
+    "scenario_id": {"target_name"},
+    "selected_targets": {"target_name"},
+    "target_scenarios": {"target_name"},
+    "target_spec": {"target_name"},
+    "unsupported_scope_reason": {"target_name"},
+    "user_skill": {"target_name"},
+    "project_skill": {"target_name"},
+}
+
 DEFERRED_SELECTION_EDGE_VOCABULARY = {
     "Scenario.platform",
     "--platform command argument",
@@ -69,6 +85,15 @@ def test_target_selection_uses_target_owned_parameters_for_install_targets() -> 
         assert not (set(signature.parameters) & legacy_parameter_names)
 
     assert "platform" in install_target_models.Scenario.__dataclass_fields__
+
+
+def test_catalog_facade_uses_target_owned_parameters_for_install_targets() -> None:
+    legacy_parameter_names = {"platform_name", "platforms"}
+    for helper_name, target_parameters in CATALOG_TARGET_OWNER_PARAMETERS.items():
+        signature = inspect.signature(getattr(REGISTRY, helper_name))
+
+        assert set(signature.parameters) >= target_parameters
+        assert not (set(signature.parameters) & legacy_parameter_names)
 
 
 def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:

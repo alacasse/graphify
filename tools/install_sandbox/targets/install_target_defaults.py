@@ -68,28 +68,28 @@ def install_target_scenarios(target_name: str, scope: str) -> list[Scenario]:
     return _load_default_scenario_registry().target_scenarios(target_name, scope)
 
 
-def user_skill(platform_name: str) -> InstallSurface:
-    return _load_default_scenario_registry().user_skill(platform_name)
+def user_skill(target_name: str) -> InstallSurface:
+    return _load_default_scenario_registry().user_skill(target_name)
 
 
-def project_skill(platform_name: str) -> InstallSurface:
-    return _load_default_scenario_registry().project_skill(platform_name)
+def project_skill(target_name: str) -> InstallSurface:
+    return _load_default_scenario_registry().project_skill(target_name)
 
 
-def unsupported_scope_reason(platform_name: str, scope: str) -> str | None:
-    return _load_default_scenario_registry().unsupported_scope_reason(platform_name, scope)
+def unsupported_scope_reason(target_name: str, scope: str) -> str | None:
+    return _load_default_scenario_registry().unsupported_scope_reason(target_name, scope)
 
 
-def direct_uninstall_command(platform_name: str) -> tuple[str, ...] | None:
-    return _load_default_scenario_registry().direct_uninstall_command(platform_name)
+def direct_uninstall_command(target_name: str) -> tuple[str, ...] | None:
+    return _load_default_scenario_registry().direct_uninstall_command(target_name)
 
 
-def generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
-    return _load_default_scenario_registry().generic_install_command(platform_name, scope)
+def generic_install_command(target_name: str, scope: str) -> tuple[str, ...]:
+    return _load_default_scenario_registry().generic_install_command(target_name, scope)
 
 
-def direct_install_command(platform_name: str, scope: str) -> tuple[str, ...] | None:
-    return _load_default_scenario_registry().direct_install_command(platform_name, scope)
+def direct_install_command(target_name: str, scope: str) -> tuple[str, ...] | None:
+    return _load_default_scenario_registry().direct_install_command(target_name, scope)
 
 
 def equivalent_install_command(scenario: Scenario) -> tuple[str, ...] | None:
@@ -106,8 +106,8 @@ def equivalence_status(scenario: Scenario) -> dict[str, object]:
     return _load_default_scenario_registry().equivalence_status(scenario)
 
 
-def make_scenario(platform_name: str, scope: str) -> Scenario | None:
-    return _load_default_scenario_registry().make_scenario(platform_name, scope)
+def make_scenario(target_name: str, scope: str) -> Scenario | None:
+    return _load_default_scenario_registry().make_scenario(target_name, scope)
 
 
 def target_runtime_validation_sections() -> list[dict[str, object]]:

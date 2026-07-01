@@ -1,10 +1,32 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from tools.install_sandbox.targets import install_target_models, install_target_selection
 
 from install_target_test_support import REGISTRY, scenario_for
+
+
+TARGET_SELECTION_PLATFORM_NAMED_PARAMETER_DEBT = {
+    "coverage_records": {"platforms"},
+    "direct_install_command": {"platform_name"},
+    "direct_uninstall_command": {"platform_name"},
+    "generic_install_command": {"platform_name"},
+    "install_variants_for_scope": {"platform_name"},
+    "make_scenario": {"platform_name"},
+    "scenario_id": {"platform_name"},
+    "unsupported_scope_reason": {"platform_name"},
+    "user_skill": {"platform_name"},
+    "project_skill": {"platform_name"},
+}
+
+DEFERRED_SELECTION_EDGE_VOCABULARY = {
+    "Scenario.platform",
+    "--platform command argument",
+    "YAML platforms registry key",
+}
 
 
 def test_scenario_id() -> None:
@@ -31,6 +53,20 @@ def test_catalog_platform_aliases_are_not_supported_accessors() -> None:
         "platform_scenarios",
     ):
         assert not hasattr(REGISTRY, name)
+
+
+def test_target_selection_classifies_remaining_platform_parameters_as_internal_debt() -> None:
+    assert DEFERRED_SELECTION_EDGE_VOCABULARY == {
+        "Scenario.platform",
+        "--platform command argument",
+        "YAML platforms registry key",
+    }
+    for helper_name, debt_parameters in TARGET_SELECTION_PLATFORM_NAMED_PARAMETER_DEBT.items():
+        signature = inspect.signature(getattr(install_target_selection, helper_name))
+
+        assert set(signature.parameters) >= debt_parameters
+
+    assert "platform" in install_target_models.Scenario.__dataclass_fields__
 
 
 def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
@@ -7,6 +9,24 @@ from tools.install_sandbox.targets import install_target_catalog, install_target
 from tools.install_sandbox.targets import install_target_defaults
 
 from install_target_test_support import REGISTRY
+
+
+DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT = {
+    "direct_install_command": {"platform_name"},
+    "direct_uninstall_command": {"platform_name"},
+    "generic_install_command": {"platform_name"},
+    "make_scenario": {"platform_name"},
+    "project_skill": {"platform_name"},
+    "risk_notes": {"platform_name"},
+    "universal_uninstall_scenarios": {"platforms"},
+    "unsupported_scope_reason": {"platform_name"},
+    "user_skill": {"platform_name"},
+}
+
+DEFERRED_DEFAULT_EDGE_VOCABULARY = {
+    "normalized YAML platforms output",
+    "--platform command argument",
+}
 
 
 def test_default_catalog_target_helpers_live_in_install_target_defaults() -> None:
@@ -27,6 +47,17 @@ def test_default_catalog_target_helpers_live_in_install_target_defaults() -> Non
 def test_default_catalog_platform_helpers_are_removed() -> None:
     for name in ("platform_spec", "platform_scenarios", "sandbox_platform_specs"):
         assert not hasattr(install_target_defaults, name)
+
+
+def test_default_target_helpers_classify_remaining_platform_parameters_as_internal_debt() -> None:
+    assert DEFERRED_DEFAULT_EDGE_VOCABULARY == {
+        "normalized YAML platforms output",
+        "--platform command argument",
+    }
+    for helper_name, debt_parameters in DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT.items():
+        signature = inspect.signature(getattr(install_target_defaults, helper_name))
+
+        assert set(signature.parameters) >= debt_parameters
 
 
 def test_install_target_module_helpers_use_default_catalog_seam() -> None:

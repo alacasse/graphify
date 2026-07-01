@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from tools.install_sandbox.targets import (
@@ -10,6 +12,18 @@ from tools.install_sandbox.targets import (
 )
 
 from install_target_test_support import REGISTRY
+
+
+HARNESS_POLICY_PLATFORM_NAMED_PARAMETER_DEBT = {
+    "risk_notes": {"platform_name"},
+}
+
+DEFERRED_HARNESS_POLICY_EDGE_FIELDS = {
+    "DisposableArtifactScenarioSpec.platform_label",
+    "UniversalUninstallScenarioSpec.platform_label",
+    "UniversalUninstallScenarioSpec.eligible_platform_scope",
+    "SelectedUniversalUninstallScenario.installed_scenarios[].platform",
+}
 
 
 def test_synthetic_policy_scenario_ids_are_owned_by_harness_policy() -> None:
@@ -41,6 +55,23 @@ def test_catalog_policy_wrappers_are_not_supported_accessors() -> None:
         "risk_notes",
     ):
         assert not hasattr(REGISTRY, name)
+
+
+def test_harness_policy_classifies_remaining_platform_parameters_as_internal_debt() -> None:
+    assert DEFERRED_HARNESS_POLICY_EDGE_FIELDS == {
+        "DisposableArtifactScenarioSpec.platform_label",
+        "UniversalUninstallScenarioSpec.platform_label",
+        "UniversalUninstallScenarioSpec.eligible_platform_scope",
+        "SelectedUniversalUninstallScenario.installed_scenarios[].platform",
+    }
+    for helper_name, debt_parameters in HARNESS_POLICY_PLATFORM_NAMED_PARAMETER_DEBT.items():
+        signature = inspect.signature(getattr(install_target_harness_policy, helper_name))
+
+        assert set(signature.parameters) >= debt_parameters
+
+    assert "platform_label" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    assert "eligible_platform_scope" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    assert "platform_label" in install_target_models.DisposableArtifactScenarioSpec.__dataclass_fields__
 
 
 def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:

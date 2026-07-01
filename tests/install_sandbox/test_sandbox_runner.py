@@ -592,6 +592,60 @@ def test_main_characterizes_runner_order_and_output_boundary(monkeypatch, tmp_pa
     assert manifest["graphify_file_effect_fail_count"] == 1
 
 
+def test_public_platform_intake_selects_validation_plan_target(monkeypatch, tmp_path) -> None:
+    output = tmp_path / "out"
+    calls: list[tuple[str, object]] = []
+
+    class RunEnvironmentDouble:
+        harness_version = "2099-12-31.test"
+        scenario_registry = object()
+
+        def __init__(self) -> None:
+            self.output = output
+
+        def sandbox_env(self):
+            return {}
+
+        def preflight(self):
+            output.mkdir(parents=True, exist_ok=True)
+            return {}
+
+        def copy_source_tree(self, copy_source):
+            return {"copy_source_mode": copy_source}
+
+        def install_graphify(self, env):
+            return {"version": "test"}
+
+        def scenario_lifecycle_hooks(self):
+            return object()
+
+    run_environment = RunEnvironmentDouble()
+    plan = SimpleNamespace(requested_scope="project", selected_targets=("codex",))
+
+    def build_plan(registry, *, all_targets, target_name=None, scope="both", **kwargs):
+        assert registry is run_environment.scenario_registry
+        calls.append(("selected-target", target_name))
+        return plan
+
+    def run_validation_plan(plan_arg, env, hooks, fail_fast_scenarios=False):
+        calls.append(("plan-selected-targets", plan_arg.selected_targets))
+        return []
+
+    monkeypatch.setattr(harness_orchestration.validation_plan, "build_validation_plan", build_plan)
+    monkeypatch.setattr(scenario_lifecycle_plan, "run_validation_plan", run_validation_plan)
+    monkeypatch.setattr(harness_orchestration, "read_os_release", lambda: {})
+    monkeypatch.setattr(harness_orchestration.platform_mod, "machine", lambda: "synthetic-arch")
+
+    args = sandbox_runner.parse_args(["--platform", "codex", "--scope", "project"])
+    result = harness_orchestration.run_harness(args, run_environment)
+
+    assert result.plan.selected_targets == ("codex",)
+    assert calls == [
+        ("selected-target", "codex"),
+        ("plan-selected-targets", ("codex",)),
+    ]
+
+
 def test_main_manifest_counts_executed_synthetic_validations(monkeypatch, tmp_path) -> None:
     output = tmp_path / "out"
 

@@ -175,6 +175,11 @@ REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS = {
         "legacy manifest.platform_coverage",
         "legacy result.platform",
     },
+    "serialized artifact input/output vocabulary": {
+        "scenario.platform",
+        "scenario.platforms",
+        "result.platform",
+    },
     "public command/YAML edge vocabulary": {
         "product --platform",
         "registry platforms",
@@ -561,6 +566,11 @@ def test_root_topology_closeout_names_reporting_projection_as_exemplar_frontier(
             "legacy manifest.platform_coverage",
             "legacy result.platform",
         },
+        "serialized artifact input/output vocabulary": {
+            "scenario.platform",
+            "scenario.platforms",
+            "result.platform",
+        },
         "public command/YAML edge vocabulary": {
             "product --platform",
             "registry platforms",
@@ -572,14 +582,17 @@ def test_root_topology_closeout_names_reporting_projection_as_exemplar_frontier(
 
     current_output = REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["current target-named generated output"]
     legacy_readers = REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["input-only legacy platform readers"]
+    serialized_artifacts = REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["serialized artifact input/output vocabulary"]
     edge_vocabulary = REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["public command/YAML edge vocabulary"]
     synthetic_labels = REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["synthetic label vocabulary"]
 
     assert current_output.isdisjoint(legacy_readers)
+    assert current_output.isdisjoint(serialized_artifacts)
     assert current_output.isdisjoint(edge_vocabulary)
     assert current_output.isdisjoint(synthetic_labels)
     assert all("target" in field or "Target" in field for field in current_output)
     assert all("legacy " in field for field in legacy_readers)
+    assert {"scenario.platform", "scenario.platforms", "result.platform"} == serialized_artifacts
     assert "platform_coverage" not in " ".join(current_output)
     assert "Scenario.platform" not in set().union(*REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS.values())
 
@@ -602,6 +615,48 @@ def test_root_topology_closeout_does_not_preserve_internal_platform_reporting_vo
     assert "platform_coverage" not in legacy_readers
     assert "platform_coverage_summary" not in legacy_readers
     assert "selected_platforms" not in legacy_readers
+
+
+def test_root_topology_closeout_classifies_remaining_platform_vocabulary_for_ptt_b5() -> None:
+    allowed_closeout_buckets = {
+        "public product CLI": {"product --platform"},
+        "YAML input": {"registry platforms"},
+        "serialized artifact input/output where current": {
+            "scenario.platform",
+            "scenario.platforms",
+            "result.platform",
+        },
+        "legacy input-only reader": {
+            "legacy manifest.platform",
+            "legacy manifest.platform_coverage",
+            "legacy result.platform",
+        },
+        "synthetic label vocabulary": {"platform_label"},
+    }
+
+    actual_closeout_buckets = {
+        "public product CLI": REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["public command/YAML edge vocabulary"]
+        & {"product --platform"},
+        "YAML input": REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["public command/YAML edge vocabulary"]
+        & {"registry platforms"},
+        "serialized artifact input/output where current": REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS[
+            "serialized artifact input/output vocabulary"
+        ],
+        "legacy input-only reader": REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS[
+            "input-only legacy platform readers"
+        ],
+        "synthetic label vocabulary": REPORTING_PROJECTION_EXEMPLAR_ROLE_BUCKETS["synthetic label vocabulary"],
+    }
+
+    assert actual_closeout_buckets == allowed_closeout_buckets
+
+    allowed_terms = set().union(*actual_closeout_buckets.values())
+    internal_terms = REPORTING_PROJECTION_INTERNAL_PLATFORM_VOCABULARY - {
+        "platform_coverage",
+    }
+    assert internal_terms.isdisjoint(allowed_terms)
+    assert "legacy manifest.platform_coverage" in actual_closeout_buckets["legacy input-only reader"]
+    assert "platform_coverage" not in allowed_terms
 
 
 def test_root_topology_closeout_keeps_scenario_result_platform_keys_at_artifact_edges() -> None:

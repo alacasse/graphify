@@ -85,6 +85,9 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     "synthetic_scenario_result.platform": {
         FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
     },
+    "synthetic_group_result.platforms": {
+        FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
+    },
     "UniversalUninstallScenarioSpec.platform_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
     },
@@ -240,6 +243,9 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
         "synthetic_scenario_result.platform": {
             FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
         },
+        "synthetic_group_result.platforms": {
+            FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
+        },
         "UniversalUninstallScenarioSpec.platform_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         },
@@ -331,6 +337,61 @@ def test_reporting_projection_classification_keeps_legacy_platform_vocabulary_in
     }
     assert current_output_fields.isdisjoint(legacy_reader_fields)
     assert all("platform_coverage" not in field for field in current_output_fields)
+
+
+def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_edges() -> None:
+    classified_edges = {
+        "public product CLI": {
+            field
+            for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+            if FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY in classes
+        },
+        "YAML input": {
+            field
+            for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+            if FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY in classes
+        },
+        "serialized artifact input/output where current": {
+            field
+            for field, classes in SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION.items()
+            if FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY in classes
+        },
+        "legacy input-only reader": {
+            field
+            for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+            if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
+        },
+        "synthetic label vocabulary": {
+            field
+            for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+            if FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL in classes
+        },
+    }
+
+    assert classified_edges == {
+        "public product CLI": {"product_command.--platform"},
+        "YAML input": {"registry_yaml.platforms"},
+        "serialized artifact input/output where current": {
+            "standard_scenario_result.platform",
+            "synthetic_scenario_result.platform",
+            "synthetic_group_result.platforms",
+        },
+        "legacy input-only reader": {
+            "legacy_manifest_input.platform",
+            "legacy_manifest_input.platform_coverage",
+            "legacy_result_input.platform",
+        },
+        "synthetic label vocabulary": {
+            "UniversalUninstallScenarioSpec.platform_label",
+            "DisposableArtifactScenarioSpec.platform_label",
+        },
+    }
+
+    assert all(
+        FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT not in classes
+        for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+        if "platform" in field
+    )
 
 
 def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:

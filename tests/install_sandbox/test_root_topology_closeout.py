@@ -186,6 +186,12 @@ DEFERRED_PRODUCT_PLATFORM_VOCABULARY = {
     "platforms": "YAML",
 }
 
+RUNNER_INTAKE_FRONTIER_MODULES = (
+    "tools.install_sandbox.run",
+    "tools.install_sandbox.sandbox_runner",
+    "tools.install_sandbox.runtime.harness_orchestration",
+)
+
 
 def _direct_test_import_surface(module_names: set[str]) -> dict[str, list[str]]:
     discovered_imports: dict[str, list[str]] = {}
@@ -300,6 +306,15 @@ def _text_files(paths: tuple[Path, ...]) -> list[Path]:
     return files
 
 
+def _function_node(module: types.ModuleType, function_name: str) -> ast.FunctionDef:
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+
+
 def test_root_topology_closeout_documents_target_named_artifact_vocabulary() -> None:
     for path in ARTIFACT_VOCABULARY_DOCS:
         text = path.read_text(encoding="utf-8")
@@ -335,6 +350,60 @@ def test_root_topology_closeout_classifies_deferred_platform_vocabulary_as_produ
     for vocabulary, classification in DEFERRED_PRODUCT_PLATFORM_VOCABULARY.items():
         assert vocabulary in docs_text
         assert classification in docs_text
+
+
+def test_root_topology_closeout_guards_runner_intake_frontier_target_naming() -> None:
+    run_module = importlib.import_module("tools.install_sandbox.run")
+    sandbox_runner = importlib.import_module("tools.install_sandbox.sandbox_runner")
+    harness_orchestration = importlib.import_module("tools.install_sandbox.runtime.harness_orchestration")
+
+    assert RUNNER_INTAKE_FRONTIER_MODULES == (
+        "tools.install_sandbox.run",
+        "tools.install_sandbox.sandbox_runner",
+        "tools.install_sandbox.runtime.harness_orchestration",
+    )
+
+    run_main = _function_node(run_module, "main")
+    build_container_call = next(
+        node
+        for node in ast.walk(run_main)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "build_container_command"
+    )
+    host_public_platform_kwarg = next(
+        keyword for keyword in build_container_call.keywords if keyword.arg == "platform"
+    )
+    assert isinstance(host_public_platform_kwarg.value, ast.Name)
+    assert host_public_platform_kwarg.value.id == "selected_install_target_input"
+
+    runner_main = _function_node(sandbox_runner, "main")
+    run_harness_call = next(
+        node
+        for node in ast.walk(runner_main)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run_harness"
+    )
+    selected_target_kwarg = next(
+        keyword for keyword in run_harness_call.keywords if keyword.arg == "selected_target_name"
+    )
+    assert isinstance(selected_target_kwarg.value, ast.Name)
+    assert selected_target_kwarg.value.id == "selected_target_name"
+
+    orchestration_run_harness = _function_node(harness_orchestration, "run_harness")
+    build_plan_call = next(
+        node
+        for node in ast.walk(orchestration_run_harness)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "build_validation_plan"
+    )
+    target_name_kwarg = next(
+        keyword for keyword in build_plan_call.keywords if keyword.arg == "target_name"
+    )
+    assert isinstance(target_name_kwarg.value, ast.Name)
+    assert target_name_kwarg.value.id == "selected_target_name"
 
 
 def test_root_topology_closeout_keeps_moved_implementation_packages_importable() -> None:

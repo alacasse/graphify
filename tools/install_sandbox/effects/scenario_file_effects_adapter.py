@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Protocol
+from typing import Callable, Iterable, Mapping, Protocol
 
+from . import file_effect_generated_artifacts
+from . import file_effect_sidecars
 from . import file_effect_state
+from . import file_effect_surfaces
+from ..surfaces.install_surface_generated import GeneratedFileDecision
+from ..surfaces.install_surface_models import InstallSurface
 from ..targets.install_target_models import Scenario
 
 
@@ -35,31 +40,30 @@ def _universal_uninstall_adapter_checks(
 
 
 class ScenarioFileEffectsOracle(Protocol):
+    roots: Mapping[str, Path]
     packaged_reference_resolution: Callable[[str], object]
+    expected_graphify_version: Callable[[], str]
 
     def seed_user_owned_content(self, scenario: Scenario) -> None: ...
 
     def scenario_file_state(self, scenario: Scenario) -> dict[str, dict[str, object]]: ...
 
-    def assert_expected_files(self, scenario: Scenario) -> list[dict[str, object]]: ...
+    def pruned_file_walk(self, base: Path) -> Iterable[Path]: ...
 
-    def assert_scope_boundaries(self, scenario: Scenario) -> list[dict[str, object]]: ...
-
-    def assert_no_unexpected_graphify_files(
+    def generated_file_decision(
         self,
         scenario: Scenario,
+        root_name: str,
+        relative: Path,
+        path: Path,
         *,
-        phase: str,
+        apply_excludes: bool,
         expected_keys: set[tuple[str, str]] | None = None,
-    ) -> list[dict[str, object]]: ...
+    ) -> GeneratedFileDecision: ...
 
     def copy_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None: ...
 
     def seed_stale_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]: ...
-
-    def assert_installed_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]: ...
-
-    def assert_uninstalled(self, scenario: Scenario) -> list[dict[str, object]]: ...
 
 
 @dataclass(frozen=True)
@@ -102,11 +106,41 @@ class ScenarioFileEffectsAdapter:
     def capture_state(self, scenario: Scenario) -> dict[str, dict[str, object]]:
         return self.oracle.scenario_file_state(scenario)
 
+    def installed_skill_sidecar_checks(self, scenario: Scenario, entry: InstallSurface) -> list[dict[str, object]]:
+        return file_effect_sidecars.assert_installed_skill_sidecar(
+            scenario,
+            entry,
+            self.oracle.roots,
+            self.oracle.packaged_reference_resolution,
+            self.oracle.expected_graphify_version,
+        )
+
     def install_checks(self, scenario: Scenario) -> list[dict[str, object]]:
-        return self.oracle.assert_expected_files(scenario) + self.oracle.assert_scope_boundaries(scenario)
+        return file_effect_surfaces.assert_expected_files(
+            scenario,
+            self.oracle.roots,
+            self.installed_skill_sidecar_checks,
+        ) + file_effect_surfaces.assert_scope_boundaries(scenario, self.oracle.roots)
 
     def unexpected_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
-        return self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+        return self.unexpected_checks_with_expected_keys(scenario, phase=phase)
+
+    def unexpected_checks_with_expected_keys(
+        self,
+        scenario: Scenario,
+        *,
+        phase: str,
+        expected_keys: set[tuple[str, str]] | None = None,
+    ) -> list[dict[str, object]]:
+        return file_effect_generated_artifacts.assert_no_unexpected_graphify_files(
+            scenario,
+            self.oracle.roots,
+            self.oracle.packaged_reference_resolution,
+            phase=phase,
+            expected_keys=expected_keys,
+            pruned_file_walk_for=self.oracle.pruned_file_walk,
+            generated_file_decision_for=self.oracle.generated_file_decision,
+        )
 
     def archive_generated_files(self, scenario: Scenario, artifact_dir: Path) -> None:
         self.oracle.copy_generated_files(scenario, artifact_dir)
@@ -133,7 +167,7 @@ class ScenarioFileEffectsAdapter:
         *,
         phase: str,
     ) -> list[dict[str, object]]:
-        return file_effect_state.assert_idempotent_state(before, after) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+        return file_effect_state.assert_idempotent_state(before, after) + self.unexpected_checks(scenario, phase=phase)
 
     def repeat_install_effects(
         self,
@@ -157,7 +191,15 @@ class ScenarioFileEffectsAdapter:
         return self.oracle.seed_stale_skill_sidecars(scenario)
 
     def stale_sidecar_repair_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
-        return self.oracle.assert_installed_skill_sidecars(scenario) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+        return self.installed_skill_sidecars(scenario) + self.unexpected_checks(scenario, phase=phase)
+
+    def installed_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]:
+        return file_effect_sidecars.assert_installed_skill_sidecars(
+            scenario,
+            self.oracle.roots,
+            self.oracle.packaged_reference_resolution,
+            self.oracle.expected_graphify_version,
+        )
 
     def stale_sidecar_repair_effects(self, scenario: Scenario, *, phase: str) -> StaleSidecarRepairFileEffects:
         return StaleSidecarRepairFileEffects(
@@ -165,7 +207,17 @@ class ScenarioFileEffectsAdapter:
         )
 
     def uninstall_checks(self, scenario: Scenario, *, phase: str) -> list[dict[str, object]]:
-        return self.oracle.assert_uninstalled(scenario) + self.oracle.assert_no_unexpected_graphify_files(scenario, phase=phase)
+        return self.uninstalled_checks(scenario) + self.unexpected_checks(scenario, phase=phase)
+
+    def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
+        return file_effect_sidecars.uninstalled_skill_sidecar_checks(entry, self.oracle.roots)
+
+    def uninstalled_checks(self, scenario: Scenario) -> list[dict[str, object]]:
+        return file_effect_surfaces.assert_uninstalled(
+            scenario,
+            self.oracle.roots,
+            self.uninstalled_skill_sidecar_checks,
+        )
 
     def uninstall_effects(self, scenario: Scenario, *, phase: str) -> UninstallFileEffects:
         return UninstallFileEffects(
@@ -193,8 +245,8 @@ class ScenarioFileEffectsAdapter:
             )
         uninstall_checks: list[dict[str, object]] = []
         for scenario in scenarios:
-            uninstall_checks.extend(self.oracle.assert_uninstalled(scenario))
-        unexpected_checks = self.oracle.assert_no_unexpected_graphify_files(
+            uninstall_checks.extend(self.uninstalled_checks(scenario))
+        unexpected_checks = self.unexpected_checks_with_expected_keys(
             runner_scenario,
             phase="universal_uninstall",
             expected_keys=expected_keys,

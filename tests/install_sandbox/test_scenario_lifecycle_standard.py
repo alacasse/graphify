@@ -122,6 +122,40 @@ def test_run_scenario_preserves_stage_order_and_records_followups(tmp_path) -> N
     ]
 
 
+def test_standard_lifecycle_execution_interface_records_observable_contract(tmp_path) -> None:
+    factory = HookFactory(tmp_path)
+    factory.command_results = [0, 0, 0, 0]
+    factory.seeded_sidecars = [{"ok": True, "detail": "seeded_stale_reference_fragment"}]
+    scenario = make_scenario()
+
+    result = scenario_lifecycle_standard.StandardScenarioLifecycleExecutor(factory.hooks()).run(scenario, {})
+
+    artifact_dir = factory.output / "scenarios" / "codex-project"
+    assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
+    risk = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
+    command_artifact = result["command_artifact"]
+
+    assert_preserved_result_shape(result)
+    assert result["id"] == assertions["scenario"]["id"] == "codex-project"
+    assert result["platform"] == assertions["scenario"]["platform"] == "codex"
+    assert result["scope"] == assertions["scenario"]["scope"] == "project"
+    assert result["passed"] is assertions["passed"] is True
+    assert result["graphify_file_effects_passed"] is True
+    assert result["overall_status"] == "graphify_install_verified"
+    assert result["risks"] == risk["statuses"] == ["graphify_install_verified"]
+    assert command_artifact == {
+        "command": "graphify install",
+        "transcript_path": "transcript.txt",
+        "artifact_dir": str(artifact_dir),
+    }
+    assert STANDARD_ARTIFACT_FILENAMES <= artifact_names(artifact_dir)
+    assert assertions["install_exit_code"] == 0
+    assert assertions["repeat_install_exit_code"] == 0
+    assert assertions["stale_sidecar_repair_exit_code"] == 0
+    assert assertions["uninstall_exit_code"] == 0
+    assert all(check["ok"] for check in assertions["checks"])
+
+
 def test_run_scenario_preserves_standard_artifact_filenames(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     factory.command_results = [0, 0, 0, 0]

@@ -177,13 +177,23 @@ def finalize_standard_scenario(context: ScenarioRunContext, stages: StandardScen
     )
 
 
+@dataclass(frozen=True)
+class StandardScenarioLifecycleExecutor:
+    """Lifecycle-facing interface from scenario dependencies to result contract."""
+
+    hooks: ScenarioLifecycleHooks
+
+    def run(self, scenario: Scenario, env: dict[str, str]) -> dict[str, object]:
+        context = prepare_scenario_run(scenario, env, hooks=self.hooks)
+        stages = run_initial_install(context, hooks=self.hooks)
+        if stages.install_1.returncode == 0:
+            run_repeat_install(context, stages, hooks=self.hooks)
+            if stages.install_2 is not None and stages.install_2.returncode == 0:
+                run_stale_sidecar_repair(context, stages, hooks=self.hooks)
+            run_uninstall_stage(context, stages, hooks=self.hooks)
+            run_equivalence_stage(context, stages, hooks=self.hooks)
+        return finalize_standard_scenario(context, stages, hooks=self.hooks)
+
+
 def run_scenario(scenario: Scenario, env: dict[str, str], *, hooks: ScenarioLifecycleHooks) -> dict[str, object]:
-    context = prepare_scenario_run(scenario, env, hooks=hooks)
-    stages = run_initial_install(context, hooks=hooks)
-    if stages.install_1.returncode == 0:
-        run_repeat_install(context, stages, hooks=hooks)
-        if stages.install_2 is not None and stages.install_2.returncode == 0:
-            run_stale_sidecar_repair(context, stages, hooks=hooks)
-        run_uninstall_stage(context, stages, hooks=hooks)
-        run_equivalence_stage(context, stages, hooks=hooks)
-    return finalize_standard_scenario(context, stages, hooks=hooks)
+    return StandardScenarioLifecycleExecutor(hooks).run(scenario, env)

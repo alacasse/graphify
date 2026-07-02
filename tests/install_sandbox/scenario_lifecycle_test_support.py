@@ -41,25 +41,31 @@ STANDARD_ARTIFACT_FILENAMES = {
 }
 
 
-def make_scenario(platform: str = "codex", scope: str = "project", *, uninstall: bool = True) -> Scenario:
+def make_scenario(target: str = "codex", scope: str = "project", *, uninstall: bool = True) -> Scenario:
     return Scenario(
-        target_name=platform,
+        target_name=target,
         scope=scope,
-        install_command=("graphify", "install", "--platform", platform),
-        uninstall_command=("graphify", "uninstall", "--platform", platform) if uninstall else None,
+        install_command=("graphify", "install", "--platform", target),
+        uninstall_command=("graphify", "uninstall", "--platform", target) if uninstall else None,
         cwd_root="project" if scope == "project" else "user_cwd",
-        expected=(InstallSurface("project" if scope == "project" else "home", f"{platform}-{scope}.md"),),
+        expected=(InstallSurface("project" if scope == "project" else "home", f"{target}-{scope}.md"),),
     )
 
 
 def make_validation_plan(
     *,
-    platforms: tuple[str, ...] = ("codex",),
+    target_names: tuple[str, ...] | None = None,
     scope: str = "project",
     standard_scenarios: tuple[Scenario, ...] = (),
     universal_uninstall: tuple[SelectedUniversalUninstallScenario, ...] = (),
     disposable_artifacts: tuple[DisposableArtifactScenarioSpec, ...] = (),
+    **legacy_kwargs: object,
 ) -> validation_plan.ValidationPlan:
+    selected_targets = target_names
+    if selected_targets is None:
+        selected_targets = cast(tuple[str, ...], legacy_kwargs.pop("platforms", ("codex",)))
+    if legacy_kwargs:
+        raise TypeError(f"unexpected keyword arguments: {', '.join(legacy_kwargs)}")
     coverage_records = tuple(
         {
             "target": scenario.target_name,
@@ -74,7 +80,7 @@ def make_validation_plan(
         for scenario in standard_scenarios
     )
     return validation_plan.ValidationPlan(
-        selected_targets=platforms,
+        selected_targets=selected_targets,
         requested_scope=scope,
         standard_scenarios=standard_scenarios,
         universal_uninstall=universal_uninstall,
@@ -82,7 +88,7 @@ def make_validation_plan(
         coverage_records=coverage_records,
         target_runtime_validation_sections=(),
         target_coverage_summary={
-            "registered_target_count": len(platforms),
+            "registered_target_count": len(selected_targets),
             "requested_scope": scope,
             "runnable_scope_count": len(standard_scenarios),
             "universal_scenario_count": len(universal_uninstall) + len(disposable_artifacts),
@@ -95,18 +101,24 @@ def make_universal_uninstall_selection(
     scenarios: tuple[Scenario, ...],
     *,
     scenario_id: str = "universal-uninstall-project",
-    platform_label: str = "multiple",
+    target_label: str | None = None,
     scope: str = "project",
     command: tuple[str, ...] = ("graphify", "uninstall", "--project"),
     cwd_root: str = "project",
     eligible_target_scope: str = "project",
     artifact_subdir: str = "uninstall",
     risk_note: str = "universal uninstall covers Graphify-owned file effects after multiple installs",
+    **legacy_kwargs: object,
 ) -> SelectedUniversalUninstallScenario:
+    selected_target_label = target_label
+    if selected_target_label is None:
+        selected_target_label = cast(str, legacy_kwargs.pop("platform_label", "multiple"))
+    if legacy_kwargs:
+        raise TypeError(f"unexpected keyword arguments: {', '.join(legacy_kwargs)}")
     return SelectedUniversalUninstallScenario(
         UniversalUninstallScenarioSpec(
             scenario_id=scenario_id,
-            platform_label=platform_label,
+            platform_label=selected_target_label,
             scope=scope,
             command=command,
             cwd_root=cwd_root,

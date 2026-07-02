@@ -9,6 +9,10 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox.reporting import agent_summary
+from tests.install_sandbox.reporting_vocabulary_test_support import (
+    current_generated_failure_manifest,
+    legacy_platform_failure_input_only_manifest,
+)
 
 
 def test_root_agent_summary_shim_is_absent() -> None:
@@ -93,27 +97,7 @@ def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
 
 def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
     output = tmp_path / "out"
-    write_json(
-        output / "manifest.json",
-        {
-            "graphify_file_effect_pass_count": 0,
-            "graphify_file_effect_fail_count": 1,
-            "scenario_count": 1,
-            "results": [
-                {
-                    "id": "codex-project",
-                    "target": "codex",
-                    "scope": "project",
-                    "passed": False,
-                    "reproduction_command": "graphify install --project --platform codex",
-                    "command_artifact": {
-                        "exit_code": 0,
-                        "transcript_path": "scenarios/codex-project/transcript.txt",
-                    },
-                }
-            ],
-        },
-    )
+    write_json(output / "manifest.json", current_generated_failure_manifest())
     write_json(
         output / "scenarios" / "codex-project" / "assertions.json",
         {
@@ -140,24 +124,7 @@ def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
 
 def test_fail_manifest_reads_legacy_platform_as_transitional_target_input(tmp_path: Path) -> None:
     output = tmp_path / "out"
-    write_json(
-        output / "manifest.json",
-        {
-            "results": [
-                {
-                    "id": "legacy-project",
-                    "platform": "legacy",
-                    "scope": "project",
-                    "passed": False,
-                    "command_artifact": {
-                        "command": "graphify install --platform legacy",
-                        "exit_code": 1,
-                        "transcript_path": "scenarios/legacy-project/transcript.txt",
-                    },
-                }
-            ],
-        },
-    )
+    write_json(output / "manifest.json", legacy_platform_failure_input_only_manifest())
     write_json(output / "scenarios" / "legacy-project" / "assertions.json", {"checks": []})
 
     summary = agent_summary.summarize_output(output)

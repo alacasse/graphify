@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox.reporting import artifacts
 from tools.install_sandbox.reporting import agent_summary
 
 
@@ -25,34 +24,22 @@ def test_reporting_agent_summary_owner_exports_supported_behavior() -> None:
     assert callable(agent_summary.render_json)
 
 
-def test_agent_summary_public_helpers_delegate_to_artifact_owner(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[tuple[str, object]] = []
+def test_agent_summary_public_helpers_remain_supported(tmp_path: Path) -> None:
+    write_json(tmp_path / "manifest.json", {"ok": True})
+    write_json(
+        tmp_path / "scenarios" / "codex-project" / "assertions.json",
+        {
+            "checks": [
+                {"ok": True, "relative": "ok.md", "detail": "exists"},
+                {"ok": False, "relative": "AGENTS.md", "root": "project", "detail": "missing Graphify block"},
+            ]
+        },
+    )
 
-    def load_json_object(path: Path) -> dict[str, object]:
-        calls.append(("json", path))
-        return {"delegated": True}
-
-    def normalized_text_snippet(value: object, *, limit: int = 240) -> str:
-        calls.append(("snippet", (value, limit)))
-        return "delegated snippet"
-
-    def failed_checks(output_dir: Path, scenario_id: str, *, limit: int) -> list[dict[str, object]]:
-        calls.append(("checks", (output_dir, scenario_id, limit)))
-        return [{"path": "delegated"}]
-
-    monkeypatch.setattr(agent_summary, "load_json_object", load_json_object)
-    monkeypatch.setattr(agent_summary, "normalized_text_snippet", normalized_text_snippet)
-    monkeypatch.setattr(agent_summary, "summarize_failed_checks", failed_checks)
-
-    assert agent_summary.load_json(tmp_path / "manifest.json") == {"delegated": True}
-    assert agent_summary.text_snippet(" alpha ", limit=12) == "delegated snippet"
-    assert agent_summary.failed_checks(tmp_path, "codex-project", limit=3) == [{"path": "delegated"}]
-    assert calls == [
-        ("json", tmp_path / "manifest.json"),
-        ("snippet", (" alpha ", 12)),
-        ("checks", (tmp_path, "codex-project", 3)),
+    assert agent_summary.load_json(tmp_path / "manifest.json") == {"ok": True}
+    assert agent_summary.text_snippet(" alpha\n\n beta\tgamma ", limit=20) == "alpha beta gamma"
+    assert agent_summary.failed_checks(tmp_path, "codex-project", limit=3) == [
+        {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"}
     ]
 
 
@@ -73,46 +60,6 @@ def test_reporting_agent_summary_direct_script_help() -> None:
 def write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
-def test_reporting_artifacts_characterize_summary_helper_contract(tmp_path: Path) -> None:
-    output = tmp_path / "out"
-    scenario_dir = output / "scenarios" / "codex-project"
-    scenario_dir.mkdir(parents=True)
-    write_json(output / "object.json", {"ok": True})
-    write_json(output / "array.json", [])
-    (output / "invalid.json").write_text("{", encoding="utf-8")
-    (output / "tail.txt").write_text("0123456789", encoding="utf-8")
-    write_json(
-        scenario_dir / "assertions.json",
-        {
-            "checks": [
-                {"ok": False, "relative": "AGENTS.md", "root": "project", "detail": "missing Graphify block"},
-                {"ok": False, "path": "/tmp/graphify-home/.codex/AGENTS.md", "root": "home", "detail": "missing local block"},
-                {"ok": False, "relative": "skip.md", "detail": "generic_direct_equivalent=True"},
-                {"ok": True, "relative": "ok.md", "detail": "exists"},
-            ]
-        },
-    )
-
-    assert artifacts.load_json_object(output / "object.json") == {"ok": True}
-    assert artifacts.load_json_object(output / "missing.json") == {}
-    assert artifacts.load_json_object(output / "array.json") == {"_error": "json root is not an object"}
-    assert artifacts.load_json_object(output / "invalid.json")["_error"].startswith("invalid json:")
-    assert artifacts.artifact_relpath(scenario_dir / "assertions.json", output) == "scenarios/codex-project/assertions.json"
-    assert artifacts.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
-    assert artifacts.compact_path("/tmp/graphify-project/AGENTS.md") == "project/AGENTS.md"
-    assert artifacts.compact_path("/tmp/graphify-home/.codex/AGENTS.md") == "home/.codex/AGENTS.md"
-    assert artifacts.compact_path("/tmp/graphify-user-cwd/file.txt") == "user_cwd/file.txt"
-    assert artifacts.compact_path(123) == ""
-    assert artifacts.normalized_text_snippet(" alpha\n\n beta\tgamma ", limit=20) == "alpha beta gamma"
-    assert artifacts.normalized_text_snippet("abcdefghij", limit=8) == "abcde..."
-    assert artifacts.tail_file(output / "tail.txt", limit=4) == "6789"
-    assert artifacts.tail_file(output / "missing-tail.txt") == ""
-    assert artifacts.failed_checks(output, "codex-project", limit=2) == [
-        {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"},
-        {"path": "home/.codex/AGENTS.md", "detail": "missing local block", "root": "home"},
-    ]
 
 
 def test_pass_manifest_reports_pass(tmp_path: Path) -> None:
@@ -187,11 +134,6 @@ def test_fail_manifest_includes_failed_assertions(tmp_path: Path) -> None:
     assert summary["failures"][0]["failed_checks"] == [
         {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"}
     ]
-    assert artifacts.failure_summary(
-        json.loads((output / "manifest.json").read_text(encoding="utf-8"))["results"][0],
-        output_dir=output.resolve(),
-        max_checks=6,
-    ) == summary["failures"][0]
     assert "AGENTS.md: missing Graphify block" in markdown
     assert "scenarios/codex-project/assertions.json" in markdown
 

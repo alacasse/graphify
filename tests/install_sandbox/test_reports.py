@@ -80,6 +80,17 @@ def test_reporting_artifacts_characterize_primitive_artifact_contract(tmp_path: 
     (artifact_dir / "stdout.txt").write_text(" line 1\n\n line\t2 \n", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text(("x" * 502) + "\nsecond line", encoding="utf-8")
     (artifact_dir / "tail.txt").write_text("0123456789", encoding="utf-8")
+    write_json(
+        artifact_dir / "assertions.json",
+        {
+            "checks": [
+                {"ok": False, "relative": "AGENTS.md", "root": "project", "detail": "missing Graphify block"},
+                {"ok": False, "path": "/tmp/graphify-home/.codex/AGENTS.md", "root": "home", "detail": "missing local block"},
+                {"ok": False, "relative": "skip.md", "detail": "generic_direct_equivalent=True"},
+                {"ok": True, "relative": "ok.md", "detail": "exists"},
+            ]
+        },
+    )
 
     assert artifacts.artifact_relpath(artifact_dir / "transcript.txt", output) == "scenarios/codex-project/transcript.txt"
     assert artifacts.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
@@ -97,6 +108,10 @@ def test_reporting_artifacts_characterize_primitive_artifact_contract(tmp_path: 
     assert artifacts.normalized_text_snippet("abcdefghij", limit=8) == "abcde..."
     assert artifacts.tail_file(artifact_dir / "tail.txt", limit=4) == "6789"
     assert artifacts.tail_file(artifact_dir / "missing-tail.txt") == ""
+    assert artifacts.failed_checks(output, "codex-project", limit=2) == [
+        {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"},
+        {"path": "home/.codex/AGENTS.md", "detail": "missing local block", "root": "home"},
+    ]
 
     summary = artifacts.command_artifact_summary(artifact_dir, output_root=output)
 
@@ -112,28 +127,6 @@ def test_reporting_artifacts_characterize_primitive_artifact_contract(tmp_path: 
         "stdout_snippet": "line 1\n\n line\t2",
         "stderr_snippet": ("x" * 500) + "...",
     }
-
-
-def test_report_artifact_helpers_stay_delegating_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[tuple[str, object]] = []
-
-    def file_text_snippet(path: Path, limit: int = 500) -> str:
-        calls.append(("text", (path, limit)))
-        return "delegated text"
-
-    def command_artifact_summary(artifact_dir: Path, *, output_root: Path) -> dict[str, object]:
-        calls.append(("command", (artifact_dir, output_root)))
-        return {"command": "delegated command"}
-
-    monkeypatch.setattr(reports, "file_text_snippet", file_text_snippet)
-    monkeypatch.setattr(reports, "summarize_command_artifact", command_artifact_summary)
-
-    text_path = tmp_path / "stdout.txt"
-    artifact_dir = tmp_path / "command"
-
-    assert reports.text_snippet(text_path, 77) == "delegated text"
-    assert reports.command_artifact_summary(artifact_dir, output_root=tmp_path) == {"command": "delegated command"}
-    assert calls == [("text", (text_path, 77)), ("command", (artifact_dir, tmp_path))]
 
 
 def test_reporting_artifacts_characterize_command_text_precedence(tmp_path: Path) -> None:

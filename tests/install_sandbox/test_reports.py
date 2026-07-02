@@ -461,9 +461,9 @@ def test_harness_run_output_writer_creates_coherent_artifact_bundle(
     output = tmp_path / "out"
     output.mkdir()
 
-    class Plan:
-        standard_validation_count = 2
-        coverage_records = (
+    plan = manifest_projection_plan_data(
+        standard_validation_count=2,
+        coverage_records=(
             {
                 "target": "codex",
                 "platform": "stale-record-alias",
@@ -478,16 +478,16 @@ def test_harness_run_output_writer_creates_coherent_artifact_bundle(
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--project", "--platform", "cursor"],
             },
-        )
-        target_runtime_validation_sections = ()
-        target_coverage_summary = {
+        ),
+        target_coverage_summary={
             "registered_target_count": 2,
             "requested_scope": "project",
             "runnable_scope_count": 2,
             "universal_scenario_count": 0,
             "unsupported_scope_count": 0,
-        }
-        target_runtime_verification = {"performed": False, "reason": "file effects only"}
+        },
+        target_runtime_verification={"performed": False, "reason": "file effects only"},
+    )
 
     write_json(
         output / "scenarios" / "cursor-project" / "assertions.json",
@@ -506,7 +506,7 @@ def test_harness_run_output_writer_creates_coherent_artifact_bundle(
         package_install={"version": "9.9.9", "package_name": "graphifyy"},
         source_snapshot={"root": "/tmp/src"},
         preflight={"project": "/tmp/project"},
-        plan=Plan(),
+        plan=plan,
         results=[
             {
                 "id": "codex-project",

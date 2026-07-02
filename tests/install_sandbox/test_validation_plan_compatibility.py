@@ -8,6 +8,7 @@ import pytest
 
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.reporting import manifest_projection
+from tests.install_sandbox.reporting_vocabulary_test_support import manifest_projection_plan_data
 from tests.install_sandbox.validation_plan_test_support import planner_registry
 
 
@@ -149,21 +150,23 @@ def test_validation_plan_source_has_no_internal_platform_helper_parameters_or_ca
 
 
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:
-    class Plan:
-        standard_validation_count = 1
-        coverage_records = ({"target": "codex", "scope": "project", "status": "runnable"},)
-        target_runtime_validation_sections = ({"section_title": "Target Runtime", "status": "declared"},)
-        target_coverage_summary = {"requested_scope": "project", "universal_scenario_count": 0}
-        target_runtime_verification = {"performed": False}
-
-        selected_platforms = ("legacy-platform-property",)
-        selected_targets = ("future-target-property",)
-        platform_coverage = ({"platform": "internal-alias", "status": "must-not-project"},)
-        platform_coverage_summary = {"requested_scope": "legacy"}
-        runtime_limitation_sections = ({"section_title": "Internal Alias", "status": "must-not-project"},)
+    plan = manifest_projection_plan_data(
+        standard_validation_count=1,
+        coverage_records=({"target": "codex", "scope": "project", "status": "runnable"},),
+        target_runtime_validation_sections=({"section_title": "Target Runtime", "status": "declared"},),
+        target_coverage_summary={"requested_scope": "project", "universal_scenario_count": 0},
+        target_runtime_verification={"performed": False},
+        ignored_alias_attributes={
+            "selected_platforms": ("legacy-platform-property",),
+            "selected_targets": ("future-target-property",),
+            "platform_coverage": ({"platform": "internal-alias", "status": "must-not-project"},),
+            "platform_coverage_summary": {"requested_scope": "legacy"},
+            "runtime_limitation_sections": ({"section_title": "Internal Alias", "status": "must-not-project"},),
+        },
+    )
 
     projected = manifest_projection.validation_plan_manifest_projection(
-        Plan(),
+        plan,
         [{"id": "codex-project", "passed": True}, {"id": "universal-cleanup", "passed": True}],
     )
 

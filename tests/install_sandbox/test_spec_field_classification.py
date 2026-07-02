@@ -10,7 +10,7 @@ from tools.install_sandbox.registry import spec_harness_policy_inputs
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data, load_registry_from_dir
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
-from tests.install_sandbox.install_target_test_support import valid_registry_data, write_registry_dir
+from tests.install_sandbox.install_target_test_support import valid_registry_data
 
 
 FIELD_CLASS_DURABLE_TARGET_FACT = "durable_target_fact"
@@ -29,6 +29,13 @@ FIELD_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
 FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
 FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
 FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT = "current_target_named_input"
+
+
+def _current_registry_data() -> dict[str, Any]:
+    data = deepcopy(valid_registry_data())
+    data["targets"] = data.pop("platforms")
+    return data
+
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -101,8 +108,12 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     "product_command.--platform": {
         FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
     },
-    "registry_yaml.platforms": {
+    "registry_yaml.targets": {
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+    },
+    "legacy_registry_yaml.platforms": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
     "legacy_manifest_input.platform": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
@@ -144,8 +155,12 @@ REPORTING_PROJECTION_ROLE_CLASSIFICATION = {
     "product_command.--platform": {
         FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
     },
-    "registry_yaml.platforms": {
+    "registry_yaml.targets": {
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+    },
+    "legacy_registry_yaml.platforms": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
     "UniversalUninstallScenarioSpec.platform_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
@@ -172,9 +187,9 @@ DEFAULT_YAML_STRUCTURAL_SCOPE_FIELDS = {
 
 
 def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture() -> None:
-    explicit = valid_registry_data()
-    conventional = deepcopy(valid_registry_data())
-    mini = conventional["platforms"]["mini"]
+    explicit = _current_registry_data()
+    conventional = _current_registry_data()
+    mini = conventional["targets"]["mini"]
     mini.pop("user_skill")
     mini.pop("project_skill")
     mini["scopes"]["user"].pop("risk_notes")
@@ -262,8 +277,12 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
         "product_command.--platform": {
             FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
         },
-        "registry_yaml.platforms": {
+        "registry_yaml.targets": {
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+        },
+        "legacy_registry_yaml.platforms": {
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
         "legacy_manifest_input.platform": {
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
@@ -307,8 +326,12 @@ def test_reporting_projection_role_classification_names_exemplar_boundary() -> N
         "product_command.--platform": {
             FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
         },
-        "registry_yaml.platforms": {
+        "registry_yaml.targets": {
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+        },
+        "legacy_registry_yaml.platforms": {
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
         "UniversalUninstallScenarioSpec.platform_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
@@ -341,6 +364,7 @@ def test_reporting_projection_classification_keeps_legacy_platform_vocabulary_in
         "legacy_manifest_input.platform",
         "legacy_manifest_input.platform_coverage",
         "legacy_result_input.platform",
+        "legacy_registry_yaml.platforms",
     }
     assert current_output_fields.isdisjoint(legacy_reader_fields)
     assert all("platform_coverage" not in field for field in current_output_fields)
@@ -377,7 +401,7 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
 
     assert classified_edges == {
         "public product CLI": {"product_command.--platform"},
-        "YAML input": {"registry_yaml.platforms"},
+        "YAML input": {"registry_yaml.targets"},
         "serialized artifact input/output where current": {
             "standard_scenario_result.platform",
             "synthetic_scenario_result.platform",
@@ -387,6 +411,7 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
             "legacy_manifest_input.platform",
             "legacy_manifest_input.platform_coverage",
             "legacy_result_input.platform",
+            "legacy_registry_yaml.platforms",
         },
         "synthetic label vocabulary": {
             "UniversalUninstallScenarioSpec.platform_label",
@@ -409,10 +434,10 @@ def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:
 
 
 def test_top_level_registry_policy_inputs_are_not_target_facts() -> None:
-    registry_data = valid_registry_data()
+    registry_data = _current_registry_data()
     actual_inventory = {
         field: {"<registry>"}
-        for field in registry_data.keys() - {"schema_version", "platforms"}
+        for field in registry_data.keys() - {"schema_version", "targets"}
     }
     unclassified_fields = set(actual_inventory) - set(REGISTRY_FIELD_CLASSIFICATION)
 
@@ -438,12 +463,12 @@ def test_default_registry_explicit_project_equivalent_nulls_are_meaningful_runti
         if isinstance(project_scope, dict) and project_scope.get("equivalent_install_command", "missing") is None:
             registry_dir = tmp_path / path.stem
             registry_dir.mkdir()
-            write_registry_dir(registry_dir, {"platforms": {path.stem: data}})
+            (registry_dir / f"{path.stem}.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
             explicit = load_registry_from_dir(registry_dir)
             explicit_project = explicit.target_spec(path.stem).scopes["project"]
 
             project_scope.pop("equivalent_install_command")
-            write_registry_dir(registry_dir, {"platforms": {path.stem: data}})
+            (registry_dir / f"{path.stem}.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
             derived = load_registry_from_dir(registry_dir)
             derived_project = derived.target_spec(path.stem).scopes["project"]
 

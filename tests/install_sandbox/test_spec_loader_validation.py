@@ -26,10 +26,14 @@ from tools.install_sandbox.registry.spec_schema_validation import (
 from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_registry_from_data
 
 
-def _target_container_data() -> dict[str, object]:
+def _current_data() -> dict[str, object]:
     data = copy.deepcopy(_valid_data())
     data[CURRENT_REGISTRY_CONTAINER_FIELD] = data.pop(LEGACY_REGISTRY_CONTAINER_FIELD)
     return data
+
+
+def _mini(data: dict[str, object]) -> dict[str, object]:
+    return data[CURRENT_REGISTRY_CONTAINER_FIELD]["mini"]
 
 
 def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
@@ -62,8 +66,8 @@ def test_loader_parse_path_consumes_root_name_role_apis(monkeypatch) -> None:
     monkeypatch.setattr(spec_target_facts, "DEFAULT_SANDBOX_ROOT_REGISTRY", root_registry)
     monkeypatch.setattr(spec_harness_policy_inputs, "DEFAULT_SANDBOX_ROOT_REGISTRY", root_registry)
 
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["project"]["cwd_root"] = "repo_mount"
+    data = _current_data()
+    _mini(data)["scopes"]["project"]["cwd_root"] = "repo_mount"
     data["universal_uninstall_specs"] = [
         {
             "scenario_id": "repo-mount-uninstall",
@@ -71,7 +75,7 @@ def test_loader_parse_path_consumes_root_name_role_apis(monkeypatch) -> None:
             "scope": "project",
             "command": ["graphify", "uninstall", "--project"],
             "cwd_root": "repo_mount",
-            "eligible_platform_scope": "project",
+            CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
         }
     ]
     data["disposable_artifact_specs"][0]["cwd_root"] = "repo_mount"
@@ -86,7 +90,7 @@ def test_loader_parse_path_consumes_root_name_role_apis(monkeypatch) -> None:
 
 
 def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
-    data = _valid_data()
+    data = _current_data()
     data["universal_uninstall_specs"] = [
         {
             "scenario_id": "repo-mount-uninstall",
@@ -94,7 +98,7 @@ def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
             "scope": "project",
             "command": ["graphify", "uninstall", "--project"],
             "cwd_root": "repo_mount",
-            "eligible_platform_scope": "project",
+            CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
         }
     ]
     data["disposable_artifact_specs"][0]["cwd_root"] = "repo_mount"
@@ -122,7 +126,7 @@ def test_loader_splits_catalog_target_root_and_policy_root_validation(monkeypatc
     monkeypatch.setattr(spec_loader.ScenarioRegistry, "validate_target_roots", validate_target_roots)
     monkeypatch.setattr(validation_plan, "validate_policy_owned_roots", validate_policy_owned_roots)
 
-    registry = load_registry_from_data(_valid_data())
+    registry = load_registry_from_data(_current_data())
 
     assert registry.target_names == ["mini"]
     assert calls == [
@@ -132,7 +136,7 @@ def test_loader_splits_catalog_target_root_and_policy_root_validation(monkeypatc
 
 
 def test_loader_rejects_unknown_policy_cwd_root_before_catalog_validation() -> None:
-    data = _valid_data()
+    data = _current_data()
     data["universal_uninstall_specs"] = [
         {
             "scenario_id": "unknown-root-uninstall",
@@ -140,7 +144,7 @@ def test_loader_rejects_unknown_policy_cwd_root_before_catalog_validation() -> N
             "scope": "project",
             "command": ["graphify", "uninstall", "--project"],
             "cwd_root": "missing_root",
-            "eligible_platform_scope": "project",
+            CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
         }
     ]
 
@@ -148,14 +152,14 @@ def test_loader_rejects_unknown_policy_cwd_root_before_catalog_validation() -> N
 
 
 def test_loader_rejects_unknown_expected_root() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["effects"][0]["root"] = "repo_mount"
+    data = _current_data()
+    _mini(data)["scopes"]["user"]["effects"][0]["root"] = "repo_mount"
 
     _expect_invalid(data, "unknown expected root")
 
 
 def test_loader_accepts_target_named_registry_container_equivalent_to_legacy_input() -> None:
-    current_registry = load_registry_from_data(_target_container_data())
+    current_registry = load_registry_from_data(_current_data())
     legacy_registry = load_registry_from_data(_valid_data())
 
     assert current_registry.target_names == legacy_registry.target_names == ["mini"]
@@ -165,7 +169,7 @@ def test_loader_accepts_target_named_registry_container_equivalent_to_legacy_inp
 
 
 def test_loader_accepts_target_named_harness_policy_eligibility_input() -> None:
-    data = _valid_data()
+    data = _current_data()
     data["universal_uninstall_specs"] = [
         {
             "scenario_id": "target-named-uninstall",
@@ -212,7 +216,7 @@ def test_loader_rejects_ambiguous_current_and_legacy_harness_policy_eligibility(
 
 
 def test_loader_rejects_ambiguous_current_and_legacy_registry_containers() -> None:
-    data = _target_container_data()
+    data = _current_data()
     data[LEGACY_REGISTRY_CONTAINER_FIELD] = copy.deepcopy(data[CURRENT_REGISTRY_CONTAINER_FIELD])
     expected_error = (
         rf"<data>: declares both {CURRENT_REGISTRY_CONTAINER_FIELD} and legacy {LEGACY_REGISTRY_CONTAINER_FIELD}"
@@ -248,52 +252,52 @@ def test_directory_loading_uses_current_container_without_renaming_target_files(
 
 
 def test_loader_rejects_non_surface_root_for_disposable_path_root() -> None:
-    data = _valid_data()
+    data = _current_data()
     data["disposable_artifact_specs"][0]["disposable_path_root"] = "repo_mount"
 
     _expect_invalid(data, "unknown expected root")
 
 
 def test_loader_rejects_platform_key_name_mismatch() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["name"] = "other"
+    data = _current_data()
+    _mini(data)["name"] = "other"
 
     _expect_invalid(data, "platform key/name mismatch")
 
 
 def test_loader_rejects_missing_or_conflicting_scope_declarations() -> None:
-    missing = _valid_data()
-    missing["platforms"]["mini"]["scopes"].pop("project")
+    missing = _current_data()
+    _mini(missing)["scopes"].pop("project")
     _expect_invalid(missing, "exactly one runnable scope")
 
-    conflicting = _valid_data()
-    conflicting["platforms"]["mini"]["unsupported_scopes"]["project"] = "unsupported"
+    conflicting = _current_data()
+    _mini(conflicting)["unsupported_scopes"]["project"] = "unsupported"
     _expect_invalid(conflicting, "exactly one runnable scope")
 
 
 def test_loader_rejects_invalid_commands() -> None:
-    empty = _valid_data()
-    empty["platforms"]["mini"]["scopes"]["user"]["install_command"] = []
+    empty = _current_data()
+    _mini(empty)["scopes"]["user"]["install_command"] = []
     _expect_invalid(empty, "expected non-empty list")
 
-    non_string = _valid_data()
-    non_string["platforms"]["mini"]["scopes"]["user"]["install_command"] = ["tool", 3]
+    non_string = _current_data()
+    _mini(non_string)["scopes"]["user"]["install_command"] = ["tool", 3]
     _expect_invalid(non_string, "expected non-empty string")
 
 
 def test_loader_rejects_invalid_relative_paths() -> None:
-    absolute = _valid_data()
-    absolute["platforms"]["mini"]["scopes"]["user"]["effects"][0]["relative"] = "/tmp/SKILL.md"
+    absolute = _current_data()
+    _mini(absolute)["scopes"]["user"]["effects"][0]["relative"] = "/tmp/SKILL.md"
     _expect_invalid(absolute, "must not be absolute")
 
-    escaping = _valid_data()
-    escaping["platforms"]["mini"]["scopes"]["user"]["effects"][0]["relative"] = "../SKILL.md"
+    escaping = _current_data()
+    _mini(escaping)["scopes"]["user"]["effects"][0]["relative"] = "../SKILL.md"
     _expect_invalid(escaping, "must not escape")
 
 
 def test_loader_rejects_duplicate_install_variant_labels() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["project"]["install_variants"] = [
+    data = _current_data()
+    _mini(data)["scopes"]["project"]["install_variants"] = [
         {"label": "same", "command": ["tool", "a"]},
         {"label": "same", "command": ["tool", "b"]},
     ]
@@ -302,21 +306,21 @@ def test_loader_rejects_duplicate_install_variant_labels() -> None:
 
 
 def test_loader_rejects_invalid_scope_names() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["both"] = data["platforms"]["mini"]["scopes"].pop("project")
+    data = _current_data()
+    _mini(data)["scopes"]["both"] = _mini(data)["scopes"].pop("project")
 
     _expect_invalid(data, "invalid platform scope: both")
 
 
 def test_loader_rejects_unknown_structured_risk_note() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["risk_notes"] = ["unknown_structured_note"]
+    data = _current_data()
+    _mini(data)["scopes"]["user"]["risk_notes"] = ["unknown_structured_note"]
 
     _expect_invalid(data, "unknown structured risk note")
 
 
 def test_loader_rejects_unknown_top_level_registry_fields() -> None:
-    data = _valid_data()
+    data = _current_data()
     data["target_runtime_validation_policies"] = {"typo": {}}
 
     with pytest.raises(SpecLoaderError, match=r"<data>: unknown field: target_runtime_validation_policies"):
@@ -327,19 +331,19 @@ def test_loader_rejects_unknown_top_level_registry_fields() -> None:
     ("mutate", "field_name"),
     [
         (
-            lambda data: data["platforms"]["mini"].update({"unknown_target_fact": True}),
+            lambda data: _mini(data).update({"unknown_target_fact": True}),
             "unknown_target_fact",
         ),
         (
-            lambda data: data["platforms"]["mini"]["scopes"]["user"].update({"unknown_scope_fact": True}),
+            lambda data: _mini(data)["scopes"]["user"].update({"unknown_scope_fact": True}),
             "unknown_scope_fact",
         ),
         (
-            lambda data: data["platforms"]["mini"]["scopes"]["user"]["effects"][0].update({"unknown_effect_fact": True}),
+            lambda data: _mini(data)["scopes"]["user"]["effects"][0].update({"unknown_effect_fact": True}),
             "unknown_effect_fact",
         ),
         (
-            lambda data: data["platforms"]["mini"]["scopes"]["user"].update(
+            lambda data: _mini(data)["scopes"]["user"].update(
                 {
                     "generated_file_expectation": {
                         "relative_substrings": ["graphify"],
@@ -350,13 +354,13 @@ def test_loader_rejects_unknown_top_level_registry_fields() -> None:
             "unknown_generated_fact",
         ),
         (
-            lambda data: data["platforms"]["mini"].update(
+            lambda data: _mini(data).update(
                 {"reference_bundles": [{"name": "mini", "unknown_reference_fact": True}]}
             ),
             "unknown_reference_fact",
         ),
         (
-            lambda data: data["platforms"]["mini"].update(
+            lambda data: _mini(data).update(
                 {
                     "target_runtime_validation": [
                         {
@@ -375,7 +379,7 @@ def test_loader_rejects_unknown_top_level_registry_fields() -> None:
     ],
 )
 def test_loader_rejects_unknown_target_fact_fields(mutate, field_name: str) -> None:
-    data = _valid_data()
+    data = _current_data()
     mutate(data)
 
     with pytest.raises(SpecLoaderError, match=rf"unknown field: {field_name}"):
@@ -383,8 +387,8 @@ def test_loader_rejects_unknown_target_fact_fields(mutate, field_name: str) -> N
 
 
 def test_loader_rejects_unknown_json_hook_fields() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
+    data = _current_data()
+    _mini(data)["scopes"]["user"]["effects"] = [
         {
             "kind": "json_hooks",
             "root": "home",
@@ -406,8 +410,8 @@ def test_loader_rejects_unknown_json_hook_fields() -> None:
 
 
 def test_loader_rejects_unknown_json_plugin_fields() -> None:
-    data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
+    data = _current_data()
+    _mini(data)["scopes"]["user"]["effects"] = [
         {
             "kind": "file",
             "root": "home",
@@ -437,7 +441,7 @@ def test_loader_rejects_unknown_json_plugin_fields() -> None:
                     "scope": "project",
                     "command": ["graphify", "uninstall", "--project"],
                     "cwd_root": "repo_mount",
-                    "eligible_platform_scope": "project",
+                    CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
                     "unknown_universal_policy": True,
                 }
             ),
@@ -454,7 +458,7 @@ def test_loader_rejects_unknown_json_plugin_fields() -> None:
     ],
 )
 def test_loader_rejects_unknown_harness_policy_input_fields(mutate, field_name: str) -> None:
-    data = _valid_data()
+    data = _current_data()
     mutate(data)
 
     with pytest.raises(SpecLoaderError, match=rf"unknown field: {field_name}"):

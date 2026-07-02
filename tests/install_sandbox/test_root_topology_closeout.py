@@ -530,6 +530,18 @@ def _function_node(module: types.ModuleType, function_name: str) -> ast.Function
     )
 
 
+def _call_keyword_names(function_node: ast.FunctionDef, called_function_name: str) -> set[str]:
+    return {
+        keyword.arg
+        for node in ast.walk(function_node)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == called_function_name
+        for keyword in node.keywords
+        if keyword.arg is not None
+    }
+
+
 def _resolve_dotted_owner(dotted_name: str) -> object:
     module_name, separator, _ = dotted_name.partition(".ScenarioRegistry")
     owner = importlib.import_module(module_name)
@@ -879,8 +891,17 @@ def test_root_topology_closeout_characterizes_validation_plan_internal_target_vo
     for dotted_name, expected_parameters in VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY.items():
         _, helper_name = dotted_name.rsplit(".", maxsplit=1)
         signature = inspect.signature(getattr(validation_plan, helper_name))
+        helper_node = _function_node(validation_plan, helper_name)
+        helper_parameters = {arg.arg for arg in helper_node.args.args + helper_node.args.kwonlyargs}
 
         assert set(signature.parameters) >= expected_parameters
+        assert helper_parameters >= expected_parameters
+        assert "platforms" not in helper_parameters
+
+    build_node = _function_node(validation_plan, "build_validation_plan")
+    coverage_summary_keywords = _call_keyword_names(build_node, "_coverage_summary")
+    assert coverage_summary_keywords >= {"target_names"}
+    assert "platforms" not in coverage_summary_keywords
 
     internal_terms = set().union(*VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY.values())
     edge_terms = set().union(*VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS.values())

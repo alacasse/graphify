@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -54,6 +56,30 @@ VALIDATION_PLAN_INTERNAL_TARGET_CALLSITE_KEYWORDS = {
 }
 
 
+def _validation_plan_tree() -> ast.Module:
+    return ast.parse(Path(validation_plan.__file__).read_text(encoding="utf-8"))
+
+
+def _top_level_function(tree: ast.Module, function_name: str) -> ast.FunctionDef:
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+
+
+def _call_keyword_names(function_node: ast.FunctionDef, called_function_name: str) -> set[str]:
+    return {
+        keyword.arg
+        for node in ast.walk(function_node)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == called_function_name
+        for keyword in node.keywords
+        if keyword.arg is not None
+    }
+
+
 def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape() -> None:
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
     target_selector_signature = inspect.signature(validation_plan.selected_targets)
@@ -104,6 +130,22 @@ def test_validation_plan_uses_target_vocabulary_for_internal_helper_names() -> N
         "build_validation_plan": {"_coverage_summary.target_names"},
     }
     assert not any(hasattr(validation_plan.ValidationPlan, name) for name in {"platforms", "selected_platforms"})
+
+
+def test_validation_plan_source_has_no_internal_platform_helper_parameters_or_call_keywords() -> None:
+    tree = _validation_plan_tree()
+
+    for helper_name, expected_parameters in VALIDATION_PLAN_INTERNAL_TARGET_HELPER_PARAMETERS.items():
+        helper_node = _top_level_function(tree, helper_name)
+        parameter_names = {arg.arg for arg in helper_node.args.args + helper_node.args.kwonlyargs}
+
+        assert parameter_names >= expected_parameters
+        assert "platforms" not in parameter_names
+
+    build_node = _top_level_function(tree, "build_validation_plan")
+    coverage_summary_keywords = _call_keyword_names(build_node, "_coverage_summary")
+    assert coverage_summary_keywords >= {"target_names"}
+    assert "platforms" not in coverage_summary_keywords
 
 
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:

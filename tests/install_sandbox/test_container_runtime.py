@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -110,3 +111,51 @@ def test_build_image_command_uses_harness_directory() -> None:
     ]
     assert container_runtime.HARNESS_DIR.name == "install_sandbox"
     assert container_runtime.HARNESS_DIR.joinpath("Dockerfile").is_file()
+
+
+def test_run_command_prints_shell_joined_transcript(monkeypatch, capsys) -> None:
+    command = ["docker", "run", "image", "value with spaces"]
+    calls = []
+
+    def fake_run(command_arg, *, check, timeout):
+        calls.append((command_arg, check, timeout))
+
+    monkeypatch.setattr(container_runtime.subprocess, "run", fake_run)
+
+    container_runtime.run_command(command, timeout_seconds=12, command_class="container")
+
+    assert calls == [(command, True, 12)]
+    assert capsys.readouterr().out == "$ docker run image 'value with spaces'\n"
+
+
+def test_run_command_translates_timeout_to_exit_124(monkeypatch, capsys) -> None:
+    command = ["docker", "build", "-t", "image"]
+
+    def fake_run(command_arg, *, check, timeout):
+        raise subprocess.TimeoutExpired(command_arg, timeout)
+
+    monkeypatch.setattr(container_runtime.subprocess, "run", fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        container_runtime.run_command(command, timeout_seconds=600, command_class="build")
+
+    assert exc_info.value.code == 124
+    captured = capsys.readouterr()
+    assert captured.out == "$ docker build -t image\n"
+    assert captured.err == "error: build command timed out after 600 seconds: docker build -t image\n"
+
+
+def test_run_command_propagates_nonzero_process_failures(monkeypatch, capsys) -> None:
+    command = ["docker", "run", "image"]
+    failure = subprocess.CalledProcessError(returncode=7, cmd=command)
+
+    def fake_run(command_arg, *, check, timeout):
+        raise failure
+
+    monkeypatch.setattr(container_runtime.subprocess, "run", fake_run)
+
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        container_runtime.run_command(command, timeout_seconds=3600, command_class="container")
+
+    assert exc_info.value is failure
+    assert capsys.readouterr().out == "$ docker run image\n"

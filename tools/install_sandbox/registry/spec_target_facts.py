@@ -18,37 +18,61 @@ from ..targets.install_target_models import (
     TargetRuntimeValidationSpec,
 )
 from ..targets.install_target_scenarios import _scenario
-from .spec_schema_validation import SpecSchemaValidationError, reject_unknown_fields
+from .spec_schema_validation import (
+    SCHEMA_CLASS_TARGET_FACT,
+    SCHEMA_CLASS_TRANSITIONAL_EXECUTION,
+    SCHEMA_CLASS_TRANSITIONAL_PLANNING,
+    SpecSchemaValidationError,
+    reject_unknown_fields,
+)
 from .spec_install_surfaces import SpecInstallSurfaceError, derive_scope_install_surfaces
 
 
 _SCOPE_NAMES = {"user", "project"}
-_TARGET_FIELDS = {
-    "display_name",
-    "name",
-    "project_skill",
-    "reference_bundles",
-    "scopes",
-    "simulated_linux_layout",
-    "target_kind",
-    "target_runtime_validation",
-    "universal_uninstall_scopes",
-    "unsupported_scopes",
-    "user_skill",
-    "uses_packaged_references",
+TARGET_LOCAL_FACT_FIELDS = frozenset(
+    {
+        "display_name",
+        "name",
+        "project_skill",
+        "reference_bundles",
+        "scopes",
+        "simulated_linux_layout",
+        "target_kind",
+        "target_runtime_validation",
+        "unsupported_scopes",
+        "user_skill",
+        "uses_packaged_references",
+    }
+)
+TRANSITIONAL_TARGET_PLANNING_FIELDS = frozenset({"universal_uninstall_scopes"})
+TARGET_FIELD_CLASSIFICATIONS = {
+    **dict.fromkeys(TARGET_LOCAL_FACT_FIELDS, SCHEMA_CLASS_TARGET_FACT),
+    **dict.fromkeys(TRANSITIONAL_TARGET_PLANNING_FIELDS, SCHEMA_CLASS_TRANSITIONAL_PLANNING),
 }
-_SCOPE_FIELDS = {
-    "allowed_roots",
-    "cwd_root",
-    "effects",
-    "equivalent_install_command",
-    "expected",
-    "generated_file_expectation",
-    "install_command",
-    "install_variants",
-    "risk_notes",
-    "uninstall_command",
+_TARGET_FIELDS = set(TARGET_FIELD_CLASSIFICATIONS)
+SCOPE_LOCAL_FACT_FIELDS = frozenset(
+    {
+        "effects",
+        "generated_file_expectation",
+        "risk_notes",
+    }
+)
+TRANSITIONAL_SCOPE_EXECUTION_FIELDS = frozenset(
+    {
+        "allowed_roots",
+        "cwd_root",
+        "equivalent_install_command",
+        "expected",
+        "install_command",
+        "install_variants",
+        "uninstall_command",
+    }
+)
+SCOPE_FIELD_CLASSIFICATIONS = {
+    **dict.fromkeys(SCOPE_LOCAL_FACT_FIELDS, SCHEMA_CLASS_TARGET_FACT),
+    **dict.fromkeys(TRANSITIONAL_SCOPE_EXECUTION_FIELDS, SCHEMA_CLASS_TRANSITIONAL_EXECUTION),
 }
+_SCOPE_FIELDS = set(SCOPE_FIELD_CLASSIFICATIONS)
 _INSTALL_VARIANT_FIELDS = {"command", "label"}
 _GENERATED_FILE_EXPECTATION_FIELDS = {
     "content_markers",

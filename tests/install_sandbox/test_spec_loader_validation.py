@@ -9,6 +9,14 @@ from tests.install_sandbox.install_target_test_support import (
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from tools.install_sandbox.registry import spec_harness_policy_inputs, spec_loader, spec_target_facts
+from tools.install_sandbox.registry.spec_schema_validation import (
+    PUBLIC_SCHEMA_COMPATIBILITY_FIELDS,
+    SCHEMA_CLASS_HARNESS_POLICY_INPUT,
+    SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY,
+    SCHEMA_CLASS_TARGET_FACT,
+    SCHEMA_CLASS_TRANSITIONAL_EXECUTION,
+    SCHEMA_CLASS_TRANSITIONAL_PLANNING,
+)
 from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_registry_from_data
 
 
@@ -346,3 +354,22 @@ def test_loader_rejects_unknown_harness_policy_input_fields(mutate, field_name: 
 
     with pytest.raises(SpecLoaderError, match=rf"unknown field: {field_name}"):
         load_registry_from_data(data)
+
+
+def test_schema_field_classification_is_visible_at_registry_owners() -> None:
+    assert spec_target_facts.TARGET_FIELD_CLASSIFICATIONS["user_skill"] == SCHEMA_CLASS_TARGET_FACT
+    assert spec_target_facts.TARGET_FIELD_CLASSIFICATIONS["project_skill"] == SCHEMA_CLASS_TARGET_FACT
+    assert spec_target_facts.TARGET_FIELD_CLASSIFICATIONS["universal_uninstall_scopes"] == SCHEMA_CLASS_TRANSITIONAL_PLANNING
+    assert spec_target_facts.SCOPE_FIELD_CLASSIFICATIONS["effects"] == SCHEMA_CLASS_TARGET_FACT
+    assert spec_target_facts.SCOPE_FIELD_CLASSIFICATIONS["install_command"] == SCHEMA_CLASS_TRANSITIONAL_EXECUTION
+    assert spec_target_facts.SCOPE_FIELD_CLASSIFICATIONS["uninstall_command"] == SCHEMA_CLASS_TRANSITIONAL_EXECUTION
+    assert spec_harness_policy_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["command"] == SCHEMA_CLASS_TRANSITIONAL_EXECUTION
+    assert (
+        spec_harness_policy_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_platform_scope"]
+        == SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY
+    )
+    assert (
+        spec_harness_policy_inputs.DISPOSABLE_ARTIFACT_FIELD_CLASSIFICATIONS["scope_eligibility"]
+        == SCHEMA_CLASS_HARNESS_POLICY_INPUT
+    )
+    assert PUBLIC_SCHEMA_COMPATIBILITY_FIELDS >= {"platforms", "eligible_platform_scope"}

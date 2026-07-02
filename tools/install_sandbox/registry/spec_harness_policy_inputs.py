@@ -13,7 +13,13 @@ from .spec_install_surfaces import (
     validate_install_surface_root,
     validate_relative_path,
 )
-from .spec_schema_validation import SpecSchemaValidationError, reject_unknown_fields
+from .spec_schema_validation import (
+    SCHEMA_CLASS_HARNESS_POLICY_INPUT,
+    SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY,
+    SCHEMA_CLASS_TRANSITIONAL_EXECUTION,
+    SpecSchemaValidationError,
+    reject_unknown_fields,
+)
 
 
 TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS = frozenset(
@@ -22,27 +28,34 @@ TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS = frozenset(
         "disposable_artifact_specs",
     }
 )
-_UNIVERSAL_UNINSTALL_FIELDS = frozenset(
+UNIVERSAL_UNINSTALL_HARNESS_POLICY_FIELDS = frozenset(
     {
         "artifact_subdir",
-        "command",
-        "cwd_root",
-        "eligible_platform_scope",
         "minimum_installed_scenarios",
-        "platform_label",
         "risk_note",
         "scenario_id",
         "scope",
     }
 )
-_DISPOSABLE_ARTIFACT_FIELDS = frozenset(
+UNIVERSAL_UNINSTALL_TRANSITIONAL_EXECUTION_FIELDS = frozenset(
     {
-        "artifact_subdir",
         "command",
         "cwd_root",
+        "platform_label",
+    }
+)
+UNIVERSAL_UNINSTALL_PUBLIC_SCHEMA_COMPATIBILITY_FIELDS = frozenset({"eligible_platform_scope"})
+UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS = {
+    **dict.fromkeys(UNIVERSAL_UNINSTALL_HARNESS_POLICY_FIELDS, SCHEMA_CLASS_HARNESS_POLICY_INPUT),
+    **dict.fromkeys(UNIVERSAL_UNINSTALL_TRANSITIONAL_EXECUTION_FIELDS, SCHEMA_CLASS_TRANSITIONAL_EXECUTION),
+    **dict.fromkeys(UNIVERSAL_UNINSTALL_PUBLIC_SCHEMA_COMPATIBILITY_FIELDS, SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY),
+}
+_UNIVERSAL_UNINSTALL_FIELDS = frozenset(UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS)
+DISPOSABLE_ARTIFACT_HARNESS_POLICY_FIELDS = frozenset(
+    {
+        "artifact_subdir",
         "disposable_path_relative",
         "disposable_path_root",
-        "platform_label",
         "risk_note",
         "scenario_id",
         "scope",
@@ -50,6 +63,18 @@ _DISPOSABLE_ARTIFACT_FIELDS = frozenset(
         "seed_files",
     }
 )
+DISPOSABLE_ARTIFACT_TRANSITIONAL_EXECUTION_FIELDS = frozenset(
+    {
+        "command",
+        "cwd_root",
+        "platform_label",
+    }
+)
+DISPOSABLE_ARTIFACT_FIELD_CLASSIFICATIONS = {
+    **dict.fromkeys(DISPOSABLE_ARTIFACT_HARNESS_POLICY_FIELDS, SCHEMA_CLASS_HARNESS_POLICY_INPUT),
+    **dict.fromkeys(DISPOSABLE_ARTIFACT_TRANSITIONAL_EXECUTION_FIELDS, SCHEMA_CLASS_TRANSITIONAL_EXECUTION),
+}
+_DISPOSABLE_ARTIFACT_FIELDS = frozenset(DISPOSABLE_ARTIFACT_FIELD_CLASSIFICATIONS)
 _DISPOSABLE_SEED_FIELDS = frozenset({"content", "relative"})
 
 

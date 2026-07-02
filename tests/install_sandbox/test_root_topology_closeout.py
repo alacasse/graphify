@@ -68,15 +68,6 @@ HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETER_GUARDS = {
     },
 }
 
-HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY = {
-    "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
-    "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
-    "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
-    "Scenario.target_name": "standard scenario target identity",
-    "--platform": "public product command edge",
-    "platforms": "public YAML edge",
-}
-
 SCENARIO_PLATFORM_CONTRACT_DECISION = "migrated_internal_artifact_identity"
 
 LEGACY_PLATFORM_INPUT_ONLY_READERS = {
@@ -163,15 +154,19 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
     models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
     harness_policy = importlib.import_module("tools.install_sandbox.targets.install_target_harness_policy")
     spec_inputs = importlib.import_module("tools.install_sandbox.registry.spec_harness_policy_inputs")
+    schema_validation = importlib.import_module("tools.install_sandbox.registry.spec_schema_validation")
 
-    assert HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY == {
-        "UniversalUninstallScenarioSpec.platform_label": "synthetic output label",
-        "DisposableArtifactScenarioSpec.platform_label": "synthetic output label",
-        "registry.universal_uninstall_specs[].eligible_platform_scope": "YAML input edge",
-        "Scenario.target_name": "standard scenario target identity",
-        "--platform": "public product command edge",
-        "platforms": "public YAML edge",
-    }
+    assert spec_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_platform_scope"] == (
+        schema_validation.SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY
+    )
+    assert spec_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["platform_label"] == (
+        schema_validation.SCHEMA_CLASS_TRANSITIONAL_EXECUTION
+    )
+    assert spec_inputs.DISPOSABLE_ARTIFACT_FIELD_CLASSIFICATIONS["platform_label"] == (
+        schema_validation.SCHEMA_CLASS_TRANSITIONAL_EXECUTION
+    )
+    assert schema_validation.PUBLIC_SCHEMA_COMPATIBILITY_FIELDS >= {"platforms", "eligible_platform_scope"}
+    assert schema_validation.PUBLIC_PRODUCT_CONTRACT_FIELDS == {"--platform"}
 
     legacy_eligibility_names = {"platform_name", "platforms", "eligible_platform_scope"}
     for owner_name, api_parameters in HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETER_GUARDS.items():

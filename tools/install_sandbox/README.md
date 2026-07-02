@@ -87,6 +87,14 @@ The current split is intentional:
 - The checked-in YAML registry still uses the top-level `platforms` container as
   schema vocabulary. Do not treat that name as permission to reintroduce
   platform-named internal APIs or generated `platform_coverage*` output fields.
+- YAML `install_command`, `uninstall_command`, `equivalent_install_command`,
+  `cwd_root`, `allowed_roots`, and `universal_uninstall_scopes` are transitional
+  sandbox execution or planning inputs. They are intentionally classified near
+  the registry loaders and are not durable Target Facts for a future Installer
+  Core.
+- YAML `eligible_platform_scope` is retained as public schema compatibility for
+  universal uninstall policy input. Rename it only in a future public schema
+  migration with an explicit compatibility plan.
 
 In short: prefer target vocabulary for internal sandbox models, planner data,
 and generated artifacts; keep platform vocabulary only where it is a current

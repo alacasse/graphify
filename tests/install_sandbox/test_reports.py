@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import json
 from pathlib import Path
 
@@ -60,9 +59,7 @@ def test_status_label_prefers_overall_status_then_passed_flag() -> None:
     assert reports.status_label({"passed": False}) == reports.RISK_GRAPHIFY_FAILED
 
 
-def test_report_artifact_helpers_characterize_current_contract(tmp_path) -> None:
-    # Report helper names are characterized for migration; root compatibility is
-    # pinned separately in the agent-summary wrapper tests.
+def test_reporting_artifacts_characterize_primitive_artifact_contract(tmp_path: Path) -> None:
     output = tmp_path / "out"
     artifact_dir = output / "scenarios" / "codex-project"
     artifact_dir.mkdir(parents=True)
@@ -82,17 +79,26 @@ def test_report_artifact_helpers_characterize_current_contract(tmp_path) -> None
     )
     (artifact_dir / "stdout.txt").write_text(" line 1\n\n line\t2 \n", encoding="utf-8")
     (artifact_dir / "stderr.txt").write_text(("x" * 502) + "\nsecond line", encoding="utf-8")
+    (artifact_dir / "tail.txt").write_text("0123456789", encoding="utf-8")
 
-    assert reports.artifact_relpath(artifact_dir / "transcript.txt", output) == "scenarios/codex-project/transcript.txt"
-    assert reports.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
-    assert reports.read_json_object(artifact_dir / "command-result.json")["command_class"] == "installer"
-    assert reports.read_json_object(artifact_dir / "missing.json") == {}
+    assert artifacts.artifact_relpath(artifact_dir / "transcript.txt", output) == "scenarios/codex-project/transcript.txt"
+    assert artifacts.artifact_relpath(tmp_path / "elsewhere.txt", output) == str(tmp_path / "elsewhere.txt")
+    assert artifacts.read_json_object(artifact_dir / "command-result.json")["command_class"] == "installer"
+    assert artifacts.read_json_object(artifact_dir / "missing.json") == {}
     (artifact_dir / "invalid.json").write_text("{", encoding="utf-8")
     (artifact_dir / "array.json").write_text("[]", encoding="utf-8")
-    assert reports.read_json_object(artifact_dir / "invalid.json") == {}
-    assert reports.read_json_object(artifact_dir / "array.json") == {}
+    assert artifacts.read_json_object(artifact_dir / "invalid.json") == {}
+    assert artifacts.read_json_object(artifact_dir / "array.json") == {}
+    assert artifacts.load_json_object(artifact_dir / "missing.json") == {}
+    assert artifacts.load_json_object(artifact_dir / "invalid.json")["_error"].startswith("invalid json:")
+    assert artifacts.load_json_object(artifact_dir / "array.json") == {"_error": "json root is not an object"}
+    assert artifacts.file_text_snippet(artifact_dir / "stdout.txt") == "line 1\n\n line\t2"
+    assert artifacts.normalized_text_snippet(" alpha\n\n beta\tgamma ", limit=20) == "alpha beta gamma"
+    assert artifacts.normalized_text_snippet("abcdefghij", limit=8) == "abcde..."
+    assert artifacts.tail_file(artifact_dir / "tail.txt", limit=4) == "6789"
+    assert artifacts.tail_file(artifact_dir / "missing-tail.txt") == ""
 
-    summary = reports.command_artifact_summary(artifact_dir, output_root=output)
+    summary = artifacts.command_artifact_summary(artifact_dir, output_root=output)
 
     assert summary == {
         "command": "graphify install --project --platform codex",
@@ -106,51 +112,31 @@ def test_report_artifact_helpers_characterize_current_contract(tmp_path) -> None
         "stdout_snippet": "line 1\n\n line\t2",
         "stderr_snippet": ("x" * 500) + "...",
     }
-    assert artifacts.command_artifact_summary(artifact_dir, output_root=output) == summary
 
 
-def test_report_artifact_helpers_stay_delegating_wrappers() -> None:
-    tree = ast.parse(Path(reports.__file__).read_text(encoding="utf-8"))
-    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+def test_report_artifact_helpers_stay_delegating_wrappers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, object]] = []
 
-    text_calls = {node.func.id for node in ast.walk(functions["text_snippet"]) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
-    command_calls = {
-        node.func.id
-        for node in ast.walk(functions["command_artifact_summary"])
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
+    def file_text_snippet(path: Path, limit: int = 500) -> str:
+        calls.append(("text", (path, limit)))
+        return "delegated text"
 
-    assert text_calls == {"file_text_snippet"}
-    assert command_calls == {"summarize_command_artifact"}
+    def command_artifact_summary(artifact_dir: Path, *, output_root: Path) -> dict[str, object]:
+        calls.append(("command", (artifact_dir, output_root)))
+        return {"command": "delegated command"}
 
+    monkeypatch.setattr(reports, "file_text_snippet", file_text_snippet)
+    monkeypatch.setattr(reports, "summarize_command_artifact", command_artifact_summary)
 
-def test_render_modules_do_not_regrow_artifact_helper_implementations() -> None:
-    report_functions = {
-        node.name
-        for node in ast.parse(Path(reports.__file__).read_text(encoding="utf-8")).body
-        if isinstance(node, ast.FunctionDef)
-    }
-    summary_functions = {
-        node.name
-        for node in ast.parse(Path(agent_summary.__file__).read_text(encoding="utf-8")).body
-        if isinstance(node, ast.FunctionDef)
-    }
+    text_path = tmp_path / "stdout.txt"
+    artifact_dir = tmp_path / "command"
 
-    duplicated_primitive_helpers = {
-        "compact_path",
-        "read_json_object",
-        "load_json_object",
-        "file_text_snippet",
-        "normalized_text_snippet",
-        "tail_file",
-    }
-
-    assert duplicated_primitive_helpers.isdisjoint(report_functions)
-    assert duplicated_primitive_helpers.isdisjoint(summary_functions)
-    assert artifacts.__name__ == "tools.install_sandbox.reporting.artifacts"
+    assert reports.text_snippet(text_path, 77) == "delegated text"
+    assert reports.command_artifact_summary(artifact_dir, output_root=tmp_path) == {"command": "delegated command"}
+    assert calls == [("text", (text_path, 77)), ("command", (artifact_dir, tmp_path))]
 
 
-def test_report_command_artifact_summary_characterizes_command_text_precedence(tmp_path) -> None:
+def test_reporting_artifacts_characterize_command_text_precedence(tmp_path: Path) -> None:
     output = tmp_path / "out"
     display_dir = output / "scenarios" / "display"
     fallback_dir = output / "scenarios" / "fallback"
@@ -176,8 +162,8 @@ def test_report_command_artifact_summary_characterizes_command_text_precedence(t
     )
     (fallback_dir / "command.txt").write_text(" fallback command\nwith preserved newline ", encoding="utf-8")
 
-    assert reports.command_artifact_summary(display_dir, output_root=output)["command"] == "display wins"
-    assert reports.command_artifact_summary(fallback_dir, output_root=output)["command"] == (
+    assert artifacts.command_artifact_summary(display_dir, output_root=output)["command"] == "display wins"
+    assert artifacts.command_artifact_summary(fallback_dir, output_root=output)["command"] == (
         "fallback command\nwith preserved newline"
     )
 

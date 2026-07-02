@@ -160,6 +160,8 @@ def render_report_md(manifest: dict[str, object]) -> str:
     failures = [item for item in results if item.get("passed") is not True]
     lines.extend(["", "## Failures", ""])
     if failures:
+        lines.append("- First read: `agent-summary.md` lists failed checks and next artifacts to inspect.")
+        lines.append("")
         for item in failures:
             command_artifact = object_dict(item.get("command_artifact"))
             lines.append(f"### {item.get('id')}")

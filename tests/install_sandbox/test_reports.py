@@ -14,6 +14,11 @@ from tools.install_sandbox.reporting import reports
 from tools.install_sandbox.reporting import status as reporting_status
 
 
+def write_json(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def test_known_status_values_are_serializable_file_effect_statuses() -> None:
     encoded = json.dumps({"risk_status_values": reports.known_status_values()})
 
@@ -545,6 +550,135 @@ def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> N
     assert manifest["graphify_file_effect_pass_count"] == 1
     assert manifest["graphify_file_effect_fail_count"] == 1
     assert manifest["risk_status_values"] == reporting_status.known_status_values()
+
+
+def test_harness_run_output_writer_creates_coherent_artifact_bundle(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "out"
+    output.mkdir()
+
+    class Plan:
+        standard_validation_count = 2
+        coverage_records = (
+            {
+                "target": "codex",
+                "platform": "stale-record-alias",
+                "scope": "project",
+                "status": "runnable",
+                "install_command": ["graphify", "install", "--project", "--platform", "codex"],
+            },
+            {
+                "target": "cursor",
+                "platform": "stale-cursor-alias",
+                "scope": "project",
+                "status": "runnable",
+                "install_command": ["graphify", "install", "--project", "--platform", "cursor"],
+            },
+        )
+        target_runtime_validation_sections = ()
+        target_coverage_summary = {
+            "registered_target_count": 2,
+            "requested_scope": "project",
+            "runnable_scope_count": 2,
+            "universal_scenario_count": 0,
+            "unsupported_scope_count": 0,
+        }
+        target_runtime_verification = {"performed": False, "reason": "file effects only"}
+
+    write_json(
+        output / "scenarios" / "cursor-project" / "assertions.json",
+        {
+            "checks": [
+                {"ok": True, "relative": "ok.md", "detail": "exists"},
+                {"ok": False, "relative": "AGENTS.md", "root": "project", "detail": "missing Graphify block"},
+            ]
+        },
+    )
+    run_result = harness_run.harness_run_result(
+        harness_version="test-harness",
+        python_version="3.12 synthetic",
+        os_release={"PRETTY_NAME": "Synthetic Linux"},
+        architecture="x86_64",
+        package_install={"version": "9.9.9", "package_name": "graphifyy"},
+        source_snapshot={"root": "/tmp/src"},
+        preflight={"project": "/tmp/project"},
+        plan=Plan(),
+        results=[
+            {
+                "id": "codex-project",
+                "target": "codex",
+                "scope": "project",
+                "passed": True,
+                "graphify_file_effects_passed": True,
+                "overall_status": reports.RISK_GRAPHIFY_VERIFIED,
+                "duration_ms": 42,
+                "command_artifact": {
+                    "command": "graphify install --project --platform codex",
+                    "exit_code": 0,
+                    "transcript_path": "scenarios/codex-project/transcript.txt",
+                },
+            },
+            {
+                "id": "cursor-project",
+                "target": "cursor",
+                "scope": "project",
+                "passed": False,
+                "graphify_file_effects_passed": False,
+                "overall_status": reports.RISK_GRAPHIFY_FAILED,
+                "duration_ms": 7,
+                "reproduction_command": "graphify install --project --platform cursor",
+                "command_artifact": {
+                    "command": "graphify install --project --platform cursor",
+                    "exit_code": 1,
+                    "transcript_path": "scenarios/cursor-project/transcript.txt",
+                    "stderr_snippet": "boom",
+                },
+            },
+        ],
+    )
+
+    harness_run.write_harness_run_outputs(output, run_result)
+
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    report_markdown = (output / "report.md").read_text(encoding="utf-8")
+    summary_json = json.loads((output / "agent-summary.json").read_text(encoding="utf-8"))
+    summary_markdown = (output / "agent-summary.md").read_text(encoding="utf-8")
+    stdout_summary = json.loads(capsys.readouterr().out)
+
+    assert manifest["target_coverage"] == [
+        {
+            "target": "codex",
+            "scope": "project",
+            "status": "runnable",
+            "install_command": ["graphify", "install", "--project", "--platform", "codex"],
+        },
+        {
+            "target": "cursor",
+            "scope": "project",
+            "status": "runnable",
+            "install_command": ["graphify", "install", "--project", "--platform", "cursor"],
+        },
+    ]
+    assert "platform_coverage" not in manifest
+    assert "stale-record-alias" not in json.dumps(manifest)
+    assert "| codex | project | runnable | graphify install --project --platform codex |" in report_markdown
+    assert "### cursor-project" in report_markdown
+    assert "graphify install --project --platform cursor" in report_markdown
+    assert "boom" in report_markdown
+    assert "First read: `agent-summary.md`" in report_markdown
+    assert summary_json["status"] == "FAIL"
+    assert summary_json["failure_count"] == 1
+    assert summary_json["failures"][0]["scenario"] == "cursor-project"
+    assert summary_json["failures"][0]["failed_checks"] == [
+        {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"}
+    ]
+    assert "Status: **FAIL**" in summary_markdown
+    assert "cursor-project" in summary_markdown
+    assert "AGENTS.md: missing Graphify block" in summary_markdown
+    assert stdout_summary["passed"] == 1
+    assert stdout_summary["failed"] == 1
+    assert stdout_summary["agent_summary"] == str(output / "agent-summary.md")
 
 
 def test_harness_run_output_writer_preserves_summary_order(monkeypatch, tmp_path) -> None:

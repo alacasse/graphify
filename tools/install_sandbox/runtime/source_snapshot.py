@@ -83,7 +83,46 @@ def repo_relative(path: Path, config: SourceSnapshotConfig) -> str:
         return path.name
 
 
-def validate_source_symlink(src_path: Path, config: SourceSnapshotConfig) -> str:
+def copied_paths_contain(relative: str, copied_paths: set[str]) -> bool:
+    return relative in copied_paths or any(path.startswith(f"{relative}/") for path in copied_paths)
+
+
+def required_snapshot_paths_for_symlink_target(src_path: Path, target_path: Path, config: SourceSnapshotConfig) -> list[str]:
+    repo = config.repo_mount.resolve()
+    current = Path(os.path.abspath(os.path.normpath(src_path.parent / target_path)))
+    try:
+        parts = list(current.relative_to(repo).parts)
+    except ValueError:
+        return []
+
+    required: list[str] = []
+    seen_symlinks: set[str] = set()
+    for _ in range(40):
+        if not parts:
+            return required
+        candidate = repo
+        for index, part in enumerate(parts):
+            candidate = candidate / part
+            relative = candidate.relative_to(repo).as_posix()
+            required.append(relative)
+            if candidate.is_symlink():
+                if relative in seen_symlinks:
+                    return required
+                seen_symlinks.add(relative)
+                symlink_target = Path(os.readlink(candidate))
+                next_path = symlink_target if symlink_target.is_absolute() else candidate.parent / symlink_target
+                next_path = Path(os.path.abspath(os.path.normpath(next_path)))
+                try:
+                    parts = list(next_path.relative_to(repo).parts) + parts[index + 1 :]
+                except ValueError:
+                    return required
+                break
+        else:
+            return required
+    return required
+
+
+def validate_source_symlink(src_path: Path, config: SourceSnapshotConfig, *, copied_paths: set[str] | None = None) -> str:
     target = os.readlink(src_path)
     target_path = Path(target)
     if target_path.is_absolute():
@@ -91,15 +130,32 @@ def validate_source_symlink(src_path: Path, config: SourceSnapshotConfig) -> str
     resolved_repo = config.repo_mount.resolve()
     resolved_target = (src_path.parent / target_path).resolve(strict=False)
     try:
-        resolved_target.relative_to(resolved_repo)
+        target_relative = resolved_target.relative_to(resolved_repo).as_posix()
     except ValueError as exc:
         raise RuntimeError(f"unsafe source symlink: {repo_relative(src_path, config)} points outside repository to {target}") from exc
     if not resolved_target.exists():
         raise RuntimeError(f"unsafe source symlink: {repo_relative(src_path, config)} points to missing target {target}")
+    if should_exclude_source_path(target_relative, config.copy_excludes):
+        raise RuntimeError(
+            f"unsafe source symlink: {repo_relative(src_path, config)} points to target absent from source snapshot: {target}"
+        )
+    if copied_paths is not None and not copied_paths_contain(target_relative, copied_paths):
+        raise RuntimeError(
+            f"unsafe source symlink: {repo_relative(src_path, config)} points to target absent from source snapshot: {target}"
+        )
+    if copied_paths is not None:
+        for required_relative in required_snapshot_paths_for_symlink_target(src_path, target_path, config):
+            if not copied_paths_contain(required_relative, copied_paths):
+                raise RuntimeError(
+                    f"unsafe source symlink: {repo_relative(src_path, config)} "
+                    f"points to target absent from source snapshot: {target}"
+                )
     return target
 
 
 def validate_source_symlinks_for_copytree(config: SourceSnapshotConfig) -> None:
+    copied_paths: set[str] = set()
+    symlink_paths: list[Path] = []
     for root, dirs, files in os.walk(config.repo_mount):
         root_path = Path(root)
         kept_dirs: list[str] = []
@@ -108,17 +164,22 @@ def validate_source_symlinks_for_copytree(config: SourceSnapshotConfig) -> None:
             relative = repo_relative(path, config)
             if should_exclude_source_path(relative, config.copy_excludes):
                 continue
+            copied_paths.add(relative)
             if path.is_symlink():
-                validate_source_symlink(path, config)
+                symlink_paths.append(path)
                 continue
             kept_dirs.append(name)
         dirs[:] = kept_dirs
         for name in sorted(files):
             path = root_path / name
-            if should_exclude_source_path(repo_relative(path, config), config.copy_excludes):
+            relative = repo_relative(path, config)
+            if should_exclude_source_path(relative, config.copy_excludes):
                 continue
+            copied_paths.add(relative)
             if path.is_symlink():
-                validate_source_symlink(path, config)
+                symlink_paths.append(path)
+    for path in symlink_paths:
+        validate_source_symlink(path, config, copied_paths=copied_paths)
 
 
 def pruned_file_walk(base: Path, prune_dirs: Iterable[str] = MANIFEST_PRUNE_DIRS) -> Iterable[Path]:
@@ -151,18 +212,18 @@ def copy_tracked_source_tree(config: SourceSnapshotConfig) -> dict[str, object] 
     if result.returncode != 0:
         return None
     config.src.mkdir(parents=True, exist_ok=True)
+    tracked_paths = {
+        raw.decode("utf-8", errors="surrogateescape")
+        for raw in result.stdout.split(b"\0")
+        if raw and not should_exclude_source_path(raw.decode("utf-8", errors="surrogateescape"), config.copy_excludes)
+    }
     copied = 0
-    for raw in result.stdout.split(b"\0"):
-        if not raw:
-            continue
-        rel = raw.decode("utf-8", errors="surrogateescape")
-        if should_exclude_source_path(rel, config.copy_excludes):
-            continue
+    for rel in sorted(tracked_paths):
         src_path = config.repo_mount / rel
         dst_path = config.src / rel
         if src_path.is_symlink():
             dst_path.parent.mkdir(parents=True, exist_ok=True)
-            dst_path.symlink_to(validate_source_symlink(src_path, config))
+            dst_path.symlink_to(validate_source_symlink(src_path, config, copied_paths=tracked_paths))
             copied += 1
         elif src_path.is_file():
             dst_path.parent.mkdir(parents=True, exist_ok=True)

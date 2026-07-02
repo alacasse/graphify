@@ -84,6 +84,63 @@ def test_tracked_source_copy_preserves_safe_in_repo_symlink(tmp_path) -> None:
     assert os.readlink(src / "link.txt") == "target.txt"
 
 
+def test_fallback_source_copy_preserves_safe_in_repo_symlink(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "link.txt").symlink_to("target.txt")
+
+    manifest = source_snapshot.copy_source_tree("always", config=snapshot_config(repo, src))
+
+    assert manifest["snapshot_strategy"] == "copytree_with_exclusions"
+    assert (src / "link.txt").is_symlink()
+    assert os.readlink(src / "link.txt") == "target.txt"
+
+
+def test_tracked_source_copy_rejects_symlink_to_untracked_in_repo_target(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "link.txt").symlink_to("target.txt")
+    init_git_repo(repo)
+    git_add(repo, "link.txt")
+
+    with pytest.raises(RuntimeError, match="absent from source snapshot"):
+        source_snapshot.copy_tracked_source_tree(snapshot_config(repo, src))
+
+
+def test_tracked_source_copy_rejects_symlink_to_untracked_intermediate_symlink(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "middle.txt").symlink_to("target.txt")
+    (repo / "link.txt").symlink_to("middle.txt")
+    init_git_repo(repo)
+    git_add(repo, "target.txt", "link.txt")
+
+    with pytest.raises(RuntimeError, match="absent from source snapshot"):
+        source_snapshot.copy_tracked_source_tree(snapshot_config(repo, src))
+
+    assert not (src / "link.txt").exists()
+
+
+def test_tracked_source_copy_rejects_symlink_to_excluded_in_repo_target(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "dist").mkdir()
+    (repo / "dist" / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "link.txt").symlink_to("dist/target.txt")
+    init_git_repo(repo)
+    git_add(repo, "dist/target.txt", "link.txt")
+
+    with pytest.raises(RuntimeError, match="absent from source snapshot"):
+        source_snapshot.copy_tracked_source_tree(snapshot_config(repo, src))
+
+
 def test_tracked_source_copy_rejects_out_of_repo_symlink(tmp_path) -> None:
     repo = tmp_path / "repo"
     src = tmp_path / "src"
@@ -97,6 +154,18 @@ def test_tracked_source_copy_rejects_out_of_repo_symlink(tmp_path) -> None:
         source_snapshot.copy_tracked_source_tree(snapshot_config(repo, src))
 
 
+def test_tracked_source_copy_rejects_missing_in_repo_target(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "link.txt").symlink_to("missing.txt")
+    init_git_repo(repo)
+    git_add(repo, "link.txt")
+
+    with pytest.raises(RuntimeError, match="missing target"):
+        source_snapshot.copy_tracked_source_tree(snapshot_config(repo, src))
+
+
 def test_fallback_source_copy_rejects_out_of_repo_symlink(tmp_path) -> None:
     repo = tmp_path / "repo"
     src = tmp_path / "src"
@@ -106,3 +175,32 @@ def test_fallback_source_copy_rejects_out_of_repo_symlink(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="outside repository"):
         source_snapshot.copy_source_tree("always", config=snapshot_config(repo, src))
+
+
+def test_fallback_source_copy_rejects_symlink_to_excluded_in_repo_target(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "dist").mkdir()
+    (repo / "dist" / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "link.txt").symlink_to("dist/target.txt")
+
+    with pytest.raises(RuntimeError, match="absent from source snapshot"):
+        source_snapshot.copy_source_tree("always", config=snapshot_config(repo, src))
+
+    assert not (src / "link.txt").exists()
+
+
+def test_fallback_source_copy_rejects_symlink_through_excluded_intermediate(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    src = tmp_path / "src"
+    repo.mkdir()
+    (repo / "target.txt").write_text("target\n", encoding="utf-8")
+    (repo / "dist").mkdir()
+    (repo / "dist" / "middle.txt").symlink_to("../target.txt")
+    (repo / "link.txt").symlink_to("dist/middle.txt")
+
+    with pytest.raises(RuntimeError, match="absent from source snapshot"):
+        source_snapshot.copy_source_tree("always", config=snapshot_config(repo, src))
+
+    assert not (src / "link.txt").exists()

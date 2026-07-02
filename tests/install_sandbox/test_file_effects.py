@@ -57,12 +57,12 @@ def test_path_resolution_owner_rejects_unknown_roots() -> None:
 
 
 def test_file_effect_owners_import_path_resolution_helpers_from_owner_module() -> None:
-    owner_modules = (
-        file_effect_oracle,
-        file_effect_surfaces,
-    )
+    owner_modules = {
+        file_effect_oracle: {"resolve_install_root"},
+        file_effect_surfaces: {"resolve_install_surface_path"},
+    }
 
-    for module in owner_modules:
+    for module, expected_owner_helpers in owner_modules.items():
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
         imported_owner_helpers = {
             alias.name
@@ -81,7 +81,7 @@ def test_file_effect_owners_import_path_resolution_helpers_from_owner_module() -
             for alias in node.names
         }
 
-        assert "resolve_install_surface_path" in imported_owner_helpers
+        assert expected_owner_helpers <= imported_owner_helpers
         assert imported_core_helpers.isdisjoint(
             {"resolve_install_root", "resolve_install_surface_path"}
         )
@@ -90,26 +90,10 @@ def test_file_effect_owners_import_path_resolution_helpers_from_owner_module() -
 def test_file_effect_oracle_boundary_rejects_pure_core_pass_throughs() -> None:
     oracle_adapter_methods = {
         "root_path",
-        "expected_path",
-        "skill_assertion_record",
-        "installed_skill_reference_relatives",
-        "tracked_skill_sidecar_relatives",
-        "installed_reference_names",
-        "check_skill_version",
-        "check_references_tmp_absent",
-        "check_packaged_references",
-        "check_skill_reference_pointers",
-        "assert_installed_skill_sidecar",
-        "assert_installed_skill_sidecars",
         "seed_stale_skill_sidecars",
         "expected_manifest_relatives",
         "seed_user_owned_content",
-        "installed_surface_observation",
-        "expected_entry_status",
         "assert_expected_files",
-        "uninstalled_surface_observation",
-        "uninstalled_entry_status",
-        "uninstalled_skill_sidecar_checks",
         "assert_uninstalled",
         "pruned_file_walk",
         "assert_no_unexpected_graphify_files",

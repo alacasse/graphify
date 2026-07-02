@@ -9,11 +9,8 @@ from . import file_effect_sidecars
 from . import file_effect_state
 from . import file_effect_surfaces
 from ..surfaces.install_surface_generated import GeneratedFileDecision
-from ..surfaces.install_surface_models import InstallSurface, TextExpectation
-from ..surfaces.path_resolution import (
-    resolve_install_root,
-    resolve_install_surface_path,
-)
+from ..surfaces.install_surface_models import TextExpectation
+from ..surfaces.path_resolution import resolve_install_root
 from ..targets.reference_resolution import PackagedReferenceResolution
 from ..targets.install_target_models import Scenario
 
@@ -32,65 +29,7 @@ class FileEffectOracle:
     def root_path(self, root: str) -> Path:
         return resolve_install_root(root, self.roots)
 
-    def expected_path(self, entry: InstallSurface) -> Path:
-        return resolve_install_surface_path(entry, self.roots)
-
-    def skill_assertion_record(self, entry: InstallSurface, relative: Path, ok: bool, detail: str) -> dict[str, object]:
-        return file_effect_sidecars.skill_assertion_record(entry, self.roots, relative, ok, detail)
-
-    def installed_skill_reference_relatives(self, entry: InstallSurface) -> set[Path]:
-        return file_effect_sidecars.installed_skill_reference_relatives(entry, self.roots)
-
-    def tracked_skill_sidecar_relatives(self, scenario: Scenario, entry: InstallSurface) -> set[Path]:
-        return file_effect_sidecars.tracked_skill_sidecar_relatives(
-            scenario,
-            entry,
-            self.roots,
-            self.packaged_reference_resolution,
-        )
-
-    def installed_reference_names(self, refs_dir: Path) -> list[str]:
-        return file_effect_sidecars.installed_reference_names(refs_dir)
-
     # Skill sidecar checks
-    def check_skill_version(self, entry: InstallSurface) -> dict[str, object]:
-        return file_effect_sidecars.check_skill_version(entry, self.roots, self.expected_graphify_version)
-
-    def check_references_tmp_absent(self, entry: InstallSurface) -> dict[str, object]:
-        return file_effect_sidecars.check_references_tmp_absent(entry, self.roots)
-
-    def check_packaged_references(self, scenario: Scenario, entry: InstallSurface) -> dict[str, object]:
-        return file_effect_sidecars.check_packaged_references(
-            scenario,
-            entry,
-            self.roots,
-            self.packaged_reference_resolution,
-        )
-
-    def check_skill_reference_pointers(self, entry: InstallSurface, skill_text: str) -> dict[str, object]:
-        return file_effect_sidecars.check_skill_reference_pointers(
-            entry,
-            self.roots,
-            skill_text,
-        )
-
-    def assert_installed_skill_sidecar(self, scenario: Scenario, entry: InstallSurface) -> list[dict[str, object]]:
-        return file_effect_sidecars.assert_installed_skill_sidecar(
-            scenario,
-            entry,
-            self.roots,
-            self.packaged_reference_resolution,
-            self.expected_graphify_version,
-        )
-
-    def assert_installed_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]:
-        return file_effect_sidecars.assert_installed_skill_sidecars(
-            scenario,
-            self.roots,
-            self.packaged_reference_resolution,
-            self.expected_graphify_version,
-        )
-
     def seed_stale_skill_sidecars(self, scenario: Scenario) -> list[dict[str, object]]:
         return file_effect_sidecars.seed_stale_skill_sidecars(
             scenario,
@@ -108,38 +47,25 @@ class FileEffectOracle:
     def seed_user_owned_content(self, scenario: Scenario) -> None:
         return file_effect_state.seed_user_owned_content(scenario, self.root_path)
 
-    def installed_surface_observation(self, entry: InstallSurface) -> file_effect_surfaces.InstallSurfaceObservation:
-        return file_effect_surfaces.installed_surface_observation(entry, self.roots)
-
-    def expected_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        observation = self.installed_surface_observation(entry)
-        return file_effect_surfaces.expected_entry_status_from_observation(entry, observation)
-
     # Install/uninstall assertions
     def assert_expected_files(self, scenario: Scenario) -> list[dict[str, object]]:
         return file_effect_surfaces.assert_expected_files(
             scenario,
             self.roots,
-            self.assert_installed_skill_sidecar,
-            self.expected_entry_status,
+            lambda checked_scenario, entry: file_effect_sidecars.assert_installed_skill_sidecar(
+                checked_scenario,
+                entry,
+                self.roots,
+                self.packaged_reference_resolution,
+                self.expected_graphify_version,
+            ),
         )
-
-    def uninstalled_surface_observation(self, entry: InstallSurface) -> file_effect_surfaces.UninstallSurfaceObservation:
-        return file_effect_surfaces.uninstalled_surface_observation(entry, self.roots)
-
-    def uninstalled_entry_status(self, entry: InstallSurface) -> tuple[bool, str]:
-        observation = self.uninstalled_surface_observation(entry)
-        return file_effect_surfaces.uninstalled_entry_status_from_observation(entry, observation)
-
-    def uninstalled_skill_sidecar_checks(self, entry: InstallSurface) -> list[dict[str, object]]:
-        return file_effect_sidecars.uninstalled_skill_sidecar_checks(entry, self.roots)
 
     def assert_uninstalled(self, scenario: Scenario) -> list[dict[str, object]]:
         return file_effect_surfaces.assert_uninstalled(
             scenario,
             self.roots,
-            self.uninstalled_skill_sidecar_checks,
-            self.uninstalled_entry_status,
+            lambda entry: file_effect_sidecars.uninstalled_skill_sidecar_checks(entry, self.roots),
         )
 
     # Generated-file discovery/copying
@@ -180,7 +106,7 @@ class FileEffectOracle:
             scenario,
             self.packaged_reference_resolution,
             self.root_path,
-            self.installed_skill_reference_relatives,
+            lambda entry: file_effect_sidecars.installed_skill_reference_relatives(entry, self.roots),
             self.file_fingerprint,
         )
 

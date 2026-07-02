@@ -231,12 +231,20 @@ def test_sidecar_topic_module_renders_installed_skill_records(oracle, roots) -> 
     (refs / "query.md").write_text("# query\n", encoding="utf-8")
     (refs / "update.md").write_text("# update\n", encoding="utf-8")
 
-    assert file_effect_sidecars.assert_installed_skill_sidecars(
+    checks = file_effect_sidecars.assert_installed_skill_sidecars(
         test_scenario,
         roots,
         oracle.packaged_reference_resolution,
         oracle.expected_graphify_version,
-    ) == oracle.assert_installed_skill_sidecars(test_scenario)
+    )
+
+    assert [check["relative"] for check in checks] == [
+        ".claude/skills/graphify/.graphify_version",
+        ".claude/skills/graphify/references.tmp",
+        ".claude/skills/graphify/references",
+        ".claude/skills/graphify/SKILL.md",
+    ]
+    assert all(check["ok"] is True for check in checks)
 
 
 def test_skill_assertion_detects_missing_references_sidecar_from_body_pointer(oracle, roots) -> None:

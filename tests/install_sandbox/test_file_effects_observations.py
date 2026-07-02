@@ -11,6 +11,7 @@ from tools.install_sandbox.effects import file_effect_oracle
 from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox.effects import file_effect_surfaces
 from tools.install_sandbox.surfaces import install_surface_statuses
+from tools.install_sandbox.surfaces import path_resolution
 from tools.install_sandbox.targets.reference_resolution import PackagedReferenceResolution
 from tools.install_sandbox.targets import install_target_models
 from tools.install_sandbox.targets.install_target_models import ExpectedPath, InstallSurface, Scenario
@@ -158,10 +159,10 @@ def test_install_surface_alias_is_accepted_by_scenario_and_oracle(oracle, roots)
 def test_install_surface_path_uses_declared_root_and_relative(oracle, roots) -> None:
     surface = InstallSurface("project", "nested/surface.txt")
 
-    assert oracle.expected_path(surface) == roots["project"] / "nested/surface.txt"
+    assert path_resolution.resolve_install_surface_path(surface, roots) == roots["project"] / "nested/surface.txt"
 
     with pytest.raises(AssertionError, match="unknown root: missing"):
-        oracle.expected_path(InstallSurface("missing", "surface.txt"))
+        path_resolution.resolve_install_surface_path(InstallSurface("missing", "surface.txt"), roots)
 
 
 def test_install_surface_kind_status_contracts(oracle, roots) -> None:
@@ -175,11 +176,11 @@ def test_install_surface_kind_status_contracts(oracle, roots) -> None:
     (roots["project"] / "socketish").write_text("installed\n", encoding="utf-8")
     (roots["project"] / "wrong-dir").write_text("not a directory\n", encoding="utf-8")
 
-    assert oracle.expected_entry_status(file_surface) == (True, "file")
-    assert oracle.expected_entry_status(dir_surface) == (True, "directory")
-    assert oracle.expected_entry_status(generic_surface) == (True, "exists")
-    assert oracle.expected_entry_status(wrong_dir_surface) == (False, "expected_directory_but_not_directory")
-    assert oracle.expected_entry_status(InstallSurface("project", "missing-dir", kind="dir")) == (False, "missing")
+    assert file_effect_surfaces.expected_entry_status(file_surface, roots) == (True, "file")
+    assert file_effect_surfaces.expected_entry_status(dir_surface, roots) == (True, "directory")
+    assert file_effect_surfaces.expected_entry_status(generic_surface, roots) == (True, "exists")
+    assert file_effect_surfaces.expected_entry_status(wrong_dir_surface, roots) == (False, "expected_directory_but_not_directory")
+    assert file_effect_surfaces.expected_entry_status(InstallSurface("project", "missing-dir", kind="dir"), roots) == (False, "missing")
 
 
 def test_assert_expected_files_uses_surface_module_installed_surface_observation(oracle, roots, monkeypatch) -> None:
@@ -216,45 +217,7 @@ def test_assert_expected_files_uses_surface_module_installed_surface_observation
     ]
 
 
-def test_oracle_installed_surface_observation_override_affects_status_and_assertions(oracle, roots, monkeypatch) -> None:
-    surface = section("project", "virtual-notes.md", preserve_user_content=True)
-    path = roots["project"] / "virtual-notes.md"
-    observed_text = f"{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n"
-    observed = install_surface_statuses.InstallSurfaceObservation(
-        path=path,
-        exists=True,
-        is_file=True,
-        text=observed_text,
-    )
-    calls: list[InstallSurface] = []
-
-    def installed_surface_observation(
-        self: file_effect_oracle.FileEffectOracle,
-        entry: InstallSurface,
-    ) -> install_surface_statuses.InstallSurfaceObservation:
-        assert self is oracle
-        calls.append(entry)
-        return observed
-
-    monkeypatch.setattr(file_effect_oracle.FileEffectOracle, "installed_surface_observation", installed_surface_observation)
-
-    assert oracle.expected_entry_status(surface) == (True, "marker_count=1; user_content_preserved; stale_replaced=True")
-    checks = oracle.assert_expected_files(scenario("unit", surface))
-
-    assert calls == [surface, surface]
-    assert not path.exists()
-    assert checks == [
-        {
-            "path": str(path),
-            "ok": True,
-            "detail": "marker_count=1; user_content_preserved; stale_replaced=True",
-            "root": "project",
-            "relative": "virtual-notes.md",
-        }
-    ]
-
-
-def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
+def test_surface_owner_routes_installed_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
     text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\nnew section\n"
@@ -268,7 +231,7 @@ def test_oracle_routes_installed_surface_observation_to_core(oracle, roots, monk
 
     monkeypatch.setattr(file_effect_surfaces, "installed_surface_status_from_observation", decide_from_observation)
 
-    assert oracle.expected_entry_status(surface) == (True, "observed_by_core")
+    assert file_effect_surfaces.expected_entry_status(surface, roots) == (True, "observed_by_core")
     assert captured["entry"] is surface
     observation = captured["observation"]
     assert isinstance(observation, install_surface_statuses.InstallSurfaceObservation)
@@ -355,21 +318,21 @@ def test_uninstall_surface_status_contracts(oracle, roots) -> None:
     plain = InstallSurface("project", "plain.txt")
     plain_path = roots["project"] / "plain.txt"
 
-    assert oracle.uninstalled_entry_status(plain) == (True, "removed")
+    assert file_effect_surfaces.uninstalled_entry_status(plain, roots) == (True, "removed")
 
     plain_path.write_text("still here\n", encoding="utf-8")
-    assert oracle.uninstalled_entry_status(plain) == (False, "still_exists")
+    assert file_effect_surfaces.uninstalled_entry_status(plain, roots) == (False, "still_exists")
 
     text_section = section("project", "notes.md", preserve_user_content=True)
     notes_path = roots["project"] / "notes.md"
     notes_path.write_text(f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n## User Section\n", encoding="utf-8")
-    assert oracle.uninstalled_entry_status(text_section) == (True, "graphify_removed=True; user_content_preserved=True")
+    assert file_effect_surfaces.uninstalled_entry_status(text_section, roots) == (True, "graphify_removed=True; user_content_preserved=True")
 
     notes_path.write_text(
         f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n{install_target_models.GRAPHIFY_MARKER}\n{file_effect_state.STALE_GRAPHIFY_SENTINEL}\n",
         encoding="utf-8",
     )
-    assert oracle.uninstalled_entry_status(text_section) == (False, "graphify_removed=False; user_content_preserved=True")
+    assert file_effect_surfaces.uninstalled_entry_status(text_section, roots) == (False, "graphify_removed=False; user_content_preserved=True")
 
 
 def test_assert_uninstalled_uses_surface_module_uninstalled_surface_observation(oracle, roots, monkeypatch) -> None:
@@ -405,44 +368,7 @@ def test_assert_uninstalled_uses_surface_module_uninstalled_surface_observation(
     ]
 
 
-def test_oracle_uninstalled_surface_observation_override_affects_status_and_assertions(oracle, roots, monkeypatch) -> None:
-    surface = section("project", "virtual-notes.md", preserve_user_content=True)
-    path = roots["project"] / "virtual-notes.md"
-    observed = install_surface_statuses.UninstallSurfaceObservation(
-        path=path,
-        exists=True,
-        is_file=True,
-        text=f"{file_effect_state.USER_SENTINEL}\n\n## User Section\n",
-    )
-    calls: list[InstallSurface] = []
-
-    def uninstalled_surface_observation(
-        self: file_effect_oracle.FileEffectOracle,
-        entry: InstallSurface,
-    ) -> install_surface_statuses.UninstallSurfaceObservation:
-        assert self is oracle
-        calls.append(entry)
-        return observed
-
-    monkeypatch.setattr(file_effect_oracle.FileEffectOracle, "uninstalled_surface_observation", uninstalled_surface_observation)
-
-    assert oracle.uninstalled_entry_status(surface) == (True, "graphify_removed=True; user_content_preserved=True")
-    checks = oracle.assert_uninstalled(scenario("unit", surface))
-
-    assert calls == [surface, surface]
-    assert not path.exists()
-    assert checks == [
-        {
-            "path": str(path),
-            "ok": True,
-            "detail": "graphify_removed=True; user_content_preserved=True",
-            "root": "project",
-            "relative": "virtual-notes.md",
-        }
-    ]
-
-
-def test_oracle_routes_uninstalled_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
+def test_surface_owner_routes_uninstalled_surface_observation_to_core(oracle, roots, monkeypatch) -> None:
     surface = section("project", "notes.md", preserve_user_content=True)
     path = roots["project"] / "notes.md"
     text = f"# Notes\n\n{file_effect_state.USER_SENTINEL}\n\n## User Section\n"
@@ -456,7 +382,7 @@ def test_oracle_routes_uninstalled_surface_observation_to_core(oracle, roots, mo
 
     monkeypatch.setattr(file_effect_surfaces, "uninstalled_surface_status_from_observation", decide_from_observation)
 
-    assert oracle.uninstalled_entry_status(surface) == (True, "observed_by_core")
+    assert file_effect_surfaces.uninstalled_entry_status(surface, roots) == (True, "observed_by_core")
     assert captured["entry"] is surface
     observation = captured["observation"]
     assert isinstance(observation, install_surface_statuses.UninstallSurfaceObservation)

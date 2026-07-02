@@ -21,12 +21,11 @@ DEFAULT_TARGET_HELPER_TARGET_OWNER_PARAMETERS = {
     "project_skill": {"target_name"},
     "risk_notes": {"target_name"},
     "unsupported_scope_reason": {"target_name"},
+    "universal_uninstall_scenarios": {"target_names"},
     "user_skill": {"target_name"},
 }
 
-DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT = {
-    "universal_uninstall_scenarios": {"platforms"},
-}
+DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT: dict[str, set[str]] = {}
 
 DEFERRED_DEFAULT_EDGE_VOCABULARY = {
     "normalized YAML platforms output",
@@ -68,6 +67,7 @@ def test_default_target_helpers_use_target_owned_parameters_for_install_targets(
 
 
 def test_default_target_helpers_classify_remaining_platform_parameters_as_internal_debt() -> None:
+    assert DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT == {}
     for helper_name, debt_parameters in DEFAULT_TARGET_HELPER_PLATFORM_NAMED_PARAMETER_DEBT.items():
         signature = inspect.signature(getattr(install_target_defaults, helper_name))
 

@@ -138,10 +138,10 @@ class SandboxRunEnvironment:
         return str(self.graphify_main_module().__version__)
 
     @functools.lru_cache(maxsize=None)
-    def packaged_reference_resolution(self, platform_name: str) -> reference_resolution.PackagedReferenceResolution:
-        spec = self.scenario_registry.target_spec(platform_name)
+    def packaged_reference_resolution(self, target_name: str) -> reference_resolution.PackagedReferenceResolution:
+        spec = self.scenario_registry.target_spec(target_name)
         return reference_resolution.resolve_target_packaged_references(
-            platform_name,
+            target_name,
             graphify_main=self.graphify_main_module(),
             target_reference_facts=spec,
         )

@@ -225,17 +225,17 @@ def _scope_risk_notes(
     return _dedupe(notes)
 
 
-def _generic_install_command(platform_name: str, scope_name: str) -> tuple[str, ...]:
+def _generic_install_command(target_name: str, scope_name: str) -> tuple[str, ...]:
     if scope_name == "project":
-        return ("graphify", "install", "--project", "--platform", platform_name)
-    return ("graphify", "install", "--platform", platform_name)
+        return ("graphify", "install", "--project", "--platform", target_name)
+    return ("graphify", "install", "--platform", target_name)
 
 
-def _direct_project_install_command(platform_name: str) -> tuple[str, ...]:
-    return ("graphify", platform_name, "install", "--project")
+def _direct_project_install_command(target_name: str) -> tuple[str, ...]:
+    return ("graphify", target_name, "install", "--project")
 
 
-def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> ScopeSpec:
+def _scope_spec(target_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> ScopeSpec:
     data = _mapping(value, context)
     _reject_unknown_fields(data, _SCOPE_FIELDS, context)
     if scope_name not in _SCOPE_NAMES:
@@ -276,12 +276,12 @@ def _scope_spec(platform_name: str, scope_name: str, value: object, context: str
             f"{context}.equivalent_install_command",
         )
     elif scope_name == "project" and (
-        transitional_install_command is None or transitional_install_command == _generic_install_command(platform_name, scope_name)
+        transitional_install_command is None or transitional_install_command == _generic_install_command(target_name, scope_name)
     ):
-        transitional_equivalent_install_command = _direct_project_install_command(platform_name)
+        transitional_equivalent_install_command = _direct_project_install_command(target_name)
 
     scope = _scenario(
-        platform_name,
+        target_name,
         scope_name,
         install_surfaces,
         install_command=transitional_install_command,
@@ -335,21 +335,21 @@ def _runtime_validation(value: object, context: str) -> TargetRuntimeValidationS
     )
 
 
-def _platform_runtime_validations(data: Mapping[str, Any], context: str) -> tuple[TargetRuntimeValidationSpec, ...]:
+def _target_runtime_validations(data: Mapping[str, Any], context: str) -> tuple[TargetRuntimeValidationSpec, ...]:
     return tuple(
         _runtime_validation(validation, f"{context}.target_runtime_validation[{index}]")
         for index, validation in enumerate(_sequence(data.get("target_runtime_validation", []), f"{context}.target_runtime_validation"))
     )
 
 
-def target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
+def target_spec(target_key: str, value: object, context: str) -> InstallTargetSpec:
     data = _mapping(value, context)
     _reject_unknown_fields(data, _TARGET_FIELDS, context)
-    name = platform_key
+    name = target_key
     if "name" in data:
         name = _string(data.get("name"), f"{context}.name")
-        if name != platform_key:
-            _fail(f"{context}.name", f"platform key/name mismatch: {platform_key} != {name}")
+        if name != target_key:
+            _fail(f"{context}.name", f"platform key/name mismatch: {target_key} != {name}")
 
     scopes_value = _mapping(data.get("scopes", {}), f"{context}.scopes")
     unsupported_value = _mapping(data.get("unsupported_scopes", {}), f"{context}.unsupported_scopes")
@@ -364,7 +364,7 @@ def target_spec(platform_key: str, value: object, context: str) -> InstallTarget
 
     simulated_linux_layout = _bool(data.get("simulated_linux_layout", False), f"{context}.simulated_linux_layout")
     scopes = {
-        scope_name: _scope_spec(platform_key, scope_name, scope_value, f"{context}.scopes.{scope_name}", simulated_linux_layout=simulated_linux_layout)
+        scope_name: _scope_spec(target_key, scope_name, scope_value, f"{context}.scopes.{scope_name}", simulated_linux_layout=simulated_linux_layout)
         for scope_name, scope_value in scopes_value.items()
     }
     unsupported_scopes = {
@@ -375,7 +375,7 @@ def target_spec(platform_key: str, value: object, context: str) -> InstallTarget
         user_skill_value = data.get("user_skill")
         user_skill = None if user_skill_value is None else _string(user_skill_value, f"{context}.user_skill")
     else:
-        user_skill = f".{platform_key}/skills/graphify/SKILL.md"
+        user_skill = f".{target_key}/skills/graphify/SKILL.md"
     if "project_skill" in data:
         project_skill_value = data.get("project_skill")
         project_skill = None if project_skill_value is None else _string(project_skill_value, f"{context}.project_skill")
@@ -397,5 +397,5 @@ def target_spec(platform_key: str, value: object, context: str) -> InstallTarget
         reference_bundles=reference_bundles,
         simulated_linux_layout=simulated_linux_layout,
         universal_uninstall_scopes=_string_list(data.get("universal_uninstall_scopes", []), f"{context}.universal_uninstall_scopes"),
-        target_runtime_validation=_platform_runtime_validations(data, context),
+        target_runtime_validation=_target_runtime_validations(data, context),
     )

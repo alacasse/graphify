@@ -16,30 +16,30 @@ def _dedupe_notes(*notes: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(note for note in notes if note))
 
 
-def _generic_install_command(platform_name: str, scope: str) -> tuple[str, ...]:
+def _generic_install_command(target_name: str, scope: str) -> tuple[str, ...]:
     if scope == "project":
-        return ("graphify", "install", "--project", "--platform", platform_name)
-    return ("graphify", "install", "--platform", platform_name)
+        return ("graphify", "install", "--project", "--platform", target_name)
+    return ("graphify", "install", "--platform", target_name)
 
 
-def _generic_uninstall_command(platform_name: str, scope: str) -> tuple[str, ...]:
+def _generic_uninstall_command(target_name: str, scope: str) -> tuple[str, ...]:
     if scope == "project":
-        return ("graphify", "uninstall", "--project", "--platform", platform_name)
-    return ("graphify", "uninstall", "--platform", platform_name)
+        return ("graphify", "uninstall", "--project", "--platform", target_name)
+    return ("graphify", "uninstall", "--platform", target_name)
 
 
-def _direct_project_install(platform_name: str) -> tuple[str, ...]:
-    return ("graphify", platform_name, "install", "--project")
+def _direct_project_install(target_name: str) -> tuple[str, ...]:
+    return ("graphify", target_name, "install", "--project")
 
 
 def _declared_install_variants(
-    platform_name: str,
+    target_name: str,
     scope: str,
     install_command: tuple[str, ...],
     equivalent_install_command: tuple[str, ...] | None,
 ) -> tuple[InstallCommandVariant, ...]:
-    generic = _generic_install_command(platform_name, scope)
-    direct = _direct_project_install(platform_name) if scope == "project" else ("graphify", platform_name, "install")
+    generic = _generic_install_command(target_name, scope)
+    direct = _direct_project_install(target_name) if scope == "project" else ("graphify", target_name, "install")
 
     def label(command: tuple[str, ...], fallback: str) -> str:
         if command == generic:
@@ -59,7 +59,7 @@ def _skill(root: str, relative: str) -> InstallSurface:
 
 
 def _scenario(
-    platform_name: str,
+    target_name: str,
     scope: str,
     expected: tuple[InstallSurface, ...],
     *,
@@ -70,7 +70,7 @@ def _scenario(
     equivalent_install_command: tuple[str, ...] | None = None,
 ) -> ScopeSpec:
     if uninstall_command == "generic":
-        uninstall = _generic_uninstall_command(platform_name, scope)
+        uninstall = _generic_uninstall_command(target_name, scope)
     else:
         uninstall = uninstall_command
     if scope == "project":
@@ -81,7 +81,7 @@ def _scenario(
         allowed_roots = ("home",)
         if MIXED_SCOPE_PROJECT_WIRING_NOTE in risk_notes:
             allowed_roots = ("home", "project", "user_cwd")
-    declared_install = install_command or _generic_install_command(platform_name, scope)
+    declared_install = install_command or _generic_install_command(target_name, scope)
     return ScopeSpec(
         install_command=declared_install,
         uninstall_command=uninstall,
@@ -89,6 +89,6 @@ def _scenario(
         expected=expected,
         risk_notes=risk_notes,
         equivalent_install_command=equivalent_install_command,
-        install_variants=_declared_install_variants(platform_name, scope, declared_install, equivalent_install_command),
+        install_variants=_declared_install_variants(target_name, scope, declared_install, equivalent_install_command),
         allowed_roots=allowed_roots,
     )

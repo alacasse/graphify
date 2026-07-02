@@ -50,13 +50,12 @@ TARGET_OWNER_API_PARAMETER_GUARDS = {
         "project_skill": {"target_name"},
         "risk_notes": {"target_name"},
         "unsupported_scope_reason": {"target_name"},
+        "universal_uninstall_scenarios": {"target_names"},
         "user_skill": {"target_name"},
     },
 }
 
-DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS = {
-    "tools.install_sandbox.targets.install_target_defaults.universal_uninstall_scenarios": {"platforms"},
-}
+DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS: dict[str, set[str]] = {}
 
 HARNESS_POLICY_TARGET_ELIGIBILITY_PARAMETER_GUARDS = {
     "tools.install_sandbox.targets.install_target_harness_policy": {
@@ -100,6 +99,15 @@ def _function_node(module: types.ModuleType, function_name: str) -> ast.Function
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == function_name
     )
+
+
+def _function_parameter_names(module: types.ModuleType) -> dict[str, set[str]]:
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    parameters: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            parameters[node.name] = {parameter.arg for parameter in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)}
+    return parameters
 
 
 def _class_method_node(module: types.ModuleType, class_name: str, method_name: str) -> ast.FunctionDef:
@@ -148,6 +156,25 @@ def test_root_topology_closeout_guards_target_owner_parameter_vocabulary() -> No
         signature = inspect.signature(getattr(owner, api_name))
 
         assert set(signature.parameters) >= deferred_parameters
+    assert DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS == {}
+
+
+def test_root_topology_closeout_guards_private_target_owner_parameter_vocabulary() -> None:
+    legacy_parameter_names = {"platform_name", "platforms"}
+    private_owner_modules = (
+        "tools.install_sandbox.registry.spec_target_facts",
+        "tools.install_sandbox.runtime.sandbox_run_environment",
+        "tools.install_sandbox.targets.install_target_scenarios",
+    )
+    for module_name in private_owner_modules:
+        module = importlib.import_module(module_name)
+        parameter_names_by_function = _function_parameter_names(module)
+
+        assert not {
+            function_name: parameter_names & legacy_parameter_names
+            for function_name, parameter_names in parameter_names_by_function.items()
+            if parameter_names & legacy_parameter_names
+        }
 
 
 def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> None:

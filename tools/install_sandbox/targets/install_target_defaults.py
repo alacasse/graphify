@@ -116,13 +116,13 @@ def target_runtime_validation_sections() -> list[dict[str, object]]:
 
 
 def universal_uninstall_scenarios(
-    platforms: list[str], scope: str
+    target_names: list[str], scope: str
 ) -> list[SelectedUniversalUninstallScenario]:
     registry = _load_default_scenario_registry()
     return _harness_policy.universal_uninstall_scenarios(
         registry.specs,
         registry.universal_uninstall_specs,
-        platforms,
+        target_names,
         scope,
     )
 

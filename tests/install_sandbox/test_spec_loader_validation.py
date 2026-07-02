@@ -202,6 +202,14 @@ def test_loader_rejects_unknown_structured_risk_note() -> None:
     _expect_invalid(data, "unknown structured risk note")
 
 
+def test_loader_rejects_unknown_top_level_registry_fields() -> None:
+    data = _valid_data()
+    data["target_runtime_validation_policies"] = {"typo": {}}
+
+    with pytest.raises(SpecLoaderError, match=r"<data>: unknown field: target_runtime_validation_policies"):
+        load_registry_from_data(data)
+
+
 @pytest.mark.parametrize(
     ("mutate", "field_name"),
     [
@@ -302,4 +310,39 @@ def test_loader_rejects_unknown_json_plugin_fields() -> None:
     ]
 
     with pytest.raises(SpecLoaderError, match=r"unknown field: unknown_plugin_fact"):
+        load_registry_from_data(data)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "field_name"),
+    [
+        (
+            lambda data: data["universal_uninstall_specs"].append(
+                {
+                    "scenario_id": "repo-mount-uninstall",
+                    "platform_label": "repo-mounted",
+                    "scope": "project",
+                    "command": ["graphify", "uninstall", "--project"],
+                    "cwd_root": "repo_mount",
+                    "eligible_platform_scope": "project",
+                    "unknown_universal_policy": True,
+                }
+            ),
+            "unknown_universal_policy",
+        ),
+        (
+            lambda data: data["disposable_artifact_specs"][0].update({"unknown_disposable_policy": True}),
+            "unknown_disposable_policy",
+        ),
+        (
+            lambda data: data["disposable_artifact_specs"][0]["seed_files"][0].update({"unknown_seed_policy": True}),
+            "unknown_seed_policy",
+        ),
+    ],
+)
+def test_loader_rejects_unknown_harness_policy_input_fields(mutate, field_name: str) -> None:
+    data = _valid_data()
+    mutate(data)
+
+    with pytest.raises(SpecLoaderError, match=rf"unknown field: {field_name}"):
         load_registry_from_data(data)

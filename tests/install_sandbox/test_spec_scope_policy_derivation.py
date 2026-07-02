@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from tools.install_sandbox.targets import install_target_models
-from tools.install_sandbox.registry.spec_loader import load_default_registry, load_registry_from_data
+import pytest
+
+from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
 
 from tests.install_sandbox.install_target_test_support import valid_registry_data as _valid_data
 
@@ -73,8 +75,9 @@ def test_loader_preserves_explicit_target_runtime_validation() -> None:
     )
 
 
-def test_loader_ignores_top_level_runtime_validation_policies() -> None:
+def test_loader_rejects_top_level_runtime_validation_policies() -> None:
     data = _valid_data()
     data["target_runtime_validation_policies"] = {"typo": {}}
 
-    assert load_registry_from_data(data).target_spec("mini").target_runtime_validation == ()
+    with pytest.raises(SpecLoaderError, match=r"unknown field: target_runtime_validation_policies"):
+        load_registry_from_data(data)

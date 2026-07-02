@@ -13,6 +13,7 @@ from .spec_install_surfaces import (
     validate_install_surface_root,
     validate_relative_path,
 )
+from .spec_schema_validation import SpecSchemaValidationError, reject_unknown_fields
 
 
 TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS = frozenset(
@@ -21,6 +22,35 @@ TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS = frozenset(
         "disposable_artifact_specs",
     }
 )
+_UNIVERSAL_UNINSTALL_FIELDS = frozenset(
+    {
+        "artifact_subdir",
+        "command",
+        "cwd_root",
+        "eligible_platform_scope",
+        "minimum_installed_scenarios",
+        "platform_label",
+        "risk_note",
+        "scenario_id",
+        "scope",
+    }
+)
+_DISPOSABLE_ARTIFACT_FIELDS = frozenset(
+    {
+        "artifact_subdir",
+        "command",
+        "cwd_root",
+        "disposable_path_relative",
+        "disposable_path_root",
+        "platform_label",
+        "risk_note",
+        "scenario_id",
+        "scope",
+        "scope_eligibility",
+        "seed_files",
+    }
+)
+_DISPOSABLE_SEED_FIELDS = frozenset({"content", "relative"})
 
 
 class SpecHarnessPolicyInputError(ValueError):
@@ -35,6 +65,13 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         _fail(context, "expected mapping")
     return value
+
+
+def _reject_unknown_fields(data: Mapping[str, object], allowed: frozenset[str], context: str) -> None:
+    try:
+        reject_unknown_fields(data, allowed, context)
+    except SpecSchemaValidationError as exc:
+        raise SpecHarnessPolicyInputError(str(exc)) from exc
 
 
 def _sequence(value: object, context: str) -> list[Any]:
@@ -107,6 +144,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
             )
         _fail(context, f"unknown compact universal uninstall scope: {value}")
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _UNIVERSAL_UNINSTALL_FIELDS, context)
     cwd_root = _string(data.get("cwd_root"), f"{context}.cwd_root")
     _validate_cwd_root(cwd_root, f"{context}.cwd_root")
     return UniversalUninstallScenarioSpec(
@@ -124,6 +162,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
 
 def _disposable_seed(value: object, context: str) -> DisposableSeedFile:
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _DISPOSABLE_SEED_FIELDS, context)
     relative = _string(data.get("relative"), f"{context}.relative")
     _validate_relative(relative, f"{context}.relative")
     return DisposableSeedFile(relative, _string(data.get("content"), f"{context}.content"))
@@ -131,6 +170,7 @@ def _disposable_seed(value: object, context: str) -> DisposableSeedFile:
 
 def _disposable_artifact(value: object, context: str) -> DisposableArtifactScenarioSpec:
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _DISPOSABLE_ARTIFACT_FIELDS, context)
     cwd_root = _string(data.get("cwd_root"), f"{context}.cwd_root")
     _validate_cwd_root(cwd_root, f"{context}.cwd_root")
     disposable_path_root = _string(data.get("disposable_path_root"), f"{context}.disposable_path_root")

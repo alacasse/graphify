@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Mapping
+from typing import AbstractSet, Mapping
 
 
 class SpecSchemaValidationError(ValueError):
     pass
 
 
-def reject_unknown_fields(data: Mapping[str, object], allowed: set[str], context: str) -> None:
+def reject_unknown_fields(data: Mapping[str, object], allowed: AbstractSet[str], context: str) -> None:
     unknown = sorted(str(key) for key in data if key not in allowed)
     if not unknown:
         return

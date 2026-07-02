@@ -17,13 +17,22 @@ from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegis
 from ..targets.install_target_models import InstallTargetSpec
 from .spec_harness_policy_inputs import (
     SpecHarnessPolicyInputError,
+    TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS,
     parse_top_level_policy_inputs,
 )
+from .spec_schema_validation import SpecSchemaValidationError, reject_unknown_fields
 from .spec_target_facts import SpecTargetFactError, target_spec
 
 
 SCHEMA_VERSION = 1
 DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "specs"
+_TOP_LEVEL_REGISTRY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "platforms",
+        *TOP_LEVEL_TRANSITIONAL_POLICY_INPUT_FIELDS,
+    }
+)
 
 
 class SpecLoaderError(ValueError):
@@ -38,6 +47,13 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         _fail(context, "expected mapping")
     return value
+
+
+def _reject_unknown_fields(data: Mapping[str, object], allowed: frozenset[str], context: str) -> None:
+    try:
+        reject_unknown_fields(data, allowed, context)
+    except SpecSchemaValidationError as exc:
+        raise SpecLoaderError(str(exc)) from exc
 
 
 def _target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
@@ -56,6 +72,7 @@ def _top_level_policy_inputs(registry: Mapping[str, Any], source: str):
 
 def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallTargetCatalog:
     registry = _mapping(data, source)
+    _reject_unknown_fields(registry, _TOP_LEVEL_REGISTRY_FIELDS, source)
     version = registry.get("schema_version")
     if version != SCHEMA_VERSION:
         _fail(f"{source}.schema_version", f"expected schema version {SCHEMA_VERSION}")

@@ -11,7 +11,7 @@ from tools.install_sandbox.registry import spec_schema_validation
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data, load_registry_from_dir
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
-from tests.install_sandbox.install_target_test_support import valid_registry_data
+from tests.install_sandbox.install_target_test_support import legacy_platform_registry_data, valid_registry_data
 
 
 FIELD_CLASS_DURABLE_TARGET_FACT = "durable_target_fact"
@@ -30,6 +30,7 @@ FIELD_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
 FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
 FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
 FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT = "current_target_named_input"
+FIELD_CLASS_CURRENT_FIXTURE_INPUT = "current_fixture_input"
 FIELD_CLASS_UNCHANGED_NORMALIZED_REGISTRY_OUTPUT = "unchanged_normalized_registry_output"
 
 
@@ -78,6 +79,16 @@ SPEC_WEIGHT_FIELD_EXAMPLES = {
 REGISTRY_FIELD_EXAMPLES = {
     "universal_uninstall_specs": {"<registry>"},
     "disposable_artifact_specs": {"<registry>"},
+}
+
+FIXTURE_INPUT_ROLE_CLASSIFICATION = {
+    "valid_registry_data.targets": {
+        FIELD_CLASS_CURRENT_FIXTURE_INPUT,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+    },
+    "legacy_platform_registry_data.platforms": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
 }
 
 HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
@@ -283,6 +294,25 @@ def test_registry_field_classification_vocabulary_is_explicit() -> None:
     }
 
 
+def test_fixture_input_roles_keep_current_and_legacy_inputs_separate() -> None:
+    current_fixture = valid_registry_data()
+    legacy_fixture = legacy_platform_registry_data()
+
+    assert FIXTURE_INPUT_ROLE_CLASSIFICATION == {
+        "valid_registry_data.targets": {
+            FIELD_CLASS_CURRENT_FIXTURE_INPUT,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+        },
+        "legacy_platform_registry_data.platforms": {
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+    }
+    assert "targets" in current_fixture
+    assert "platforms" not in current_fixture
+    assert "platforms" in legacy_fixture
+    assert "targets" not in legacy_fixture
+
+
 def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
     assert HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION == {
         "universal_uninstall_specs[].platform_label": {
@@ -432,17 +462,22 @@ def test_reporting_projection_classification_keeps_legacy_platform_vocabulary_in
 
 def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_edges() -> None:
     classified_edges = {
+        "current fixture input": {
+            field
+            for field, classes in FIXTURE_INPUT_ROLE_CLASSIFICATION.items()
+            if FIELD_CLASS_CURRENT_FIXTURE_INPUT in classes
+        },
         "public product CLI": {
             field
             for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
             if FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY in classes
         },
-        "YAML input": {
+        "current YAML input": {
             field
             for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
             if FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY in classes
         },
-        "serialized artifact input/output where current": {
+        "generated output vocabulary": {
             field
             for field, classes in SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION.items()
             if FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY in classes
@@ -450,6 +485,11 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
         "legacy input-only reader": {
             field
             for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+            if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
+        }
+        | {
+            field
+            for field, classes in FIXTURE_INPUT_ROLE_CLASSIFICATION.items()
             if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
         },
         "unchanged normalized registry output": {
@@ -465,14 +505,16 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
     }
 
     assert classified_edges == {
+        "current fixture input": {"valid_registry_data.targets"},
         "public product CLI": {"product_command.--platform"},
-        "YAML input": {"registry_yaml.targets"},
-        "serialized artifact input/output where current": {
+        "current YAML input": {"registry_yaml.targets"},
+        "generated output vocabulary": {
             "standard_scenario_result.platform",
             "synthetic_scenario_result.platform",
             "synthetic_group_result.platforms",
         },
         "legacy input-only reader": {
+            "legacy_platform_registry_data.platforms",
             "legacy_manifest_input.platform",
             "legacy_manifest_input.platform_coverage",
             "legacy_result_input.platform",

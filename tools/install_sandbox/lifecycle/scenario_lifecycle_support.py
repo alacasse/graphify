@@ -93,7 +93,7 @@ class StandardScenarioOutcome:
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         scenario = context.scenario
         return {
-            "scenario": {"platform": scenario.target_name, "scope": scenario.scope, "id": self.scenario_name},
+            "scenario": {"target": scenario.target_name, "scope": scenario.scope, "id": self.scenario_name},
             "passed": self.passed,
             "install_exit_code": self.stages.install_1.returncode,
             "repeat_install_exit_code": None if self.stages.install_2 is None else self.stages.install_2.returncode,
@@ -337,9 +337,10 @@ class ScenarioArtifacts:
         risks: dict[str, object] | None = None,
     ) -> dict[str, object]:
         risk_payload = outcome.risks(context, self) if risks is None else risks
+        identity_key = "target" if isinstance(outcome, StandardScenarioOutcome) else "platform"
         return {
             "id": outcome.scenario_name,
-            "platform": outcome.platform_name(context),
+            identity_key: outcome.platform_name(context),
             "scope": outcome.scope(context),
             "started_at": context.started_at,
             "duration_ms": scenario_duration_ms(context),

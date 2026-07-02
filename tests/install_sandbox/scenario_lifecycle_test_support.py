@@ -20,7 +20,6 @@ from tools.install_sandbox.targets.install_target_models import (
 
 PRESERVED_RESULT_FIELDS = {
     "id",
-    "platform",
     "scope",
     "passed",
     "graphify_file_effects_passed",
@@ -372,8 +371,8 @@ class HookFactory:
         return scenario_lifecycle_support.ScenarioLifecycleHooks(**values)
 
 
-def assert_preserved_result_shape(result: dict[str, object]) -> None:
-    assert PRESERVED_RESULT_FIELDS <= result.keys()
+def assert_preserved_result_shape(result: dict[str, object], *, identity_key: str = "platform") -> None:
+    assert PRESERVED_RESULT_FIELDS | {identity_key} <= result.keys()
     assert isinstance(result["duration_ms"], int)
     assert isinstance(result["command_artifact"], dict)
     assert isinstance(result["reproduction_command"], str)

@@ -49,7 +49,7 @@ def test_run_scenario_skips_followups_when_initial_install_fails(tmp_path) -> No
     artifact_dir = factory.output / "scenarios" / "codex-project"
     assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
 
-    assert_preserved_result_shape(result)
+    assert_preserved_result_shape(result, identity_key="target")
     assert factory.command_call_strings() == ["command:graphify install --platform codex"]
     assert factory.command_artifact_subdirs() == ["."]
     skipped_followups = {"seed-stale:codex", "sidecars:codex", "equivalence:codex"}
@@ -75,7 +75,7 @@ def test_run_scenario_preserves_stage_order_and_records_followups(tmp_path) -> N
     result = scenario_lifecycle_standard.run_scenario(scenario, {}, hooks=factory.hooks())
     assertions = json.loads((factory.output / "scenarios" / "codex-project" / "assertions.json").read_text(encoding="utf-8"))
 
-    assert_preserved_result_shape(result)
+    assert_preserved_result_shape(result, identity_key="target")
     assert result["passed"] is True
     assert result["graphify_file_effects_passed"] is True
     assert result["overall_status"] == "graphify_install_verified"
@@ -116,9 +116,11 @@ def test_standard_lifecycle_execution_interface_records_observable_contract(tmp_
     risk = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
     command_artifact = result["command_artifact"]
 
-    assert_preserved_result_shape(result)
+    assert_preserved_result_shape(result, identity_key="target")
     assert result["id"] == assertions["scenario"]["id"] == "codex-project"
-    assert result["platform"] == assertions["scenario"]["platform"] == "codex"
+    assert result["target"] == assertions["scenario"]["target"] == "codex"
+    assert "platform" not in result
+    assert "platform" not in assertions["scenario"]
     assert result["scope"] == assertions["scenario"]["scope"] == "project"
     assert result["passed"] is assertions["passed"] is True
     assert result["graphify_file_effects_passed"] is True

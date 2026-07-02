@@ -41,6 +41,18 @@ VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES = {
     },
 }
 
+VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_PARAMETERS = {
+    "_standard_scenarios": {"platforms"},
+    "coverage_records": {"platforms"},
+    "universal_uninstall_scenarios": {"platforms"},
+    "target_runtime_validation_sections": {"platforms"},
+    "_coverage_summary": {"platforms"},
+}
+
+VALIDATION_PLAN_INTERNAL_PLATFORM_CALLSITE_KEYWORDS = {
+    "build_validation_plan": {"_coverage_summary.platforms"},
+}
+
 
 def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape() -> None:
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
@@ -68,6 +80,28 @@ def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape
         "target_runtime_validation_sections",
         "target_runtime_verification",
     }
+
+
+def test_validation_plan_characterizes_internal_platform_helper_vocabulary_as_cleanup_target() -> None:
+    plan_signature = inspect.signature(validation_plan.ValidationPlan)
+    target_selector_signature = inspect.signature(validation_plan.selected_targets)
+
+    assert "platforms" not in plan_signature.parameters
+    assert {"target_name", "selected_target_names"} <= set(target_selector_signature.parameters)
+    assert "platform_name" not in target_selector_signature.parameters
+    assert "selected_platform_names" not in target_selector_signature.parameters
+
+    for helper_name, expected_parameters in VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_PARAMETERS.items():
+        helper_signature = inspect.signature(getattr(validation_plan, helper_name))
+
+        assert set(helper_signature.parameters) >= expected_parameters
+
+    build_source = inspect.getsource(validation_plan.build_validation_plan)
+    assert "platforms=selected_target_names_tuple" in build_source
+    assert VALIDATION_PLAN_INTERNAL_PLATFORM_CALLSITE_KEYWORDS == {
+        "build_validation_plan": {"_coverage_summary.platforms"},
+    }
+    assert not any(hasattr(validation_plan.ValidationPlan, name) for name in {"platforms", "selected_platforms"})
 
 
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:

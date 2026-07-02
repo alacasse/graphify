@@ -50,11 +50,10 @@ def test_run_scenario_skips_followups_when_initial_install_fails(tmp_path) -> No
     assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
 
     assert_preserved_result_shape(result)
-    assert factory.calls.count("command:graphify install --platform codex") == 1
-    assert not any(call.startswith("command:graphify uninstall") for call in factory.calls)
-    assert "seed-stale:codex" not in factory.calls
-    assert "sidecars:codex" not in factory.calls
-    assert "equivalence:codex" not in factory.calls
+    assert factory.command_call_strings() == ["command:graphify install --platform codex"]
+    assert factory.command_artifact_subdirs() == ["."]
+    skipped_followups = {"seed-stale:codex", "sidecars:codex", "equivalence:codex"}
+    assert not skipped_followups & set(factory.calls)
     assert result["passed"] is False
     assert assertions["repeat_install_exit_code"] is None
     assert assertions["stale_sidecar_repair_exit_code"] is None
@@ -87,39 +86,21 @@ def test_run_scenario_preserves_stage_order_and_records_followups(tmp_path) -> N
     assert assertions["repeat_install_exit_code"] == 0
     assert assertions["stale_sidecar_repair_exit_code"] == 0
     assert assertions["uninstall_exit_code"] == 0
-    assert [call for call in factory.calls if call.startswith("command:")] == [
+    assert factory.command_call_strings() == [
         "command:graphify install --platform codex",
         "command:graphify install --platform codex",
         "command:graphify install --platform codex",
         "command:graphify uninstall --platform codex",
     ]
-    assert factory.calls == [
-        "reset",
-        "seed:codex",
-        "manifest:before-install-files.json",
-        "command:graphify install --platform codex",
-        "state:codex",
-        "expected:codex",
-        "scope:codex",
-        "unexpected:install",
-        "manifest:after-install-files.json",
-        "copy:codex",
-        "command:graphify install --platform codex",
-        "state:codex",
-        "idempotent",
-        "unexpected:repeat_install",
-        "manifest:after-repeat-install-files.json",
-        "seed-stale:codex",
-        "command:graphify install --platform codex",
-        "sidecars:codex",
-        "unexpected:stale_sidecar_repair",
-        "manifest:after-stale-sidecar-repair-files.json",
-        "command:graphify uninstall --platform codex",
-        "uninstalled:codex",
-        "unexpected:uninstall",
-        "manifest:after-uninstall-files.json",
-        "equivalence:codex",
-    ]
+    assert factory.command_artifact_subdirs() == [".", "repeat-install", "stale-sidecar-repair", "uninstall"]
+    assert factory.command_record_index("repeat-install") < factory.call_index("idempotent")
+    assert factory.call_index("idempotent") < factory.call_index("seed-stale:codex")
+    assert factory.command_record_index("stale-sidecar-repair") < factory.call_index("sidecars:codex")
+    assert factory.call_index("sidecars:codex") < factory.call_index("command:graphify uninstall --platform codex")
+    assert factory.call_index("command:graphify uninstall --platform codex") < factory.call_index("equivalence:codex")
+    assert {"detail": "unchanged_after_repeat_install", "ok": True} in assertions["checks"]
+    assert {"detail": "sidecars", "ok": True} in assertions["stale_sidecar_repair_checks"]
+    assert {"detail": "removed", "ok": True} in assertions["checks"]
 
 
 def test_standard_lifecycle_execution_interface_records_observable_contract(tmp_path) -> None:

@@ -153,6 +153,33 @@ class HookFactory:
         self.universal_check_ok = True
         self.disposable_check_records: list[dict[str, object]] = []
 
+    def command_call_strings(self) -> list[str]:
+        return [call for call in self.calls if call.startswith("command:")]
+
+    def command_artifact_subdirs(self) -> list[str]:
+        scenario_root = self.output / "scenarios" / "codex-project"
+        subdirs = []
+        for record in self.command_records:
+            artifact_dir = record["artifact_dir"]
+            assert isinstance(artifact_dir, Path)
+            subdirs.append("." if artifact_dir == scenario_root else str(artifact_dir.relative_to(scenario_root)))
+        return subdirs
+
+    def call_index(self, call: str) -> int:
+        return self.calls.index(call)
+
+    def command_record_index(self, artifact_subdir: str) -> int:
+        scenario_root = self.output / "scenarios" / "codex-project"
+        for record in self.command_records:
+            artifact_dir = record["artifact_dir"]
+            assert isinstance(artifact_dir, Path)
+            subdir = "." if artifact_dir == scenario_root else str(artifact_dir.relative_to(scenario_root))
+            if subdir == artifact_subdir:
+                call_index = record["call_index"]
+                assert isinstance(call_index, int)
+                return call_index
+        raise AssertionError(f"missing command record for artifact subdir: {artifact_subdir}")
+
     def completed(self, command, returncode: int) -> subprocess.CompletedProcess[str]:
         result = subprocess.CompletedProcess(list(command), returncode, "", "")
         result.started_at = "2026-06-02T00:00:00Z"
@@ -161,6 +188,7 @@ class HookFactory:
 
     def run_capture(self, command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
         command_tuple = tuple(command)
+        call_index = len(self.calls)
         self.calls.append("command:" + " ".join(command_tuple))
         if artifact_dir is not None:
             artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -172,6 +200,7 @@ class HookFactory:
                 "artifact_dir": None if artifact_dir is None else Path(artifact_dir),
                 "command_class": command_class,
                 "timeout_seconds": timeout_seconds,
+                "call_index": call_index,
             }
         )
         returncode = self.command_results.pop(0) if self.command_results else 0

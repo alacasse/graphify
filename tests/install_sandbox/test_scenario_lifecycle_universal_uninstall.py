@@ -127,9 +127,15 @@ def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_ri
     risks = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
 
     assert result["id"] == "sweep-custom-workspace"
-    assert result["platform"] == "synthetic-cleaner"
+    assert result["target"] == "synthetic-cleaner"
+    assert "platform" not in result
     assert result["scope"] == "workspace"
     assert command_artifact_dir(result) == str(artifact_dir / "declared-artifacts")
+    assert assertions["scenario"] == {
+        "id": "sweep-custom-workspace",
+        "scope": "workspace",
+        "targets": ["alpha", "beta"],
+    }
     assert assertions["uninstall_command"] == ["custom-tool", "remove", "workspace"]
     assert factory.command_records[-1]["command"] == ("custom-tool", "remove", "workspace")
     assert factory.command_records[-1]["cwd"] == factory.user_cwd

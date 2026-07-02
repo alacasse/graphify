@@ -38,9 +38,12 @@ def test_purge_scenario_removes_disposable_graphify_out_and_writes_artifacts(tmp
     assert result["id"] == purge_scenario_id
     assert result["graphify_file_effects_passed"] is True
     assert result["overall_status"] == "graphify_install_verified"
+    assert result["target"] == "purge"
+    assert "platform" not in result
     assert command_artifact_dir(result) == str(artifact_dir / "uninstall-purge")
     assert factory.command_artifact_dirs == [artifact_dir / "uninstall-purge"]
     assert "target_runtime_verification" not in result
+    assert assertions["scenario"] == {"id": purge_scenario_id, "scope": "project", "target": "purge"}
     assert assertions["uninstall_exit_code"] == 0
     assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": True, "detail": "purged"}]
     assert risks["statuses"] == ["graphify_install_verified"]
@@ -178,7 +181,8 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
     risks = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
 
     assert result["id"] == "discard-weird-cache"
-    assert result["platform"] == "janitor"
+    assert result["target"] == "janitor"
+    assert "platform" not in result
     assert result["scope"] == "workspace"
     assert command_artifact_dir(result) == str(artifact_dir / "declared-discard")
     assert factory.command_records == [
@@ -190,6 +194,7 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
             "timeout_seconds": None,
         }
     ]
+    assert assertions["scenario"] == {"id": "discard-weird-cache", "scope": "workspace", "target": "janitor"}
     assert assertions["checks"] == [{"path": str(factory.user_cwd / "nested/cache-dir"), "ok": True, "detail": "purged"}]
     assert risks["notes"] == ["declared disposable path risk"]
     assert undeclared_path.exists()

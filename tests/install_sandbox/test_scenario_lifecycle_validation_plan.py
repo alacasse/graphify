@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from tools.install_sandbox import validation_plan
@@ -569,9 +570,12 @@ def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_pat
     )
 
     artifact_dir = factory.output / "scenarios" / "selected-sweep"
+    assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
     assert results[-1]["id"] == "selected-sweep"
-    assert results[-1]["platform"] == "selected-cleaner"
+    assert results[-1]["target"] == "selected-cleaner"
+    assert "platform" not in results[-1]
     assert results[-1]["scope"] == "selected-scope"
+    assert assertions["scenario"] == {"id": "selected-sweep", "scope": "selected-scope", "targets": ["arbitrary"]}
     assert command_artifact_dir(results[-1]) == str(artifact_dir / "selected-artifacts")
     assert factory.command_records[-1]["command"] == ("selected", "remove")
     assert factory.command_records[-1]["cwd"] == factory.user_cwd

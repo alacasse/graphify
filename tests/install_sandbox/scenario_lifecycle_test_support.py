@@ -371,7 +371,7 @@ class HookFactory:
         return scenario_lifecycle_support.ScenarioLifecycleHooks(**values)
 
 
-def assert_preserved_result_shape(result: dict[str, object], *, identity_key: str = "platform") -> None:
+def assert_preserved_result_shape(result: dict[str, object], *, identity_key: str = "target") -> None:
     assert PRESERVED_RESULT_FIELDS | {identity_key} <= result.keys()
     assert isinstance(result["duration_ms"], int)
     assert isinstance(result["command_artifact"], dict)

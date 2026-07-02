@@ -142,7 +142,7 @@ class UniversalUninstallOutcome:
 
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         return {
-            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "platforms": [scenario.target_name for scenario in self.scenarios]},
+            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "targets": [scenario.target_name for scenario in self.scenarios]},
             "passed": self.passed,
             "install_results": self.install_results,
             "uninstall_command": list(self.uninstall_command),
@@ -187,7 +187,7 @@ class DisposableArtifactOutcome:
 
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         return {
-            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "platform": self.platform_label},
+            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "target": self.platform_label},
             "passed": self.passed,
             "uninstall_exit_code": self.result.returncode,
             "checks": self.checks,
@@ -337,10 +337,9 @@ class ScenarioArtifacts:
         risks: dict[str, object] | None = None,
     ) -> dict[str, object]:
         risk_payload = outcome.risks(context, self) if risks is None else risks
-        identity_key = "target" if isinstance(outcome, StandardScenarioOutcome) else "platform"
         return {
             "id": outcome.scenario_name,
-            identity_key: outcome.platform_name(context),
+            "target": outcome.platform_name(context),
             "scope": outcome.scope(context),
             "started_at": context.started_at,
             "duration_ms": scenario_duration_ms(context),

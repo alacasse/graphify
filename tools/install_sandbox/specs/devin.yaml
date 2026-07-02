@@ -16,11 +16,6 @@ scopes:
     - root: home
       relative: .config/devin/skills/graphify/SKILL.md
   project:
-    equivalent_install_command:
-    - graphify
-    - devin
-    - install
-    - --project
     effects:
     - root: project
       relative: .devin/skills/graphify/SKILL.md

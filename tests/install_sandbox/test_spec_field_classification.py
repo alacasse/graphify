@@ -37,6 +37,16 @@ def _current_registry_data() -> dict[str, Any]:
     return deepcopy(valid_registry_data())
 
 
+def _default_registry_yaml_data() -> dict[str, Any]:
+    return {
+        "schema_version": spec_loader.SCHEMA_VERSION,
+        "targets": {
+            path.stem: yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            for path in sorted(spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml"))
+        },
+    }
+
+
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
     "uninstall_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -208,6 +218,33 @@ def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture
 
     assert FIELD_CLASS_DERIVED_DEFAULT == "derived_default"
     assert normalize_registry(load_registry_from_data(conventional)) == normalize_registry(load_registry_from_data(explicit))
+
+
+def test_default_registry_derives_removed_checked_in_boilerplate() -> None:
+    minimal = _default_registry_yaml_data()
+    explicit = deepcopy(minimal)
+    explicit["targets"]["agents"]["user_skill"] = ".agents/skills/graphify/SKILL.md"
+    explicit["targets"]["agents"]["project_skill"] = ".agents/skills/graphify/SKILL.md"
+    explicit["targets"]["antigravity"]["scopes"]["project"]["equivalent_install_command"] = [
+        "graphify",
+        "antigravity",
+        "install",
+        "--project",
+    ]
+    explicit["targets"]["devin"]["scopes"]["project"]["equivalent_install_command"] = [
+        "graphify",
+        "devin",
+        "install",
+        "--project",
+    ]
+    explicit["targets"]["pi"]["scopes"]["project"]["equivalent_install_command"] = [
+        "graphify",
+        "pi",
+        "install",
+        "--project",
+    ]
+
+    assert normalize_registry(load_registry_from_data(minimal)) == normalize_registry(load_registry_from_data(explicit))
 
 
 def _default_yaml_spec_weight_field_inventory() -> dict[str, set[str]]:

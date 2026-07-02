@@ -21,11 +21,6 @@ scopes:
     - root: user_cwd
       relative: .agents/workflows/graphify.md
   project:
-    equivalent_install_command:
-    - graphify
-    - antigravity
-    - install
-    - --project
     effects:
     - root: project
       relative: .agents/skills/graphify/SKILL.md

@@ -1,7 +1,5 @@
 display_name: Agent Skills
 target_kind: generic_standard
-user_skill: .agents/skills/graphify/SKILL.md
-project_skill: .agents/skills/graphify/SKILL.md
 scopes:
   user:
     uninstall_command: null

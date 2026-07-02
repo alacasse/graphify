@@ -14,11 +14,6 @@ scopes:
     - root: home
       relative: .pi/agent/skills/graphify/SKILL.md
   project:
-    equivalent_install_command:
-    - graphify
-    - pi
-    - install
-    - --project
     effects:
     - root: project
       relative: .pi/agent/skills/graphify/SKILL.md

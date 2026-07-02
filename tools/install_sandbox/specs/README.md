@@ -12,6 +12,10 @@ Keep the YAML as target-local facts. Python derives root selection, defaults, sc
 
 Target-local facts include install surfaces, target skill paths, packaged
 reference bundles, unsupported scopes, and target runtime limitation notes.
+Conventional skill paths of `.<target>/skills/graphify/SKILL.md` may be omitted
+when they are equivalent to the loader default; nonconventional paths, disabled
+skill paths, and paths that differ between user/project scopes remain explicit
+because they are target-local facts rather than derivable boilerplate.
 Command fields such as `install_command`, `uninstall_command`,
 `equivalent_install_command`, root execution hints such as `cwd_root` and
 `allowed_roots`, and planning fields such as `universal_uninstall_scopes` are

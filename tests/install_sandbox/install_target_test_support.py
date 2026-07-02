@@ -22,10 +22,10 @@ def skill_effect_data(relative: str = ".mini/skills/graphify/SKILL.md") -> dict[
     return {"root": "home", "relative": relative}
 
 
-def valid_registry_data() -> dict[str, Any]:
+def _valid_target_registry_data(container_field: str) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "platforms": {
+        container_field: {
             "mini": {
                 "user_skill": ".mini/skills/graphify/SKILL.md",
                 "project_skill": ".mini/skills/graphify/SKILL.md",
@@ -66,6 +66,14 @@ def valid_registry_data() -> dict[str, Any]:
     }
 
 
+def valid_registry_data() -> dict[str, Any]:
+    return _valid_target_registry_data("targets")
+
+
+def legacy_platform_registry_data() -> dict[str, Any]:
+    return _valid_target_registry_data("platforms")
+
+
 def expect_invalid_registry(data: dict[str, Any], match: str) -> None:
     import pytest
 
@@ -74,7 +82,7 @@ def expect_invalid_registry(data: dict[str, Any], match: str) -> None:
 
 
 def write_registry_dir(path: Any, data: dict[str, Any]) -> None:
-    for target_name, target_data in data["platforms"].items():
+    for target_name, target_data in data["targets"].items():
         (path / f"{target_name}.yaml").write_text(yaml.safe_dump(target_data, sort_keys=False), encoding="utf-8")
 
 

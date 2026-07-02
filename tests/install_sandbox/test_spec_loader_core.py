@@ -46,8 +46,8 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
 
 def test_loader_preserves_explicit_target_metadata() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["display_name"] = "Mini Target"
-    data["platforms"]["mini"]["target_kind"] = "generic_standard"
+    data["targets"]["mini"]["display_name"] = "Mini Target"
+    data["targets"]["mini"]["target_kind"] = "generic_standard"
 
     spec = load_registry_from_data(data).target_spec("mini")
 
@@ -57,7 +57,7 @@ def test_loader_preserves_explicit_target_metadata() -> None:
 
 def test_loader_preserves_explicit_no_project_install_equivalence() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["scopes"]["project"]["equivalent_install_command"] = None
+    data["targets"]["mini"]["scopes"]["project"]["equivalent_install_command"] = None
 
     registry = load_registry_from_data(data)
     project = registry.make_scenario("mini", "project")

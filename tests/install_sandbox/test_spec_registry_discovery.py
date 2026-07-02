@@ -33,7 +33,7 @@ def test_default_registry_discovers_product_yaml_files_in_filename_order() -> No
 
 def test_load_registry_from_dir_does_not_supply_synthetic_registry_policies(tmp_path: Any) -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["simulated_linux_layout"] = True
+    data["targets"]["mini"]["simulated_linux_layout"] = True
     _write_registry_dir(tmp_path, data)
 
     registry = load_registry_from_dir(tmp_path)
@@ -55,7 +55,7 @@ def test_load_registry_from_dir_rejects_empty_product_specs(tmp_path: Any) -> No
 def test_load_registry_from_dir_discovers_added_product_yaml_files(tmp_path: Any) -> None:
     data = _valid_data()
     _write_registry_dir(tmp_path, data)
-    (tmp_path / "alpha.yaml").write_text(yaml.safe_dump(deepcopy(data["platforms"]["mini"]), sort_keys=False), encoding="utf-8")
+    (tmp_path / "alpha.yaml").write_text(yaml.safe_dump(deepcopy(data["targets"]["mini"]), sort_keys=False), encoding="utf-8")
 
     registry = load_registry_from_dir(tmp_path)
 
@@ -64,7 +64,7 @@ def test_load_registry_from_dir_discovers_added_product_yaml_files(tmp_path: Any
 
 def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["name"] = "other"
+    data["targets"]["mini"]["name"] = "other"
     _write_registry_dir(tmp_path, data)
 
     with pytest.raises(SpecLoaderError, match="platform key/name mismatch: mini != other"):
@@ -73,8 +73,8 @@ def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> 
 
 def test_load_registry_from_dir_uses_deterministic_filename_order(tmp_path: Any) -> None:
     data = _valid_data()
-    mini = deepcopy(data["platforms"]["mini"])
-    data["platforms"] = {
+    mini = deepcopy(data["targets"]["mini"])
+    data["targets"] = {
         "beta": deepcopy(mini),
         "alpha": deepcopy(mini),
     }
@@ -89,7 +89,7 @@ def test_load_registry_from_dir_ignores_shared_yaml_and_orders_by_filename_stem(
     tmp_path: Any,
 ) -> None:
     data = _valid_data()
-    mini = deepcopy(data["platforms"]["mini"])
+    mini = deepcopy(data["targets"]["mini"])
     (tmp_path / "beta.yaml").write_text(yaml.safe_dump(mini, sort_keys=False), encoding="utf-8")
     (tmp_path / "alpha.yaml").write_text(yaml.safe_dump(mini, sort_keys=False), encoding="utf-8")
     (tmp_path / "shared.yaml").write_text(
@@ -102,10 +102,10 @@ def test_load_registry_from_dir_ignores_shared_yaml_and_orders_by_filename_stem(
     assert registry.target_names == ["alpha", "beta"]
 
 
-def test_load_registry_from_data_uses_platform_mapping_order() -> None:
+def test_load_registry_from_data_uses_target_mapping_order() -> None:
     data = deepcopy(_valid_data())
-    mini = deepcopy(data["platforms"]["mini"])
-    data["platforms"] = {
+    mini = deepcopy(data["targets"]["mini"])
+    data["targets"] = {
         "zeta": deepcopy(mini),
         "alpha": deepcopy(mini),
     }

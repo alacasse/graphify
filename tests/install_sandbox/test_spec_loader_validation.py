@@ -6,6 +6,7 @@ import pytest
 
 from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,
+    legacy_platform_registry_data as _legacy_data,
     valid_registry_data as _valid_data,
 )
 from tools.install_sandbox import validation_plan
@@ -27,9 +28,7 @@ from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_reg
 
 
 def _current_data() -> dict[str, object]:
-    data = copy.deepcopy(_valid_data())
-    data[CURRENT_REGISTRY_CONTAINER_FIELD] = data.pop(LEGACY_REGISTRY_CONTAINER_FIELD)
-    return data
+    return copy.deepcopy(_valid_data())
 
 
 def _mini(data: dict[str, object]) -> dict[str, object]:
@@ -160,7 +159,7 @@ def test_loader_rejects_unknown_expected_root() -> None:
 
 def test_loader_accepts_target_named_registry_container_equivalent_to_legacy_input() -> None:
     current_registry = load_registry_from_data(_current_data())
-    legacy_registry = load_registry_from_data(_valid_data())
+    legacy_registry = load_registry_from_data(_legacy_data())
 
     assert current_registry.target_names == legacy_registry.target_names == ["mini"]
     assert current_registry.make_scenario("mini", "project") == legacy_registry.make_scenario("mini", "project")
@@ -187,7 +186,7 @@ def test_loader_accepts_target_named_harness_policy_eligibility_input() -> None:
 
 
 def test_loader_accepts_legacy_harness_policy_eligibility_input_as_compatibility() -> None:
-    registry = load_registry_from_data(_valid_data())
+    registry = load_registry_from_data(_legacy_data())
 
     assert registry.universal_uninstall_specs[0].eligible_target_scope == "project"
 

@@ -33,8 +33,8 @@ def test_default_registry_skill_effects_declare_sidecar_expectation() -> None:
 
 def test_loader_derives_scope_locality_and_simulated_notes() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["simulated_linux_layout"] = True
-    data["platforms"]["mini"]["scopes"]["user"]["effects"].append(
+    data["targets"]["mini"]["simulated_linux_layout"] = True
+    data["targets"]["mini"]["scopes"]["user"]["effects"].append(
         {"root": "user_cwd", "relative": "GEMINI.md", "kind": "text_section"}
     )
 
@@ -51,7 +51,7 @@ def test_loader_derives_scope_locality_and_simulated_notes() -> None:
 
 def test_loader_preserves_explicit_target_runtime_validation() -> None:
     data = _valid_data()
-    data["platforms"]["mini"]["target_runtime_validation"] = [
+    data["targets"]["mini"]["target_runtime_validation"] = [
         {
             "section_title": "Windows Validation",
             "status": "payload_consistency_only",
@@ -60,7 +60,7 @@ def test_loader_preserves_explicit_target_runtime_validation() -> None:
             "notes": ["runtime validation is external"],
         }
     ]
-    data["platforms"]["mini"]["simulated_linux_layout"] = True
+    data["targets"]["mini"]["simulated_linux_layout"] = True
 
     spec = load_registry_from_data(data).target_spec("mini")
 

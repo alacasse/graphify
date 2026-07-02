@@ -34,9 +34,7 @@ FIELD_CLASS_UNCHANGED_NORMALIZED_REGISTRY_OUTPUT = "unchanged_normalized_registr
 
 
 def _current_registry_data() -> dict[str, Any]:
-    data = deepcopy(valid_registry_data())
-    data["targets"] = data.pop("platforms")
-    return data
+    return deepcopy(valid_registry_data())
 
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {

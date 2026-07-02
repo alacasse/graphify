@@ -7,6 +7,10 @@ import pytest
 from tools.install_sandbox.runtime import container_runtime
 
 
+def _option_values(command: list[str], option: str) -> list[str]:
+    return [command[index + 1] for index, token in enumerate(command[:-1]) if token == option]
+
+
 def test_docker_command_construction(tmp_path) -> None:
     repo = tmp_path / "repo"
     output = tmp_path / "out"
@@ -25,15 +29,32 @@ def test_docker_command_construction(tmp_path) -> None:
         keep_container=False,
     )
 
-    joined = " ".join(command)
+    assert command[:2] == ["docker", "run"]
     assert "--rm" in command
-    assert "--user" in command
-    assert "HOME=/tmp/graphify-home" in command
-    assert "XDG_CONFIG_HOME=/tmp/graphify-home/.config" in command
-    assert "GRAPHIFY_PROJECT=/tmp/graphify-project" in command
-    assert f"{repo}:/mnt/graphify-repo:ro" in command
-    assert f"{output}:/sandbox-out:rw" in command
-    assert "--platform codex" in joined
+    assert command.index("--rm") < command.index("--user")
+    assert command[command.index("--user") + 1].count(":") == 1
+
+    assert _option_values(command, "--env") == [
+        f"{key}={value}" for key, value in container_runtime.ROOT_REGISTRY.env_entries().items()
+    ]
+    host_paths = {"repo_mount": repo, "output": output}
+    assert _option_values(command, "--volume") == [
+        f"{host_paths[root.name]}:{root.container_path}:{root.mount_mode}"
+        for root in container_runtime.ROOT_REGISTRY.volume_roots()
+    ]
+
+    workdir_index = command.index("--workdir")
+    assert command[workdir_index:] == [
+        "--workdir",
+        container_runtime.CONTAINER_PROJECT,
+        "graphify-install-sandbox:local",
+        "--scope",
+        "both",
+        "--copy-source",
+        "always",
+        "--platform",
+        "codex",
+    ]
 
 
 def test_container_command_supports_all_platforms_without_rm(tmp_path) -> None:
@@ -51,8 +72,17 @@ def test_container_command_supports_all_platforms_without_rm(tmp_path) -> None:
 
     assert command[:2] == ["podman", "run"]
     assert "--rm" not in command
-    assert command[-3:] == ["--copy-source", "auto", "--all"]
-    assert "custom-image" in command
+    workdir_index = command.index("--workdir")
+    assert command[workdir_index:] == [
+        "--workdir",
+        container_runtime.CONTAINER_PROJECT,
+        "custom-image",
+        "--scope",
+        "project",
+        "--copy-source",
+        "auto",
+        "--all",
+    ]
 
 
 def test_container_command_requires_platform_or_all_platforms(tmp_path) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tests.install_sandbox.install_target_test_support import (
     expect_invalid_registry as _expect_invalid,
     valid_registry_data as _valid_data,
@@ -7,7 +9,7 @@ from tests.install_sandbox.install_target_test_support import (
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from tools.install_sandbox.registry import spec_harness_policy_inputs, spec_loader, spec_target_facts
-from tools.install_sandbox.registry.spec_loader import load_registry_from_data
+from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_registry_from_data
 
 
 def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
@@ -198,3 +200,106 @@ def test_loader_rejects_unknown_structured_risk_note() -> None:
     data["platforms"]["mini"]["scopes"]["user"]["risk_notes"] = ["unknown_structured_note"]
 
     _expect_invalid(data, "unknown structured risk note")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "field_name"),
+    [
+        (
+            lambda data: data["platforms"]["mini"].update({"unknown_target_fact": True}),
+            "unknown_target_fact",
+        ),
+        (
+            lambda data: data["platforms"]["mini"]["scopes"]["user"].update({"unknown_scope_fact": True}),
+            "unknown_scope_fact",
+        ),
+        (
+            lambda data: data["platforms"]["mini"]["scopes"]["user"]["effects"][0].update({"unknown_effect_fact": True}),
+            "unknown_effect_fact",
+        ),
+        (
+            lambda data: data["platforms"]["mini"]["scopes"]["user"].update(
+                {
+                    "generated_file_expectation": {
+                        "relative_substrings": ["graphify"],
+                        "unknown_generated_fact": True,
+                    }
+                }
+            ),
+            "unknown_generated_fact",
+        ),
+        (
+            lambda data: data["platforms"]["mini"].update(
+                {"reference_bundles": [{"name": "mini", "unknown_reference_fact": True}]}
+            ),
+            "unknown_reference_fact",
+        ),
+        (
+            lambda data: data["platforms"]["mini"].update(
+                {
+                    "target_runtime_validation": [
+                        {
+                            "section_title": "Runtime",
+                            "status": "declared",
+                            "strategy": "manual",
+                            "targets": ["runtime"],
+                            "notes": ["external"],
+                            "unknown_runtime_fact": True,
+                        }
+                    ]
+                }
+            ),
+            "unknown_runtime_fact",
+        ),
+    ],
+)
+def test_loader_rejects_unknown_target_fact_fields(mutate, field_name: str) -> None:
+    data = _valid_data()
+    mutate(data)
+
+    with pytest.raises(SpecLoaderError, match=rf"unknown field: {field_name}"):
+        load_registry_from_data(data)
+
+
+def test_loader_rejects_unknown_json_hook_fields() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
+        {
+            "kind": "json_hooks",
+            "root": "home",
+            "relative": ".mini/settings.json",
+            "schema_name": "mini_settings",
+            "hooks": [
+                {
+                    "event": "PreToolUse",
+                    "matcher": "Bash",
+                    "required_fragments": ["graphify"],
+                    "unknown_hook_fact": True,
+                }
+            ],
+        }
+    ]
+
+    with pytest.raises(SpecLoaderError, match=r"unknown field: unknown_hook_fact"):
+        load_registry_from_data(data)
+
+
+def test_loader_rejects_unknown_json_plugin_fields() -> None:
+    data = _valid_data()
+    data["platforms"]["mini"]["scopes"]["user"]["effects"] = [
+        {
+            "kind": "file",
+            "root": "home",
+            "relative": ".mini/plugins/graphify.js",
+        },
+        {
+            "kind": "json_plugin",
+            "root": "home",
+            "relative": ".mini/config.json",
+            "schema_name": "mini_config",
+            "unknown_plugin_fact": True,
+        },
+    ]
+
+    with pytest.raises(SpecLoaderError, match=r"unknown field: unknown_plugin_fact"):
+        load_registry_from_data(data)

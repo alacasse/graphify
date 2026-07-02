@@ -18,9 +18,20 @@ from ..surfaces.install_surface_models import (
     TextSectionEffect,
 )
 from ..targets.install_target_models import GRAPHIFY_MARKER
+from .spec_schema_validation import SpecSchemaValidationError, reject_unknown_fields
 
 
 _EFFECT_KINDS = {"file", "skill", "text_section", "json_hooks", "json_plugin"}
+_EFFECT_COMMON_FIELDS = {"kind", "relative", "remove_on_uninstall", "root"}
+_EFFECT_FIELDS_BY_KIND = {
+    "file": _EFFECT_COMMON_FIELDS,
+    "skill": _EFFECT_COMMON_FIELDS,
+    "text_section": _EFFECT_COMMON_FIELDS
+    | {"marker", "preserve_user_content", "repair_stale_graphify_section"},
+    "json_hooks": _EFFECT_COMMON_FIELDS | {"hooks", "schema_name"},
+    "json_plugin": _EFFECT_COMMON_FIELDS | {"allow_file_uri", "plugin_relative", "schema_name"},
+}
+_JSON_HOOK_FIELDS = {"detail_name", "event", "matcher", "required_fragments"}
 _USER_OWNED_TEXT_SECTION_RELATIVES = {
     "AGENTS.md",
     "CLAUDE.md",
@@ -43,6 +54,13 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         _fail(context, "expected mapping")
     return value
+
+
+def _reject_unknown_fields(data: Mapping[str, object], allowed: set[str], context: str) -> None:
+    try:
+        reject_unknown_fields(data, allowed, context)
+    except SpecSchemaValidationError as exc:
+        raise SpecInstallSurfaceError(str(exc)) from exc
 
 
 def _sequence(value: object, context: str) -> list[Any]:
@@ -125,6 +143,7 @@ def _json_hooks(effect: Mapping[str, Any], context: str) -> tuple[JsonHookExpect
     parsed: list[JsonHookExpectation] = []
     for index, hook_value in enumerate(hooks):
         hook = _mapping(hook_value, f"{context}.hooks[{index}]")
+        _reject_unknown_fields(hook, _JSON_HOOK_FIELDS, f"{context}.hooks[{index}]")
         fragments = hook.get("required_fragments", ["graphify"])
         parsed.append(
             JsonHookExpectation(
@@ -189,6 +208,7 @@ def _install_surface(effect_value: object, context: str, *, effect_values: list[
     effect = _mapping(effect_value, context)
     root, relative, declared_remove_on_uninstall = _effect_common(effect, context)
     kind = _effect_kind(effect, relative, context)
+    _reject_unknown_fields(effect, _EFFECT_FIELDS_BY_KIND[kind], context)
 
     if kind == "skill":
         path = SkillEffect(root, relative, remove_on_uninstall=declared_remove_on_uninstall)

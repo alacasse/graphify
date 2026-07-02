@@ -18,10 +18,54 @@ from ..targets.install_target_models import (
     TargetRuntimeValidationSpec,
 )
 from ..targets.install_target_scenarios import _scenario
+from .spec_schema_validation import SpecSchemaValidationError, reject_unknown_fields
 from .spec_install_surfaces import SpecInstallSurfaceError, derive_scope_install_surfaces
 
 
 _SCOPE_NAMES = {"user", "project"}
+_TARGET_FIELDS = {
+    "display_name",
+    "name",
+    "project_skill",
+    "reference_bundles",
+    "scopes",
+    "simulated_linux_layout",
+    "target_kind",
+    "target_runtime_validation",
+    "universal_uninstall_scopes",
+    "unsupported_scopes",
+    "user_skill",
+    "uses_packaged_references",
+}
+_SCOPE_FIELDS = {
+    "allowed_roots",
+    "cwd_root",
+    "effects",
+    "equivalent_install_command",
+    "expected",
+    "generated_file_expectation",
+    "install_command",
+    "install_variants",
+    "risk_notes",
+    "uninstall_command",
+}
+_INSTALL_VARIANT_FIELDS = {"command", "label"}
+_GENERATED_FILE_EXPECTATION_FIELDS = {
+    "content_markers",
+    "include_user_content_sentinel",
+    "max_text_bytes",
+    "relative_substrings",
+    "text_suffixes",
+}
+_REFERENCE_BUNDLE_FIELDS = {"name", "required_package_relative"}
+_TARGET_RUNTIME_VALIDATION_FIELDS = {
+    "evidence_path",
+    "notes",
+    "section_title",
+    "status",
+    "strategy",
+    "targets",
+}
 _WIDENED_SCOPE_ROOTS = ("home", "project", "user_cwd")
 _KNOWN_SCOPE_RISK_NOTES = {
     PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE,
@@ -43,6 +87,13 @@ def _mapping(value: object, context: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         _fail(context, "expected mapping")
     return value
+
+
+def _reject_unknown_fields(data: Mapping[str, object], allowed: set[str], context: str) -> None:
+    try:
+        reject_unknown_fields(data, allowed, context)
+    except SpecSchemaValidationError as exc:
+        raise SpecTargetFactError(str(exc)) from exc
 
 
 def _sequence(value: object, context: str) -> list[Any]:
@@ -97,6 +148,7 @@ def _install_variants(value: object, context: str) -> tuple[InstallCommandVarian
     parsed: list[InstallCommandVariant] = []
     for index, variant_value in enumerate(variants):
         variant = _mapping(variant_value, f"{context}[{index}]")
+        _reject_unknown_fields(variant, _INSTALL_VARIANT_FIELDS, f"{context}[{index}]")
         label = _string(variant.get("label"), f"{context}[{index}].label")
         if label in labels:
             _fail(f"{context}[{index}].label", f"duplicate install variant label: {label}")
@@ -107,6 +159,7 @@ def _install_variants(value: object, context: str) -> tuple[InstallCommandVarian
 
 def _generated_file_expectation(value: object, context: str) -> GeneratedFileExpectation:
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _GENERATED_FILE_EXPECTATION_FIELDS, context)
     return GeneratedFileExpectation(
         relative_substrings=_string_list(data.get("relative_substrings", ["graphify"]), f"{context}.relative_substrings"),
         text_suffixes=_string_list(data.get("text_suffixes", [".json", ".js", ".md", ".mdc", ".txt", ""]), f"{context}.text_suffixes"),
@@ -160,6 +213,7 @@ def _direct_project_install_command(platform_name: str) -> tuple[str, ...]:
 
 def _scope_spec(platform_name: str, scope_name: str, value: object, context: str, *, simulated_linux_layout: bool) -> ScopeSpec:
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _SCOPE_FIELDS, context)
     if scope_name not in _SCOPE_NAMES:
         _fail(context, f"invalid platform scope: {scope_name}")
     try:
@@ -235,6 +289,7 @@ def _reference_bundle(value: object, context: str) -> ReferenceBundle:
     if isinstance(value, str):
         return ReferenceBundle(value)
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _REFERENCE_BUNDLE_FIELDS, context)
     required = data.get("required_package_relative")
     return ReferenceBundle(
         _string(data.get("name"), f"{context}.name"),
@@ -244,6 +299,7 @@ def _reference_bundle(value: object, context: str) -> ReferenceBundle:
 
 def _runtime_validation(value: object, context: str) -> TargetRuntimeValidationSpec:
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _TARGET_RUNTIME_VALIDATION_FIELDS, context)
     evidence = data.get("evidence_path")
     return TargetRuntimeValidationSpec(
         section_title=_string(data.get("section_title"), f"{context}.section_title"),
@@ -264,6 +320,7 @@ def _platform_runtime_validations(data: Mapping[str, Any], context: str) -> tupl
 
 def target_spec(platform_key: str, value: object, context: str) -> InstallTargetSpec:
     data = _mapping(value, context)
+    _reject_unknown_fields(data, _TARGET_FIELDS, context)
     name = platform_key
     if "name" in data:
         name = _string(data.get("name"), f"{context}.name")

@@ -14,9 +14,12 @@ SCHEMA_CLASS_HARNESS_POLICY_INPUT = "harness_policy_input"
 SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY = "public_schema_compatibility"
 SCHEMA_CLASS_PUBLIC_PRODUCT_CONTRACT = "public_product_contract"
 
+CURRENT_REGISTRY_CONTAINER_FIELD = "targets"
+LEGACY_REGISTRY_CONTAINER_FIELD = "platforms"
+
 PUBLIC_SCHEMA_COMPATIBILITY_FIELDS = frozenset(
     {
-        "platforms",
+        LEGACY_REGISTRY_CONTAINER_FIELD,
         "eligible_platform_scope",
     }
 )

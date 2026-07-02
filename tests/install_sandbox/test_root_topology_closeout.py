@@ -153,9 +153,14 @@ def test_root_topology_closeout_guards_target_owner_parameter_vocabulary() -> No
 def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> None:
     models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
     harness_policy = importlib.import_module("tools.install_sandbox.targets.install_target_harness_policy")
+    spec_loader = importlib.import_module("tools.install_sandbox.registry.spec_loader")
     spec_inputs = importlib.import_module("tools.install_sandbox.registry.spec_harness_policy_inputs")
     schema_validation = importlib.import_module("tools.install_sandbox.registry.spec_schema_validation")
 
+    assert spec_loader.CURRENT_REGISTRY_CONTAINER_FIELD == "targets"
+    assert spec_loader.LEGACY_REGISTRY_CONTAINER_FIELD == "platforms"
+    assert spec_loader.CURRENT_REGISTRY_CONTAINER_FIELD == schema_validation.CURRENT_REGISTRY_CONTAINER_FIELD
+    assert spec_loader.LEGACY_REGISTRY_CONTAINER_FIELD == schema_validation.LEGACY_REGISTRY_CONTAINER_FIELD
     assert spec_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_platform_scope"] == (
         schema_validation.SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY
     )

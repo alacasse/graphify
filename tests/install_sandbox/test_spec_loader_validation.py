@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from tests.install_sandbox.install_target_test_support import (
@@ -10,6 +12,8 @@ from tools.install_sandbox import validation_plan
 from tools.install_sandbox.sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from tools.install_sandbox.registry import spec_harness_policy_inputs, spec_loader, spec_target_facts
 from tools.install_sandbox.registry.spec_schema_validation import (
+    CURRENT_REGISTRY_CONTAINER_FIELD,
+    LEGACY_REGISTRY_CONTAINER_FIELD,
     PUBLIC_SCHEMA_COMPATIBILITY_FIELDS,
     SCHEMA_CLASS_HARNESS_POLICY_INPUT,
     SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY,
@@ -18,6 +22,12 @@ from tools.install_sandbox.registry.spec_schema_validation import (
     SCHEMA_CLASS_TRANSITIONAL_PLANNING,
 )
 from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_registry_from_data
+
+
+def _target_container_data() -> dict[str, object]:
+    data = copy.deepcopy(_valid_data())
+    data[CURRENT_REGISTRY_CONTAINER_FIELD] = data.pop(LEGACY_REGISTRY_CONTAINER_FIELD)
+    return data
 
 
 def test_loader_root_validation_uses_install_surface_root_vocabulary() -> None:
@@ -140,6 +150,52 @@ def test_loader_rejects_unknown_expected_root() -> None:
     data["platforms"]["mini"]["scopes"]["user"]["effects"][0]["root"] = "repo_mount"
 
     _expect_invalid(data, "unknown expected root")
+
+
+def test_loader_accepts_target_named_registry_container_equivalent_to_legacy_input() -> None:
+    current_registry = load_registry_from_data(_target_container_data())
+    legacy_registry = load_registry_from_data(_valid_data())
+
+    assert current_registry.target_names == legacy_registry.target_names == ["mini"]
+    assert current_registry.make_scenario("mini", "project") == legacy_registry.make_scenario("mini", "project")
+    assert current_registry.universal_uninstall_specs == legacy_registry.universal_uninstall_specs
+    assert current_registry.disposable_artifact_specs == legacy_registry.disposable_artifact_specs
+
+
+def test_loader_rejects_ambiguous_current_and_legacy_registry_containers() -> None:
+    data = _target_container_data()
+    data[LEGACY_REGISTRY_CONTAINER_FIELD] = copy.deepcopy(data[CURRENT_REGISTRY_CONTAINER_FIELD])
+    expected_error = (
+        rf"<data>: declares both {CURRENT_REGISTRY_CONTAINER_FIELD} and legacy {LEGACY_REGISTRY_CONTAINER_FIELD}"
+    )
+
+    with pytest.raises(SpecLoaderError, match=expected_error):
+        load_registry_from_data(data)
+
+
+def test_directory_loading_uses_current_container_without_renaming_target_files(monkeypatch, tmp_path) -> None:
+    (tmp_path / "mini.yaml").write_text("name: mini\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_load_yaml_data(path):
+        return {"name": path.stem}
+
+    def fake_load_registry_from_data(data, *, source="<data>"):
+        captured["source"] = source
+        captured["data"] = data
+        return "loaded"
+
+    monkeypatch.setattr(spec_loader, "_load_yaml_data", fake_load_yaml_data)
+    monkeypatch.setattr(spec_loader, "load_registry_from_data", fake_load_registry_from_data)
+
+    loaded = spec_loader.load_registry_from_dir(tmp_path)
+
+    assert loaded == "loaded"
+    assert captured["source"] == str(tmp_path)
+    assert captured["data"] == {
+        "schema_version": 1,
+        CURRENT_REGISTRY_CONTAINER_FIELD: {"mini": {"name": "mini"}},
+    }
 
 
 def test_loader_rejects_non_surface_root_for_disposable_path_root() -> None:
@@ -357,6 +413,8 @@ def test_loader_rejects_unknown_harness_policy_input_fields(mutate, field_name: 
 
 
 def test_schema_field_classification_is_visible_at_registry_owners() -> None:
+    assert spec_loader.CURRENT_REGISTRY_CONTAINER_FIELD == "targets"
+    assert spec_loader.LEGACY_REGISTRY_CONTAINER_FIELD == "platforms"
     assert spec_target_facts.TARGET_FIELD_CLASSIFICATIONS["user_skill"] == SCHEMA_CLASS_TARGET_FACT
     assert spec_target_facts.TARGET_FIELD_CLASSIFICATIONS["project_skill"] == SCHEMA_CLASS_TARGET_FACT
     assert spec_target_facts.TARGET_FIELD_CLASSIFICATIONS["universal_uninstall_scopes"] == SCHEMA_CLASS_TRANSITIONAL_PLANNING
@@ -372,4 +430,4 @@ def test_schema_field_classification_is_visible_at_registry_owners() -> None:
         spec_harness_policy_inputs.DISPOSABLE_ARTIFACT_FIELD_CLASSIFICATIONS["scope_eligibility"]
         == SCHEMA_CLASS_HARNESS_POLICY_INPUT
     )
-    assert PUBLIC_SCHEMA_COMPATIBILITY_FIELDS >= {"platforms", "eligible_platform_scope"}
+    assert PUBLIC_SCHEMA_COMPATIBILITY_FIELDS >= {LEGACY_REGISTRY_CONTAINER_FIELD, "eligible_platform_scope"}

@@ -148,6 +148,7 @@ class HookFactory:
         self.command_artifact_dirs: list[Path] = []
         self.captured_artifact_dirs: list[Path] = []
         self.command_records: list[dict[str, object]] = []
+        self._command_record_call_indices: list[int] = []
         self.manifest_records: list[dict[str, object]] = []
         self.seeded_sidecars: list[dict[str, object]] = []
         self.universal_check_ok = True
@@ -170,14 +171,12 @@ class HookFactory:
 
     def command_record_index(self, artifact_subdir: str) -> int:
         scenario_root = self.output / "scenarios" / "codex-project"
-        for record in self.command_records:
+        for index, record in enumerate(self.command_records):
             artifact_dir = record["artifact_dir"]
             assert isinstance(artifact_dir, Path)
             subdir = "." if artifact_dir == scenario_root else str(artifact_dir.relative_to(scenario_root))
             if subdir == artifact_subdir:
-                call_index = record["call_index"]
-                assert isinstance(call_index, int)
-                return call_index
+                return self._command_record_call_indices[index]
         raise AssertionError(f"missing command record for artifact subdir: {artifact_subdir}")
 
     def completed(self, command, returncode: int) -> subprocess.CompletedProcess[str]:
@@ -200,9 +199,9 @@ class HookFactory:
                 "artifact_dir": None if artifact_dir is None else Path(artifact_dir),
                 "command_class": command_class,
                 "timeout_seconds": timeout_seconds,
-                "call_index": call_index,
             }
         )
+        self._command_record_call_indices.append(call_index)
         returncode = self.command_results.pop(0) if self.command_results else 0
         return self.completed(command_tuple, returncode)
 

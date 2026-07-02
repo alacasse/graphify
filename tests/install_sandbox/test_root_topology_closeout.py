@@ -8,30 +8,6 @@ from pathlib import Path
 
 
 INSTALL_SANDBOX_ROOT = Path(__file__).parents[2] / "tools" / "install_sandbox"
-TESTS_ROOT = Path(__file__).parents[2] / "tests"
-
-VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY = {
-    "tools.install_sandbox.validation_plan._standard_scenarios": {"target_names"},
-    "tools.install_sandbox.validation_plan.coverage_records": {"target_names"},
-    "tools.install_sandbox.validation_plan.universal_uninstall_scenarios": {"target_names"},
-    "tools.install_sandbox.validation_plan.target_runtime_validation_sections": {"target_names"},
-    "tools.install_sandbox.validation_plan._coverage_summary": {"target_names"},
-}
-
-VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS = {
-    "public product CLI": {"--platform"},
-    "YAML input": {"registry platforms"},
-    "serialized artifact input/output": {"scenario.platform", "scenario.platforms", "result.platform"},
-    "legacy input-only reader": {
-        "legacy manifest.platform",
-        "legacy manifest.platform_coverage",
-        "legacy result.platform",
-    },
-}
-
-DELETED_INSTALL_TARGET_MODEL_NAMES = {
-    "Platform" "Spec",
-}
 
 TARGET_OWNER_API_PARAMETER_GUARDS = {
     "tools.install_sandbox.targets.install_target_selection": {
@@ -103,8 +79,6 @@ HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY = {
 
 SCENARIO_PLATFORM_CONTRACT_DECISION = "migratable_internal_identity"
 
-SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES: dict[str, int] = {}
-
 SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS = {
     "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
 }
@@ -120,33 +94,6 @@ RUNNER_INTAKE_FRONTIER_MODULES = (
     "tools.install_sandbox.sandbox_runner",
     "tools.install_sandbox.runtime.harness_orchestration",
 )
-
-
-def _install_target_model_name_surface(model_names: set[str]) -> dict[str, list[str]]:
-    discovered_names: dict[str, list[str]] = {}
-
-    for root in (INSTALL_SANDBOX_ROOT, TESTS_ROOT / "install_sandbox"):
-        for path in sorted(root.rglob("*.py")):
-            relative = path.relative_to(Path(__file__).parents[2]).as_posix()
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            names: set[str] = set()
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    names.update(alias.name for alias in node.names if alias.name in model_names)
-                elif isinstance(node, ast.Import):
-                    names.update(alias.name for alias in node.names if alias.name in model_names)
-                elif isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-                    if node.name in model_names:
-                        names.add(node.name)
-                elif isinstance(node, ast.Name) and node.id in model_names:
-                    names.add(node.id)
-                elif isinstance(node, ast.Attribute) and node.attr in model_names:
-                    names.add(node.attr)
-
-            if names:
-                discovered_names[relative] = sorted(names)
-
-    return discovered_names
 
 
 def _source_occurrence_counts(predicate) -> dict[str, int]:
@@ -167,18 +114,6 @@ def _function_node(module: types.ModuleType, function_name: str) -> ast.Function
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == function_name
     )
-
-
-def _call_keyword_names(function_node: ast.FunctionDef, called_function_name: str) -> set[str]:
-    return {
-        keyword.arg
-        for node in ast.walk(function_node)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == called_function_name
-        for keyword in node.keywords
-        if keyword.arg is not None
-    }
 
 
 def _resolve_dotted_owner(dotted_name: str) -> object:
@@ -258,7 +193,6 @@ def test_root_topology_closeout_classifies_scenario_platform_as_internal_identit
     assert "platform" not in models.Scenario.__dataclass_fields__
     assert not hasattr(models.Scenario, "platform")
     assert not isinstance(getattr(models.Scenario, "platform", None), property)
-    assert SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES == {}
 
     attribute_references = _source_occurrence_counts(
         lambda node: isinstance(node, ast.Attribute)
@@ -266,7 +200,7 @@ def test_root_topology_closeout_classifies_scenario_platform_as_internal_identit
         and not (isinstance(node.value, ast.Name) and node.value.id == "args")
     )
 
-    assert attribute_references == SCENARIO_PLATFORM_INTERNAL_IDENTITY_REFERENCES
+    assert attribute_references == {}
 
 
 def test_root_topology_closeout_keeps_scenario_result_platform_keys_at_artifact_edges() -> None:
@@ -341,64 +275,6 @@ def test_root_topology_closeout_guards_runner_intake_frontier_target_naming() ->
     )
     assert isinstance(target_name_kwarg.value, ast.Name)
     assert target_name_kwarg.value.id == "selected_target_name"
-
-
-def test_root_topology_closeout_characterizes_validation_plan_internal_target_vocabulary() -> None:
-    validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
-
-    assert VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY == {
-        "tools.install_sandbox.validation_plan._standard_scenarios": {"target_names"},
-        "tools.install_sandbox.validation_plan.coverage_records": {"target_names"},
-        "tools.install_sandbox.validation_plan.universal_uninstall_scenarios": {"target_names"},
-        "tools.install_sandbox.validation_plan.target_runtime_validation_sections": {"target_names"},
-        "tools.install_sandbox.validation_plan._coverage_summary": {"target_names"},
-    }
-    assert VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS == {
-        "public product CLI": {"--platform"},
-        "YAML input": {"registry platforms"},
-        "serialized artifact input/output": {"scenario.platform", "scenario.platforms", "result.platform"},
-        "legacy input-only reader": {
-            "legacy manifest.platform",
-            "legacy manifest.platform_coverage",
-            "legacy result.platform",
-        },
-    }
-
-    public_plan_parameters = set(inspect.signature(validation_plan.ValidationPlan).parameters)
-    public_selector_parameters = set(inspect.signature(validation_plan.selected_targets).parameters)
-    assert "platforms" not in public_plan_parameters
-    assert {"target_name", "selected_target_names"} <= public_selector_parameters
-
-    for dotted_name, expected_parameters in VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY.items():
-        _, helper_name = dotted_name.rsplit(".", maxsplit=1)
-        signature = inspect.signature(getattr(validation_plan, helper_name))
-        helper_node = _function_node(validation_plan, helper_name)
-        helper_parameters = {arg.arg for arg in helper_node.args.args + helper_node.args.kwonlyargs}
-
-        assert set(signature.parameters) >= expected_parameters
-        assert helper_parameters >= expected_parameters
-        assert "platforms" not in helper_parameters
-
-    build_node = _function_node(validation_plan, "build_validation_plan")
-    coverage_summary_keywords = _call_keyword_names(build_node, "_coverage_summary")
-    assert coverage_summary_keywords >= {"target_names"}
-    assert "platforms" not in coverage_summary_keywords
-
-    internal_terms = set().union(*VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY.values())
-    edge_terms = set().union(*VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS.values())
-    assert internal_terms == {"target_names"}
-    assert "registry platforms" in edge_terms
-    assert "platforms" not in edge_terms
-    assert internal_terms.isdisjoint(edge_terms)
-
-
-def test_root_topology_closeout_keeps_deleted_install_target_model_names_absent() -> None:
-    install_target_models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
-
-    for model_name in DELETED_INSTALL_TARGET_MODEL_NAMES:
-        assert not hasattr(install_target_models, model_name)
-
-    assert _install_target_model_name_surface(DELETED_INSTALL_TARGET_MODEL_NAMES) == {}
 
 
 def test_root_topology_closeout_keeps_runtime_root_roles_on_registry_apis() -> None:

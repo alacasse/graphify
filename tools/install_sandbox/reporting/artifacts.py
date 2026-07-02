@@ -100,6 +100,12 @@ def command_artifact_summary(artifact_dir: Path, *, output_root: Path) -> dict[s
     }
 
 
+def artifact_target(record: dict[str, Any]) -> Any:
+    if "target" in record:
+        return record.get("target")
+    return record.get("platform")
+
+
 def failed_checks(output_dir: Path, scenario_id: str, *, limit: int) -> list[dict[str, Any]]:
     assertions_path = output_dir / "scenarios" / scenario_id / "assertions.json"
     assertions = load_json_object(assertions_path)
@@ -129,7 +135,7 @@ def failure_summary(item: dict[str, Any], *, output_dir: Path, max_checks: int) 
     checks = failed_checks(output_dir, scenario_id, limit=max_checks) if scenario_id else []
     failure: dict[str, Any] = {
         "scenario": scenario_id,
-        "target": item.get("target") or item.get("platform"),
+        "target": artifact_target(item),
         "scope": item.get("scope"),
         "reproduce": item.get("reproduction_command") or artifact.get("command"),
         "exit": artifact.get("exit_code"),

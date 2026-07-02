@@ -77,16 +77,11 @@ HARNESS_POLICY_FRONTIER_EDGE_VOCABULARY = {
     "platforms": "public YAML edge",
 }
 
-SCENARIO_PLATFORM_CONTRACT_DECISION = "migratable_internal_identity"
-
-SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS = {
-    "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
-}
+SCENARIO_PLATFORM_CONTRACT_DECISION = "migrated_internal_artifact_identity"
 
 LEGACY_PLATFORM_INPUT_ONLY_READERS = {
     "tools/install_sandbox/reporting/artifacts.py": 1,
     "tools/install_sandbox/reporting/manifest_projection.py": 1,
-    "tools/install_sandbox/reporting/reports.py": 2,
 }
 
 RUNNER_INTAKE_FRONTIER_MODULES = (
@@ -114,6 +109,28 @@ def _function_node(module: types.ModuleType, function_name: str) -> ast.Function
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == function_name
     )
+
+
+def _class_method_node(module: types.ModuleType, class_name: str, method_name: str) -> ast.FunctionDef:
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    class_node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == class_name
+    )
+    return next(
+        node
+        for node in class_node.body
+        if isinstance(node, ast.FunctionDef) and node.name == method_name
+    )
+
+
+def _constant_values(node: ast.AST) -> set[object]:
+    return {
+        child.value
+        for child in ast.walk(node)
+        if isinstance(child, ast.Constant)
+    }
 
 
 def _resolve_dotted_owner(dotted_name: str) -> object:
@@ -188,7 +205,7 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
 def test_root_topology_closeout_classifies_scenario_platform_as_internal_identity() -> None:
     models = importlib.import_module("tools.install_sandbox.targets.install_target_models")
 
-    assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migratable_internal_identity"
+    assert SCENARIO_PLATFORM_CONTRACT_DECISION == "migrated_internal_artifact_identity"
     assert "target_name" in models.Scenario.__dataclass_fields__
     assert "platform" not in models.Scenario.__dataclass_fields__
     assert not hasattr(models.Scenario, "platform")
@@ -203,24 +220,34 @@ def test_root_topology_closeout_classifies_scenario_platform_as_internal_identit
     assert attribute_references == {}
 
 
-def test_root_topology_closeout_keeps_scenario_result_platform_keys_at_artifact_edges() -> None:
-    assert SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS == {
-        "tools/install_sandbox/lifecycle/scenario_lifecycle_support.py": 3,
-    }
+def test_root_topology_closeout_classifies_generated_artifact_vocabulary_separately_from_legacy_input() -> None:
     assert LEGACY_PLATFORM_INPUT_ONLY_READERS == {
         "tools/install_sandbox/reporting/artifacts.py": 1,
         "tools/install_sandbox/reporting/manifest_projection.py": 1,
-        "tools/install_sandbox/reporting/reports.py": 2,
     }
+
+    lifecycle_support = importlib.import_module("tools.install_sandbox.lifecycle.scenario_lifecycle_support")
+    result_record_constants = _constant_values(_class_method_node(lifecycle_support, "ScenarioArtifacts", "result_record"))
+    standard_assertion_constants = _constant_values(_class_method_node(lifecycle_support, "StandardScenarioOutcome", "assertions"))
+    universal_assertion_constants = _constant_values(_class_method_node(lifecycle_support, "UniversalUninstallOutcome", "assertions"))
+    disposable_assertion_constants = _constant_values(_class_method_node(lifecycle_support, "DisposableArtifactOutcome", "assertions"))
+
+    assert "target" in result_record_constants
+    assert "target" in standard_assertion_constants
+    assert "targets" in universal_assertion_constants
+    assert "target" in disposable_assertion_constants
+    assert "platform" not in (
+        result_record_constants
+        | standard_assertion_constants
+        | universal_assertion_constants
+        | disposable_assertion_constants
+    )
 
     literal_platform_keys = _source_occurrence_counts(
         lambda node: isinstance(node, ast.Constant) and node.value == "platform"
     )
 
-    assert literal_platform_keys == {
-        **SCENARIO_PLATFORM_SERIALIZED_ARTIFACT_KEYS,
-        **LEGACY_PLATFORM_INPUT_ONLY_READERS,
-    }
+    assert literal_platform_keys == LEGACY_PLATFORM_INPUT_ONLY_READERS
 
 
 def test_root_topology_closeout_guards_runner_intake_frontier_target_naming() -> None:

@@ -5,7 +5,7 @@ import shlex
 from pathlib import Path
 from typing import Iterable, cast
 
-from .artifacts import artifact_relpath, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
+from .artifacts import artifact_relpath, artifact_target, command_artifact_summary as summarize_command_artifact, file_text_snippet, read_json_object
 from .status import RISK_GRAPHIFY_FAILED, RISK_GRAPHIFY_VERIFIED, known_status_values
 
 
@@ -117,7 +117,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
         transcript = command_artifact.get("transcript_path") or item.get("transcript_path") or ""
         scenario_rows.append(
             (
-                item.get("target") or item.get("platform"),
+                artifact_target(item),
                 item.get("scope"),
                 item.get("id"),
                 graphify_status,
@@ -133,7 +133,7 @@ def render_report_md(manifest: dict[str, object]) -> str:
     for record in coverage:
         command = record.get("install_command")
         command_text = shlex.join([str(part) for part in command]) if isinstance(command, list) else record.get("reason", "")
-        coverage_rows.append((record.get("target") or record.get("platform"), record.get("scope"), record.get("status"), command_text))
+        coverage_rows.append((artifact_target(record), record.get("scope"), record.get("status"), command_text))
     lines.extend(md_table(["Target", "Scope", "Coverage", "Graphify Installer Command"], coverage_rows))
 
     lines.extend(["", "## Target Runtime Verification", "", "- Not performed by this sandbox. The report validates Graphify-owned installer file effects only."])

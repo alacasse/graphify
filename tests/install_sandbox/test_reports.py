@@ -112,6 +112,8 @@ def test_reporting_artifacts_characterize_primitive_artifact_contract(tmp_path: 
     assert artifacts.normalized_text_snippet("abcdefghij", limit=8) == "abcde..."
     assert artifacts.tail_file(artifact_dir / "tail.txt", limit=4) == "6789"
     assert artifacts.tail_file(artifact_dir / "missing-tail.txt") == ""
+    assert artifacts.artifact_target({"target": "codex", "platform": "stale-platform-alias"}) == "codex"
+    assert artifacts.artifact_target({"platform": "legacy"}) == "legacy"
     assert artifacts.failed_checks(output, "codex-project", limit=2) == [
         {"path": "AGENTS.md", "detail": "missing Graphify block", "root": "project"},
         {"path": "home/.codex/AGENTS.md", "detail": "missing local block", "root": "home"},

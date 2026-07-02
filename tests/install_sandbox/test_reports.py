@@ -14,6 +14,7 @@ from tools.install_sandbox.reporting import status as reporting_status
 from tests.install_sandbox.reporting_vocabulary_test_support import (
     current_generated_report_manifest,
     legacy_platform_coverage_input_only_manifest,
+    manifest_projection_plan_data,
 )
 
 
@@ -352,9 +353,9 @@ def test_manifest_projection_plan_interface_names_reporting_inputs() -> None:
 
 
 def test_validation_plan_manifest_projection_returns_manifest_primitives() -> None:
-    class Plan:
-        standard_validation_count = 1
-        coverage_records = (
+    plan = manifest_projection_plan_data(
+        standard_validation_count=1,
+        coverage_records=(
             {
                 "target": "codex",
                 "platform": "stale-record-alias",
@@ -362,22 +363,24 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
                 "status": "runnable",
                 "install_command": ["graphify", "install", "--platform", "codex"],
             },
-        )
-        target_runtime_validation_sections = ({"section_title": "Projected Runtime", "status": "declared"},)
-        target_coverage_summary = {
+        ),
+        target_runtime_validation_sections=({"section_title": "Projected Runtime", "status": "declared"},),
+        target_coverage_summary={
             "registered_target_count": 1,
             "requested_scope": "project",
             "runnable_scope_count": 1,
             "universal_scenario_count": 0,
             "unsupported_scope_count": 0,
-        }
-        target_runtime_verification = {"performed": False, "reason": "file effects only"}
-
-        platform_coverage = ({"platform": "legacy-alias", "status": "must-not-project"},)
-        runtime_limitation_sections = ({"section_title": "Legacy Alias", "status": "must-not-project"},)
+        },
+        target_runtime_verification={"performed": False, "reason": "file effects only"},
+        ignored_alias_attributes={
+            "platform_coverage": ({"platform": "legacy-alias", "status": "must-not-project"},),
+            "runtime_limitation_sections": ({"section_title": "Legacy Alias", "status": "must-not-project"},),
+        },
+    )
 
     projected = manifest_projection.validation_plan_manifest_projection(
-        Plan(),
+        plan,
         [
             {"id": "codex-project", "passed": True},
             {"id": "universal-cleanup", "passed": True},
@@ -409,7 +412,7 @@ def test_validation_plan_manifest_projection_returns_manifest_primitives() -> No
 
 
 def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> None:
-    class Plan:
+    class ProjectionCollaboratorPlan:
         standard_validation_count = 1
 
     projection_calls: list[tuple[object, int]] = []
@@ -426,7 +429,7 @@ def test_harness_run_result_uses_reporting_manifest_projection(monkeypatch) -> N
         }
 
     monkeypatch.setattr(harness_run.manifest_projection, "validation_plan_manifest_projection", project_plan)
-    plan = Plan()
+    plan = ProjectionCollaboratorPlan()
     run_result = harness_run.harness_run_result(
         harness_version="test-harness",
         python_version="3.12 synthetic",

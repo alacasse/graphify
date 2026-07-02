@@ -1,6 +1,33 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import SimpleNamespace
+
 from tools.install_sandbox.reporting import reports
+
+
+def manifest_projection_plan_data(
+    *,
+    standard_validation_count: int = 0,
+    coverage_records: tuple[dict[str, object], ...] = (),
+    target_runtime_validation_sections: tuple[dict[str, object], ...] = (),
+    target_coverage_summary: dict[str, object] | None = None,
+    target_runtime_verification: dict[str, object] | None = None,
+    ignored_alias_attributes: Mapping[str, object] | None = None,
+) -> SimpleNamespace:
+    """Attribute-only plan data for manifest projection tests.
+
+    Keep behavior-bearing doubles inline in the test that owns the behavior.
+    """
+    attributes: dict[str, object] = {
+        "standard_validation_count": standard_validation_count,
+        "coverage_records": coverage_records,
+        "target_runtime_validation_sections": target_runtime_validation_sections,
+        "target_coverage_summary": target_coverage_summary or {},
+        "target_runtime_verification": target_runtime_verification or {},
+    }
+    attributes.update(ignored_alias_attributes or {})
+    return SimpleNamespace(**attributes)
 
 
 def current_generated_report_manifest() -> dict[str, object]:

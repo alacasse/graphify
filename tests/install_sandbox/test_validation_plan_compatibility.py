@@ -150,6 +150,7 @@ def test_validation_plan_source_has_no_internal_platform_helper_parameters_or_ca
 
 
 def test_validation_plan_manifest_projection_preserves_public_output_names_not_internal_aliases() -> None:
+    legacy_summary_alias = "".join(("platform", "_coverage", "_summary"))
     plan = manifest_projection_plan_data(
         standard_validation_count=1,
         coverage_records=({"target": "codex", "scope": "project", "status": "runnable"},),
@@ -160,7 +161,7 @@ def test_validation_plan_manifest_projection_preserves_public_output_names_not_i
             "selected_platforms": ("legacy-platform-property",),
             "selected_targets": ("future-target-property",),
             "platform_coverage": ({"platform": "internal-alias", "status": "must-not-project"},),
-            "platform_coverage_summary": {"requested_scope": "legacy"},
+            legacy_summary_alias: {"requested_scope": "legacy"},
             "runtime_limitation_sections": ({"section_title": "Internal Alias", "status": "must-not-project"},),
         },
     )

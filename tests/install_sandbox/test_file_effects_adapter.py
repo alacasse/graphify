@@ -60,6 +60,78 @@ def scenario(platform: str, *expected: InstallSurface, scope: str = "project") -
     )
 
 
+class RecordingScenarioFileEffectsOracle:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    def packaged_reference_resolution(self, platform: str) -> PackagedReferenceResolution:
+        return resolution("intentionally_absent", detail="absent refs")
+
+    def seed_user_owned_content(self, scenario_arg: Scenario) -> None:
+        self.calls.append(("seed_user_owned_content", scenario_arg.target_name))
+
+    def scenario_file_state(self, scenario_arg: Scenario) -> dict[str, dict[str, object]]:
+        self.calls.append(("scenario_file_state", scenario_arg.target_name))
+        return {"state": {"exists": True}}
+
+    def assert_expected_files(self, scenario_arg: Scenario) -> list[dict[str, object]]:
+        self.calls.append(("assert_expected_files", scenario_arg.target_name))
+        return [{"path": "expected", "ok": True, "detail": "expected"}]
+
+    def assert_scope_boundaries(self, scenario_arg: Scenario) -> list[dict[str, object]]:
+        self.calls.append(("assert_scope_boundaries", scenario_arg.target_name))
+        return [{"path": "scope", "ok": True, "detail": "scope"}]
+
+    def assert_no_unexpected_graphify_files(
+        self,
+        scenario_arg: Scenario,
+        *,
+        phase: str,
+        expected_keys: set[tuple[str, str]] | None = None,
+    ) -> list[dict[str, object]]:
+        self.calls.append(("assert_no_unexpected_graphify_files", scenario_arg.target_name, phase, expected_keys))
+        return [{"path": "unexpected", "ok": True, "detail": f"none_after_{phase}"}]
+
+    def copy_generated_files(self, scenario_arg: Scenario, artifact_dir: Path) -> None:
+        self.calls.append(("copy_generated_files", scenario_arg.target_name, artifact_dir))
+
+    def seed_stale_skill_sidecars(self, scenario_arg: Scenario) -> list[dict[str, object]]:
+        self.calls.append(("seed_stale_skill_sidecars", scenario_arg.target_name))
+        return [{"path": "stale", "ok": True, "detail": "seeded_stale_reference_fragment"}]
+
+    def assert_installed_skill_sidecars(self, scenario_arg: Scenario) -> list[dict[str, object]]:
+        self.calls.append(("assert_installed_skill_sidecars", scenario_arg.target_name))
+        return [{"path": "sidecars", "ok": True, "detail": "sidecars"}]
+
+    def assert_uninstalled(self, scenario_arg: Scenario) -> list[dict[str, object]]:
+        self.calls.append(("assert_uninstalled", scenario_arg.target_name))
+        return [{"path": f"uninstalled-{scenario_arg.target_name}", "ok": True, "detail": "removed"}]
+
+
+class UniversalUninstallOrderOracle(RecordingScenarioFileEffectsOracle):
+    def assert_uninstalled(self, scenario_arg: Scenario) -> list[dict[str, object]]:
+        self.calls.append(("assert_uninstalled", scenario_arg.target_name))
+        if scenario_arg.target_name == "first":
+            return [
+                {"path": "first.md", "ok": True, "detail": "removed"},
+                {"path": "first-sidecar", "ok": True, "detail": "removed"},
+            ]
+        return [{"path": "second.md", "ok": True, "detail": "removed"}]
+
+    def assert_no_unexpected_graphify_files(
+        self,
+        scenario_arg: Scenario,
+        *,
+        phase: str,
+        expected_keys: set[tuple[str, str]] | None = None,
+    ) -> list[dict[str, object]]:
+        self.calls.append(("assert_no_unexpected_graphify_files", scenario_arg.target_name, phase, expected_keys))
+        return [
+            {"path": "leftover.md", "ok": False, "detail": "unexpected_graphify_related_file_after_universal_uninstall"},
+            {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
+        ]
+
+
 def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_uninstall_shapes(oracle, roots) -> None:
     def write_manifest(*args, **kwargs) -> None:
         raise AssertionError("not used")
@@ -125,37 +197,16 @@ def test_scenario_file_effects_adapter_preserves_repeat_install_and_universal_un
     ]
 
 
-def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(oracle) -> None:
-    class RecordingOracle(file_effect_oracle.FileEffectOracle):
-        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
-            super().__init__(
-                roots=wrapped.roots,
-                packaged_reference_resolution=wrapped.packaged_reference_resolution,
-                expected_graphify_version=wrapped.expected_graphify_version,
-                manifest_prune_dirs=wrapped.manifest_prune_dirs,
-            )
-
-        def assert_uninstalled(self, scenario_arg):
-            if scenario_arg.target_name == "first":
-                return [
-                    {"path": "first.md", "ok": True, "detail": "removed"},
-                    {"path": "first-sidecar", "ok": True, "detail": "removed"},
-                ]
-            return [{"path": "second.md", "ok": True, "detail": "removed"}]
-
-        def assert_no_unexpected_graphify_files(self, scenario_arg, *, phase, expected_keys=None):
-            return [
-                {"path": "leftover.md", "ok": False, "detail": "unexpected_graphify_related_file_after_universal_uninstall"},
-                {"path": "unexpected-graphify-files", "ok": True, "detail": "none_after_universal_uninstall"},
-            ]
-
+def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups() -> None:
     def write_manifest(*args, **kwargs) -> None:
         raise AssertionError("not used")
 
     def equivalence_check(scenario_arg, env, artifact_dir):
         raise AssertionError("not used")
 
-    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(RecordingOracle(oracle), write_manifest, equivalence_check)
+    adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(
+        UniversalUninstallOrderOracle(), write_manifest, equivalence_check
+    )
     runner = scenario("runner", ExpectedPath("project", "runner.md"))
     first = scenario("first", ExpectedPath("project", "first.md"))
     second = scenario("second", ExpectedPath("home", "second.md"))
@@ -175,51 +226,8 @@ def test_scenario_file_effects_adapter_orders_universal_uninstall_check_groups(o
     ]
 
 
-def test_scenario_file_effects_adapter_preserves_phase_result_shapes(oracle, roots, tmp_path) -> None:
+def test_scenario_file_effects_adapter_preserves_phase_result_shapes(roots, tmp_path) -> None:
     calls: list[tuple[object, ...]] = []
-
-    class RecordingOracle(file_effect_oracle.FileEffectOracle):
-        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
-            super().__init__(
-                roots=wrapped.roots,
-                packaged_reference_resolution=wrapped.packaged_reference_resolution,
-                expected_graphify_version=wrapped.expected_graphify_version,
-                manifest_prune_dirs=wrapped.manifest_prune_dirs,
-            )
-
-        def seed_user_owned_content(self, scenario_arg):
-            calls.append(("seed_user_owned_content", scenario_arg.target_name))
-
-        def scenario_file_state(self, scenario_arg):
-            calls.append(("scenario_file_state", scenario_arg.target_name))
-            return {"state": {"exists": True}}
-
-        def assert_expected_files(self, scenario_arg):
-            calls.append(("assert_expected_files", scenario_arg.target_name))
-            return [{"path": "expected", "ok": True, "detail": "expected"}]
-
-        def assert_scope_boundaries(self, scenario_arg):
-            calls.append(("assert_scope_boundaries", scenario_arg.target_name))
-            return [{"path": "scope", "ok": True, "detail": "scope"}]
-
-        def assert_no_unexpected_graphify_files(self, scenario_arg, *, phase, expected_keys=None):
-            calls.append(("assert_no_unexpected_graphify_files", scenario_arg.target_name, phase, expected_keys))
-            return [{"path": "unexpected", "ok": True, "detail": f"none_after_{phase}"}]
-
-        def copy_generated_files(self, scenario_arg, artifact_dir):
-            calls.append(("copy_generated_files", scenario_arg.target_name, artifact_dir))
-
-        def seed_stale_skill_sidecars(self, scenario_arg):
-            calls.append(("seed_stale_skill_sidecars", scenario_arg.target_name))
-            return [{"path": "stale", "ok": True, "detail": "seeded_stale_reference_fragment"}]
-
-        def assert_installed_skill_sidecars(self, scenario_arg):
-            calls.append(("assert_installed_skill_sidecars", scenario_arg.target_name))
-            return [{"path": "sidecars", "ok": True, "detail": "sidecars"}]
-
-        def assert_uninstalled(self, scenario_arg):
-            calls.append(("assert_uninstalled", scenario_arg.target_name))
-            return [{"path": f"uninstalled-{scenario_arg.target_name}", "ok": True, "detail": "removed"}]
 
     def write_manifest(path, roots_arg, **kwargs) -> None:
         calls.append(("write_manifest", path, roots_arg, kwargs))
@@ -228,7 +236,8 @@ def test_scenario_file_effects_adapter_preserves_phase_result_shapes(oracle, roo
         calls.append(("equivalence_check", scenario_arg.target_name, env, artifact_dir))
         return [{"path": "equivalence", "ok": True, "detail": "equivalent"}]
 
-    recording_oracle = RecordingOracle(oracle)
+    recording_oracle = RecordingScenarioFileEffectsOracle()
+    recording_oracle.calls = calls
     adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
     adapter_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md"))
     artifact_dir = tmp_path / "artifact"
@@ -324,37 +333,20 @@ def test_scenario_file_effects_adapter_preserves_phase_result_shapes(oracle, roo
     ]
 
 
-def test_scenario_file_effects_adapter_preserves_setup_method_shapes(oracle) -> None:
-    class RecordingOracle(file_effect_oracle.FileEffectOracle):
-        def __init__(self, wrapped: file_effect_oracle.FileEffectOracle) -> None:
-            super().__init__(
-                roots=wrapped.roots,
-                packaged_reference_resolution=wrapped.packaged_reference_resolution,
-                expected_graphify_version=wrapped.expected_graphify_version,
-                manifest_prune_dirs=wrapped.manifest_prune_dirs,
-            )
-            object.__setattr__(self, "calls", [])
-
-        def seed_user_owned_content(self, scenario_arg):
-            self.calls.append(("seed_user_owned_content", scenario_arg.target_name))
-
-        def seed_stale_skill_sidecars(self, scenario_arg):
-            self.calls.append(("seed_stale_skill_sidecars", scenario_arg.target_name))
-            return [{"ok": True, "detail": "seeded_stale_reference_fragment"}]
-
+def test_scenario_file_effects_adapter_preserves_setup_method_shapes() -> None:
     def write_manifest(*args, **kwargs) -> None:
         raise AssertionError("not used")
 
     def equivalence_check(scenario_arg, env, artifact_dir):
         raise AssertionError("not used")
 
-    recording_oracle = RecordingOracle(oracle)
+    recording_oracle = RecordingScenarioFileEffectsOracle()
     adapter = scenario_file_effects_adapter.ScenarioFileEffectsAdapter(recording_oracle, write_manifest, equivalence_check)
     setup_scenario = scenario("unit", ExpectedPath("project", "AGENTS.md"))
 
     assert adapter.seed_scenario_inputs(setup_scenario) is None
     assert adapter.seed_stale_sidecar_repair(setup_scenario) == [
-        {"ok": True, "detail": "seeded_stale_reference_fragment"}
+        {"path": "stale", "ok": True, "detail": "seeded_stale_reference_fragment"}
     ]
     assert recording_oracle.calls == [
         ("seed_user_owned_content", "unit"),

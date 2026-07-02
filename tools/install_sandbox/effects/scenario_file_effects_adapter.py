@@ -34,7 +34,7 @@ def _universal_uninstall_adapter_checks(
     return [*install_checks, *uninstall_checks, *unexpected_checks]
 
 
-class FileEffectOracleLike(Protocol):
+class ScenarioFileEffectsOracle(Protocol):
     packaged_reference_resolution: Callable[[str], object]
 
     def seed_user_owned_content(self, scenario: Scenario) -> None: ...
@@ -89,7 +89,7 @@ class UninstallFileEffects:
 
 @dataclass(frozen=True)
 class ScenarioFileEffectsAdapter:
-    oracle: FileEffectOracleLike
+    oracle: ScenarioFileEffectsOracle
     write_file_manifest: Callable[..., None]
     run_equivalence_check: Callable[[Scenario, dict[str, str], Path], list[dict[str, object]]]
 

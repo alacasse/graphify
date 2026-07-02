@@ -171,7 +171,7 @@ class DisposableArtifactOutcome:
 
     @property
     def passed(self) -> bool:
-        return self.result.returncode == 0 and self.removed
+        return self.result.returncode == 0 and self.removed and all(check["ok"] for check in self.checks)
 
     def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
         return self.command

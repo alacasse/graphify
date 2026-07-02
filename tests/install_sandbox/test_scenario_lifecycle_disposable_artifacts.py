@@ -99,6 +99,48 @@ def test_purge_scenario_derives_failure_from_command_exit_and_removal(tmp_path) 
     assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": False, "detail": "still_exists"}]
 
 
+def test_purge_scenario_derives_failure_from_emitted_check_records(tmp_path) -> None:
+    spec = make_disposable_graphify_out_spec()
+    factory = HookFactory(tmp_path)
+    default_hooks = factory.hooks()
+
+    class FailingDisposableChecks:
+        def __getattr__(self, name):
+            return getattr(default_hooks.file_effects, name)
+
+        def disposable_artifact_checks(self, disposable_path, removed):
+            factory.calls.append("disposable-check:forced-failure")
+            return [{"path": str(disposable_path), "ok": False, "detail": "forced_failure"}]
+
+    def purge_run_capture(command, *, cwd, env, artifact_dir=None, command_class="installer", timeout_seconds=None):
+        result = factory.run_capture(command, cwd=cwd, env=env, artifact_dir=artifact_dir, command_class=command_class, timeout_seconds=timeout_seconds)
+        graphify_out = factory.project / "graphify-out"
+        for child in graphify_out.iterdir():
+            child.unlink()
+        graphify_out.rmdir()
+        return result
+
+    result = scenario_lifecycle_disposable.run_disposable_artifact_scenario(
+        spec,
+        {},
+        hooks=factory.hooks(file_effects=FailingDisposableChecks(), run_capture=purge_run_capture),
+    )
+    artifact_dir = factory.output / "scenarios" / spec.scenario_id
+    assertions = json.loads((artifact_dir / "assertions.json").read_text(encoding="utf-8"))
+    risks = json.loads((artifact_dir / "risk.json").read_text(encoding="utf-8"))
+
+    assert_preserved_result_shape(result)
+    assert result["passed"] is False
+    assert result["graphify_file_effects_passed"] is False
+    assert result["overall_status"] == "graphify_install_failed"
+    assert result["risks"] == ["graphify_install_failed"]
+    assert assertions["passed"] is False
+    assert assertions["uninstall_exit_code"] == 0
+    assert assertions["checks"] == [{"path": str(factory.project / "graphify-out"), "ok": False, "detail": "forced_failure"}]
+    assert risks["statuses"] == ["graphify_install_failed"]
+    assert not (factory.project / "graphify-out").exists()
+
+
 def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_artifact(tmp_path) -> None:
     factory = HookFactory(tmp_path)
     undeclared_path = factory.project / "graphify-out"

@@ -28,6 +28,7 @@ FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY = "public_product_edge_vocabulary"
 FIELD_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
 FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
 FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
+FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT = "current_target_named_input"
 
 SPEC_WEIGHT_FIELD_CLASSIFICATION = {
     "install_command": FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
@@ -65,9 +66,12 @@ HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
-    "universal_uninstall_specs[].eligible_platform_scope": {
+    "universal_uninstall_specs[].eligible_target_scope": {
         FIELD_CLASS_SELECTED_TARGET_ELIGIBILITY,
-        FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+    },
+    "universal_uninstall_specs[].eligible_platform_scope": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
     "disposable_artifact_specs[].platform_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
@@ -220,9 +224,12 @@ def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
-        "universal_uninstall_specs[].eligible_platform_scope": {
+        "universal_uninstall_specs[].eligible_target_scope": {
             FIELD_CLASS_SELECTED_TARGET_ELIGIBILITY,
-            FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+            FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT,
+        },
+        "universal_uninstall_specs[].eligible_platform_scope": {
+            FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
         "disposable_artifact_specs[].platform_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,

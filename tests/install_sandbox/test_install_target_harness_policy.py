@@ -29,6 +29,7 @@ SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL = "synthetic_output_label"
 SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY = "selected_target_eligibility"
 SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY = "yaml_input_edge_vocabulary"
 SURFACE_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_scenario_target_identity"
+SURFACE_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
 
 HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
     "UniversalUninstallScenarioSpec.platform_label": {
@@ -42,8 +43,11 @@ HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
     "UniversalUninstallScenarioSpec.eligible_target_scope": {
         SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
     },
+    "registry.universal_uninstall_specs[].eligible_target_scope": {
+        SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
+    },
     "registry.universal_uninstall_specs[].eligible_platform_scope": {
-        SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+        SURFACE_CLASS_LEGACY_INPUT_ONLY_READER,
     },
     "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
     "SelectedUniversalUninstallScenario.installed_scenarios[].target_name": {
@@ -96,8 +100,11 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
         "UniversalUninstallScenarioSpec.eligible_target_scope": {
             SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
         },
+        "registry.universal_uninstall_specs[].eligible_target_scope": {
+            SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
+        },
         "registry.universal_uninstall_specs[].eligible_platform_scope": {
-            SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
+            SURFACE_CLASS_LEGACY_INPUT_ONLY_READER,
         },
         "risk_notes.target_name": {SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY},
         "SelectedUniversalUninstallScenario.installed_scenarios[].target_name": {

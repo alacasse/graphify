@@ -14,6 +14,8 @@ from .spec_install_surfaces import (
     validate_relative_path,
 )
 from .spec_schema_validation import (
+    CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD,
+    LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD,
     SCHEMA_CLASS_HARNESS_POLICY_INPUT,
     SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY,
     SCHEMA_CLASS_TRANSITIONAL_EXECUTION,
@@ -35,6 +37,7 @@ UNIVERSAL_UNINSTALL_HARNESS_POLICY_FIELDS = frozenset(
         "risk_note",
         "scenario_id",
         "scope",
+        CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD,
     }
 )
 UNIVERSAL_UNINSTALL_TRANSITIONAL_EXECUTION_FIELDS = frozenset(
@@ -44,7 +47,7 @@ UNIVERSAL_UNINSTALL_TRANSITIONAL_EXECUTION_FIELDS = frozenset(
         "platform_label",
     }
 )
-UNIVERSAL_UNINSTALL_PUBLIC_SCHEMA_COMPATIBILITY_FIELDS = frozenset({"eligible_platform_scope"})
+UNIVERSAL_UNINSTALL_PUBLIC_SCHEMA_COMPATIBILITY_FIELDS = frozenset({LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD})
 UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS = {
     **dict.fromkeys(UNIVERSAL_UNINSTALL_HARNESS_POLICY_FIELDS, SCHEMA_CLASS_HARNESS_POLICY_INPUT),
     **dict.fromkeys(UNIVERSAL_UNINSTALL_TRANSITIONAL_EXECUTION_FIELDS, SCHEMA_CLASS_TRANSITIONAL_EXECUTION),
@@ -128,6 +131,26 @@ def _command(value: object, context: str) -> tuple[str, ...]:
     return _string_list(value, context, allow_empty=False)
 
 
+def _universal_uninstall_eligible_target_scope(data: Mapping[str, object], context: str) -> str:
+    has_current = CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD in data
+    has_legacy = LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD in data
+    if has_current and has_legacy:
+        _fail(
+            context,
+            f"declares both {CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD} "
+            f"and legacy {LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD}",
+        )
+    if has_current:
+        return _string(
+            data.get(CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD),
+            f"{context}.{CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD}",
+        )
+    return _string(
+        data.get(LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD),
+        f"{context}.{LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD}",
+    )
+
+
 def _validate_relative(relative: str, context: str) -> None:
     try:
         validate_relative_path(relative, context)
@@ -178,7 +201,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
         scope=_string(data.get("scope"), f"{context}.scope"),
         command=_command(data.get("command"), f"{context}.command"),
         cwd_root=cwd_root,
-        eligible_target_scope=_string(data.get("eligible_platform_scope"), f"{context}.eligible_platform_scope"),
+        eligible_target_scope=_universal_uninstall_eligible_target_scope(data, context),
         minimum_installed_scenarios=_int(data.get("minimum_installed_scenarios", 2), f"{context}.minimum_installed_scenarios"),
         artifact_subdir=_string(data.get("artifact_subdir", "uninstall"), f"{context}.artifact_subdir"),
         risk_note=_string(data.get("risk_note", "universal uninstall covers Graphify-owned file effects after multiple installs"), f"{context}.risk_note"),

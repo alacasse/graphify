@@ -12,7 +12,9 @@ from tools.install_sandbox import validation_plan
 from tools.install_sandbox.sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from tools.install_sandbox.registry import spec_harness_policy_inputs, spec_loader, spec_target_facts
 from tools.install_sandbox.registry.spec_schema_validation import (
+    CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD,
     CURRENT_REGISTRY_CONTAINER_FIELD,
+    LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD,
     LEGACY_REGISTRY_CONTAINER_FIELD,
     PUBLIC_SCHEMA_COMPATIBILITY_FIELDS,
     SCHEMA_CLASS_HARNESS_POLICY_INPUT,
@@ -160,6 +162,53 @@ def test_loader_accepts_target_named_registry_container_equivalent_to_legacy_inp
     assert current_registry.make_scenario("mini", "project") == legacy_registry.make_scenario("mini", "project")
     assert current_registry.universal_uninstall_specs == legacy_registry.universal_uninstall_specs
     assert current_registry.disposable_artifact_specs == legacy_registry.disposable_artifact_specs
+
+
+def test_loader_accepts_target_named_harness_policy_eligibility_input() -> None:
+    data = _valid_data()
+    data["universal_uninstall_specs"] = [
+        {
+            "scenario_id": "target-named-uninstall",
+            "platform_label": "selected-targets",
+            "scope": "project",
+            "command": ["graphify", "uninstall", "--project"],
+            "cwd_root": "project",
+            CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
+        }
+    ]
+
+    registry = load_registry_from_data(data)
+
+    assert registry.universal_uninstall_specs[0].eligible_target_scope == "project"
+
+
+def test_loader_accepts_legacy_harness_policy_eligibility_input_as_compatibility() -> None:
+    registry = load_registry_from_data(_valid_data())
+
+    assert registry.universal_uninstall_specs[0].eligible_target_scope == "project"
+
+
+def test_loader_rejects_ambiguous_current_and_legacy_harness_policy_eligibility() -> None:
+    data = _valid_data()
+    data["universal_uninstall_specs"] = [
+        {
+            "scenario_id": "ambiguous-uninstall",
+            "platform_label": "selected-targets",
+            "scope": "project",
+            "command": ["graphify", "uninstall", "--project"],
+            "cwd_root": "project",
+            CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
+            LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD: "project",
+        }
+    ]
+    expected_error = (
+        rf"<data>.universal_uninstall_specs\[0\]: declares both "
+        rf"{CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD} "
+        rf"and legacy {LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD}"
+    )
+
+    with pytest.raises(SpecLoaderError, match=expected_error):
+        load_registry_from_data(data)
 
 
 def test_loader_rejects_ambiguous_current_and_legacy_registry_containers() -> None:
@@ -422,6 +471,10 @@ def test_schema_field_classification_is_visible_at_registry_owners() -> None:
     assert spec_target_facts.SCOPE_FIELD_CLASSIFICATIONS["install_command"] == SCHEMA_CLASS_TRANSITIONAL_EXECUTION
     assert spec_target_facts.SCOPE_FIELD_CLASSIFICATIONS["uninstall_command"] == SCHEMA_CLASS_TRANSITIONAL_EXECUTION
     assert spec_harness_policy_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["command"] == SCHEMA_CLASS_TRANSITIONAL_EXECUTION
+    assert (
+        spec_harness_policy_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_target_scope"]
+        == SCHEMA_CLASS_HARNESS_POLICY_INPUT
+    )
     assert (
         spec_harness_policy_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_platform_scope"]
         == SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY

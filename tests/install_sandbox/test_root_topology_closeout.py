@@ -161,6 +161,11 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
     assert spec_loader.LEGACY_REGISTRY_CONTAINER_FIELD == "platforms"
     assert spec_loader.CURRENT_REGISTRY_CONTAINER_FIELD == schema_validation.CURRENT_REGISTRY_CONTAINER_FIELD
     assert spec_loader.LEGACY_REGISTRY_CONTAINER_FIELD == schema_validation.LEGACY_REGISTRY_CONTAINER_FIELD
+    assert schema_validation.CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD == "eligible_target_scope"
+    assert schema_validation.LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD == "eligible_platform_scope"
+    assert spec_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_target_scope"] == (
+        schema_validation.SCHEMA_CLASS_HARNESS_POLICY_INPUT
+    )
     assert spec_inputs.UNIVERSAL_UNINSTALL_FIELD_CLASSIFICATIONS["eligible_platform_scope"] == (
         schema_validation.SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY
     )
@@ -198,8 +203,10 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
     assert "platform_label" not in selection_source
 
     loader_source = inspect.getsource(spec_inputs._universal_uninstall)
-    assert 'data.get("eligible_platform_scope")' in loader_source
+    eligibility_resolver_source = inspect.getsource(spec_inputs._universal_uninstall_eligible_target_scope)
     assert "eligible_target_scope=" in loader_source
+    assert "CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD" in eligibility_resolver_source
+    assert "LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD" in eligibility_resolver_source
 
 
 def test_root_topology_closeout_classifies_scenario_platform_as_internal_identity() -> None:

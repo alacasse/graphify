@@ -150,12 +150,12 @@ VALIDATION_PLAN_PUBLIC_OUTPUT_FIELDS = {
     "target_runtime_verification",
 }
 
-VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_VOCABULARY = {
-    "tools.install_sandbox.validation_plan._standard_scenarios": {"platforms"},
-    "tools.install_sandbox.validation_plan.coverage_records": {"platforms"},
-    "tools.install_sandbox.validation_plan.universal_uninstall_scenarios": {"platforms"},
-    "tools.install_sandbox.validation_plan.target_runtime_validation_sections": {"platforms"},
-    "tools.install_sandbox.validation_plan._coverage_summary": {"platforms"},
+VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY = {
+    "tools.install_sandbox.validation_plan._standard_scenarios": {"target_names"},
+    "tools.install_sandbox.validation_plan.coverage_records": {"target_names"},
+    "tools.install_sandbox.validation_plan.universal_uninstall_scenarios": {"target_names"},
+    "tools.install_sandbox.validation_plan.target_runtime_validation_sections": {"target_names"},
+    "tools.install_sandbox.validation_plan._coverage_summary": {"target_names"},
 }
 
 VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS = {
@@ -850,15 +850,15 @@ def test_root_topology_closeout_guards_runner_intake_frontier_target_naming() ->
     assert target_name_kwarg.value.id == "selected_target_name"
 
 
-def test_root_topology_closeout_characterizes_validation_plan_internal_platform_vocabulary() -> None:
+def test_root_topology_closeout_characterizes_validation_plan_internal_target_vocabulary() -> None:
     validation_plan = importlib.import_module("tools.install_sandbox.validation_plan")
 
-    assert VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_VOCABULARY == {
-        "tools.install_sandbox.validation_plan._standard_scenarios": {"platforms"},
-        "tools.install_sandbox.validation_plan.coverage_records": {"platforms"},
-        "tools.install_sandbox.validation_plan.universal_uninstall_scenarios": {"platforms"},
-        "tools.install_sandbox.validation_plan.target_runtime_validation_sections": {"platforms"},
-        "tools.install_sandbox.validation_plan._coverage_summary": {"platforms"},
+    assert VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY == {
+        "tools.install_sandbox.validation_plan._standard_scenarios": {"target_names"},
+        "tools.install_sandbox.validation_plan.coverage_records": {"target_names"},
+        "tools.install_sandbox.validation_plan.universal_uninstall_scenarios": {"target_names"},
+        "tools.install_sandbox.validation_plan.target_runtime_validation_sections": {"target_names"},
+        "tools.install_sandbox.validation_plan._coverage_summary": {"target_names"},
     }
     assert VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS == {
         "public product CLI": {"--platform"},
@@ -876,15 +876,15 @@ def test_root_topology_closeout_characterizes_validation_plan_internal_platform_
     assert "platforms" not in public_plan_parameters
     assert {"target_name", "selected_target_names"} <= public_selector_parameters
 
-    for dotted_name, expected_parameters in VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_VOCABULARY.items():
+    for dotted_name, expected_parameters in VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY.items():
         _, helper_name = dotted_name.rsplit(".", maxsplit=1)
         signature = inspect.signature(getattr(validation_plan, helper_name))
 
         assert set(signature.parameters) >= expected_parameters
 
-    internal_terms = set().union(*VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_VOCABULARY.values())
+    internal_terms = set().union(*VALIDATION_PLAN_INTERNAL_TARGET_HELPER_VOCABULARY.values())
     edge_terms = set().union(*VALIDATION_PLAN_EDGE_PLATFORM_VOCABULARY_BUCKETS.values())
-    assert internal_terms == {"platforms"}
+    assert internal_terms == {"target_names"}
     assert "registry platforms" in edge_terms
     assert "platforms" not in edge_terms
     assert internal_terms.isdisjoint(edge_terms)

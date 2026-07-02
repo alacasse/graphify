@@ -41,16 +41,16 @@ VALIDATION_PLAN_PRUNED_COMPATIBILITY_ALIASES = {
     },
 }
 
-VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_PARAMETERS = {
-    "_standard_scenarios": {"platforms"},
-    "coverage_records": {"platforms"},
-    "universal_uninstall_scenarios": {"platforms"},
-    "target_runtime_validation_sections": {"platforms"},
-    "_coverage_summary": {"platforms"},
+VALIDATION_PLAN_INTERNAL_TARGET_HELPER_PARAMETERS = {
+    "_standard_scenarios": {"target_names"},
+    "coverage_records": {"target_names"},
+    "universal_uninstall_scenarios": {"target_names"},
+    "target_runtime_validation_sections": {"target_names"},
+    "_coverage_summary": {"target_names"},
 }
 
-VALIDATION_PLAN_INTERNAL_PLATFORM_CALLSITE_KEYWORDS = {
-    "build_validation_plan": {"_coverage_summary.platforms"},
+VALIDATION_PLAN_INTERNAL_TARGET_CALLSITE_KEYWORDS = {
+    "build_validation_plan": {"_coverage_summary.target_names"},
 }
 
 
@@ -82,7 +82,7 @@ def test_validation_plan_alias_inventory_keeps_only_owner_names_and_output_shape
     }
 
 
-def test_validation_plan_characterizes_internal_platform_helper_vocabulary_as_cleanup_target() -> None:
+def test_validation_plan_uses_target_vocabulary_for_internal_helper_names() -> None:
     plan_signature = inspect.signature(validation_plan.ValidationPlan)
     target_selector_signature = inspect.signature(validation_plan.selected_targets)
 
@@ -91,15 +91,17 @@ def test_validation_plan_characterizes_internal_platform_helper_vocabulary_as_cl
     assert "platform_name" not in target_selector_signature.parameters
     assert "selected_platform_names" not in target_selector_signature.parameters
 
-    for helper_name, expected_parameters in VALIDATION_PLAN_INTERNAL_PLATFORM_HELPER_PARAMETERS.items():
+    for helper_name, expected_parameters in VALIDATION_PLAN_INTERNAL_TARGET_HELPER_PARAMETERS.items():
         helper_signature = inspect.signature(getattr(validation_plan, helper_name))
 
         assert set(helper_signature.parameters) >= expected_parameters
+        assert "platforms" not in helper_signature.parameters
 
     build_source = inspect.getsource(validation_plan.build_validation_plan)
-    assert "platforms=selected_target_names_tuple" in build_source
-    assert VALIDATION_PLAN_INTERNAL_PLATFORM_CALLSITE_KEYWORDS == {
-        "build_validation_plan": {"_coverage_summary.platforms"},
+    assert "platforms=selected_target_names_tuple" not in build_source
+    assert "target_names=selected_target_names_tuple" in build_source
+    assert VALIDATION_PLAN_INTERNAL_TARGET_CALLSITE_KEYWORDS == {
+        "build_validation_plan": {"_coverage_summary.target_names"},
     }
     assert not any(hasattr(validation_plan.ValidationPlan, name) for name in {"platforms", "selected_platforms"})
 

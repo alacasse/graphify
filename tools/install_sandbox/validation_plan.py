@@ -157,27 +157,27 @@ def selected_targets(
     return (target_name,)
 
 
-def _standard_scenarios(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
+def _standard_scenarios(registry: InstallTargetCatalog, target_names: tuple[str, ...], scope: str) -> tuple[Scenario, ...]:
     scenarios: list[Scenario] = []
-    for platform_name in platforms:
+    for target_name in target_names:
         for one_scope in _selected_scopes(scope):
-            scenario = registry.make_scenario(platform_name, one_scope)
+            scenario = registry.make_scenario(target_name, one_scope)
             if scenario is not None:
                 scenarios.append(scenario)
     return tuple(scenarios)
 
 
-def coverage_records(registry: InstallTargetCatalog, platforms: tuple[str, ...], scope: str) -> tuple[dict[str, object], ...]:
-    return tuple(registry.coverage_records(list(platforms), scope))
+def coverage_records(registry: InstallTargetCatalog, target_names: tuple[str, ...], scope: str) -> tuple[dict[str, object], ...]:
+    return tuple(registry.coverage_records(list(target_names), scope))
 
 
 def universal_uninstall_scenarios(
     registry: InstallTargetCatalog,
-    platforms: tuple[str, ...],
+    target_names: tuple[str, ...],
     scope: str,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[SelectedUniversalUninstallScenario, ...]:
-    return _harness_policy.selected_universal_uninstall_scenarios(registry, platforms, scope, policy)
+    return _harness_policy.selected_universal_uninstall_scenarios(registry, target_names, scope, policy)
 
 
 def universal_uninstall_spec_for_scope(
@@ -199,10 +199,10 @@ def disposable_artifact_scenarios(
 
 def target_runtime_validation_sections(
     registry: InstallTargetCatalog,
-    platforms: tuple[str, ...] | None = None,
+    target_names: tuple[str, ...] | None = None,
     policy: HarnessPolicy = DEFAULT_HARNESS_POLICY,
 ) -> tuple[dict[str, object], ...]:
-    return _harness_policy.selected_target_runtime_validation_sections(registry, platforms, policy)
+    return _harness_policy.selected_target_runtime_validation_sections(registry, target_names, policy)
 
 
 def validate_policy_owned_roots(
@@ -223,7 +223,7 @@ def _selected_policy_root_names(root_registry: SandboxRootRegistry) -> set[str]:
 
 def _coverage_summary(
     *,
-    platforms: tuple[str, ...],
+    target_names: tuple[str, ...],
     scope: str,
     standard_scenarios: tuple[Scenario, ...],
     universal_uninstall_scenarios: tuple[SelectedUniversalUninstallScenario, ...],
@@ -232,7 +232,7 @@ def _coverage_summary(
 ) -> dict[str, object]:
     unsupported = sum(1 for record in coverage if record["status"] == "unsupported")
     return {
-        "registered_target_count": len(platforms),
+        "registered_target_count": len(target_names),
         "requested_scope": scope,
         "runnable_scope_count": len(standard_scenarios),
         "universal_scenario_count": len(universal_uninstall_scenarios) + len(disposable_artifact_scenarios),
@@ -276,7 +276,7 @@ def build_validation_plan(
         coverage_records=coverage,
         target_runtime_validation_sections=target_runtime_validation_sections(registry, selected_target_names_tuple, policy),
         target_coverage_summary=_coverage_summary(
-            platforms=selected_target_names_tuple,
+            target_names=selected_target_names_tuple,
             scope=scope,
             standard_scenarios=standard,
             universal_uninstall_scenarios=universal,

@@ -159,6 +159,7 @@ def test_install_surface_alias_is_accepted_by_scenario_and_oracle(oracle, roots)
 def test_install_surface_path_uses_declared_root_and_relative(oracle, roots) -> None:
     surface = InstallSurface("project", "nested/surface.txt")
 
+    assert path_resolution.resolve_install_root("home", roots) == roots["home"]
     assert path_resolution.resolve_install_surface_path(surface, roots) == roots["project"] / "nested/surface.txt"
 
     with pytest.raises(AssertionError, match="unknown root: missing"):

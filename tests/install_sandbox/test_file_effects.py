@@ -8,8 +8,6 @@ from tools.install_sandbox.effects import file_effect_sidecars
 from tools.install_sandbox.effects import file_effect_surfaces
 from tools.install_sandbox.effects import file_effect_state
 from tools.install_sandbox.effects import scenario_file_effects_adapter
-from tools.install_sandbox.surfaces import install_surface_models
-from tools.install_sandbox.surfaces import path_resolution
 
 # File-effects package and oracle boundary guards live here. Behavior assertions
 # stay with topic-owner tests such as test_file_effects_sidecars.py,
@@ -30,30 +28,6 @@ def test_file_effects_package_tests_do_not_claim_topic_behavior_ownership() -> N
 
     assert scenario_file_effects_adapter.ScenarioFileEffectsAdapter.__name__ == "ScenarioFileEffectsAdapter"
     assert file_effect_oracle.FileEffectOracle.__name__ == "FileEffectOracle"
-
-
-def test_path_resolution_owner_resolves_roots_and_surface_paths() -> None:
-    roots = {
-        "project": Path("/sandbox/project"),
-        "home": Path("/sandbox/home"),
-    }
-
-    assert path_resolution.resolve_install_root("home", roots) == Path("/sandbox/home")
-    assert path_resolution.resolve_install_surface_path(
-        install_surface_models.InstallSurface("project", "AGENTS.md"),
-        roots,
-    ) == Path("/sandbox/project/AGENTS.md")
-
-
-def test_path_resolution_owner_rejects_unknown_roots() -> None:
-    roots = {"project": Path("/sandbox/project")}
-
-    try:
-        path_resolution.resolve_install_root("missing", roots)
-    except AssertionError as exc:
-        assert str(exc) == "unknown root: missing"
-    else:  # pragma: no cover - assertion branch
-        raise AssertionError("unknown root did not raise")
 
 
 def test_file_effect_owners_import_path_resolution_helpers_from_owner_module() -> None:

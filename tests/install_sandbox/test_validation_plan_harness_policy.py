@@ -76,7 +76,7 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_targets() -> N
         targets=("windows",),
         notes=("must not leak",),
     )
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         {
             "codex": install_target_models.InstallTargetSpec(
                 name="codex",
@@ -128,7 +128,7 @@ def test_validation_plan_runtime_sections_are_limited_to_selected_targets() -> N
 
 def test_validation_plan_dedupes_explicit_and_policy_runtime_sections() -> None:
     validation = validation_plan.DEFAULT_HARNESS_POLICY.runtime_limitation_sections[0]
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         {
             "one": install_target_models.InstallTargetSpec(
                 name="one",

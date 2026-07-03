@@ -12,8 +12,8 @@ def scope(relative: str = "graphify.txt") -> install_target_models.ScopeSpec:
     )
 
 
-def planner_registry() -> install_target_catalog.ScenarioRegistry:
-    return install_target_catalog.ScenarioRegistry(
+def planner_registry() -> install_target_catalog.InstallTargetCatalog:
+    return install_target_catalog.InstallTargetCatalog(
         {
             "claude": install_target_models.InstallTargetSpec(
                 name="claude",

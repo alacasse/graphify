@@ -82,7 +82,7 @@ def test_build_validation_plan_consumes_install_surface_root_role_for_validation
 
 
 def test_build_validation_plan_keeps_target_roots_limited_to_install_surface_roots() -> None:
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         {
             "repo-mounted": install_target_models.InstallTargetSpec(
                 name="repo-mounted",
@@ -138,7 +138,7 @@ def test_build_validation_plan_policy_validation_uses_install_surface_roots_not_
 
 
 def test_build_validation_plan_validates_registry_specific_synthetic_policy_roots() -> None:
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         {
             "alpha": install_target_models.InstallTargetSpec(
                 name="alpha",

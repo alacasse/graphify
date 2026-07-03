@@ -111,7 +111,7 @@ def test_loader_accepts_non_surface_root_for_policy_cwd_root() -> None:
 
 def test_loader_splits_catalog_target_root_and_policy_root_validation(monkeypatch) -> None:
     calls: list[tuple[str, set[str]]] = []
-    original_validate_target_roots = spec_loader.ScenarioRegistry.validate_target_roots
+    original_validate_target_roots = spec_loader.InstallTargetCatalog.validate_target_roots
     original_validate_policy_owned_roots = validation_plan.validate_policy_owned_roots
 
     def validate_target_roots(self, declared_roots):
@@ -122,7 +122,7 @@ def test_loader_splits_catalog_target_root_and_policy_root_validation(monkeypatc
         calls.append(("policy", set(declared_roots)))
         original_validate_policy_owned_roots(registry, policy, declared_roots)
 
-    monkeypatch.setattr(spec_loader.ScenarioRegistry, "validate_target_roots", validate_target_roots)
+    monkeypatch.setattr(spec_loader.InstallTargetCatalog, "validate_target_roots", validate_target_roots)
     monkeypatch.setattr(validation_plan, "validate_policy_owned_roots", validate_policy_owned_roots)
 
     registry = load_registry_from_data(_current_data())

@@ -10,7 +10,7 @@ from tests.install_sandbox.validation_plan_test_support import planner_registry,
 
 
 def test_validation_plan_orders_all_targets_and_standard_scenarios() -> None:
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         {
             "zeta": install_target_models.InstallTargetSpec(
                 name="zeta",
@@ -55,7 +55,9 @@ def test_validation_plan_orders_all_targets_and_standard_scenarios() -> None:
 
 
 def test_validation_plan_rejects_unknown_platform() -> None:
-    registry = install_target_catalog.ScenarioRegistry({"known": install_target_models.InstallTargetSpec(name="known")})
+    registry = install_target_catalog.InstallTargetCatalog(
+        {"known": install_target_models.InstallTargetSpec(name="known")}
+    )
 
     with pytest.raises(RuntimeError, match="unknown sandbox platform"):
         validation_plan.build_validation_plan(registry, all_targets=False, target_name="missing", scope="project")
@@ -181,7 +183,7 @@ def test_validation_work_item_is_frozen_plan_owned_model() -> None:
 
 
 def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         {
             "alpha": install_target_models.InstallTargetSpec(
                 name="alpha",

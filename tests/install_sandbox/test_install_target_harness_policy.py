@@ -478,7 +478,7 @@ def test_harness_policy_owner_projects_runtime_sections_and_risk_notes_after_cat
 
 
 def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> None:
-    registry = install_target_catalog.ScenarioRegistry(
+    registry = install_target_catalog.InstallTargetCatalog(
         specs={
             "rooted": install_target_models.InstallTargetSpec(
                 name="rooted",

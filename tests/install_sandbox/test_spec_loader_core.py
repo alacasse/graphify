@@ -21,7 +21,7 @@ def test_loader_returns_existing_registry_dataclasses_with_defaults() -> None:
     project = registry.make_scenario("mini", "project")
     spec = registry.target_spec("mini")
 
-    assert isinstance(registry, install_target_catalog.ScenarioRegistry)
+    assert isinstance(registry, install_target_catalog.InstallTargetCatalog)
     assert isinstance(spec, install_target_models.InstallTargetSpec)
     assert spec.display_name is None
     assert spec.target_kind == "product"
@@ -66,11 +66,11 @@ def test_loader_preserves_explicit_no_project_install_equivalence() -> None:
     assert registry.equivalent_install_command(project) is None
 
 
-def test_default_registry_loads_and_returns_scenario_registry() -> None:
+def test_default_registry_loads_and_returns_install_target_catalog() -> None:
     registry = load_default_registry()
 
-    assert isinstance(registry, install_target_catalog.ScenarioRegistry)
     assert type(registry) is install_target_catalog.InstallTargetCatalog
+    assert isinstance(registry, install_target_catalog.InstallTargetCatalog)
     assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
     assert registry.specs
     assert registry.universal_uninstall_specs == ()
@@ -78,6 +78,7 @@ def test_default_registry_loads_and_returns_scenario_registry() -> None:
 
 
 def test_registry_spec_loader_is_owner_import_surface() -> None:
+    # Temporary LR-B10 bridge for Slice 4 deletion, not a desired closeout API.
     assert registry_spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert registry_spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
     assert registry_spec_loader.load_default_registry is load_default_registry

@@ -23,7 +23,7 @@ from .install_target_scenarios import (
 
 
 @dataclass(frozen=True)
-class ScenarioRegistry:
+class InstallTargetCatalog:
     specs: dict[str, InstallTargetSpec]
     universal_uninstall_specs: tuple[UniversalUninstallScenarioSpec, ...] = ()
     disposable_artifact_specs: tuple[DisposableArtifactScenarioSpec, ...] = ()
@@ -97,4 +97,6 @@ class ScenarioRegistry:
             raise RuntimeError(f"unknown sandbox root declaration(s): {', '.join(sorted(unknown))}")
 
 
-InstallTargetCatalog = ScenarioRegistry
+# Temporary LR-B10 bridge: Slice 4 deletes ScenarioRegistry after downstream
+# production callers and tests move to InstallTargetCatalog.
+ScenarioRegistry = InstallTargetCatalog

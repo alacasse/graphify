@@ -13,7 +13,7 @@ else:
 
 from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from .. import validation_plan
-from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry
+from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry as _ScenarioRegistry
 from ..targets.install_target_models import InstallTargetSpec
 from .spec_harness_policy_inputs import (
     SpecHarnessPolicyInputError,
@@ -43,6 +43,11 @@ _TOP_LEVEL_REGISTRY_FIELDS = frozenset(
 
 class SpecLoaderError(ValueError):
     pass
+
+
+# Temporary LR-B10 bridge for tests/callers that still patch the old loader
+# export; Slice 4 deletes it after internal migration.
+ScenarioRegistry = _ScenarioRegistry
 
 
 def _fail(context: str, message: str) -> None:
@@ -111,7 +116,7 @@ def load_registry_from_data(data: object, *, source: str = "<data>") -> InstallT
         for target_name in target_names
     }
     universal, disposable = _top_level_policy_inputs(registry, source)
-    loaded = ScenarioRegistry(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
+    loaded = InstallTargetCatalog(specs, universal_uninstall_specs=universal, disposable_artifact_specs=disposable)
     declared_roots = DEFAULT_SANDBOX_ROOT_REGISTRY.root_names()
     loaded.validate_target_roots(declared_roots)
     validation_plan.validate_policy_owned_roots(

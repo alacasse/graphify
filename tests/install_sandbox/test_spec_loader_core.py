@@ -71,18 +71,17 @@ def test_default_registry_loads_and_returns_install_target_catalog() -> None:
 
     assert type(registry) is install_target_catalog.InstallTargetCatalog
     assert isinstance(registry, install_target_catalog.InstallTargetCatalog)
-    assert install_target_catalog.InstallTargetCatalog is install_target_catalog.ScenarioRegistry
+    assert not hasattr(install_target_catalog, "ScenarioRegistry")
     assert registry.specs
     assert registry.universal_uninstall_specs == ()
     assert registry.disposable_artifact_specs == ()
 
 
 def test_registry_spec_loader_is_owner_import_surface() -> None:
-    # Temporary LR-B10 bridge for Slice 4 deletion, not a desired closeout API.
-    assert registry_spec_loader.ScenarioRegistry is install_target_catalog.ScenarioRegistry
     assert registry_spec_loader.InstallTargetCatalog is install_target_catalog.InstallTargetCatalog
     assert registry_spec_loader.load_default_registry is load_default_registry
     assert registry_spec_loader.load_registry_from_data is load_registry_from_data
+    assert not hasattr(registry_spec_loader, "ScenarioRegistry")
     assert not hasattr(registry_spec_loader, "_scenario")
 
 

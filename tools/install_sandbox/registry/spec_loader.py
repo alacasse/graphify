@@ -13,7 +13,7 @@ else:
 
 from ..sandbox_roots import DEFAULT_SANDBOX_ROOT_REGISTRY
 from .. import validation_plan
-from ..targets.install_target_catalog import InstallTargetCatalog, ScenarioRegistry as _ScenarioRegistry
+from ..targets.install_target_catalog import InstallTargetCatalog
 from ..targets.install_target_models import InstallTargetSpec
 from .spec_harness_policy_inputs import (
     SpecHarnessPolicyInputError,
@@ -43,12 +43,6 @@ _TOP_LEVEL_REGISTRY_FIELDS = frozenset(
 
 class SpecLoaderError(ValueError):
     pass
-
-
-# Temporary LR-B10 bridge for tests/callers that still patch the old loader
-# export; Slice 4 deletes it after internal migration.
-ScenarioRegistry = _ScenarioRegistry
-
 
 def _fail(context: str, message: str) -> None:
     raise SpecLoaderError(f"{context}: {message}")

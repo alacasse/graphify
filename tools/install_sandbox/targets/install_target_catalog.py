@@ -95,8 +95,3 @@ class InstallTargetCatalog:
                 unknown.update(entry.root for entry in scope.expected if entry.root not in declared_roots)
         if unknown:
             raise RuntimeError(f"unknown sandbox root declaration(s): {', '.join(sorted(unknown))}")
-
-
-# Temporary LR-B10 bridge: Slice 4 deletes ScenarioRegistry after downstream
-# production callers and tests move to InstallTargetCatalog.
-ScenarioRegistry = InstallTargetCatalog

@@ -25,7 +25,7 @@ TARGET_OWNER_API_PARAMETER_GUARDS = {
         "unsupported_scope_reason": {"target_name"},
         "user_skill": {"target_name"},
     },
-    "tools.install_sandbox.targets.install_target_catalog.ScenarioRegistry": {
+    "tools.install_sandbox.targets.install_target_catalog.InstallTargetCatalog": {
         "coverage_records": {"target_names"},
         "direct_install_command": {"target_name"},
         "direct_uninstall_command": {"target_name"},
@@ -132,12 +132,16 @@ def _constant_values(node: ast.AST) -> set[object]:
     }
 
 
+DELETED_TARGET_OWNER_ALIASES = {
+    "tools.install_sandbox.targets.install_target_catalog": {"ScenarioRegistry"},
+    "tools.install_sandbox.registry.spec_loader": {"ScenarioRegistry"},
+}
+
+
 def _resolve_dotted_owner(dotted_name: str) -> object:
-    module_name, separator, _ = dotted_name.partition(".ScenarioRegistry")
+    module_name, attribute_name = dotted_name.rsplit(".", maxsplit=1)
     owner = importlib.import_module(module_name)
-    if separator:
-        owner = getattr(owner, "ScenarioRegistry")
-    return owner
+    return getattr(owner, attribute_name)
 
 
 def test_root_topology_closeout_guards_target_owner_parameter_vocabulary() -> None:
@@ -157,6 +161,17 @@ def test_root_topology_closeout_guards_target_owner_parameter_vocabulary() -> No
 
         assert set(signature.parameters) >= deferred_parameters
     assert DEFERRED_TARGET_OWNER_PLATFORM_PARAMETERS == {}
+
+
+def test_root_topology_closeout_guards_deleted_target_owner_aliases() -> None:
+    assert DELETED_TARGET_OWNER_ALIASES == {
+        "tools.install_sandbox.targets.install_target_catalog": {"ScenarioRegistry"},
+        "tools.install_sandbox.registry.spec_loader": {"ScenarioRegistry"},
+    }
+    for module_name, alias_names in DELETED_TARGET_OWNER_ALIASES.items():
+        module = importlib.import_module(module_name)
+        for alias_name in alias_names:
+            assert not hasattr(module, alias_name)
 
 
 def test_root_topology_closeout_guards_private_target_owner_parameter_vocabulary() -> None:

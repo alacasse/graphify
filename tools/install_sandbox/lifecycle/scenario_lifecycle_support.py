@@ -9,12 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
-from ..targets.install_target_catalog import ScenarioRegistry
+from ..targets.install_target_catalog import InstallTargetCatalog
 from ..targets.install_target_defaults import default_install_target_catalog
 from ..targets.install_target_models import DisposableArtifactScenarioSpec, Scenario, SelectedUniversalUninstallScenario
 
 
-DEFAULT_SCENARIO_REGISTRY = default_install_target_catalog()
+DEFAULT_INSTALL_TARGET_CATALOG = default_install_target_catalog()
 
 
 @dataclass(frozen=True)
@@ -213,11 +213,20 @@ class SandboxPaths:
     def scenario_artifact_dir(self, scenario_name: str) -> Path:
         return self.output / "scenarios" / scenario_name
 
-    def prepare_run(self, scenario: Scenario, env: dict[str, str], *, registry: ScenarioRegistry, scenario_name: str | None = None) -> ScenarioRunContext:
+    def prepare_run(
+        self,
+        scenario: Scenario,
+        env: dict[str, str],
+        *,
+        install_target_catalog: InstallTargetCatalog,
+        scenario_name: str | None = None,
+    ) -> ScenarioRunContext:
         started_at = self.utc_timestamp()
         started_monotonic = time.monotonic()
         self.reset_sandbox_dirs()
-        artifact_dir = self.scenario_artifact_dir(scenario_name or registry.scenario_id(scenario.target_name, scenario.scope))
+        artifact_dir = self.scenario_artifact_dir(
+            scenario_name or install_target_catalog.scenario_id(scenario.target_name, scenario.scope)
+        )
         if artifact_dir.exists():
             shutil.rmtree(artifact_dir)
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -395,14 +404,43 @@ class MatrixRunnerOverrides:
     run_disposable_artifact_scenario: Callable[[DisposableArtifactScenarioSpec, dict[str, str]], dict[str, object]] | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ScenarioLifecycleHooks:
     paths: SandboxPaths
     file_effects: ScenarioFileEffects
     commands: CommandExecutor
     artifacts: ScenarioArtifacts
-    scenario_registry: ScenarioRegistry = DEFAULT_SCENARIO_REGISTRY
+    install_target_catalog: InstallTargetCatalog = DEFAULT_INSTALL_TARGET_CATALOG
     matrix_overrides: MatrixRunnerOverrides = field(default_factory=MatrixRunnerOverrides)
+
+    def __init__(
+        self,
+        *,
+        paths: SandboxPaths,
+        file_effects: ScenarioFileEffects,
+        commands: CommandExecutor,
+        artifacts: ScenarioArtifacts,
+        install_target_catalog: InstallTargetCatalog | None = None,
+        matrix_overrides: MatrixRunnerOverrides | None = None,
+        scenario_registry: InstallTargetCatalog | None = None,
+    ) -> None:
+        catalog = install_target_catalog if install_target_catalog is not None else scenario_registry
+        if catalog is None:
+            catalog = DEFAULT_INSTALL_TARGET_CATALOG
+        object.__setattr__(self, "paths", paths)
+        object.__setattr__(self, "file_effects", file_effects)
+        object.__setattr__(self, "commands", commands)
+        object.__setattr__(self, "artifacts", artifacts)
+        object.__setattr__(self, "install_target_catalog", catalog)
+        object.__setattr__(
+            self,
+            "matrix_overrides",
+            MatrixRunnerOverrides() if matrix_overrides is None else matrix_overrides,
+        )
+
+    @property
+    def scenario_registry(self) -> InstallTargetCatalog:
+        return self.install_target_catalog
 
 
 def scenario_artifact_dir(scenario_name: str, *, hooks: ScenarioLifecycleHooks) -> Path:
@@ -410,7 +448,12 @@ def scenario_artifact_dir(scenario_name: str, *, hooks: ScenarioLifecycleHooks) 
 
 
 def prepare_scenario_run(scenario: Scenario, env: dict[str, str], *, hooks: ScenarioLifecycleHooks, scenario_name: str | None = None) -> ScenarioRunContext:
-    return hooks.paths.prepare_run(scenario, env, registry=hooks.scenario_registry, scenario_name=scenario_name)
+    return hooks.paths.prepare_run(
+        scenario,
+        env,
+        install_target_catalog=hooks.install_target_catalog,
+        scenario_name=scenario_name,
+    )
 
 
 def scenario_duration_ms(context: ScenarioRunContext) -> int:

@@ -8,8 +8,6 @@ from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
 from tools.install_sandbox.targets import install_target_catalog, install_target_models
 from tools.install_sandbox.targets import install_target_defaults
 
-from install_target_test_support import REGISTRY
-
 
 DEFAULT_TARGET_HELPER_TARGET_OWNER_PARAMETERS = {
     "direct_install_command": {"target_name"},
@@ -77,7 +75,6 @@ def test_default_target_helpers_classify_remaining_platform_parameters_as_intern
 def test_install_target_module_helpers_use_default_catalog_seam() -> None:
     catalog = install_target_defaults.default_install_target_catalog()
 
-    assert catalog is REGISTRY
     assert install_target_defaults.install_target_specs() is catalog.specs
     assert install_target_defaults.install_target_spec("codex") is catalog.target_spec("codex")
     assert install_target_defaults.install_target_scenarios("cursor", "both") == catalog.target_scenarios("cursor", "both")
@@ -88,7 +85,7 @@ def test_install_target_module_helpers_use_default_catalog_seam() -> None:
 
 
 def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    registry = install_target_catalog.ScenarioRegistry(
+    catalog = install_target_catalog.InstallTargetCatalog(
         {
             "cached-target": install_target_models.InstallTargetSpec(
                 name="cached-target",
@@ -103,12 +100,12 @@ def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest
             )
         }
     )
-    monkeypatch.setattr(install_target_defaults, "_DEFAULT_SCENARIO_REGISTRY", registry)
+    monkeypatch.setattr(install_target_defaults, "_DEFAULT_INSTALL_TARGET_CATALOG", catalog)
 
-    assert install_target_defaults.default_install_target_catalog() is registry
-    assert install_target_defaults.install_target_specs() is registry.specs
-    assert install_target_defaults.install_target_spec("cached-target") is registry.target_spec("cached-target")
-    assert install_target_defaults.install_target_scenarios("cached-target", "project") == registry.target_scenarios(
+    assert install_target_defaults.default_install_target_catalog() is catalog
+    assert install_target_defaults.install_target_specs() is catalog.specs
+    assert install_target_defaults.install_target_spec("cached-target") is catalog.target_spec("cached-target")
+    assert install_target_defaults.install_target_scenarios("cached-target", "project") == catalog.target_scenarios(
         "cached-target",
         "project",
     )
@@ -116,7 +113,7 @@ def test_install_target_helpers_use_replaced_default_catalog(monkeypatch: pytest
 
 def test_lazy_default_catalog_exports_share_one_cache_for_supported_names(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
-    registry = install_target_catalog.ScenarioRegistry(
+    catalog = install_target_catalog.InstallTargetCatalog(
         {
             "cached-target": install_target_models.InstallTargetSpec(
                 name="cached-target",
@@ -135,15 +132,17 @@ def test_lazy_default_catalog_exports_share_one_cache_for_supported_names(monkey
     def load_default_registry():
         nonlocal calls
         calls += 1
-        return registry
+        return catalog
 
-    monkeypatch.setattr(install_target_defaults, "_DEFAULT_SCENARIO_REGISTRY", None)
+    monkeypatch.setattr(install_target_defaults, "_DEFAULT_INSTALL_TARGET_CATALOG", None)
     monkeypatch.setitem(install_target_defaults.__dict__, "_import_load_default_registry", lambda: load_default_registry)
     for name in install_target_defaults._LAZY_DEFAULT_NAMES:
         monkeypatch.delitem(install_target_defaults.__dict__, name, raising=False)
 
-    assert install_target_defaults.default_install_target_catalog() is registry
-    assert install_target_defaults.__getattr__("DEFAULT_SCENARIO_REGISTRY") is registry
+    assert install_target_defaults.default_install_target_catalog() is catalog
+    assert install_target_defaults.__getattr__("DEFAULT_INSTALL_TARGET_CATALOG") is catalog
+    with pytest.raises(AttributeError):
+        install_target_defaults.__getattr__("DEFAULT_SCENARIO_REGISTRY")
     with pytest.raises(AttributeError):
         install_target_defaults.__getattr__("SANDBOX_PLATFORM_SPECS")
     with pytest.raises(AttributeError):

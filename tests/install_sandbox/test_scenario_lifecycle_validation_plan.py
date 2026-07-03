@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_plan, scenario_lifecycle_support, scenario_lifecycle_universal
 from tools.install_sandbox.runtime.sandbox_run_environment import SandboxRunEnvironment
-from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets.install_target_defaults import DEFAULT_INSTALL_TARGET_CATALOG
 from tools.install_sandbox.targets import install_target_harness_policy
 from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
@@ -150,7 +150,7 @@ def test_sandbox_run_environment_exposes_canonical_disposable_override_hook(tmp_
         "user_cwd": tmp_path / "user-cwd",
     }
     runtime.roots = {"project": runtime.project, "user_cwd": runtime.user_cwd}
-    runtime.scenario_registry = DEFAULT_SCENARIO_REGISTRY
+    runtime.scenario_registry = DEFAULT_INSTALL_TARGET_CATALOG
 
     for path in (runtime.output, runtime.project, runtime.user_cwd):
         path.mkdir(parents=True)
@@ -296,7 +296,7 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
     def run_scenario(item, env):
         calls.append(f"scenario:{item.target_name}")
         return {
-            "id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope),
+            "id": DEFAULT_INSTALL_TARGET_CATALOG.scenario_id(item.target_name, item.scope),
             "platform": item.target_name,
             "scope": item.scope,
             "passed": item.target_name == "second",
@@ -375,7 +375,7 @@ def test_run_validation_plan_fail_fast_stops_first_graphify_failure(tmp_path) ->
 
     def run_scenario(item, env):
         calls.append(item.target_name)
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": False}
+        return {"id": DEFAULT_INSTALL_TARGET_CATALOG.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": False}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         plan,
@@ -414,7 +414,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     )
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id=install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
-            DEFAULT_SCENARIO_REGISTRY.disposable_artifact_specs
+            DEFAULT_INSTALL_TARGET_CATALOG.disposable_artifact_specs
         ),
         platform_label="purge",
         scope="project",
@@ -440,7 +440,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
 
     def run_scenario(item, env):
         calls.append(f"scenario:{item.target_name}")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": True}
+        return {"id": DEFAULT_INSTALL_TARGET_CATALOG.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_universal(selected, env):
         calls.append(f"universal:{selected.spec.scope}")
@@ -469,15 +469,15 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     assert calls == ["scenario:first", "scenario:second", "universal:user", "universal:project", "disposable"]
     assert [result["id"] for result in results][-3:] == [
         install_target_harness_policy.universal_uninstall_scenario_id(
-            DEFAULT_SCENARIO_REGISTRY.universal_uninstall_specs,
+            DEFAULT_INSTALL_TARGET_CATALOG.universal_uninstall_specs,
             "user",
         ),
         install_target_harness_policy.universal_uninstall_scenario_id(
-            DEFAULT_SCENARIO_REGISTRY.universal_uninstall_specs,
+            DEFAULT_INSTALL_TARGET_CATALOG.universal_uninstall_specs,
             "project",
         ),
         install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
-            DEFAULT_SCENARIO_REGISTRY.disposable_artifact_specs
+            DEFAULT_INSTALL_TARGET_CATALOG.disposable_artifact_specs
         ),
     ]
 
@@ -593,7 +593,7 @@ def test_universal_uninstall_spec_lookup_uses_validation_plan_owner(tmp_path) ->
     )
 
     hooks = factory.hooks(
-        scenario_registry=SimpleNamespace(
+        install_target_catalog=SimpleNamespace(
             universal_uninstall_specs=(universal_spec,),
             universal_uninstall_spec_for_scope=lambda scope: (_ for _ in ()).throw(
                 AssertionError("lifecycle should not use the catalog policy lookup wrapper")
@@ -630,7 +630,7 @@ def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_br
 
     def run_scenario(item, env):
         calls.append(f"scenario:{item.target_name}:{item.scope}")
-        return {"id": DEFAULT_SCENARIO_REGISTRY.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": True}
+        return {"id": DEFAULT_INSTALL_TARGET_CATALOG.scenario_id(item.target_name, item.scope), "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")

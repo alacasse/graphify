@@ -8,7 +8,7 @@ from typing import cast
 from tools.install_sandbox import validation_plan
 from tools.install_sandbox.lifecycle import scenario_lifecycle_support
 from tools.install_sandbox.surfaces.install_surface_models import InstallSurface
-from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets.install_target_defaults import DEFAULT_INSTALL_TARGET_CATALOG
 from tools.install_sandbox.targets.install_target_models import (
     DisposableArtifactScenarioSpec,
     DisposableSeedFile,
@@ -70,7 +70,7 @@ def make_validation_plan(
             "target": scenario.target_name,
             "scope": scenario.scope,
             "status": "runnable",
-            "scenario_id": DEFAULT_SCENARIO_REGISTRY.scenario_id(scenario.target_name, scenario.scope),
+            "scenario_id": DEFAULT_INSTALL_TARGET_CATALOG.scenario_id(scenario.target_name, scenario.scope),
             "install_command": list(scenario.install_command),
             "uninstall_command": None if scenario.uninstall_command is None else list(scenario.uninstall_command),
             "generic_direct_equivalence": {"status": "not_applicable"},

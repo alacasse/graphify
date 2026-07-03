@@ -7,11 +7,11 @@ import yaml
 from tools.install_sandbox.registry.spec_loader import SpecLoaderError, load_default_registry, load_registry_from_data
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
 from tools.install_sandbox.surfaces.install_surface_models import ExpectedPath
-from tools.install_sandbox.targets.install_target_defaults import DEFAULT_SCENARIO_REGISTRY
+from tools.install_sandbox.targets.install_target_defaults import DEFAULT_INSTALL_TARGET_CATALOG
 from tools.install_sandbox.targets.install_target_models import PUBLIC_CLI_LACKS_USER_SKILL_UNINSTALL_NOTE, Scenario
 
 
-REGISTRY = DEFAULT_SCENARIO_REGISTRY
+REGISTRY = DEFAULT_INSTALL_TARGET_CATALOG
 
 
 def normalize_default_registry() -> dict[str, object]:

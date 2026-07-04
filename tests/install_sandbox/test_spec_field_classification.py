@@ -30,6 +30,7 @@ FIELD_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_scen
 FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY = "serialized_artifact_vocabulary"
 FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY = "public_product_edge_vocabulary"
 FIELD_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
+FIELD_CLASS_HISTORICAL_EVIDENCE = "historical_evidence"
 FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
 FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
 FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT = "current_target_named_input"
@@ -95,7 +96,6 @@ FIXTURE_INPUT_ROLE_CLASSIFICATION = {
 
 HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
     "universal_uninstall_specs[].platform_label": {
-        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
     "universal_uninstall_specs[].eligible_target_scope": {
@@ -106,7 +106,6 @@ HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION = {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
     "disposable_artifact_specs[].platform_label": {
-        FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
     },
 }
@@ -142,6 +141,9 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     },
     "legacy_registry_yaml.eligible_platform_scope": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "historical_registry_yaml.platform_label": {
+        FIELD_CLASS_HISTORICAL_EVIDENCE,
     },
     "normalized_registry_output.targets": {
         FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
@@ -195,6 +197,9 @@ REPORTING_PROJECTION_ROLE_CLASSIFICATION = {
     },
     "legacy_registry_yaml.eligible_platform_scope": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "historical_registry_yaml.platform_label": {
+        FIELD_CLASS_HISTORICAL_EVIDENCE,
     },
     "UniversalUninstallScenarioSpec.synthetic_result_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
@@ -417,7 +422,6 @@ def test_fixture_input_roles_keep_current_and_legacy_inputs_separate() -> None:
 def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
     assert HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION == {
         "universal_uninstall_specs[].platform_label": {
-            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
         "universal_uninstall_specs[].eligible_target_scope": {
@@ -428,7 +432,6 @@ def test_harness_policy_input_edge_platform_field_roles_are_explicit() -> None:
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
         "disposable_artifact_specs[].platform_label": {
-            FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
             FIELD_CLASS_YAML_INPUT_EDGE_VOCABULARY,
         },
     }
@@ -467,6 +470,9 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
         },
         "legacy_registry_yaml.eligible_platform_scope": {
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+        "historical_registry_yaml.platform_label": {
+            FIELD_CLASS_HISTORICAL_EVIDENCE,
         },
         "normalized_registry_output.targets": {
             FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
@@ -522,6 +528,9 @@ def test_reporting_projection_role_classification_names_exemplar_boundary() -> N
         },
         "legacy_registry_yaml.eligible_platform_scope": {
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        },
+        "historical_registry_yaml.platform_label": {
+            FIELD_CLASS_HISTORICAL_EVIDENCE,
         },
         "UniversalUninstallScenarioSpec.synthetic_result_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
@@ -593,6 +602,15 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
             for field, classes in FIXTURE_INPUT_ROLE_CLASSIFICATION.items()
             if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
         },
+        "historical evidence": {
+            field
+            for classification in (
+                REPORTING_PROJECTION_ROLE_CLASSIFICATION,
+                SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION,
+            )
+            for field, classes in classification.items()
+            if FIELD_CLASS_HISTORICAL_EVIDENCE in classes
+        },
         "current target-named output": {
             field
             for classification in (
@@ -626,6 +644,9 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
             "legacy_registry_yaml.platforms",
             "legacy_registry_yaml.eligible_platform_scope",
         },
+        "historical evidence": {
+            "historical_registry_yaml.platform_label",
+        },
         "current target-named output": {
             "manifest_projection.target_coverage",
             "manifest_projection.target_coverage_summary",
@@ -644,6 +665,19 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
         for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
         if "platform" in field
     )
+    assert {
+        field
+        for field, classes in HARNESS_POLICY_INPUT_EDGE_FIELD_CLASSIFICATION.items()
+        if "platform_label" in field and FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL in classes
+    } == set()
+    assert {
+        field
+        for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
+        if FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL in classes
+    } == {
+        "UniversalUninstallScenarioSpec.synthetic_result_label",
+        "DisposableArtifactScenarioSpec.synthetic_result_label",
+    }
 
 
 def test_public_yaml_schema_closeout_keeps_current_legacy_and_product_buckets_separate() -> None:

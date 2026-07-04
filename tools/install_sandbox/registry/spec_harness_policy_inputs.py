@@ -175,7 +175,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
         if value == "user":
             return UniversalUninstallScenarioSpec(
                 scenario_id="universal-uninstall-user",
-                platform_label="multiple",
+                synthetic_result_label="multiple",
                 scope="user",
                 command=("graphify", "uninstall"),
                 cwd_root="user_cwd",
@@ -184,7 +184,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
         if value == "project":
             return UniversalUninstallScenarioSpec(
                 scenario_id="universal-uninstall-project",
-                platform_label="multiple",
+                synthetic_result_label="multiple",
                 scope="project",
                 command=("graphify", "uninstall", "--project"),
                 cwd_root="project",
@@ -197,7 +197,7 @@ def _universal_uninstall(value: object, context: str) -> UniversalUninstallScena
     _validate_cwd_root(cwd_root, f"{context}.cwd_root")
     return UniversalUninstallScenarioSpec(
         scenario_id=_string(data.get("scenario_id"), f"{context}.scenario_id"),
-        platform_label=_string(data.get("platform_label"), f"{context}.platform_label"),
+        synthetic_result_label=_string(data.get("platform_label"), f"{context}.platform_label"),
         scope=_string(data.get("scope"), f"{context}.scope"),
         command=_command(data.get("command"), f"{context}.command"),
         cwd_root=cwd_root,
@@ -227,7 +227,7 @@ def _disposable_artifact(value: object, context: str) -> DisposableArtifactScena
     _validate_relative(disposable_path_relative, f"{context}.disposable_path_relative")
     return DisposableArtifactScenarioSpec(
         scenario_id=_string(data.get("scenario_id"), f"{context}.scenario_id"),
-        platform_label=_string(data.get("platform_label"), f"{context}.platform_label"),
+        synthetic_result_label=_string(data.get("platform_label"), f"{context}.platform_label"),
         scope=_string(data.get("scope"), f"{context}.scope"),
         command=_command(data.get("command"), f"{context}.command"),
         cwd_root=cwd_root,

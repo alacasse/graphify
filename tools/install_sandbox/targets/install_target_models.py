@@ -63,7 +63,7 @@ class TargetRuntimeValidationSpec:
 @dataclass(frozen=True)
 class UniversalUninstallScenarioSpec:
     scenario_id: str
-    platform_label: str
+    synthetic_result_label: str
     scope: str
     command: tuple[str, ...]
     cwd_root: str
@@ -88,7 +88,7 @@ class DisposableSeedFile:
 @dataclass(frozen=True)
 class DisposableArtifactScenarioSpec:
     scenario_id: str
-    platform_label: str
+    synthetic_result_label: str
     scope: str
     command: tuple[str, ...]
     cwd_root: str

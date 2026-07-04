@@ -151,7 +151,7 @@ def test_disposable_artifact_lifecycle_uses_declared_seed_path_command_cwd_and_a
     (undeclared_path / "graph.json").write_text("{}\n", encoding="utf-8")
     spec = DisposableArtifactScenarioSpec(
         scenario_id="discard-weird-cache",
-        platform_label="janitor",
+        synthetic_result_label="janitor",
         scope="workspace",
         command=("janitor", "discard", "cache"),
         cwd_root="home",

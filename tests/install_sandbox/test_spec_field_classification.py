@@ -124,10 +124,10 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     "synthetic_group_result.platforms": {
         FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
     },
-    "UniversalUninstallScenarioSpec.platform_label": {
+    "UniversalUninstallScenarioSpec.synthetic_result_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
     },
-    "DisposableArtifactScenarioSpec.platform_label": {
+    "DisposableArtifactScenarioSpec.synthetic_result_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
     },
     "product_command.--platform": {
@@ -196,10 +196,10 @@ REPORTING_PROJECTION_ROLE_CLASSIFICATION = {
     "legacy_registry_yaml.eligible_platform_scope": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
-    "UniversalUninstallScenarioSpec.platform_label": {
+    "UniversalUninstallScenarioSpec.synthetic_result_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
     },
-    "DisposableArtifactScenarioSpec.platform_label": {
+    "DisposableArtifactScenarioSpec.synthetic_result_label": {
         FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
     },
 }
@@ -449,10 +449,10 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
         "synthetic_group_result.platforms": {
             FIELD_CLASS_SERIALIZED_ARTIFACT_VOCABULARY,
         },
-        "UniversalUninstallScenarioSpec.platform_label": {
+        "UniversalUninstallScenarioSpec.synthetic_result_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         },
-        "DisposableArtifactScenarioSpec.platform_label": {
+        "DisposableArtifactScenarioSpec.synthetic_result_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         },
         "product_command.--platform": {
@@ -523,10 +523,10 @@ def test_reporting_projection_role_classification_names_exemplar_boundary() -> N
         "legacy_registry_yaml.eligible_platform_scope": {
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
-        "UniversalUninstallScenarioSpec.platform_label": {
+        "UniversalUninstallScenarioSpec.synthetic_result_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         },
-        "DisposableArtifactScenarioSpec.platform_label": {
+        "DisposableArtifactScenarioSpec.synthetic_result_label": {
             FIELD_CLASS_SYNTHETIC_OUTPUT_LABEL,
         },
     }
@@ -634,8 +634,8 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
             "normalized_registry_output.targets",
         },
         "synthetic label vocabulary": {
-            "UniversalUninstallScenarioSpec.platform_label",
-            "DisposableArtifactScenarioSpec.platform_label",
+            "UniversalUninstallScenarioSpec.synthetic_result_label",
+            "DisposableArtifactScenarioSpec.synthetic_result_label",
         },
     }
 

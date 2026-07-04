@@ -32,14 +32,10 @@ SURFACE_CLASS_INTERNAL_STANDARD_SCENARIO_TARGET_IDENTITY = "internal_standard_sc
 SURFACE_CLASS_LEGACY_INPUT_ONLY_READER = "legacy_input_only_reader"
 
 HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION = {
-    "UniversalUninstallScenarioSpec.platform_label": {
-        SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL,
-        SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
-    },
-    "DisposableArtifactScenarioSpec.platform_label": {
-        SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL,
-        SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
-    },
+    "UniversalUninstallScenarioSpec.synthetic_result_label": {SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL},
+    "DisposableArtifactScenarioSpec.synthetic_result_label": {SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL},
+    "registry.universal_uninstall_specs[].platform_label": {SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY},
+    "registry.disposable_artifact_specs[].platform_label": {SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY},
     "UniversalUninstallScenarioSpec.eligible_target_scope": {
         SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
     },
@@ -89,14 +85,10 @@ def test_catalog_policy_wrappers_are_not_supported_accessors() -> None:
 
 def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() -> None:
     assert HARNESS_POLICY_PLATFORM_SURFACE_CLASSIFICATION == {
-        "UniversalUninstallScenarioSpec.platform_label": {
-            SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL,
-            SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
-        },
-        "DisposableArtifactScenarioSpec.platform_label": {
-            SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL,
-            SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY,
-        },
+        "UniversalUninstallScenarioSpec.synthetic_result_label": {SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL},
+        "DisposableArtifactScenarioSpec.synthetic_result_label": {SURFACE_CLASS_SYNTHETIC_OUTPUT_LABEL},
+        "registry.universal_uninstall_specs[].platform_label": {SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY},
+        "registry.disposable_artifact_specs[].platform_label": {SURFACE_CLASS_YAML_INPUT_EDGE_VOCABULARY},
         "UniversalUninstallScenarioSpec.eligible_target_scope": {
             SURFACE_CLASS_SELECTED_TARGET_ELIGIBILITY,
         },
@@ -120,10 +112,12 @@ def test_harness_policy_classifies_platform_named_surfaces_by_contract_role() ->
 
         assert set(signature.parameters) >= debt_parameters
 
-    assert "platform_label" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    assert "synthetic_result_label" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
+    assert "platform_label" not in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
     assert "eligible_target_scope" in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
     assert "eligible_platform_scope" not in install_target_models.UniversalUninstallScenarioSpec.__dataclass_fields__
-    assert "platform_label" in install_target_models.DisposableArtifactScenarioSpec.__dataclass_fields__
+    assert "synthetic_result_label" in install_target_models.DisposableArtifactScenarioSpec.__dataclass_fields__
+    assert "platform_label" not in install_target_models.DisposableArtifactScenarioSpec.__dataclass_fields__
 
 
 def test_harness_policy_closeout_keeps_target_eligibility_target_named() -> None:
@@ -191,7 +185,7 @@ def test_target_runtime_validation_sections_are_declared_and_deduped() -> None:
 def test_disposable_artifact_scenarios_are_declared_by_scope() -> None:
     spec = install_target_models.DisposableArtifactScenarioSpec(
         scenario_id="discard-cache",
-        platform_label="cache-cleaner",
+        synthetic_result_label="cache-cleaner",
         scope="project",
         command=("tool", "discard"),
         cwd_root="project",
@@ -216,7 +210,7 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
     )
     universal = install_target_models.UniversalUninstallScenarioSpec(
         scenario_id="uninstall-everything",
-        platform_label="declared-combo",
+        synthetic_result_label="declared-combo",
         scope="workspace",
         command=("tool", "remove", "all"),
         cwd_root="user_cwd",
@@ -250,7 +244,7 @@ def test_universal_uninstall_scenarios_return_declared_policy() -> None:
     assert [scenario.target_name for scenario in selected[0].installed_scenarios] == ["alpha"]
 
 
-def test_universal_uninstall_platform_label_is_output_label_not_target_eligibility() -> None:
+def test_universal_uninstall_synthetic_result_label_is_not_target_eligibility() -> None:
     installable_scope = install_target_models.ScopeSpec(
         install_command=("tool", "install"),
         uninstall_command=None,
@@ -259,7 +253,7 @@ def test_universal_uninstall_platform_label_is_output_label_not_target_eligibili
     )
     universal = install_target_models.UniversalUninstallScenarioSpec(
         scenario_id="uninstall-selected-project-targets",
-        platform_label="synthetic-cleanup-label",
+        synthetic_result_label="synthetic-cleanup-label",
         scope="project",
         command=("tool", "remove", "all"),
         cwd_root="project",
@@ -292,7 +286,7 @@ def test_universal_uninstall_platform_label_is_output_label_not_target_eligibili
     )
 
     assert len(selected) == 1
-    assert selected[0].spec.platform_label == "synthetic-cleanup-label"
+    assert selected[0].spec.synthetic_result_label == "synthetic-cleanup-label"
     assert selected[0].spec.eligible_target_scope == "project"
     assert [scenario.target_name for scenario in selected[0].installed_scenarios] == ["alpha", "beta"]
 
@@ -389,7 +383,7 @@ def test_harness_policy_owner_selects_policy_scenarios_after_catalog_wrapper_del
     )
     universal = install_target_models.UniversalUninstallScenarioSpec(
         scenario_id="uninstall-combo",
-        platform_label="declared-combo",
+        synthetic_result_label="declared-combo",
         scope="project",
         command=("tool", "remove", "all"),
         cwd_root="project",
@@ -398,7 +392,7 @@ def test_harness_policy_owner_selects_policy_scenarios_after_catalog_wrapper_del
     )
     disposable = install_target_models.DisposableArtifactScenarioSpec(
         scenario_id="purge-cache",
-        platform_label="cleanup",
+        synthetic_result_label="cleanup",
         scope="project",
         command=("tool", "purge"),
         cwd_root="project",
@@ -497,7 +491,7 @@ def test_catalog_target_root_validation_excludes_synthetic_policy_roots() -> Non
         universal_uninstall_specs=(
             install_target_models.UniversalUninstallScenarioSpec(
                 scenario_id="universal",
-                platform_label="combo",
+                synthetic_result_label="combo",
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="policy-cwd",
@@ -535,7 +529,7 @@ def test_harness_policy_validate_roots_covers_scenarios_and_synthetic_policies()
     universal_specs = (
         install_target_models.UniversalUninstallScenarioSpec(
             scenario_id="universal",
-            platform_label="combo",
+            synthetic_result_label="combo",
             scope="project",
             command=("tool", "uninstall"),
             cwd_root="declared-cwd",
@@ -545,7 +539,7 @@ def test_harness_policy_validate_roots_covers_scenarios_and_synthetic_policies()
     disposable_specs = (
         install_target_models.DisposableArtifactScenarioSpec(
             scenario_id="disposable",
-            platform_label="cleanup",
+            synthetic_result_label="cleanup",
             scope="project",
             command=("tool", "purge"),
             cwd_root="declared-cwd",

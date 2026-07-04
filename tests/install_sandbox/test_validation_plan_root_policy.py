@@ -34,7 +34,7 @@ def test_build_validation_plan_validates_target_roots_before_selected_policy_roo
         universal_uninstall_specs=(
             install_target_models.UniversalUninstallScenarioSpec(
                 scenario_id="repo-mounted-uninstall",
-                platform_label="repo-mounted",
+                synthetic_result_label="repo-mounted",
                 scope="project",
                 command=("graphify", "uninstall", "--project"),
                 cwd_root="repo_mount",
@@ -115,7 +115,7 @@ def test_build_validation_plan_policy_validation_uses_install_surface_roots_not_
         universal_uninstall_specs=(
             install_target_models.UniversalUninstallScenarioSpec(
                 scenario_id="policy-cwd-uninstall",
-                platform_label="policy-cwd",
+                synthetic_result_label="policy-cwd",
                 scope="project",
                 command=("graphify", "uninstall", "--project"),
                 cwd_root="policy_cwd",
@@ -149,7 +149,7 @@ def test_build_validation_plan_validates_registry_specific_synthetic_policy_root
         universal_uninstall_specs=(
             install_target_models.UniversalUninstallScenarioSpec(
                 scenario_id="custom-uninstall",
-                platform_label="custom",
+                synthetic_result_label="custom",
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="missing-universal-root",
@@ -159,7 +159,7 @@ def test_build_validation_plan_validates_registry_specific_synthetic_policy_root
         disposable_artifact_specs=(
             install_target_models.DisposableArtifactScenarioSpec(
                 scenario_id="custom-disposable",
-                platform_label="custom",
+                synthetic_result_label="custom",
                 scope="project",
                 command=("tool", "purge"),
                 cwd_root="project",

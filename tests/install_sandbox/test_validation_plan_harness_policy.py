@@ -164,7 +164,7 @@ def test_harness_policy_validates_owned_roots() -> None:
         universal_uninstall_specs=(
             install_target_models.UniversalUninstallScenarioSpec(
                 scenario_id="bad",
-                platform_label="bad",
+                synthetic_result_label="bad",
                 scope="project",
                 command=("bad",),
                 cwd_root="missing-cwd",

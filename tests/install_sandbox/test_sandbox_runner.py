@@ -337,7 +337,7 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
         universal_uninstall_specs=(
             UniversalUninstallScenarioSpec(
                 scenario_id="custom-uninstall",
-                platform_label="custom",
+                synthetic_result_label="custom",
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="missing-universal-root",
@@ -347,7 +347,7 @@ def test_preflight_validates_registry_specific_synthetic_policy_roots(tmp_path) 
         disposable_artifact_specs=(
             DisposableArtifactScenarioSpec(
                 scenario_id="custom-disposable",
-                platform_label="custom",
+                synthetic_result_label="custom",
                 scope="project",
                 command=("tool", "purge"),
                 cwd_root="project",
@@ -449,7 +449,7 @@ def test_preflight_current_policy_validation_uses_install_surface_roots_not_all_
         universal_uninstall_specs=(
             UniversalUninstallScenarioSpec(
                 scenario_id="repo-mounted-uninstall",
-                platform_label="repo-mounted",
+                synthetic_result_label="repo-mounted",
                 scope="project",
                 command=("tool", "uninstall"),
                 cwd_root="repo_mount",

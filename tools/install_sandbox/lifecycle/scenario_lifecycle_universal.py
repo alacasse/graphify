@@ -35,7 +35,7 @@ class UniversalUninstallLifecycle:
 
     def runner_scenario(self) -> Scenario:
         return Scenario(
-            target_name=self.spec.platform_label,
+            target_name=self.spec.synthetic_result_label,
             scope=self.spec.scope,
             install_command=self.uninstall_command,
             uninstall_command=None,
@@ -113,7 +113,7 @@ class UniversalUninstallLifecycle:
         self.write_after_uninstall_manifest(context)
         return UniversalUninstallOutcome(
             scenario_name=self.scenario_name,
-            platform_label=self.spec.platform_label,
+            platform_label=self.spec.synthetic_result_label,
             scope_name=self.spec.scope,
             scenarios=self.scenarios,
             install_results=install_results,

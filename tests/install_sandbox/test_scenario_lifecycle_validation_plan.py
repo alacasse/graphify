@@ -54,7 +54,7 @@ def test_run_validation_plan_consumes_work_items_without_bucket_access(tmp_path)
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")
-        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+        return {"id": spec.scenario_id, "platform": spec.synthetic_result_label, "scope": spec.scope, "passed": True}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         WorkItemOnlyPlan(),
@@ -100,7 +100,7 @@ def test_run_validation_plan_uses_canonical_matrix_runner_override_shapes(tmp_pa
         calls.append(f"universal:{selected.spec.scope}:{scenario_platforms}:{scenario_env['HOME']}")
         return {
             "id": f"universal-{selected.spec.scope}",
-            "platform": selected.spec.platform_label,
+            "platform": selected.spec.synthetic_result_label,
             "scope": selected.spec.scope,
             "passed": True,
         }
@@ -111,7 +111,7 @@ def test_run_validation_plan_uses_canonical_matrix_runner_override_shapes(tmp_pa
         calls.append(f"disposable:{spec.scenario_id}:{scenario_env['HOME']}")
         return {
             "id": spec.scenario_id,
-            "platform": spec.platform_label,
+            "platform": spec.synthetic_result_label,
             "scope": spec.scope,
             "passed": True,
         }
@@ -181,7 +181,7 @@ def test_sandbox_run_environment_exposes_canonical_disposable_override_hook(tmp_
     runtime.risk_report = risk_report
 
     def run_disposable(spec, env):
-        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+        return {"id": spec.scenario_id, "platform": spec.synthetic_result_label, "scope": spec.scope, "passed": True}
 
     parameter_names = SandboxRunEnvironment.scenario_lifecycle_hooks.__code__.co_varnames
     hooks = runtime.scenario_lifecycle_hooks(run_disposable_artifact_scenario_func=run_disposable)
@@ -227,11 +227,11 @@ def test_run_validation_plan_executes_plan_buckets_in_current_order(tmp_path) ->
 
     def run_universal(selected, env):
         calls.append(f"universal:{selected.spec.scenario_id}")
-        return {"id": selected.spec.scenario_id, "platform": selected.spec.platform_label, "scope": selected.spec.scope, "passed": True}
+        return {"id": selected.spec.scenario_id, "platform": selected.spec.synthetic_result_label, "scope": selected.spec.scope, "passed": True}
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")
-        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+        return {"id": spec.scenario_id, "platform": spec.synthetic_result_label, "scope": spec.scope, "passed": True}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         plan,
@@ -266,7 +266,7 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
     second = make_scenario("second", "project", uninstall=False)
     universal_spec = UniversalUninstallScenarioSpec(
         scenario_id="project-sweep",
-        platform_label="multiple",
+        synthetic_result_label="multiple",
         scope="project",
         command=("cleanup", "project"),
         cwd_root="project",
@@ -274,7 +274,7 @@ def test_run_validation_plan_collects_graphify_failures_and_skips_synthetics(tmp
     )
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id="purge-project-cache",
-        platform_label="purge",
+        synthetic_result_label="purge",
         scope="project",
         command=("purge", "project"),
         cwd_root="project",
@@ -340,11 +340,11 @@ def test_run_validation_plan_fail_fast_only_short_circuits_standard_scenarios(tm
 
     def run_universal(selected, env):
         calls.append(f"universal:{selected.spec.scenario_id}")
-        return {"id": selected.spec.scenario_id, "platform": selected.spec.platform_label, "scope": selected.spec.scope, "passed": False}
+        return {"id": selected.spec.scenario_id, "platform": selected.spec.synthetic_result_label, "scope": selected.spec.scope, "passed": False}
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")
-        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+        return {"id": spec.scenario_id, "platform": spec.synthetic_result_label, "scope": spec.scope, "passed": True}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         plan,
@@ -398,7 +398,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     second = make_scenario("second", "project", uninstall=False)
     user_spec = UniversalUninstallScenarioSpec(
         scenario_id="universal-uninstall-user",
-        platform_label="multiple",
+        synthetic_result_label="multiple",
         scope="user",
         command=("graphify", "uninstall"),
         cwd_root="user_cwd",
@@ -406,7 +406,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     )
     project_spec = UniversalUninstallScenarioSpec(
         scenario_id="universal-uninstall-project",
-        platform_label="multiple",
+        synthetic_result_label="multiple",
         scope="project",
         command=("graphify", "uninstall", "--project"),
         cwd_root="project",
@@ -416,7 +416,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         scenario_id=install_target_harness_policy.purge_disposable_graphify_out_scenario_id(
             DEFAULT_INSTALL_TARGET_CATALOG.disposable_artifact_specs
         ),
-        platform_label="purge",
+        synthetic_result_label="purge",
         scope="project",
         command=("graphify", "uninstall", "--purge"),
         cwd_root="project",
@@ -446,7 +446,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
         calls.append(f"universal:{selected.spec.scope}")
         return {
             "id": selected.spec.scenario_id,
-            "platform": selected.spec.platform_label,
+            "platform": selected.spec.synthetic_result_label,
             "scope": selected.spec.scope,
             "passed": False,
         }
@@ -454,7 +454,7 @@ def test_run_validation_plan_collects_universal_failures_and_runs_disposable_cle
     def run_disposable(spec, env):
         assert isinstance(spec, DisposableArtifactScenarioSpec)
         calls.append("disposable")
-        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": False}
+        return {"id": spec.scenario_id, "platform": spec.synthetic_result_label, "scope": spec.scope, "passed": False}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         plan,
@@ -488,7 +488,7 @@ def test_run_validation_plan_rejects_legacy_override_shapes(tmp_path) -> None:
     second = make_scenario("second", "project", uninstall=False)
     universal_spec = UniversalUninstallScenarioSpec(
         scenario_id="legacy-project-sweep",
-        platform_label="multiple",
+        synthetic_result_label="multiple",
         scope="project",
         command=("cleanup", "project"),
         cwd_root="project",
@@ -496,7 +496,7 @@ def test_run_validation_plan_rejects_legacy_override_shapes(tmp_path) -> None:
     )
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id="legacy-purge",
-        platform_label="purge",
+        synthetic_result_label="purge",
         scope="project",
         command=("purge",),
         cwd_root="project",
@@ -519,7 +519,7 @@ def test_run_validation_plan_rejects_legacy_override_shapes(tmp_path) -> None:
         return {"id": f"{item.target_name}-{item.scope}", "platform": item.target_name, "scope": item.scope, "passed": True}
 
     def run_universal(universal_scope, scenarios, env):
-        return {"id": universal_spec.scenario_id, "platform": universal_spec.platform_label, "scope": universal_scope, "passed": True}
+        return {"id": universal_spec.scenario_id, "platform": universal_spec.synthetic_result_label, "scope": universal_scope, "passed": True}
 
     try:
         scenario_lifecycle_plan.run_validation_plan(
@@ -542,7 +542,7 @@ def test_run_validation_plan_preserves_selected_universal_uninstall_spec(tmp_pat
     scenario = make_scenario("arbitrary", "project", uninstall=False)
     universal_spec = UniversalUninstallScenarioSpec(
         scenario_id="selected-sweep",
-        platform_label="selected-cleaner",
+        synthetic_result_label="selected-cleaner",
         scope="selected-scope",
         command=("selected", "remove"),
         cwd_root="user_cwd",
@@ -585,7 +585,7 @@ def test_universal_uninstall_spec_lookup_uses_validation_plan_owner(tmp_path) ->
     factory = HookFactory(tmp_path)
     universal_spec = UniversalUninstallScenarioSpec(
         scenario_id="registry-selected-sweep",
-        platform_label="selected",
+        synthetic_result_label="selected",
         scope="project",
         command=("selected", "uninstall"),
         cwd_root="project",
@@ -610,7 +610,7 @@ def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_br
     scenario = make_scenario("arbitrary", "user", uninstall=False)
     disposable_spec = DisposableArtifactScenarioSpec(
         scenario_id="user-disposable-cleanup",
-        platform_label="cleanup",
+        synthetic_result_label="cleanup",
         scope="user",
         command=("cleanup", "now"),
         cwd_root="home",
@@ -634,7 +634,7 @@ def test_run_validation_plan_runs_declared_disposable_scenarios_without_scope_br
 
     def run_disposable(spec, env):
         calls.append(f"disposable:{spec.scenario_id}")
-        return {"id": spec.scenario_id, "platform": spec.platform_label, "scope": spec.scope, "passed": True}
+        return {"id": spec.scenario_id, "platform": spec.synthetic_result_label, "scope": spec.scope, "passed": True}
 
     results = scenario_lifecycle_plan.run_validation_plan(
         plan,

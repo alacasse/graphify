@@ -100,7 +100,7 @@ def make_universal_uninstall_selection(
     scenarios: tuple[Scenario, ...],
     *,
     scenario_id: str = "universal-uninstall-project",
-    target_label: str | None = None,
+    synthetic_result_label: str = "multiple",
     scope: str = "project",
     command: tuple[str, ...] = ("graphify", "uninstall", "--project"),
     cwd_root: str = "project",
@@ -109,15 +109,12 @@ def make_universal_uninstall_selection(
     risk_note: str = "universal uninstall covers Graphify-owned file effects after multiple installs",
     **legacy_kwargs: object,
 ) -> SelectedUniversalUninstallScenario:
-    selected_target_label = target_label
-    if selected_target_label is None:
-        selected_target_label = cast(str, legacy_kwargs.pop("platform_label", "multiple"))
     if legacy_kwargs:
         raise TypeError(f"unexpected keyword arguments: {', '.join(legacy_kwargs)}")
     return SelectedUniversalUninstallScenario(
         UniversalUninstallScenarioSpec(
             scenario_id=scenario_id,
-            platform_label=selected_target_label,
+            synthetic_result_label=synthetic_result_label,
             scope=scope,
             command=command,
             cwd_root=cwd_root,
@@ -132,7 +129,7 @@ def make_universal_uninstall_selection(
 def make_disposable_graphify_out_spec() -> DisposableArtifactScenarioSpec:
     return DisposableArtifactScenarioSpec(
         scenario_id="purge-disposable-graphify-out",
-        platform_label="purge",
+        synthetic_result_label="purge",
         scope="project",
         command=("graphify", "uninstall", "--purge"),
         cwd_root="project",

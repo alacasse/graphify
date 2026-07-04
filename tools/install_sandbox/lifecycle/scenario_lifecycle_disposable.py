@@ -34,7 +34,7 @@ class DisposableArtifactLifecycle:
 
     def runner_scenario(self) -> Scenario:
         return Scenario(
-            target_name=self.spec.platform_label,
+            target_name=self.spec.synthetic_result_label,
             scope=self.spec.scope,
             install_command=self.command,
             uninstall_command=None,
@@ -84,7 +84,7 @@ class DisposableArtifactLifecycle:
         self.write_after_uninstall_manifest(context)
         return DisposableArtifactOutcome(
             scenario_name=self.scenario_name,
-            platform_label=self.spec.platform_label,
+            platform_label=self.spec.synthetic_result_label,
             scope_name=self.spec.scope,
             command=self.command,
             result=result,

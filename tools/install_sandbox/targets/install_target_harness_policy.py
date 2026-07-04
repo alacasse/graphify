@@ -27,7 +27,7 @@ def _default_universal_uninstall_specs() -> tuple[UniversalUninstallScenarioSpec
     return (
         UniversalUninstallScenarioSpec(
             scenario_id="universal-uninstall-user",
-            platform_label="multiple",
+            synthetic_result_label="multiple",
             scope="user",
             command=("graphify", "uninstall"),
             cwd_root="user_cwd",
@@ -35,7 +35,7 @@ def _default_universal_uninstall_specs() -> tuple[UniversalUninstallScenarioSpec
         ),
         UniversalUninstallScenarioSpec(
             scenario_id="universal-uninstall-project",
-            platform_label="multiple",
+            synthetic_result_label="multiple",
             scope="project",
             command=("graphify", "uninstall", "--project"),
             cwd_root="project",
@@ -48,7 +48,7 @@ def _default_disposable_artifact_specs() -> tuple[DisposableArtifactScenarioSpec
     return (
         DisposableArtifactScenarioSpec(
             scenario_id="purge-disposable-graphify-out",
-            platform_label="purge",
+            synthetic_result_label="purge",
             scope="project",
             command=("graphify", "uninstall", "--purge"),
             cwd_root="project",

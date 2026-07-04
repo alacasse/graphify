@@ -231,8 +231,10 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
 
     universal_fields = models.UniversalUninstallScenarioSpec.__dataclass_fields__
     disposable_fields = models.DisposableArtifactScenarioSpec.__dataclass_fields__
-    assert "platform_label" in universal_fields
-    assert "platform_label" in disposable_fields
+    assert "synthetic_result_label" in universal_fields
+    assert "synthetic_result_label" in disposable_fields
+    assert "platform_label" not in universal_fields
+    assert "platform_label" not in disposable_fields
     assert "eligible_target_scope" in universal_fields
     assert "eligible_platform_scope" not in universal_fields
     assert "target_name" in models.Scenario.__dataclass_fields__
@@ -246,6 +248,8 @@ def test_root_topology_closeout_guards_harness_policy_frontier_vocabulary() -> N
 
     loader_source = inspect.getsource(spec_inputs._universal_uninstall)
     eligibility_resolver_source = inspect.getsource(spec_inputs._universal_uninstall_eligible_target_scope)
+    assert "synthetic_result_label=" in loader_source
+    assert "platform_label=" not in loader_source
     assert "eligible_target_scope=" in loader_source
     assert "CURRENT_HARNESS_POLICY_ELIGIBILITY_FIELD" in eligibility_resolver_source
     assert "LEGACY_HARNESS_POLICY_ELIGIBILITY_FIELD" in eligibility_resolver_source

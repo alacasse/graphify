@@ -108,7 +108,7 @@ def test_universal_uninstall_lifecycle_uses_declared_command_cwd_platform_and_ri
     selected = make_universal_uninstall_selection(
         scenarios,
         scenario_id="sweep-custom-workspace",
-        platform_label="synthetic-cleaner",
+        synthetic_result_label="synthetic-cleaner",
         scope="workspace",
         command=("custom-tool", "remove", "workspace"),
         cwd_root="user_cwd",

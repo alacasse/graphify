@@ -336,7 +336,7 @@ def test_catalog_boundary_preserves_target_selection_behavior() -> None:
             "uninstall_command": ["tool", "uninstall"],
             "generic_direct_equivalence": {
                 "status": "not_applicable",
-                "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
+                "reason": "generic and direct commands are unsupported or intentionally differ for this target/scope",
             },
             "risk_notes": [],
         },

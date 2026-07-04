@@ -14,28 +14,28 @@ def target_spec(specs: dict[str, InstallTargetSpec], target_name: str) -> Instal
     try:
         return specs[target_name]
     except KeyError as exc:
-        raise RuntimeError(f"unknown sandbox platform: {target_name}") from exc
+        raise RuntimeError(f"unknown Install Target: {target_name}") from exc
 
 
 def selected_targets(specs: dict[str, InstallTargetSpec], *, all_platforms: bool, target_name: str | None) -> list[str]:
     target_names = list(specs) if all_platforms else [target_name]
     unknown = [name for name in target_names if name not in specs]
     if unknown:
-        raise RuntimeError(f"unknown sandbox platform(s): {', '.join(str(name) for name in unknown)}")
+        raise RuntimeError(f"unknown Install Target(s): {', '.join(str(name) for name in unknown)}")
     return [str(name) for name in target_names]
 
 
 def user_skill(specs: dict[str, InstallTargetSpec], target_name: str) -> InstallSurface:
     skill = target_spec(specs, target_name).user_skill
     if skill is None:
-        raise RuntimeError(f"sandbox platform has no user skill path: {target_name}")
+        raise RuntimeError(f"Install Target has no user skill path: {target_name}")
     return _skill("home", skill)
 
 
 def project_skill(specs: dict[str, InstallTargetSpec], target_name: str) -> InstallSurface:
     skill = target_spec(specs, target_name).project_skill
     if skill is None:
-        raise RuntimeError(f"sandbox platform has no project skill path: {target_name}")
+        raise RuntimeError(f"Install Target has no project skill path: {target_name}")
     return _skill("project", skill)
 
 
@@ -141,7 +141,7 @@ def equivalence_status(specs: dict[str, InstallTargetSpec], scenario: Scenario) 
         return {"status": "runnable", "command": list(equivalent)}
     return {
         "status": "not_applicable",
-        "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
+        "reason": "generic and direct commands are unsupported or intentionally differ for this target/scope",
     }
 
 
@@ -177,7 +177,7 @@ def coverage_records(specs: dict[str, InstallTargetSpec], target_names: list[str
                         "target": target_name,
                         "scope": one_scope,
                         "status": "unsupported",
-                        "reason": reason or "no sandbox scenario is defined for this platform/scope",
+                        "reason": reason or "no sandbox scenario is defined for this target/scope",
                     }
                 )
     return records

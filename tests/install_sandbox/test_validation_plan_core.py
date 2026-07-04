@@ -92,7 +92,7 @@ def test_validation_plan_preserves_explicit_target_order_and_full_plan_contents(
     assert [scenario.scenario_id for scenario in plan.disposable_artifacts] == ["purge-disposable-graphify-out"]
     generic_direct_equivalence = {
         "status": "not_applicable",
-        "reason": "generic and direct commands are unsupported or intentionally differ for this platform/scope",
+        "reason": "generic and direct commands are unsupported or intentionally differ for this target/scope",
     }
     assert plan.coverage_records == (
         {

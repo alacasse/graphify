@@ -78,9 +78,9 @@ def test_install_target_module_helpers_use_default_catalog_seam() -> None:
     assert install_target_defaults.install_target_specs() is catalog.specs
     assert install_target_defaults.install_target_spec("codex") is catalog.target_spec("codex")
     assert install_target_defaults.install_target_scenarios("cursor", "both") == catalog.target_scenarios("cursor", "both")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+    with pytest.raises(RuntimeError, match=r"^unknown Install Target: missing-target$"):
         install_target_defaults.install_target_spec("missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+    with pytest.raises(RuntimeError, match=r"^unknown Install Target: missing-target$"):
         install_target_defaults.install_target_scenarios("missing-target", "both")
 
 

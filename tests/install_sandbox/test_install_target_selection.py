@@ -98,15 +98,34 @@ def test_catalog_facade_uses_target_owned_parameters_for_install_targets() -> No
         assert not (set(signature.parameters) & legacy_parameter_names)
 
 
-def test_missing_install_target_and_legacy_platform_errors_keep_legacy_wording() -> None:
-    # Error wording is user-visible today and intentionally remains separate
-    # from the internal accessor migration.
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+def test_missing_install_target_errors_use_install_target_wording() -> None:
+    with pytest.raises(RuntimeError, match=r"^unknown Install Target: missing-target$"):
         REGISTRY.target_spec("missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform\(s\): missing-target$"):
+    with pytest.raises(RuntimeError, match=r"^unknown Install Target\(s\): missing-target$"):
         REGISTRY.selected_targets(all_platforms=False, target_name="missing-target")
-    with pytest.raises(RuntimeError, match=r"^unknown sandbox platform: missing-target$"):
+    with pytest.raises(RuntimeError, match=r"^unknown Install Target: missing-target$"):
         REGISTRY.target_scenarios("missing-target", "both")
+
+
+def test_missing_skill_path_errors_use_install_target_wording() -> None:
+    specs = {
+        "skillless": install_target_models.InstallTargetSpec(
+            name="skillless",
+            scopes={
+                "project": install_target_models.ScopeSpec(
+                    install_command=("tool", "install"),
+                    uninstall_command=None,
+                    cwd_root="project",
+                    expected=(install_target_models.ExpectedPath("project", "skillless.txt"),),
+                )
+            },
+        )
+    }
+
+    with pytest.raises(RuntimeError, match=r"^Install Target has no user skill path: skillless$"):
+        install_target_selection.user_skill(specs, "skillless")
+    with pytest.raises(RuntimeError, match=r"^Install Target has no project skill path: skillless$"):
+        install_target_selection.project_skill(specs, "skillless")
 
 
 def test_every_catalog_scope_is_runnable_or_explained() -> None:
@@ -242,6 +261,31 @@ def test_target_coverage_records_unsupported_scopes() -> None:
     assert user["status"] == "unsupported"
     assert "reason" in user
     assert project["status"] == "runnable"
+
+
+def test_target_coverage_records_explain_missing_target_scope() -> None:
+    specs = {
+        "project-only": install_target_models.InstallTargetSpec(
+            name="project-only",
+            scopes={
+                "project": install_target_models.ScopeSpec(
+                    install_command=("tool", "install"),
+                    uninstall_command=None,
+                    cwd_root="project",
+                    expected=(install_target_models.ExpectedPath("project", "project-only.txt"),),
+                )
+            },
+        )
+    }
+
+    assert install_target_selection.coverage_records(specs, ["project-only"], "user") == [
+        {
+            "target": "project-only",
+            "scope": "user",
+            "status": "unsupported",
+            "reason": "no sandbox scenario is defined for this target/scope",
+        }
+    ]
 
 
 def test_generic_direct_equivalence_applicability() -> None:

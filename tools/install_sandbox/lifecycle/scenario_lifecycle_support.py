@@ -53,7 +53,7 @@ class ScenarioResultOutcome(Protocol):
     @property
     def passed(self) -> bool: ...
 
-    def platform_name(self, context: ScenarioRunContext) -> str: ...
+    def result_target_label(self, context: ScenarioRunContext) -> str: ...
 
     def scope(self, context: ScenarioRunContext) -> str: ...
 
@@ -78,7 +78,7 @@ class StandardScenarioOutcome:
     def passed(self) -> bool:
         return self.command_ok and all(check["ok"] for check in self.checks)
 
-    def platform_name(self, context: ScenarioRunContext) -> str:
+    def result_target_label(self, context: ScenarioRunContext) -> str:
         return context.scenario.target_name
 
     def scope(self, context: ScenarioRunContext) -> str:
@@ -114,7 +114,7 @@ class StandardScenarioOutcome:
 @dataclass(frozen=True)
 class UniversalUninstallOutcome:
     scenario_name: str
-    platform_label: str
+    synthetic_result_label: str
     scope_name: str
     scenarios: list[Scenario]
     install_results: list[dict[str, object]]
@@ -131,8 +131,8 @@ class UniversalUninstallOutcome:
     def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
         return self.uninstall_command
 
-    def platform_name(self, context: ScenarioRunContext) -> str:
-        return self.platform_label
+    def result_target_label(self, context: ScenarioRunContext) -> str:
+        return self.synthetic_result_label
 
     def scope(self, context: ScenarioRunContext) -> str:
         return self.scope_name
@@ -160,7 +160,7 @@ class UniversalUninstallOutcome:
 @dataclass(frozen=True)
 class DisposableArtifactOutcome:
     scenario_name: str
-    platform_label: str
+    synthetic_result_label: str
     scope_name: str
     command: tuple[str, ...]
     result: subprocess.CompletedProcess[str]
@@ -176,8 +176,8 @@ class DisposableArtifactOutcome:
     def reproduction_command(self, context: ScenarioRunContext) -> tuple[str, ...]:
         return self.command
 
-    def platform_name(self, context: ScenarioRunContext) -> str:
-        return self.platform_label
+    def result_target_label(self, context: ScenarioRunContext) -> str:
+        return self.synthetic_result_label
 
     def scope(self, context: ScenarioRunContext) -> str:
         return self.scope_name
@@ -187,7 +187,7 @@ class DisposableArtifactOutcome:
 
     def assertions(self, context: ScenarioRunContext) -> dict[str, object]:
         return {
-            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "target": self.platform_label},
+            "scenario": {"id": self.scenario_name, "scope": self.scope_name, "target": self.synthetic_result_label},
             "passed": self.passed,
             "uninstall_exit_code": self.result.returncode,
             "checks": self.checks,
@@ -348,7 +348,7 @@ class ScenarioArtifacts:
         risk_payload = outcome.risks(context, self) if risks is None else risks
         return {
             "id": outcome.scenario_name,
-            "target": outcome.platform_name(context),
+            "target": outcome.result_target_label(context),
             "scope": outcome.scope(context),
             "started_at": context.started_at,
             "duration_ms": scenario_duration_ms(context),

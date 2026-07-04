@@ -84,7 +84,7 @@ class DisposableArtifactLifecycle:
         self.write_after_uninstall_manifest(context)
         return DisposableArtifactOutcome(
             scenario_name=self.scenario_name,
-            platform_label=self.spec.synthetic_result_label,
+            synthetic_result_label=self.spec.synthetic_result_label,
             scope_name=self.spec.scope,
             command=self.command,
             result=result,

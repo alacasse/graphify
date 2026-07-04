@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -35,6 +36,11 @@ FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
 FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
 FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT = "current_target_named_input"
 FIELD_CLASS_CURRENT_FIXTURE_INPUT = "current_fixture_input"
+FIELD_CLASS_SANDBOX_CLI_TRANSPORT = "sandbox_cli_transport"
+FIELD_CLASS_GENERATED_COMMAND_LITERAL = "generated_command_literal"
+FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY = "artifact_schema_compatibility"
+
+PROJECT_ROOT = Path(__file__).parents[2]
 
 
 def _current_registry_data() -> dict[str, Any]:
@@ -155,6 +161,84 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
 }
+
+POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION = {
+    "product_command.--platform": {
+        FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY,
+    },
+    "sandbox_cli.run.--platform": {
+        FIELD_CLASS_SANDBOX_CLI_TRANSPORT,
+    },
+    "sandbox_cli.run.all_platforms": {
+        FIELD_CLASS_SANDBOX_CLI_TRANSPORT,
+    },
+    "sandbox_cli.sandbox_runner.--platform": {
+        FIELD_CLASS_SANDBOX_CLI_TRANSPORT,
+    },
+    "runtime.container_command.platform": {
+        FIELD_CLASS_SANDBOX_CLI_TRANSPORT,
+    },
+    "runtime.container_command.all_platforms": {
+        FIELD_CLASS_SANDBOX_CLI_TRANSPORT,
+    },
+    "legacy_registry_yaml.platforms": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "legacy_registry_yaml.eligible_platform_scope": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+    },
+    "legacy_manifest_input.platform": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY,
+    },
+    "legacy_manifest_input.platform_coverage": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY,
+    },
+    "legacy_result_input.platform": {
+        FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
+        FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY,
+    },
+    "historical_registry_yaml.platform_label": {
+        FIELD_CLASS_HISTORICAL_EVIDENCE,
+    },
+    "generated_graphify_install_command.--platform": {
+        FIELD_CLASS_GENERATED_COMMAND_LITERAL,
+    },
+    "generated_graphify_uninstall_command.--platform": {
+        FIELD_CLASS_GENERATED_COMMAND_LITERAL,
+    },
+    "target_yaml_command_literals.--platform": {
+        FIELD_CLASS_GENERATED_COMMAND_LITERAL,
+    },
+    "legacy_serialized_standard_result.platform": {
+        FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY,
+    },
+    "legacy_serialized_synthetic_result.platform": {
+        FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY,
+    },
+    "legacy_serialized_synthetic_group.platforms": {
+        FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY,
+    },
+}
+
+SELECTED_DIAGNOSTIC_SOURCE_FILES = (
+    "tools/install_sandbox/targets/install_target_selection.py",
+    "tools/install_sandbox/validation_plan.py",
+    "tools/install_sandbox/registry/spec_loader.py",
+    "tools/install_sandbox/registry/spec_target_facts.py",
+)
+
+STALE_SELECTED_DIAGNOSTIC_WORDING = (
+    "unknown sandbox platform",
+    "unknown sandbox platform(s)",
+    "sandbox platform has no user skill path",
+    "sandbox platform has no project skill path",
+    "platform/scope",
+    "platform spec file",
+    "platform key/name mismatch",
+    "invalid platform scope",
+)
 
 REPORTING_PROJECTION_ROLE_CLASSIFICATION = {
     "manifest_projection.target_coverage": {
@@ -677,6 +761,86 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
     } == {
         "UniversalUninstallScenarioSpec.synthetic_result_label",
         "DisposableArtifactScenarioSpec.synthetic_result_label",
+    }
+
+
+def test_diagnostic_wording_closeout_classifies_allowed_platform_vocabulary_buckets() -> None:
+    buckets = {
+        "public product CLI": {
+            field
+            for field, classes in POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION.items()
+            if FIELD_CLASS_PUBLIC_PRODUCT_EDGE_VOCABULARY in classes
+        },
+        "sandbox CLI transport": {
+            field
+            for field, classes in POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION.items()
+            if FIELD_CLASS_SANDBOX_CLI_TRANSPORT in classes
+        },
+        "legacy input-only readers": {
+            field
+            for field, classes in POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION.items()
+            if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
+        },
+        "historical planning evidence": {
+            field
+            for field, classes in POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION.items()
+            if FIELD_CLASS_HISTORICAL_EVIDENCE in classes
+        },
+        "generated command literals": {
+            field
+            for field, classes in POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION.items()
+            if FIELD_CLASS_GENERATED_COMMAND_LITERAL in classes
+        },
+        "artifact schema compatibility": {
+            field
+            for field, classes in POST_DIAGNOSTIC_PLATFORM_VOCABULARY_CLASSIFICATION.items()
+            if FIELD_CLASS_ARTIFACT_SCHEMA_COMPATIBILITY in classes
+        },
+    }
+
+    assert buckets == {
+        "public product CLI": {"product_command.--platform"},
+        "sandbox CLI transport": {
+            "runtime.container_command.all_platforms",
+            "runtime.container_command.platform",
+            "sandbox_cli.run.--platform",
+            "sandbox_cli.run.all_platforms",
+            "sandbox_cli.sandbox_runner.--platform",
+        },
+        "legacy input-only readers": {
+            "legacy_manifest_input.platform",
+            "legacy_manifest_input.platform_coverage",
+            "legacy_registry_yaml.eligible_platform_scope",
+            "legacy_registry_yaml.platforms",
+            "legacy_result_input.platform",
+        },
+        "historical planning evidence": {"historical_registry_yaml.platform_label"},
+        "generated command literals": {
+            "generated_graphify_install_command.--platform",
+            "generated_graphify_uninstall_command.--platform",
+            "target_yaml_command_literals.--platform",
+        },
+        "artifact schema compatibility": {
+            "legacy_manifest_input.platform",
+            "legacy_manifest_input.platform_coverage",
+            "legacy_result_input.platform",
+            "legacy_serialized_standard_result.platform",
+            "legacy_serialized_synthetic_group.platforms",
+            "legacy_serialized_synthetic_result.platform",
+        },
+    }
+
+
+def test_diagnostic_wording_closeout_does_not_preserve_stale_selected_diagnostics() -> None:
+    selected_sources = "\n".join(
+        (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        for relative_path in SELECTED_DIAGNOSTIC_SOURCE_FILES
+    )
+
+    assert not {
+        stale_wording
+        for stale_wording in STALE_SELECTED_DIAGNOSTIC_WORDING
+        if stale_wording in selected_sources
     }
 
 

@@ -54,12 +54,12 @@ def test_validation_plan_orders_all_targets_and_standard_scenarios() -> None:
     ]
 
 
-def test_validation_plan_rejects_unknown_platform() -> None:
+def test_validation_plan_rejects_unknown_target() -> None:
     registry = install_target_catalog.InstallTargetCatalog(
         {"known": install_target_models.InstallTargetSpec(name="known")}
     )
 
-    with pytest.raises(RuntimeError, match="unknown sandbox platform"):
+    with pytest.raises(RuntimeError, match="unknown install target"):
         validation_plan.build_validation_plan(registry, all_targets=False, target_name="missing", scope="project")
 
 
@@ -253,7 +253,7 @@ def test_validation_plan_builds_full_ordered_plan_for_both_scope() -> None:
 def test_validation_plan_rejects_unknown_explicit_target_names() -> None:
     registry = planner_registry()
 
-    with pytest.raises(RuntimeError, match="unknown sandbox platform\\(s\\): missing, absent"):
+    with pytest.raises(RuntimeError, match="unknown install target\\(s\\): missing, absent"):
         validation_plan.build_validation_plan(
             registry,
             all_targets=False,

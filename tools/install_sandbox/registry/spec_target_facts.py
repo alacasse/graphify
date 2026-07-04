@@ -239,7 +239,7 @@ def _scope_spec(target_name: str, scope_name: str, value: object, context: str, 
     data = _mapping(value, context)
     _reject_unknown_fields(data, _SCOPE_FIELDS, context)
     if scope_name not in _SCOPE_NAMES:
-        _fail(context, f"invalid platform scope: {scope_name}")
+        _fail(context, f"invalid target scope: {scope_name}")
     try:
         install_surfaces = derive_scope_install_surfaces(data, context)
     except SpecInstallSurfaceError as exc:
@@ -349,13 +349,13 @@ def target_spec(target_key: str, value: object, context: str) -> InstallTargetSp
     if "name" in data:
         name = _string(data.get("name"), f"{context}.name")
         if name != target_key:
-            _fail(f"{context}.name", f"platform key/name mismatch: {target_key} != {name}")
+            _fail(f"{context}.name", f"target key/name mismatch: {target_key} != {name}")
 
     scopes_value = _mapping(data.get("scopes", {}), f"{context}.scopes")
     unsupported_value = _mapping(data.get("unsupported_scopes", {}), f"{context}.unsupported_scopes")
     for scope_name in (*scopes_value, *unsupported_value):
         if scope_name not in _SCOPE_NAMES:
-            _fail(context, f"invalid platform scope: {scope_name}")
+            _fail(context, f"invalid target scope: {scope_name}")
     for scope_name in sorted(_SCOPE_NAMES):
         runnable = scope_name in scopes_value
         unsupported = scope_name in unsupported_value

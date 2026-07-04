@@ -48,7 +48,7 @@ def test_load_registry_from_dir_rejects_empty_product_specs(tmp_path: Any) -> No
     _write_registry_dir(tmp_path, data)
     (tmp_path / "mini.yaml").unlink()
 
-    with pytest.raises(SpecLoaderError, match="expected at least one platform spec file"):
+    with pytest.raises(SpecLoaderError, match="expected at least one target spec file"):
         load_registry_from_dir(tmp_path)
 
 
@@ -67,7 +67,7 @@ def test_load_registry_from_dir_rejects_filename_key_mismatch(tmp_path: Any) -> 
     data["targets"]["mini"]["name"] = "other"
     _write_registry_dir(tmp_path, data)
 
-    with pytest.raises(SpecLoaderError, match="platform key/name mismatch: mini != other"):
+    with pytest.raises(SpecLoaderError, match="target key/name mismatch: mini != other"):
         load_registry_from_dir(tmp_path)
 
 

@@ -139,7 +139,7 @@ def load_registry_from_dir(path: Path | str = DEFAULT_REGISTRY_PATH) -> InstallT
         key=lambda product_path: product_path.stem,
     )
     if not product_paths:
-        _fail(str(registry_dir), "expected at least one platform spec file")
+        _fail(str(registry_dir), "expected at least one target spec file")
 
     data = {
         "schema_version": SCHEMA_VERSION,

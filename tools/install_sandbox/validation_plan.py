@@ -148,12 +148,12 @@ def selected_targets(
         targets = tuple(selected_target_names)
         unknown = [name for name in targets if name not in registry.specs]
         if unknown:
-            raise RuntimeError(f"unknown sandbox platform(s): {', '.join(unknown)}")
+            raise RuntimeError(f"unknown install target(s): {', '.join(unknown)}")
         return targets
     if all_targets:
         return tuple(sorted(registry.specs))
     if target_name is None or target_name not in registry.specs:
-        raise RuntimeError(f"unknown sandbox platform(s): {target_name}")
+        raise RuntimeError(f"unknown install target(s): {target_name}")
     return (target_name,)
 
 

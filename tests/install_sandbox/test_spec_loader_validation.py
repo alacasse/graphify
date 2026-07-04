@@ -257,11 +257,14 @@ def test_loader_rejects_non_surface_root_for_disposable_path_root() -> None:
     _expect_invalid(data, "unknown expected root")
 
 
-def test_loader_rejects_platform_key_name_mismatch() -> None:
-    data = _current_data()
-    _mini(data)["name"] = "other"
+def test_loader_rejects_target_key_name_mismatch_for_current_and_legacy_inputs() -> None:
+    current = _current_data()
+    _mini(current)["name"] = "other"
+    _expect_invalid(current, "target key/name mismatch")
 
-    _expect_invalid(data, "platform key/name mismatch")
+    legacy = _legacy_data()
+    legacy[LEGACY_REGISTRY_CONTAINER_FIELD]["mini"]["name"] = "other"
+    _expect_invalid(legacy, "target key/name mismatch")
 
 
 def test_loader_rejects_missing_or_conflicting_scope_declarations() -> None:
@@ -304,11 +307,15 @@ def test_loader_rejects_duplicate_install_variant_labels() -> None:
     _expect_invalid(data, "duplicate install variant label")
 
 
-def test_loader_rejects_invalid_scope_names() -> None:
-    data = _current_data()
-    _mini(data)["scopes"]["both"] = _mini(data)["scopes"].pop("project")
+def test_loader_rejects_invalid_target_scope_names_for_current_and_legacy_inputs() -> None:
+    current = _current_data()
+    _mini(current)["scopes"]["both"] = _mini(current)["scopes"].pop("project")
+    _expect_invalid(current, "invalid target scope: both")
 
-    _expect_invalid(data, "invalid platform scope: both")
+    legacy = _legacy_data()
+    legacy_mini = legacy[LEGACY_REGISTRY_CONTAINER_FIELD]["mini"]
+    legacy_mini["scopes"]["both"] = legacy_mini["scopes"].pop("project")
+    _expect_invalid(legacy, "invalid target scope: both")
 
 
 def test_loader_rejects_unknown_structured_risk_note() -> None:

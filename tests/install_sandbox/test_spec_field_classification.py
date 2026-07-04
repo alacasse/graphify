@@ -7,7 +7,9 @@ import yaml
 
 from tools.install_sandbox.registry import spec_loader
 from tools.install_sandbox.registry import spec_harness_policy_inputs
+from tools.install_sandbox.registry import spec_install_surfaces
 from tools.install_sandbox.registry import spec_schema_validation
+from tools.install_sandbox.registry import spec_target_facts
 from tools.install_sandbox.registry.spec_loader import load_registry_from_data, load_registry_from_dir
 from tools.install_sandbox.registry.spec_normalize import normalize_registry
 
@@ -15,6 +17,7 @@ from tests.install_sandbox.install_target_test_support import legacy_platform_re
 
 
 FIELD_CLASS_DURABLE_TARGET_FACT = "durable_target_fact"
+FIELD_CLASS_INSTALL_SURFACE = "install_surface"
 FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION = "transitional_sandbox_execution_data"
 FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY = "transitional_sandbox_policy_data"
 FIELD_CLASS_DERIVED_DEFAULT = "derived_default"
@@ -216,6 +219,105 @@ DEFAULT_YAML_STRUCTURAL_SCOPE_FIELDS = {
     "effects",
     "expected",
 }
+
+
+def _schema_class_to_field_class(field: str, schema_class: str) -> str:
+    if field in {"simulated_linux_layout", "target_runtime_validation", "unsupported_scopes"}:
+        return FIELD_CLASS_RUNTIME_LIMITATION
+    if field == "universal_uninstall_scopes":
+        return FIELD_CLASS_HARNESS_POLICY
+    if schema_class == spec_schema_validation.SCHEMA_CLASS_TARGET_FACT:
+        return FIELD_CLASS_DURABLE_TARGET_FACT
+    if schema_class == spec_schema_validation.SCHEMA_CLASS_TRANSITIONAL_EXECUTION:
+        return FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION
+    if schema_class == spec_schema_validation.SCHEMA_CLASS_TRANSITIONAL_PLANNING:
+        return FIELD_CLASS_TRANSITIONAL_SANDBOX_POLICY
+    if schema_class == spec_schema_validation.SCHEMA_CLASS_HARNESS_POLICY_INPUT:
+        return FIELD_CLASS_HARNESS_POLICY
+    if schema_class == spec_schema_validation.SCHEMA_CLASS_PUBLIC_SCHEMA_COMPATIBILITY:
+        return FIELD_CLASS_LEGACY_INPUT_ONLY_READER
+    raise AssertionError(f"unknown schema class for {field}: {schema_class}")
+
+
+def _default_yaml_field_path_examples() -> dict[str, set[str]]:
+    examples: dict[str, set[str]] = {}
+
+    def add(path: str, example: str) -> None:
+        examples.setdefault(path, set()).add(example)
+
+    def walk(value: object, prefix: str, example: str) -> None:
+        add(prefix, example)
+        if isinstance(value, dict):
+            for key, item in value.items():
+                walk(item, f"{prefix}.{key}", example)
+            return
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    walk(item, f"{prefix}[]", example)
+
+    for spec_path in sorted(spec_loader.DEFAULT_REGISTRY_PATH.glob("*.yaml")):
+        data = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+        for field, value in data.items():
+            if field == "scopes" and isinstance(value, dict):
+                add("scopes", spec_path.stem)
+                for scope_name, scope_data in value.items():
+                    add(f"scopes.{scope_name}", spec_path.stem)
+                    if isinstance(scope_data, dict):
+                        for scope_field, scope_field_value in scope_data.items():
+                            walk(scope_field_value, f"scopes.*.{scope_field}", f"{spec_path.stem}.{scope_name}")
+                continue
+            walk(value, field, spec_path.stem)
+
+    return examples
+
+
+def _classify_default_yaml_field_path(path: str) -> str | None:
+    if path in {"scopes.project", "scopes.user"}:
+        return FIELD_CLASS_DURABLE_TARGET_FACT
+    if path.startswith("unsupported_scopes."):
+        return FIELD_CLASS_RUNTIME_LIMITATION
+    if path == "reference_bundles[]":
+        return FIELD_CLASS_DURABLE_TARGET_FACT
+    if path.startswith("reference_bundles[]."):
+        field = path.removeprefix("reference_bundles[].")
+        if field in spec_target_facts._REFERENCE_BUNDLE_FIELDS:
+            return _schema_class_to_field_class(field, spec_schema_validation.SCHEMA_CLASS_TARGET_FACT)
+        return None
+    if path.startswith("target_runtime_validation[]."):
+        field = path.removeprefix("target_runtime_validation[].")
+        if field in spec_target_facts._TARGET_RUNTIME_VALIDATION_FIELDS:
+            return FIELD_CLASS_RUNTIME_LIMITATION
+        return None
+    if path == "scopes.*.effects[].hooks[]":
+        return FIELD_CLASS_INSTALL_SURFACE
+    if path.startswith("scopes.*.effects[].hooks[]."):
+        field = path.removeprefix("scopes.*.effects[].hooks[].")
+        if field in spec_install_surfaces._JSON_HOOK_FIELDS:
+            return FIELD_CLASS_INSTALL_SURFACE
+        return None
+    if path == "scopes.*.effects[]":
+        return FIELD_CLASS_INSTALL_SURFACE
+    if path.startswith("scopes.*.effects[]."):
+        field = path.removeprefix("scopes.*.effects[].")
+        if field in set().union(*spec_install_surfaces._EFFECT_FIELDS_BY_KIND.values()):
+            return FIELD_CLASS_INSTALL_SURFACE
+        return None
+    if path.startswith("scopes.*."):
+        field = path.removeprefix("scopes.*.")
+        schema_class = spec_target_facts.SCOPE_FIELD_CLASSIFICATIONS.get(field)
+        if schema_class is None:
+            return None
+        if field == "effects":
+            return FIELD_CLASS_INSTALL_SURFACE
+        if field == "expected":
+            return FIELD_CLASS_LEGACY_INPUT_ONLY_READER
+        return _schema_class_to_field_class(field, schema_class)
+
+    schema_class = spec_target_facts.TARGET_FIELD_CLASSIFICATIONS.get(path)
+    if schema_class is None:
+        return None
+    return _schema_class_to_field_class(path, schema_class)
 
 
 def test_loader_derives_conventional_product_yaml_equivalent_to_explicit_fixture() -> None:
@@ -594,6 +696,64 @@ def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:
     unclassified_fields = set(actual_inventory) - set(SPEC_WEIGHT_FIELD_CLASSIFICATION)
 
     assert unclassified_fields == set()
+
+
+def test_default_yaml_field_paths_are_covered_by_classification_contract() -> None:
+    actual_field_examples = _default_yaml_field_path_examples()
+    actual_classification = {
+        field_path: _classify_default_yaml_field_path(field_path)
+        for field_path in actual_field_examples
+    }
+    unclassified_fields = {
+        field_path: sorted(actual_field_examples[field_path])
+        for field_path, classification in actual_classification.items()
+        if classification is None
+    }
+
+    assert unclassified_fields == {}
+
+
+def test_default_yaml_classification_contract_keeps_owner_categories_distinct() -> None:
+    actual_classification = {
+        field_path: _classify_default_yaml_field_path(field_path)
+        for field_path in _default_yaml_field_path_examples()
+    }
+    fields_by_class = {
+        field_class: {
+            field_path
+            for field_path, actual_class in actual_classification.items()
+            if actual_class == field_class
+        }
+        for field_class in {
+            FIELD_CLASS_DURABLE_TARGET_FACT,
+            FIELD_CLASS_INSTALL_SURFACE,
+            FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION,
+            FIELD_CLASS_HARNESS_POLICY,
+            FIELD_CLASS_RUNTIME_LIMITATION,
+        }
+    }
+
+    assert fields_by_class[FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION] == {
+        "scopes.*.equivalent_install_command",
+        "scopes.*.install_command",
+        "scopes.*.uninstall_command",
+    }
+    assert fields_by_class[FIELD_CLASS_TRANSITIONAL_SANDBOX_EXECUTION].isdisjoint(
+        fields_by_class[FIELD_CLASS_DURABLE_TARGET_FACT]
+    )
+    assert fields_by_class[FIELD_CLASS_HARNESS_POLICY] == {
+        "universal_uninstall_scopes",
+    }
+    assert fields_by_class[FIELD_CLASS_RUNTIME_LIMITATION] == {
+        "simulated_linux_layout",
+        "unsupported_scopes",
+        "unsupported_scopes.user",
+    }
+    assert "scopes.*.effects" in fields_by_class[FIELD_CLASS_INSTALL_SURFACE]
+    assert "targets" in REGISTRY_FIELD_CLASSIFICATION
+    assert REGISTRY_FIELD_CLASSIFICATION["targets"] == FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT
+    assert REGISTRY_FIELD_CLASSIFICATION["platforms"] == FIELD_CLASS_LEGACY_INPUT_ONLY_READER
+    assert FIELD_CLASS_DERIVED_DEFAULT == "derived_default"
 
 
 def test_top_level_registry_policy_inputs_are_not_target_facts() -> None:

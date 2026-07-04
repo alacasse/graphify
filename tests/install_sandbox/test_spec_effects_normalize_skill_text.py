@@ -66,7 +66,7 @@ def test_normalized_simple_effects_for_both_scopes() -> None:
     }
 
     for platform_name, scopes in expected_surfaces.items():
-        normalized_scopes = normalized["platforms"][platform_name]["scopes"]
+        normalized_scopes = normalized["targets"][platform_name]["scopes"]
         for scope_name, surfaces in scopes.items():
             scope = normalized_scopes[scope_name]
             assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in scope["effects"]] == surfaces

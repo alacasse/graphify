@@ -5,7 +5,7 @@ from tests.install_sandbox.install_target_test_support import normalize_default_
 
 def test_normalized_registry_exposes_codex_project_effects() -> None:
     normalized = normalize_default_registry()
-    codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
+    codex_project = normalized["targets"]["codex"]["scopes"]["project"]
 
     assert [
         (entry["effect_type"], entry["root"], entry["relative"]) for entry in codex_project["effects"]
@@ -18,7 +18,7 @@ def test_normalized_registry_exposes_codex_project_effects() -> None:
 
 def test_normalized_gemini_effects_for_both_scopes() -> None:
     normalized = normalize_default_registry()
-    gemini = normalized["platforms"]["gemini"]["scopes"]
+    gemini = normalized["targets"]["gemini"]["scopes"]
 
     assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in gemini["user"]["effects"]] == [
         ("skill", "home", ".gemini/skills/graphify/SKILL.md"),

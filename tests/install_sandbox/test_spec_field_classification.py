@@ -34,7 +34,6 @@ FIELD_CLASS_REPORTING_PROJECTION_EXEMPLAR = "reporting_projection_exemplar"
 FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT = "current_target_named_output"
 FIELD_CLASS_CURRENT_TARGET_NAMED_INPUT = "current_target_named_input"
 FIELD_CLASS_CURRENT_FIXTURE_INPUT = "current_fixture_input"
-FIELD_CLASS_UNCHANGED_NORMALIZED_REGISTRY_OUTPUT = "unchanged_normalized_registry_output"
 
 
 def _current_registry_data() -> dict[str, Any]:
@@ -144,8 +143,8 @@ SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION = {
     "legacy_registry_yaml.eligible_platform_scope": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
     },
-    "normalized_registry_output.platforms": {
-        FIELD_CLASS_UNCHANGED_NORMALIZED_REGISTRY_OUTPUT,
+    "normalized_registry_output.targets": {
+        FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
     },
     "legacy_manifest_input.platform": {
         FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
@@ -469,8 +468,8 @@ def test_scenario_identity_edge_platform_field_roles_are_explicit() -> None:
         "legacy_registry_yaml.eligible_platform_scope": {
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
         },
-        "normalized_registry_output.platforms": {
-            FIELD_CLASS_UNCHANGED_NORMALIZED_REGISTRY_OUTPUT,
+        "normalized_registry_output.targets": {
+            FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT,
         },
         "legacy_manifest_input.platform": {
             FIELD_CLASS_LEGACY_INPUT_ONLY_READER,
@@ -594,10 +593,14 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
             for field, classes in FIXTURE_INPUT_ROLE_CLASSIFICATION.items()
             if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes
         },
-        "unchanged normalized registry output": {
+        "current target-named output": {
             field
-            for field, classes in SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION.items()
-            if FIELD_CLASS_UNCHANGED_NORMALIZED_REGISTRY_OUTPUT in classes
+            for classification in (
+                REPORTING_PROJECTION_ROLE_CLASSIFICATION,
+                SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION,
+            )
+            for field, classes in classification.items()
+            if FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT in classes
         },
         "synthetic label vocabulary": {
             field
@@ -623,8 +626,12 @@ def test_platform_to_target_closeout_classifies_remaining_platform_vocabulary_ed
             "legacy_registry_yaml.platforms",
             "legacy_registry_yaml.eligible_platform_scope",
         },
-        "unchanged normalized registry output": {
-            "normalized_registry_output.platforms",
+        "current target-named output": {
+            "manifest_projection.target_coverage",
+            "manifest_projection.target_coverage_summary",
+            "report_rendering.target_coverage",
+            "agent_summary.failure.target",
+            "normalized_registry_output.targets",
         },
         "synthetic label vocabulary": {
             "UniversalUninstallScenarioSpec.platform_label",
@@ -649,11 +656,12 @@ def test_public_yaml_schema_closeout_keeps_current_legacy_and_product_buckets_se
         "legacy_registry_yaml.eligible_platform_scope",
     }
     product_command_contracts = {"product_command.--platform"}
-    generated_output_fields = {
+    current_output_fields = {
         "manifest_projection.target_coverage",
         "manifest_projection.target_coverage_summary",
         "report_rendering.target_coverage",
         "agent_summary.failure.target",
+        "normalized_registry_output.targets",
     }
 
     assert spec_schema_validation.CURRENT_REGISTRY_CONTAINER_FIELD == "targets"
@@ -667,7 +675,7 @@ def test_public_yaml_schema_closeout_keeps_current_legacy_and_product_buckets_se
     assert current_schema_inputs.isdisjoint(legacy_input_only)
     assert current_schema_inputs.isdisjoint(product_command_contracts)
     assert legacy_input_only.isdisjoint(product_command_contracts)
-    assert generated_output_fields.isdisjoint(legacy_input_only)
+    assert current_output_fields.isdisjoint(legacy_input_only)
 
     assert {
         field
@@ -683,12 +691,15 @@ def test_public_yaml_schema_closeout_keeps_current_legacy_and_product_buckets_se
     } == {"universal_uninstall_specs[].eligible_target_scope"}
     assert {
         field
+        for field, classes in SCENARIO_IDENTITY_EDGE_FIELD_CLASSIFICATION.items()
+        if FIELD_CLASS_CURRENT_TARGET_NAMED_OUTPUT in classes
+    } == {"normalized_registry_output.targets"}
+    assert {
+        field
         for field, classes in REPORTING_PROJECTION_ROLE_CLASSIFICATION.items()
         if FIELD_CLASS_LEGACY_INPUT_ONLY_READER in classes and field.startswith("legacy_registry_yaml.")
     } == legacy_input_only
-    assert normalize_registry(load_registry_from_data(_current_registry_data())).keys() >= {
-        "platforms",
-    }
+    assert set(normalize_registry(load_registry_from_data(_current_registry_data()))) == {"targets"}
 
 
 def test_default_yaml_uses_only_classified_spec_weight_fields() -> None:

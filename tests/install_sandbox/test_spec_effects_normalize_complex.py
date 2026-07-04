@@ -5,9 +5,9 @@ from tests.install_sandbox.install_target_test_support import normalize_default_
 
 def test_normalized_complex_effects_for_claude_and_vscode() -> None:
     normalized = normalize_default_registry()
-    claude_platform = normalized["platforms"]["claude"]
-    claude = claude_platform["scopes"]
-    vscode = normalized["platforms"]["vscode"]
+    claude_target = normalized["targets"]["claude"]
+    claude = claude_target["scopes"]
+    vscode = normalized["targets"]["vscode"]
 
     assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in claude["user"]["effects"]] == [
         ("skill", "home", ".claude/skills/graphify/SKILL.md"),
@@ -35,7 +35,7 @@ def test_normalized_complex_effects_for_claude_and_vscode() -> None:
             "required_fragments": ["graphify"],
         },
     ]
-    assert claude_platform["universal_uninstall_scopes"] == ["project"]
+    assert claude_target["universal_uninstall_scopes"] == ["project"]
     assert vscode["reference_bundles"] == [
         {"name": "vscode", "required_package_relative": "skill-vscode.md"},
         {"name": "copilot", "required_package_relative": None},
@@ -136,11 +136,11 @@ def test_normalized_simulated_layout_effects_and_policies() -> None:
     }
 
     for platform_name, platform_expected in expected.items():
-        platform = normalized["platforms"][platform_name]
-        assert platform["simulated_linux_layout"] is platform_expected["simulated"]
-        assert platform["target_runtime_validation"] == []
+        target = normalized["targets"][platform_name]
+        assert target["simulated_linux_layout"] is platform_expected["simulated"]
+        assert target["target_runtime_validation"] == []
         for scope_name in ("user", "project"):
-            scope = platform["scopes"][scope_name]
+            scope = target["scopes"][scope_name]
             scope_expected = platform_expected[scope_name]
 
             assert scope["install_command"] == scope_expected["install"]

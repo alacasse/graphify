@@ -153,5 +153,5 @@ def normalize_registry(registry: InstallTargetCatalog) -> dict[str, Any]:
     """Return deterministic primitive data for registry equivalence tests."""
 
     return {
-        "platforms": {name: _target_spec(registry.specs[name]) for name in registry.target_names},
+        "targets": {name: _target_spec(registry.specs[name]) for name in registry.target_names},
     }

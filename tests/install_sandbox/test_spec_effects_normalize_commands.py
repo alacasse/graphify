@@ -79,7 +79,7 @@ def test_normalized_command_effects_and_commands() -> None:
     }
 
     for platform_name, scopes in expected.items():
-        normalized_scopes = normalized["platforms"][platform_name]["scopes"]
+        normalized_scopes = normalized["targets"][platform_name]["scopes"]
         for scope_name, scope_expected in scopes.items():
             scope = normalized_scopes[scope_name]
 
@@ -90,7 +90,7 @@ def test_normalized_command_effects_and_commands() -> None:
                 (entry["effect_type"], entry["root"], entry["relative"]) for entry in scope["effects"]
             ] == scope_expected["surfaces"]
 
-    assert normalized["platforms"]["cursor"]["unsupported_scopes"] == {
+    assert normalized["targets"]["cursor"]["unsupported_scopes"] == {
         "user": (
             "cursor install writes a project-local .cursor rule in the current working directory; "
             "sandbox covers that file effect as project scope"

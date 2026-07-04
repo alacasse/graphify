@@ -36,7 +36,7 @@ def test_loader_prefers_effects_key_for_install_surface_inputs() -> None:
     assert project is not None
     assert not hasattr(user, "effects")
     assert not hasattr(project, "effects")
-    normalized_user = normalize_registry(registry)["platforms"]["mini"]["scopes"]["user"]
+    normalized_user = normalize_registry(registry)["targets"]["mini"]["scopes"]["user"]
     assert [(entry["effect_type"], entry["root"], entry["relative"]) for entry in normalized_user["effects"]] == [
         ("skill", "home", ".mini/skills/graphify/SKILL.md"),
     ]

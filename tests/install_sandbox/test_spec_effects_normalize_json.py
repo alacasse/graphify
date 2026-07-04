@@ -49,7 +49,7 @@ def test_normalized_hook_effects_for_runnable_scopes() -> None:
     }
 
     for platform_name, scopes in expected_hooks.items():
-        normalized_scopes = normalized["platforms"][platform_name]["scopes"]
+        normalized_scopes = normalized["targets"][platform_name]["scopes"]
         for scope_name, hooks in scopes.items():
             scope = normalized_scopes[scope_name]
             json_effect = next(entry for entry in scope["effects"] if entry["effect_type"] == "json_hooks")
@@ -84,7 +84,7 @@ def test_normalized_plugin_effect_entries() -> None:
     }
 
     for platform_name, scopes in expected_plugins.items():
-        normalized_scopes = normalized["platforms"][platform_name]["scopes"]
+        normalized_scopes = normalized["targets"][platform_name]["scopes"]
         for scope_name, plugin in scopes.items():
             scope = normalized_scopes[scope_name]
             json_effect = next(

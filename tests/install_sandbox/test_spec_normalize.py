@@ -24,26 +24,27 @@ def test_normalized_default_registry_is_deterministic() -> None:
     assert first == second
 
 
-def test_normalized_registry_preserves_public_platforms_output_key_in_target_order() -> None:
+def test_normalized_registry_emits_targets_output_key_in_target_order() -> None:
     registry = load_default_registry()
     normalized = normalize_registry(registry)
 
-    assert list(normalized["platforms"]) == registry.target_names
+    assert list(normalized["targets"]) == registry.target_names
 
 
-def test_normalized_registry_public_top_level_key_set_is_stable() -> None:
+def test_normalized_registry_public_top_level_targets_key_set_is_stable() -> None:
     normalized = normalize_default_registry()
 
-    assert set(normalized) == {"platforms"}
+    assert set(normalized) == {"targets"}
+    assert "platforms" not in normalized
 
 
-def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
+def test_normalized_target_and_scope_key_sets_are_stable() -> None:
     normalized = normalize_default_registry()
-    codex_platform = normalized["platforms"]["codex"]
-    codex_project = codex_platform["scopes"]["project"]
+    codex_target = normalized["targets"]["codex"]
+    codex_project = codex_target["scopes"]["project"]
     hooks = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
 
-    assert set(codex_platform) == {
+    assert set(codex_target) == {
         "name",
         "display_name",
         "target_kind",
@@ -84,7 +85,7 @@ def test_normalized_platform_and_scope_key_sets_are_stable() -> None:
 
 def test_normalized_scope_emits_effects_only() -> None:
     normalized = normalize_default_registry()
-    codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
+    codex_project = normalized["targets"]["codex"]["scopes"]["project"]
     effects_hook = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
 
     assert "expected" not in codex_project
@@ -125,15 +126,15 @@ def test_normalized_registry_does_not_emit_install_target_alias_keys() -> None:
 def test_normalized_registry_includes_target_metadata() -> None:
     normalized = normalize_default_registry()
 
-    assert normalized["platforms"]["agents"]["display_name"] == "Agent Skills"
-    assert normalized["platforms"]["agents"]["target_kind"] == "generic_standard"
-    assert normalized["platforms"]["codex"]["display_name"] is None
-    assert normalized["platforms"]["codex"]["target_kind"] == "product"
+    assert normalized["targets"]["agents"]["display_name"] == "Agent Skills"
+    assert normalized["targets"]["agents"]["target_kind"] == "generic_standard"
+    assert normalized["targets"]["codex"]["display_name"] is None
+    assert normalized["targets"]["codex"]["target_kind"] == "product"
 
 
 def test_normalized_registry_includes_nested_install_surface_policies() -> None:
     normalized = normalize_default_registry()
-    codex_project = normalized["platforms"]["codex"]["scopes"]["project"]
+    codex_project = normalized["targets"]["codex"]["scopes"]["project"]
     hooks = next(entry for entry in codex_project["effects"] if entry["relative"] == ".codex/hooks.json")
     skill = next(entry for entry in codex_project["effects"] if entry["relative"].endswith("SKILL.md"))
 
@@ -153,11 +154,11 @@ def test_normalized_registry_includes_nested_install_surface_policies() -> None:
 def test_normalized_registry_includes_high_risk_platform_policies() -> None:
     normalized = normalize_default_registry()
 
-    kilo_project = normalized["platforms"]["kilo"]["scopes"]["project"]
-    gemini_user = normalized["platforms"]["gemini"]["scopes"]["user"]
-    vscode = normalized["platforms"]["vscode"]
-    antigravity_windows = normalized["platforms"]["antigravity-windows"]
-    windows = normalized["platforms"]["windows"]
+    kilo_project = normalized["targets"]["kilo"]["scopes"]["project"]
+    gemini_user = normalized["targets"]["gemini"]["scopes"]["user"]
+    vscode = normalized["targets"]["vscode"]
+    antigravity_windows = normalized["targets"]["antigravity-windows"]
+    windows = normalized["targets"]["windows"]
 
     assert kilo_project["allowed_roots"] == ["home", "project", "user_cwd"]
     assert any(entry["root"] == "home" for entry in kilo_project["effects"])

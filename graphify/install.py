@@ -1775,8 +1775,11 @@ def claude_uninstall(project_dir: Path | None = None, *, project: bool = False) 
     supports so they are not committed to a shared repo, so uninstall also cleans
     CLAUDE.local.md, .claude/CLAUDE.local.md and .claude/settings.local.json (#1731).
     """
+    direct_user_uninstall = project_dir is None and not project
     project_dir = project_dir or Path(".")
     _remove_skill_file("claude", project=project, project_dir=project_dir)
+    if direct_user_uninstall:
+        _remove_claude_skill_registration(Path.home())
 
     md_targets = [
         project_dir / "CLAUDE.md",

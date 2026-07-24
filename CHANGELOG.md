@@ -4,6 +4,7 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.9.25 (2026-07-22)
 
+- Fix: `graphify claude uninstall` now removes the user skill registration from `~/.claude/CLAUDE.md` along with the user skill tree, while preserving unrelated user instructions.
 - Fix: CodeBuddy installs and uninstalls now keep the skill, `CODEBUDDY.md`, and hook settings in one selected scope. Generic installs use the user CodeBuddy root, project installs and `graphify codebuddy` subcommands stay in the project, and universal uninstall cleans both scopes while preserving unrelated instructions and hooks (fork issue #4).
 - Fix: progressive skill uninstall now removes a stale `references.tmp` staging directory, and Kilo global uninstall removes both `references/` and `references.tmp` before collapsing empty Graphify-owned directories (fork issue #8).
 - License: the project is now licensed under the Apache License, Version 2.0 (previously MIT). Apache 2.0 adds an explicit patent grant and patent-retaliation clause and explicit contribution terms. Contributions made before the relicensing were submitted under MIT and remain available under those terms; the original MIT license text is retained in `LICENSE-MIT` and referenced from `NOTICE`.

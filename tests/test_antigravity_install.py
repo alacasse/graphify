@@ -22,7 +22,11 @@ def test_antigravity_project_install_writes_rules_and_workflows(tmp_path):
 
 def test_antigravity_project_uninstall_clears_rules_and_workflows(tmp_path):
     m._project_install("antigravity", tmp_path)
+    skill_dir = tmp_path / ".agents" / "skills" / "graphify"
+    refs_tmp = skill_dir / "references.tmp"
+    refs_tmp.mkdir()
+    (refs_tmp / "partial.md").write_text("stale staging", encoding="utf-8")
     m._project_uninstall("antigravity", tmp_path)
     assert not (tmp_path / ".agents" / "rules" / "graphify.md").exists()
     assert not (tmp_path / ".agents" / "workflows" / "graphify.md").exists()
-    assert not (tmp_path / ".agents" / "skills" / "graphify" / "SKILL.md").exists()
+    assert not skill_dir.exists()

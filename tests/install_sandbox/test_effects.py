@@ -1,0 +1,271 @@
+import json
+from pathlib import Path
+
+from tools.install_sandbox.effects import (
+    REFERENCE_NAMES,
+    contains_json,
+    validate_installed,
+    validate_removed,
+)
+from tools.install_sandbox.models import Effect, EffectKind, Root
+
+
+def roots(tmp_path):
+    result = {root: tmp_path / root.value for root in Root}
+    for path in result.values():
+        path.mkdir()
+    return result
+
+
+def test_json_subset_matching_is_order_independent_for_list_entries():
+    actual = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Read|Glob", "hooks": [{"command": "graphify"}]},
+                {"matcher": "Bash|Grep", "hooks": [{"command": "graphify"}]},
+            ]
+        },
+        "user": "kept",
+    }
+    expected = {
+        "hooks": {
+            "PreToolUse": [{"matcher": "Bash|Grep"}, {"matcher": "Read|Glob"}]
+        }
+    }
+
+    assert contains_json(actual, expected)
+
+
+def test_progressive_skill_validates_payload_version_exact_refs_and_pointers(
+    tmp_path,
+):
+    root_map = roots(tmp_path)
+    source = tmp_path / "source"
+    skill_source = source / "graphify" / "skill.md"
+    refs_source = source / "graphify" / "skills" / "claude" / "references"
+    refs_source.mkdir(parents=True)
+    skill_source.parent.mkdir(parents=True, exist_ok=True)
+    skill_source.write_text(
+        "\n".join(f"[{name}](references/{name})" for name in REFERENCE_NAMES),
+        encoding="utf-8",
+    )
+    for name in REFERENCE_NAMES:
+        (refs_source / name).write_text(name, encoding="utf-8")
+
+    installed = root_map[Root.HOME] / ".tool/graphify/SKILL.md"
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(skill_source.read_bytes())
+    (installed.parent / ".graphify_version").write_text("1.0", encoding="utf-8")
+    installed_refs = installed.parent / "references"
+    installed_refs.mkdir()
+    for name in REFERENCE_NAMES:
+        (installed_refs / name).write_bytes((refs_source / name).read_bytes())
+    effect = Effect(
+        kind=EffectKind.SKILL,
+        root=Root.HOME,
+        path=".tool/graphify/SKILL.md",
+        source="graphify/skill.md",
+        reference_bundle="claude",
+    )
+
+    results = validate_installed([effect], root_map, source)
+
+    assert results
+    assert all(result.passed for result in results), results
+
+
+def test_markdown_json_and_opencode_reminder_checks_are_behavioral(tmp_path):
+    root_map = roots(tmp_path)
+    project = root_map[Root.PROJECT]
+    agents = project / "AGENTS.md"
+    agents.write_text("# User\n\nkeep\n\n## graphify\nowned\n", encoding="utf-8")
+    config = project / ".opencode/opencode.json"
+    config.parent.mkdir()
+    config.write_text(
+        json.dumps(
+            {
+                "user_owned": True,
+                "plugin": [".opencode/plugins/graphify.js"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    plugin = project / ".opencode/plugins/graphify.js"
+    plugin.parent.mkdir(exist_ok=True)
+    plugin.write_text(
+        "// comments may mention ` and $( safely\n"
+        "const command = 'echo \"[graphify] run graphify query with your question\" ; ' + command;\n",
+        encoding="utf-8",
+    )
+    effects = [
+        Effect(
+            kind=EffectKind.SECTION,
+            root=Root.PROJECT,
+            path="AGENTS.md",
+            marker="## graphify",
+        ),
+        Effect(
+            kind=EffectKind.JSON,
+            root=Root.PROJECT,
+            path=".opencode/opencode.json",
+            entries={"plugin": [".opencode/plugins/graphify.js"]},
+        ),
+        Effect(
+            kind=EffectKind.REMINDER_PLUGIN,
+            root=Root.PROJECT,
+            path=".opencode/plugins/graphify.js",
+            required_text=("[graphify]", "graphify query"),
+            forbidden_text=("`", "$(", "&&"),
+        ),
+    ]
+
+    results = validate_installed(effects, root_map, tmp_path / "unused")
+
+    assert all(result.passed for result in results), results
+    agents.write_text("# User\n\nkeep\n", encoding="utf-8")
+    config.write_text(
+        json.dumps({"user_owned": True, "plugin": []}), encoding="utf-8"
+    )
+    plugin.unlink()
+    assert all(result.passed for result in validate_removed(effects, root_map))
+    assert "keep" in agents.read_text(encoding="utf-8")
+    assert json.loads(config.read_text(encoding="utf-8"))["user_owned"] is True
+
+
+def test_unsafe_text_inside_captured_reminder_fails(tmp_path):
+    root_map = roots(tmp_path)
+    plugin = root_map[Root.PROJECT] / "plugin.js"
+    plugin.write_text(
+        "const x = 'echo \"[graphify] run $(graphify query)\" && ' + command;\n",
+        encoding="utf-8",
+    )
+    effect = Effect(
+        kind=EffectKind.REMINDER_PLUGIN,
+        root=Root.PROJECT,
+        path="plugin.js",
+        required_text=("[graphify]",),
+        forbidden_text=("$(", "&&"),
+    )
+
+    results = validate_installed([effect], root_map, tmp_path)
+
+    assert any(not result.passed for result in results)
+
+
+def test_owned_section_with_correct_marker_and_wrong_body_fails(tmp_path):
+    root_map = roots(tmp_path)
+    source = tmp_path / "source"
+    expected = source / "graphify" / "always_on" / "agents-md.md"
+    expected.parent.mkdir(parents=True)
+    expected.write_text(
+        "## graphify\n\nrequired graph instructions\n",
+        encoding="utf-8",
+    )
+    target = root_map[Root.PROJECT] / "AGENTS.md"
+    target.write_text(
+        "# User notes\n\nkeep\n\n## graphify\n\nstale instructions\n",
+        encoding="utf-8",
+    )
+    effect = Effect(
+        kind=EffectKind.SECTION,
+        root=Root.PROJECT,
+        path="AGENTS.md",
+        marker="## graphify",
+        source="graphify/always_on/agents-md.md",
+    )
+
+    results = validate_installed([effect], root_map, source)
+
+    assert any(
+        result.check == "payload equality" and not result.passed
+        for result in results
+    )
+
+
+def test_owned_section_body_left_after_heading_removal_fails(tmp_path):
+    root_map = roots(tmp_path)
+    source = tmp_path / "source"
+    expected = source / "graphify" / "always_on" / "agents-md.md"
+    expected.parent.mkdir(parents=True)
+    expected.write_text(
+        "## graphify\n\nrequired graph instructions\n",
+        encoding="utf-8",
+    )
+    target = root_map[Root.PROJECT] / "AGENTS.md"
+    target.write_text(
+        "# User notes\n\nkeep\n\nrequired graph instructions\n",
+        encoding="utf-8",
+    )
+    effect = Effect(
+        kind=EffectKind.SECTION,
+        root=Root.PROJECT,
+        path="AGENTS.md",
+        marker="## graphify",
+        source="graphify/always_on/agents-md.md",
+    )
+
+    results = validate_removed([effect], root_map, source)
+
+    assert any(not result.passed for result in results)
+
+
+def test_partial_json_hook_cleanup_fails_removal_validation(tmp_path):
+    root_map = roots(tmp_path)
+    settings = root_map[Root.PROJECT] / ".claude/settings.json"
+    settings.parent.mkdir()
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Read|Glob", "hooks": [{"command": "graphify"}]}
+                    ]
+                },
+                "user_owned": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    effect = Effect(
+        kind=EffectKind.JSON,
+        root=Root.PROJECT,
+        path=".claude/settings.json",
+        entries={
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash|Grep"},
+                    {"matcher": "Read|Glob"},
+                ]
+            }
+        },
+    )
+
+    results = validate_removed([effect], root_map)
+
+    assert any(not result.passed for result in results)
+
+
+def test_antigravity_skill_requires_native_discovery_frontmatter(tmp_path):
+    root_map = roots(tmp_path)
+    source = tmp_path / "source"
+    skill_source = source / "graphify" / "skill.md"
+    skill_source.parent.mkdir(parents=True)
+    skill_source.write_text("# graphify skill\n", encoding="utf-8")
+    installed = root_map[Root.HOME] / ".gemini/config/skills/graphify/SKILL.md"
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(skill_source.read_bytes())
+    effect = Effect(
+        kind=EffectKind.SKILL,
+        root=Root.HOME,
+        path=".gemini/config/skills/graphify/SKILL.md",
+        source="graphify/skill.md",
+        payload_mode="frontmatter-body",
+        required_text=("name: graphify-manager",),
+    )
+
+    results = validate_installed([effect], root_map, source)
+
+    assert any(
+        result.check.endswith("requires text") and not result.passed
+        for result in results
+    )

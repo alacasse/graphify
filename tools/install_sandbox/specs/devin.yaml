@@ -1,0 +1,19 @@
+scopes:
+  user:
+    uninstall: [graphify, devin, uninstall]
+    effects:
+      - kind: skill
+        root: home
+        path: .config/devin/skills/graphify/SKILL.md
+        source: graphify/skill-devin.md
+  project:
+    effects:
+      - kind: skill
+        root: project
+        path: .devin/skills/graphify/SKILL.md
+        source: graphify/skill-devin.md
+      - kind: text
+        root: project
+        path: .windsurf/rules/graphify.md
+        required_text: ["## graphify", "graphify query"]
+

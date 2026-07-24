@@ -1,0 +1,17 @@
+scopes:
+  user:
+    uninstall: [graphify, agents, uninstall]
+    effects:
+      - kind: skill
+        root: home
+        path: .agents/skills/graphify/SKILL.md
+        source: graphify/skill-agents.md
+        reference_bundle: agents
+  project:
+    effects:
+      - kind: skill
+        root: project
+        path: .agents/skills/graphify/SKILL.md
+        source: graphify/skill-agents.md
+        reference_bundle: agents
+

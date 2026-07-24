@@ -1,3 +1,4 @@
+universal_uninstall_scopes: [user]
 scopes:
   user:
     effects:
@@ -19,4 +20,3 @@ scopes:
         root: project
         path: .kiro/steering/graphify.md
         source: graphify/always_on/kiro-steering.md
-

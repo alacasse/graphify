@@ -1,3 +1,4 @@
+universal_uninstall_scopes: [user, project]
 scopes:
   user:
     uninstall: [graphify, devin, uninstall]
@@ -16,4 +17,3 @@ scopes:
         root: project
         path: .windsurf/rules/graphify.md
         required_text: ["## graphify", "graphify query"]
-

@@ -7,10 +7,15 @@ import os
 import sys
 from pathlib import Path
 
-from .lifecycle import copy_and_install_package, run_purge_check, run_scenario
+from .lifecycle import (
+    copy_and_install_package,
+    run_purge_check,
+    run_scenario,
+    run_universal_uninstall_scenario,
+)
 from .models import SandboxRoots, Scenario, ScenarioResult, Scope
 from .reporting import build_manifest, write_run_outputs
-from .specs import EXPECTED_TARGETS, SpecError, load_catalog
+from .specs import SpecError, catalog_names, load_catalog
 
 
 HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
@@ -19,7 +24,7 @@ HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     selection = result.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--target", choices=EXPECTED_TARGETS)
+    selection.add_argument("--target", choices=catalog_names(HARNESS_SPEC_DIR))
     selection.add_argument("--all", action="store_true", dest="all_targets")
     result.add_argument(
         "--scope",
@@ -72,11 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     except SpecError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    package = copy_and_install_package(roots)
+    package = copy_and_install_package(roots, catalog)
     if package["repo_mount_read_only"] is not True:
         raise RuntimeError("repository mount is writable; refusing unsafe sandbox run")
 
-    names = list(EXPECTED_TARGETS) if args.all_targets else [args.target]
+    names = list(catalog) if args.all_targets else [args.target]
     scopes = (
         list(Scope)
         if args.scope == "both"
@@ -92,7 +97,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"==> {name} / {scope.value}", flush=True)
             try:
                 results.append(
-                    run_scenario(Scenario(target=target, scope=scope), roots)
+                    run_scenario(
+                        Scenario(target=target, scope=scope),
+                        roots,
+                        expected_version=str(package["package_version"]),
+                    )
                 )
             except Exception as exc:
                 print(f"scenario {name}-{scope.value} crashed: {exc}", file=sys.stderr)
@@ -105,6 +114,45 @@ def main(argv: list[str] | None = None) -> int:
                         phases=[],
                         limitations=target.limitations,
                         artifact_dir=f"scenarios/{name}-{scope.value}",
+                    )
+                )
+    if args.all_targets:
+        for scope in scopes:
+            selected = [
+                Scenario(target=target, scope=scope)
+                for target in catalog.values()
+                if scope in target.universal_uninstall_scopes
+            ]
+            preserved = (
+                [
+                    Scenario(target=item.target, scope=Scope.USER)
+                    for item in selected
+                    if item.target.supports(Scope.USER)
+                ]
+                if scope is Scope.PROJECT
+                else []
+            )
+            scenario_name = f"universal-uninstall-{scope.value}"
+            print(f"==> {scenario_name}", flush=True)
+            try:
+                results.append(
+                    run_universal_uninstall_scenario(
+                        selected,
+                        roots,
+                        preserved_scenarios=preserved,
+                        expected_version=str(package["package_version"]),
+                    )
+                )
+            except Exception as exc:
+                print(f"scenario {scenario_name} crashed: {exc}", file=sys.stderr)
+                results.append(
+                    ScenarioResult(
+                        scenario=scenario_name,
+                        target="multiple",
+                        scope=scope.value,
+                        status="FAIL",
+                        phases=[],
+                        artifact_dir=f"scenarios/{scenario_name}",
                     )
                 )
     purge = run_purge_check(roots)

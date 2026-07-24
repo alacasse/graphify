@@ -56,6 +56,7 @@ class TargetSpec:
     scopes: Mapping[Scope, ScopeSpec]
     unsupported: Mapping[Scope, str] = field(default_factory=dict)
     limitations: tuple[str, ...] = ()
+    universal_uninstall_scopes: frozenset[Scope] = frozenset()
 
     def supports(self, scope: Scope) -> bool:
         return scope in self.scopes and scope not in self.unsupported
@@ -176,4 +177,3 @@ class SandboxRoots:
             Root.PROJECT: self.project,
             Root.USER_CWD: self.user_cwd,
         }
-

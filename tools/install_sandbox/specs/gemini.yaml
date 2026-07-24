@@ -1,3 +1,4 @@
+universal_uninstall_scopes: [user, project]
 scopes:
   user:
     uninstall: [graphify, gemini, uninstall]

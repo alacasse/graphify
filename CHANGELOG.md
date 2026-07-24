@@ -4,7 +4,7 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.9.25 (2026-07-22)
 
-- Tooling: rebuilt the Tier 1 Docker install sandbox around behavioral filesystem contracts for all 24 current targets, with isolated user/project roots, reinstall and progressive-sidecar repair checks, targeted uninstall and purge validation, preservation of unrelated content, and concise per-scenario evidence.
+- Tooling: rebuilt the Tier 1 Docker install sandbox around behavioral filesystem contracts for all 24 current targets, with the target catalog, install effects, and universal-uninstall eligibility owned by YAML specs; isolated user/project roots; reinstall and progressive-sidecar repair checks; targeted and grouped universal uninstall validation; undeclared-write rejection; exact version and stale-section checks; purge validation; preservation of unrelated content; and concise per-scenario evidence.
 - Fix: Antigravity installs now replace the shared skill's generic YAML name and description with the native `graphify-manager` discovery metadata, instead of skipping injection merely because some frontmatter already exists.
 - Fix: `graphify claude uninstall` now removes the user skill registration from `~/.claude/CLAUDE.md` along with the user skill tree, while preserving unrelated user instructions.
 - Fix: CodeBuddy installs and uninstalls now keep the skill, `CODEBUDDY.md`, and hook settings in one selected scope. Generic installs use the user CodeBuddy root, project installs and `graphify codebuddy` subcommands stay in the project, and universal uninstall cleans both scopes while preserving unrelated instructions and hooks (fork issue #4).

@@ -1,5 +1,6 @@
 limitations:
   - Normal Linux Hermes behavior is validated; Windows %LOCALAPPDATA% installation is not verified.
+universal_uninstall_scopes: [user]
 scopes:
   user:
     effects:

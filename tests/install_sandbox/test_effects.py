@@ -68,10 +68,29 @@ def test_progressive_skill_validates_payload_version_exact_refs_and_pointers(
         reference_bundle="claude",
     )
 
-    results = validate_installed([effect], root_map, source)
+    results = validate_installed(
+        [effect],
+        root_map,
+        source,
+        expected_version="1.0",
+    )
 
     assert results
     assert all(result.passed for result in results), results
+    (installed.parent / ".graphify_version").write_text(
+        "0.0.0-stale",
+        encoding="utf-8",
+    )
+    stale_results = validate_installed(
+        [effect],
+        root_map,
+        source,
+        expected_version="1.0",
+    )
+    assert any(
+        result.check == "version sidecar" and not result.passed
+        for result in stale_results
+    )
 
 
 def test_markdown_json_and_opencode_reminder_checks_are_behavioral(tmp_path):
@@ -178,6 +197,81 @@ def test_owned_section_with_correct_marker_and_wrong_body_fails(tmp_path):
 
     assert any(
         result.check == "payload equality" and not result.passed
+        for result in results
+    )
+
+
+def test_duplicate_owned_section_marker_fails_even_when_last_body_is_correct(
+    tmp_path,
+):
+    root_map = roots(tmp_path)
+    target = root_map[Root.PROJECT] / "AGENTS.md"
+    target.write_text(
+        "# User notes\n\n"
+        "## graphify\n\nstale instructions\n\n"
+        "## graphify\n\ncurrent instructions\n",
+        encoding="utf-8",
+    )
+    effect = Effect(
+        kind=EffectKind.SECTION,
+        root=Root.PROJECT,
+        path="AGENTS.md",
+        marker="## graphify",
+        required_text=("current instructions",),
+    )
+
+    results = validate_installed([effect], root_map, tmp_path)
+
+    assert any(
+        result.check.endswith("owned section") and not result.passed
+        for result in results
+    )
+
+
+def test_json_required_text_must_belong_to_each_declared_hook_entry(tmp_path):
+    root_map = roots(tmp_path)
+    settings = root_map[Root.PROJECT] / ".claude/settings.json"
+    settings.parent.mkdir()
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash|Grep",
+                            "hooks": [{"command": "graphify hook-guard search"}],
+                        },
+                        {
+                            "matcher": "Read|Glob",
+                            "hooks": [{"command": "wrong-command"}],
+                        },
+                    ]
+                },
+                "user_note": "graphify hook-guard",
+            }
+        ),
+        encoding="utf-8",
+    )
+    effect = Effect(
+        kind=EffectKind.JSON,
+        root=Root.PROJECT,
+        path=".claude/settings.json",
+        entries={
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash|Grep"},
+                    {"matcher": "Read|Glob"},
+                ]
+            }
+        },
+        required_text=("graphify", "hook-guard"),
+    )
+
+    results = validate_installed([effect], root_map, tmp_path)
+
+    assert any(
+        result.check.endswith("JSON owned entry payloads")
+        and not result.passed
         for result in results
     )
 

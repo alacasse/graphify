@@ -4,7 +4,9 @@ from pathlib import Path
 from tools.install_sandbox.effects import REFERENCE_NAMES, resolve_effect
 from tools.install_sandbox.lifecycle import (
     install_command,
+    parse_public_install_targets,
     run_scenario,
+    run_universal_uninstall_scenario,
     scenario_steps,
     uninstall_command,
 )
@@ -161,3 +163,224 @@ def test_lifecycle_reports_not_applicable_user_uninstall(tmp_path):
     assert result.phases[-1].status == "NOT_APPLICABLE"
     assert (roots.home / "user-owned.txt").is_file()
 
+
+def file_scenario(name, scope=Scope.PROJECT):
+    root = Root.PROJECT if scope is Scope.PROJECT else Root.HOME
+    effect = Effect(
+        kind=EffectKind.FILE,
+        root=root,
+        path=f".{name}/graphify.md",
+        source=f"{name}.md",
+    )
+    target = TargetSpec(
+        name=name,
+        scopes={scope: ScopeSpec(effects=(effect,))},
+        unsupported={
+            other: "test-only"
+            for other in Scope
+            if other is not scope
+        },
+    )
+    return Scenario(target=target, scope=scope)
+
+
+def test_lifecycle_rejects_stable_undeclared_filesystem_effect(tmp_path):
+    roots = make_roots(tmp_path)
+    scenario = file_scenario("demo")
+    source = roots.source / "demo.md"
+    source.write_text("owned", encoding="utf-8")
+
+    def fake_executor(argv, cwd, env, artifact_dir, label):
+        effect_path = resolve_effect(
+            scenario.contract.effects[0],
+            roots.effect_roots(),
+        )
+        if "uninstall" in argv:
+            effect_path.unlink(missing_ok=True)
+        else:
+            effect_path.parent.mkdir(parents=True, exist_ok=True)
+            effect_path.write_text("owned", encoding="utf-8")
+            (roots.project / ".legacy/graphify.md").parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            (roots.project / ".legacy/graphify.md").write_text(
+                "unexpected",
+                encoding="utf-8",
+            )
+        return CommandResult(tuple(argv), str(cwd), 0, "", "")
+
+    result = run_scenario(scenario, roots, executor=fake_executor)
+
+    assert result.status == "FAIL"
+    assert any(
+        check.check == "filesystem changes stay within declared effects"
+        and not check.passed
+        for phase in result.phases
+        for check in phase.validations
+    )
+
+
+def test_lifecycle_stops_after_failed_initial_install_command(tmp_path):
+    roots = make_roots(tmp_path)
+    scenario = file_scenario("demo")
+    (roots.source / "demo.md").write_text("owned", encoding="utf-8")
+    calls = []
+
+    def failing_executor(argv, cwd, env, artifact_dir, label):
+        calls.append(label)
+        return CommandResult(tuple(argv), str(cwd), 1, "", "failed")
+
+    result = run_scenario(scenario, roots, executor=failing_executor)
+
+    assert result.status == "FAIL"
+    assert calls == ["install"]
+    assert [phase.name for phase in result.phases] == ["install"]
+
+
+def test_grouped_user_uninstall_removes_all_installed_effects(tmp_path):
+    roots = make_roots(tmp_path)
+    scenarios = [
+        file_scenario("first", Scope.USER),
+        file_scenario("second", Scope.USER),
+    ]
+    for item in scenarios:
+        (roots.source / f"{item.target.name}.md").write_text(
+            item.target.name,
+            encoding="utf-8",
+        )
+
+    def fake_executor(argv, cwd, env, artifact_dir, label):
+        if tuple(argv) == ("graphify", "uninstall"):
+            for item in scenarios:
+                resolve_effect(
+                    item.contract.effects[0],
+                    roots.effect_roots(),
+                ).unlink(missing_ok=True)
+        else:
+            item = next(
+                scenario
+                for scenario in scenarios
+                if scenario.target.name == argv[-1]
+            )
+            path = resolve_effect(
+                item.contract.effects[0],
+                roots.effect_roots(),
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(item.target.name, encoding="utf-8")
+        return CommandResult(tuple(argv), str(cwd), 0, "", "")
+
+    result = run_universal_uninstall_scenario(
+        scenarios,
+        roots,
+        executor=fake_executor,
+    )
+
+    assert result.status == "PASS"
+    assert result.phases[-1].name == "uninstall"
+    assert (roots.project / "graphify-out/graph.json").is_file()
+    assert all(
+        not resolve_effect(item.contract.effects[0], roots.effect_roots()).exists()
+        for item in scenarios
+    )
+
+
+def test_grouped_project_uninstall_detects_user_scope_removal(tmp_path):
+    roots = make_roots(tmp_path)
+    project = file_scenario("project-demo", Scope.PROJECT)
+    user = file_scenario("user-demo", Scope.USER)
+    for item in (project, user):
+        (roots.source / f"{item.target.name}.md").write_text(
+            item.target.name,
+            encoding="utf-8",
+        )
+
+    def fake_executor(argv, cwd, env, artifact_dir, label):
+        if tuple(argv) == ("graphify", "uninstall", "--project"):
+            for item in (project, user):
+                resolve_effect(
+                    item.contract.effects[0],
+                    roots.effect_roots(),
+                ).unlink(missing_ok=True)
+        else:
+            item = user if argv[-1] == user.target.name else project
+            path = resolve_effect(
+                item.contract.effects[0],
+                roots.effect_roots(),
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(item.target.name, encoding="utf-8")
+        return CommandResult(tuple(argv), str(cwd), 0, "", "")
+
+    result = run_universal_uninstall_scenario(
+        [project],
+        roots,
+        preserved_scenarios=[user],
+        executor=fake_executor,
+    )
+
+    assert result.status == "FAIL"
+    assert any(
+        check.check == "filesystem changes stay within declared effects"
+        and not check.passed
+        for check in result.phases[-1].validations
+    )
+
+
+def test_failed_preserved_user_setup_does_not_cascade_into_later_phases(tmp_path):
+    roots = make_roots(tmp_path)
+    project = file_scenario("project-demo", Scope.PROJECT)
+    failed_user = file_scenario("failed-user", Scope.USER)
+    healthy_user = file_scenario("healthy-user", Scope.USER)
+    scenarios = (project, failed_user, healthy_user)
+    for item in scenarios:
+        (roots.source / f"{item.target.name}.md").write_text(
+            item.target.name,
+            encoding="utf-8",
+        )
+
+    def fake_executor(argv, cwd, env, artifact_dir, label):
+        if label == "prepare-user-failed-user":
+            return CommandResult(tuple(argv), str(cwd), 1, "", "failed")
+        if label == "uninstall":
+            resolve_effect(
+                project.contract.effects[0],
+                roots.effect_roots(),
+            ).unlink(missing_ok=True)
+        else:
+            item = next(
+                scenario
+                for scenario in scenarios
+                if scenario.target.name == argv[-1]
+            )
+            path = resolve_effect(
+                item.contract.effects[0],
+                roots.effect_roots(),
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(item.target.name, encoding="utf-8")
+        return CommandResult(tuple(argv), str(cwd), 0, "", "")
+
+    result = run_universal_uninstall_scenario(
+        [project],
+        roots,
+        preserved_scenarios=[failed_user, healthy_user],
+        executor=fake_executor,
+    )
+
+    assert result.status == "FAIL"
+    assert [(phase.name, phase.status) for phase in result.phases] == [
+        ("prepare-user-failed-user", "FAIL"),
+        ("prepare-user-healthy-user", "PASS"),
+        ("install-project-demo", "PASS"),
+        ("uninstall", "PASS"),
+    ]
+
+
+def test_public_install_target_parser_includes_dedicated_vscode_surface():
+    targets = parse_public_install_targets(
+        "Usage: graphify install\nPlatforms: claude, codex, cursor\n"
+    )
+
+    assert targets == {"claude", "codex", "cursor", "vscode"}

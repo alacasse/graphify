@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping
 
 from .models import Effect, EffectKind, Observation, Root, ValidationResult
@@ -161,14 +161,29 @@ def _validate_sidecars(
     effect: Effect,
     path: Path,
     source_root: Path,
+    expected_version: str | None,
 ) -> list[ValidationResult]:
     results: list[ValidationResult] = []
     version = path.parent / ".graphify_version"
+    actual_version = (
+        version.read_text(encoding="utf-8").strip()
+        if version.is_file()
+        else None
+    )
+    version_matches = (
+        actual_version == expected_version
+        if expected_version is not None
+        else bool(actual_version)
+    )
     results.append(
         _result(
             "version sidecar",
-            version.is_file() and bool(version.read_text(encoding="utf-8").strip()),
-            f"{version} is present and non-empty",
+            version_matches,
+            (
+                f"{version} equals installed Graphify version {expected_version!r}"
+                if expected_version is not None
+                else f"{version} is present and non-empty"
+            ),
         )
     )
     refs = path.parent / "references"
@@ -273,6 +288,7 @@ def validate_installed(
     effects: Iterable[Effect],
     roots: Mapping[Root, Path],
     source_root: Path,
+    expected_version: str | None = None,
 ) -> list[ValidationResult]:
     results: list[ValidationResult] = []
     for effect in effects:
@@ -292,12 +308,14 @@ def validate_installed(
         fragment_text = text
         if effect.kind is EffectKind.SECTION:
             section = _owned_section(text, effect.marker or "")
-            marker_present = section is not None
+            marker_count = sum(
+                line.strip() == effect.marker for line in text.splitlines()
+            )
             results.append(
                 _result(
                     f"{label} owned section",
-                    marker_present,
-                    f"exact marker line {effect.marker!r} is present",
+                    marker_count == 1,
+                    f"exact marker line {effect.marker!r} occurs once, found {marker_count}",
                 )
             )
             fragment_text = section or ""
@@ -313,6 +331,20 @@ def validate_installed(
                     f"JSON contains {expected!r}",
                 )
             )
+            if effect.required_text:
+                bound = _json_owned_entries_bind_required_text(
+                    observation.json_value,
+                    expected,
+                    effect.required_text,
+                )
+                results.append(
+                    _result(
+                        f"{label} JSON owned entry payloads",
+                        bound,
+                        "each declared JSON list entry occurs once and contains "
+                        f"{list(effect.required_text)!r}",
+                    )
+                )
         elif effect.kind is EffectKind.REMINDER_PLUGIN:
             results.extend(_validate_reminder(effect, observation))
         if effect.kind is not EffectKind.REMINDER_PLUGIN:
@@ -333,8 +365,53 @@ def validate_installed(
                     )
                 )
         if effect.kind is EffectKind.SKILL:
-            results.extend(_validate_sidecars(effect, path, source_root))
+            results.extend(
+                _validate_sidecars(
+                    effect,
+                    path,
+                    source_root,
+                    expected_version,
+                )
+            )
     return results
+
+
+def _json_owned_entries_bind_required_text(
+    actual: Any,
+    expected: Any,
+    required_text: tuple[str, ...],
+) -> bool:
+    """Bind required text to each declared JSON list entry, not the whole file."""
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return False
+        return all(
+            key in actual
+            and _json_owned_entries_bind_required_text(
+                actual[key],
+                value,
+                required_text,
+            )
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        if not isinstance(actual, list):
+            return False
+        for expected_item in expected:
+            if not isinstance(expected_item, dict):
+                continue
+            matches = [
+                candidate
+                for candidate in actual
+                if contains_json(candidate, expected_item)
+            ]
+            if len(matches) != 1:
+                return False
+            serialized = json.dumps(matches[0], sort_keys=True)
+            if not all(fragment in serialized for fragment in required_text):
+                return False
+        return True
+    return True
 
 
 def json_owned_entries_absent(actual: Any, expected: Any) -> bool:
@@ -452,3 +529,54 @@ def snapshot(
 def snapshot_digest(value: Mapping[str, Any]) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_no_unexpected_changes(
+    effects: Iterable[Effect],
+    before: Mapping[str, list[Mapping[str, object]]],
+    after: Mapping[str, list[Mapping[str, object]]],
+) -> ValidationResult:
+    """Require every changed snapshot path to belong to a declared effect."""
+    allowed: dict[str, set[str]] = {}
+    for effect in effects:
+        paths = allowed.setdefault(effect.root.value, set())
+        effect_path = PurePosixPath(effect.path)
+        paths.add(effect_path.as_posix())
+        if effect.kind is not EffectKind.SKILL:
+            continue
+        paths.add((effect_path.parent / ".graphify_version").as_posix())
+        if effect.reference_bundle:
+            paths.update(
+                (effect_path.parent / "references" / name).as_posix()
+                for name in REFERENCE_NAMES
+            )
+
+    unexpected: list[str] = []
+    for root_name in sorted(set(before) | set(after)):
+        before_files = {
+            str(item["path"]): dict(item)
+            for item in before.get(root_name, [])
+        }
+        after_files = {
+            str(item["path"]): dict(item)
+            for item in after.get(root_name, [])
+        }
+        for path in sorted(set(before_files) | set(after_files)):
+            if (
+                before_files.get(path) != after_files.get(path)
+                and path not in allowed.get(root_name, set())
+            ):
+                unexpected.append(f"{root_name}:{path}")
+
+    preview = ", ".join(unexpected[:8])
+    if len(unexpected) > 8:
+        preview += f", and {len(unexpected) - 8} more"
+    return _result(
+        "filesystem changes stay within declared effects",
+        not unexpected,
+        (
+            "no undeclared files changed"
+            if not unexpected
+            else f"undeclared changed paths: {preview}"
+        ),
+    )

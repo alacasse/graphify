@@ -10,34 +10,12 @@ import yaml
 from .models import Effect, EffectKind, Root, Scope, ScopeSpec, TargetSpec
 
 
-EXPECTED_TARGETS = (
-    "agents",
-    "aider",
-    "amp",
-    "antigravity",
-    "antigravity-windows",
-    "claude",
-    "claw",
-    "codebuddy",
-    "codex",
-    "copilot",
-    "cursor",
-    "devin",
-    "droid",
-    "gemini",
-    "hermes",
-    "kilo",
-    "kimi",
-    "kiro",
-    "opencode",
-    "pi",
-    "trae",
-    "trae-cn",
-    "vscode",
-    "windows",
-)
-
-_TOP_KEYS = {"scopes", "unsupported", "limitations"}
+_TOP_KEYS = {
+    "scopes",
+    "unsupported",
+    "limitations",
+    "universal_uninstall_scopes",
+}
 _SCOPE_KEYS = {"effects", "install", "uninstall"}
 _EFFECT_KEYS = {
     "kind",
@@ -100,6 +78,16 @@ def _command(value: Any, label: str) -> tuple[str, ...] | None:
     if not command or command[0] != "graphify":
         raise SpecError(f"{label} must be argv beginning with 'graphify'")
     return command
+
+
+def _scopes(value: Any, label: str) -> frozenset[Scope]:
+    names = _strings(value, label)
+    if len(names) != len(set(names)):
+        raise SpecError(f"{label} must not contain duplicates")
+    try:
+        return frozenset(Scope(name) for name in names)
+    except ValueError as exc:
+        raise SpecError(f"{label} contains an invalid scope") from exc
 
 
 def _effect(value: Any, label: str) -> Effect:
@@ -221,24 +209,35 @@ def load_target(path: Path) -> TargetSpec:
     if covered != set(Scope):
         missing = sorted(scope.value for scope in set(Scope) - covered)
         raise SpecError(f"{path.name} does not classify scopes: {', '.join(missing)}")
+    universal_uninstall_scopes = _scopes(
+        raw.get("universal_uninstall_scopes"),
+        f"{path.name}.universal_uninstall_scopes",
+    )
+    unavailable_universal_scopes = universal_uninstall_scopes - set(scopes)
+    if unavailable_universal_scopes:
+        names = ", ".join(
+            sorted(scope.value for scope in unavailable_universal_scopes)
+        )
+        raise SpecError(
+            f"{path.name}.universal_uninstall_scopes are not supported: {names}"
+        )
     return TargetSpec(
         name=path.stem,
         scopes=scopes,
         unsupported=unsupported,
         limitations=_strings(raw.get("limitations"), f"{path.name}.limitations"),
+        universal_uninstall_scopes=universal_uninstall_scopes,
+    )
+
+
+def catalog_names(spec_dir: Path) -> tuple[str, ...]:
+    """Return the target catalog declared by the YAML filenames."""
+    return tuple(
+        path.stem
+        for path in sorted(spec_dir.glob("*.yaml"), key=lambda item: item.stem)
     )
 
 
 def load_catalog(spec_dir: Path) -> dict[str, TargetSpec]:
     paths = sorted(spec_dir.glob("*.yaml"), key=lambda item: item.stem)
-    discovered = tuple(path.stem for path in paths)
-    if discovered != EXPECTED_TARGETS:
-        missing = sorted(set(EXPECTED_TARGETS) - set(discovered))
-        extra = sorted(set(discovered) - set(EXPECTED_TARGETS))
-        details = []
-        if missing:
-            details.append(f"missing: {', '.join(missing)}")
-        if extra:
-            details.append(f"unexpected: {', '.join(extra)}")
-        raise SpecError("target catalog mismatch (" + "; ".join(details) + ")")
     return {path.stem: load_target(path) for path in paths}

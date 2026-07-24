@@ -1,3 +1,4 @@
+universal_uninstall_scopes: [user]
 scopes:
   user:
     effects:

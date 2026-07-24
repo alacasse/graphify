@@ -4,8 +4,8 @@ import pytest
 
 from tools.install_sandbox.models import EffectKind, Scope
 from tools.install_sandbox.specs import (
-    EXPECTED_TARGETS,
     SpecError,
+    catalog_names,
     load_catalog,
     load_target,
 )
@@ -17,7 +17,7 @@ SPEC_DIR = Path("tools/install_sandbox/specs")
 def test_current_catalog_strictly_loads_all_24_targets_and_47_pairs():
     catalog = load_catalog(SPEC_DIR)
 
-    assert tuple(catalog) == EXPECTED_TARGETS
+    assert tuple(catalog) == catalog_names(SPEC_DIR)
     assert len(catalog) == 24
     assert sum(
         target.supports(scope) for target in catalog.values() for scope in Scope
@@ -99,6 +99,39 @@ def test_current_command_exceptions_match_real_direct_cli_surfaces():
     } == {"cursor", "kilo", "kiro", "vscode"}
 
 
+def test_universal_uninstall_groups_are_declared_by_target_specs():
+    catalog = load_catalog(SPEC_DIR)
+    selected = {
+        scope: {
+            name
+            for name, target in catalog.items()
+            if scope in target.universal_uninstall_scopes
+        }
+        for scope in Scope
+    }
+    all_user_destinations = {
+        (effect.root, effect.path)
+        for target in catalog.values()
+        if target.supports(Scope.USER)
+        for effect in target.scopes[Scope.USER].effects
+    }
+    selected_user_destinations = {
+        (effect.root, effect.path)
+        for name in selected[Scope.USER]
+        for effect in catalog[name].scopes[Scope.USER].effects
+    }
+
+    assert selected_user_destinations == all_user_destinations
+    assert selected[Scope.PROJECT] == {
+        "claude",
+        "codebuddy",
+        "codex",
+        "cursor",
+        "devin",
+        "gemini",
+    }
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
@@ -122,6 +155,13 @@ def test_current_command_exceptions_match_real_direct_cli_surfaces():
             "marker: '## graphify'}\n",
             "require source or required_text",
         ),
+        (
+            "universal_uninstall_scopes: [project]\n"
+            "unsupported:\n  project: unavailable\n"
+            "scopes:\n  user:\n    effects:\n"
+            "      - {root: home, path: x}\n",
+            "not supported",
+        ),
     ],
 )
 def test_loader_rejects_unknown_keys_bad_roots_and_unsafe_paths(
@@ -134,13 +174,16 @@ def test_loader_rejects_unknown_keys_bad_roots_and_unsafe_paths(
         load_target(spec)
 
 
-def test_catalog_rejects_missing_targets(tmp_path):
-    (tmp_path / "agents.yaml").write_text(
+def test_catalog_names_and_entries_come_from_yaml_files(tmp_path):
+    body = (
         "unsupported:\n  project: unavailable\n"
         "scopes:\n  user:\n    effects:\n"
-        "      - {root: home, path: x}\n",
-        encoding="utf-8",
+        "      - {root: home, path: x}\n"
     )
+    (tmp_path / "alpha.yaml").write_text(body, encoding="utf-8")
+    (tmp_path / "omega.yaml").write_text(body, encoding="utf-8")
 
-    with pytest.raises(SpecError, match="target catalog mismatch"):
-        load_catalog(tmp_path)
+    catalog = load_catalog(tmp_path)
+
+    assert catalog_names(tmp_path) == ("alpha", "omega")
+    assert tuple(catalog) == ("alpha", "omega")

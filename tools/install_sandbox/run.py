@@ -12,14 +12,17 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.install_sandbox.docker import run_sandbox
-from tools.install_sandbox.specs import EXPECTED_TARGETS, SpecError, load_catalog
+from tools.install_sandbox.specs import SpecError, catalog_names, load_catalog
+
+
+HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--repo", required=True, type=Path)
     selection = result.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--target", choices=EXPECTED_TARGETS)
+    selection.add_argument("--target", choices=catalog_names(HARNESS_SPEC_DIR))
     selection.add_argument("--all", action="store_true", dest="all_targets")
     result.add_argument(
         "--scope",
@@ -42,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: not a Graphify source checkout: {repo}", file=sys.stderr)
         return 2
     try:
-        load_catalog(Path(__file__).resolve().parent / "specs")
+        load_catalog(HARNESS_SPEC_DIR)
     except SpecError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -60,4 +63,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

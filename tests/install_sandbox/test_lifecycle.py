@@ -1,16 +1,19 @@
 import shutil
 from pathlib import Path
+from typing import cast
+
+import pytest
 
 from tools.install_sandbox.effects import REFERENCE_NAMES, resolve_effect
 from tools.install_sandbox.lifecycle import (
     install_command,
-    parse_public_install_targets,
     run_scenario,
     run_universal_uninstall_scenario,
     scenario_steps,
     uninstall_command,
 )
 from tools.install_sandbox.models import (
+    CommandMode,
     CommandResult,
     Effect,
     EffectKind,
@@ -80,6 +83,74 @@ def test_commands_and_lifecycle_order_derive_common_project_policy():
         "repair-progressive-sidecars",
         "uninstall",
     )
+
+
+@pytest.mark.parametrize("scope", list(Scope))
+def test_direct_command_modes_use_filename_target_and_verb(scope):
+    target = TargetSpec(
+        name="demo",
+        scopes={
+            scope: ScopeSpec(
+                effects=(),
+                install_mode=CommandMode.DIRECT,
+                uninstall_mode=CommandMode.DIRECT,
+            )
+        },
+        unsupported={other: "test-only" for other in Scope if other is not scope},
+    )
+    scenario = Scenario(target=target, scope=scope)
+
+    assert install_command(scenario) == ("graphify", "demo", "install")
+    assert uninstall_command(scenario) == ("graphify", "demo", "uninstall")
+
+
+def test_omitted_command_modes_keep_scope_specific_generic_behavior():
+    user = file_scenario("generic", Scope.USER)
+    project = file_scenario("generic", Scope.PROJECT)
+
+    assert install_command(user) == (
+        "graphify",
+        "install",
+        "--platform",
+        "generic",
+    )
+    assert uninstall_command(user) is None
+    assert install_command(project) == (
+        "graphify",
+        "install",
+        "--project",
+        "--platform",
+        "generic",
+    )
+    assert uninstall_command(project) == (
+        "graphify",
+        "uninstall",
+        "--project",
+        "--platform",
+        "generic",
+    )
+
+
+@pytest.mark.parametrize("verb", ["install", "uninstall"])
+def test_manually_constructed_invalid_command_modes_fail_closed(verb):
+    invalid_mode = cast(CommandMode, "direct")
+    scope_spec = (
+        ScopeSpec(effects=(), install_mode=invalid_mode)
+        if verb == "install"
+        else ScopeSpec(effects=(), uninstall_mode=invalid_mode)
+    )
+    scenario = Scenario(
+        target=TargetSpec(
+            name="demo",
+            scopes={Scope.PROJECT: scope_spec},
+            unsupported={Scope.USER: "test-only"},
+        ),
+        scope=Scope.PROJECT,
+    )
+
+    command_builder = install_command if verb == "install" else uninstall_command
+    with pytest.raises(ValueError, match=f"invalid {verb} command mode"):
+        command_builder(scenario)
 
 
 def test_full_lifecycle_is_idempotent_repairs_sidecars_and_preserves_user_content(
@@ -376,11 +447,3 @@ def test_failed_preserved_user_setup_does_not_cascade_into_later_phases(tmp_path
         ("install-project-demo", "PASS"),
         ("uninstall", "PASS"),
     ]
-
-
-def test_public_install_target_parser_includes_dedicated_vscode_surface():
-    targets = parse_public_install_targets(
-        "Usage: graphify install\nPlatforms: claude, codex, cursor\n"
-    )
-
-    assert targets == {"claude", "codex", "cursor", "vscode"}

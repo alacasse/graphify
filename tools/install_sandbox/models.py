@@ -29,6 +29,10 @@ class EffectKind(str, Enum):
     REMINDER_PLUGIN = "reminder_plugin"
 
 
+class CommandMode(str, Enum):
+    DIRECT = "direct"
+
+
 @dataclass(frozen=True)
 class Effect:
     kind: EffectKind
@@ -46,8 +50,8 @@ class Effect:
 @dataclass(frozen=True)
 class ScopeSpec:
     effects: tuple[Effect, ...]
-    install: tuple[str, ...] | None = None
-    uninstall: tuple[str, ...] | None = None
+    install_mode: CommandMode | None = None
+    uninstall_mode: CommandMode | None = None
 
 
 @dataclass(frozen=True)

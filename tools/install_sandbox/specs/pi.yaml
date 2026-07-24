@@ -1,7 +1,7 @@
 universal_uninstall_scopes: [user]
 scopes:
   user:
-    uninstall: [graphify, pi, uninstall]
+    uninstall_mode: direct
     effects:
       - kind: skill
         root: home

@@ -42,7 +42,7 @@ def test_progressive_skill_validates_payload_version_exact_refs_and_pointers(
     root_map = roots(tmp_path)
     source = tmp_path / "source"
     skill_source = source / "graphify" / "skill.md"
-    refs_source = source / "graphify" / "skills" / "claude" / "references"
+    refs_source = source / "graphify" / "skills" / "demo" / "references"
     refs_source.mkdir(parents=True)
     skill_source.parent.mkdir(parents=True, exist_ok=True)
     skill_source.write_text(
@@ -65,7 +65,7 @@ def test_progressive_skill_validates_payload_version_exact_refs_and_pointers(
         root=Root.HOME,
         path=".tool/graphify/SKILL.md",
         source="graphify/skill.md",
-        reference_bundle="claude",
+        reference_bundle="demo",
     )
 
     results = validate_installed(
@@ -93,23 +93,23 @@ def test_progressive_skill_validates_payload_version_exact_refs_and_pointers(
     )
 
 
-def test_markdown_json_and_opencode_reminder_checks_are_behavioral(tmp_path):
+def test_markdown_json_and_reminder_checks_are_behavioral(tmp_path):
     root_map = roots(tmp_path)
     project = root_map[Root.PROJECT]
-    agents = project / "AGENTS.md"
-    agents.write_text("# User\n\nkeep\n\n## graphify\nowned\n", encoding="utf-8")
-    config = project / ".opencode/opencode.json"
+    notes = project / "notes.md"
+    notes.write_text("# User\n\nkeep\n\n## graphify\nowned\n", encoding="utf-8")
+    config = project / ".demo/config.json"
     config.parent.mkdir()
     config.write_text(
         json.dumps(
             {
                 "user_owned": True,
-                "plugin": [".opencode/plugins/graphify.js"],
+                "plugin": [".demo/plugins/graphify.js"],
             }
         ),
         encoding="utf-8",
     )
-    plugin = project / ".opencode/plugins/graphify.js"
+    plugin = project / ".demo/plugins/graphify.js"
     plugin.parent.mkdir(exist_ok=True)
     plugin.write_text(
         "// comments may mention ` and $( safely\n"
@@ -120,19 +120,19 @@ def test_markdown_json_and_opencode_reminder_checks_are_behavioral(tmp_path):
         Effect(
             kind=EffectKind.SECTION,
             root=Root.PROJECT,
-            path="AGENTS.md",
+            path="notes.md",
             marker="## graphify",
         ),
         Effect(
             kind=EffectKind.JSON,
             root=Root.PROJECT,
-            path=".opencode/opencode.json",
-            entries={"plugin": [".opencode/plugins/graphify.js"]},
+            path=".demo/config.json",
+            entries={"plugin": [".demo/plugins/graphify.js"]},
         ),
         Effect(
             kind=EffectKind.REMINDER_PLUGIN,
             root=Root.PROJECT,
-            path=".opencode/plugins/graphify.js",
+            path=".demo/plugins/graphify.js",
             required_text=("[graphify]", "graphify query"),
             forbidden_text=("`", "$(", "&&"),
         ),
@@ -141,13 +141,13 @@ def test_markdown_json_and_opencode_reminder_checks_are_behavioral(tmp_path):
     results = validate_installed(effects, root_map, tmp_path / "unused")
 
     assert all(result.passed for result in results), results
-    agents.write_text("# User\n\nkeep\n", encoding="utf-8")
+    notes.write_text("# User\n\nkeep\n", encoding="utf-8")
     config.write_text(
         json.dumps({"user_owned": True, "plugin": []}), encoding="utf-8"
     )
     plugin.unlink()
     assert all(result.passed for result in validate_removed(effects, root_map))
-    assert "keep" in agents.read_text(encoding="utf-8")
+    assert "keep" in notes.read_text(encoding="utf-8")
     assert json.loads(config.read_text(encoding="utf-8"))["user_owned"] is True
 
 
@@ -174,13 +174,13 @@ def test_unsafe_text_inside_captured_reminder_fails(tmp_path):
 def test_owned_section_with_correct_marker_and_wrong_body_fails(tmp_path):
     root_map = roots(tmp_path)
     source = tmp_path / "source"
-    expected = source / "graphify" / "always_on" / "agents-md.md"
+    expected = source / "fixtures" / "notes.md"
     expected.parent.mkdir(parents=True)
     expected.write_text(
         "## graphify\n\nrequired graph instructions\n",
         encoding="utf-8",
     )
-    target = root_map[Root.PROJECT] / "AGENTS.md"
+    target = root_map[Root.PROJECT] / "notes.md"
     target.write_text(
         "# User notes\n\nkeep\n\n## graphify\n\nstale instructions\n",
         encoding="utf-8",
@@ -188,9 +188,9 @@ def test_owned_section_with_correct_marker_and_wrong_body_fails(tmp_path):
     effect = Effect(
         kind=EffectKind.SECTION,
         root=Root.PROJECT,
-        path="AGENTS.md",
+        path="notes.md",
         marker="## graphify",
-        source="graphify/always_on/agents-md.md",
+        source="fixtures/notes.md",
     )
 
     results = validate_installed([effect], root_map, source)
@@ -205,7 +205,7 @@ def test_duplicate_owned_section_marker_fails_even_when_last_body_is_correct(
     tmp_path,
 ):
     root_map = roots(tmp_path)
-    target = root_map[Root.PROJECT] / "AGENTS.md"
+    target = root_map[Root.PROJECT] / "notes.md"
     target.write_text(
         "# User notes\n\n"
         "## graphify\n\nstale instructions\n\n"
@@ -215,7 +215,7 @@ def test_duplicate_owned_section_marker_fails_even_when_last_body_is_correct(
     effect = Effect(
         kind=EffectKind.SECTION,
         root=Root.PROJECT,
-        path="AGENTS.md",
+        path="notes.md",
         marker="## graphify",
         required_text=("current instructions",),
     )
@@ -230,7 +230,7 @@ def test_duplicate_owned_section_marker_fails_even_when_last_body_is_correct(
 
 def test_json_required_text_must_belong_to_each_declared_hook_entry(tmp_path):
     root_map = roots(tmp_path)
-    settings = root_map[Root.PROJECT] / ".claude/settings.json"
+    settings = root_map[Root.PROJECT] / ".demo/settings.json"
     settings.parent.mkdir()
     settings.write_text(
         json.dumps(
@@ -255,7 +255,7 @@ def test_json_required_text_must_belong_to_each_declared_hook_entry(tmp_path):
     effect = Effect(
         kind=EffectKind.JSON,
         root=Root.PROJECT,
-        path=".claude/settings.json",
+        path=".demo/settings.json",
         entries={
             "hooks": {
                 "PreToolUse": [
@@ -279,13 +279,13 @@ def test_json_required_text_must_belong_to_each_declared_hook_entry(tmp_path):
 def test_owned_section_body_left_after_heading_removal_fails(tmp_path):
     root_map = roots(tmp_path)
     source = tmp_path / "source"
-    expected = source / "graphify" / "always_on" / "agents-md.md"
+    expected = source / "fixtures" / "notes.md"
     expected.parent.mkdir(parents=True)
     expected.write_text(
         "## graphify\n\nrequired graph instructions\n",
         encoding="utf-8",
     )
-    target = root_map[Root.PROJECT] / "AGENTS.md"
+    target = root_map[Root.PROJECT] / "notes.md"
     target.write_text(
         "# User notes\n\nkeep\n\nrequired graph instructions\n",
         encoding="utf-8",
@@ -293,9 +293,9 @@ def test_owned_section_body_left_after_heading_removal_fails(tmp_path):
     effect = Effect(
         kind=EffectKind.SECTION,
         root=Root.PROJECT,
-        path="AGENTS.md",
+        path="notes.md",
         marker="## graphify",
-        source="graphify/always_on/agents-md.md",
+        source="fixtures/notes.md",
     )
 
     results = validate_removed([effect], root_map, source)
@@ -305,7 +305,7 @@ def test_owned_section_body_left_after_heading_removal_fails(tmp_path):
 
 def test_partial_json_hook_cleanup_fails_removal_validation(tmp_path):
     root_map = roots(tmp_path)
-    settings = root_map[Root.PROJECT] / ".claude/settings.json"
+    settings = root_map[Root.PROJECT] / ".demo/settings.json"
     settings.parent.mkdir()
     settings.write_text(
         json.dumps(
@@ -323,7 +323,7 @@ def test_partial_json_hook_cleanup_fails_removal_validation(tmp_path):
     effect = Effect(
         kind=EffectKind.JSON,
         root=Root.PROJECT,
-        path=".claude/settings.json",
+        path=".demo/settings.json",
         entries={
             "hooks": {
                 "PreToolUse": [
@@ -339,19 +339,19 @@ def test_partial_json_hook_cleanup_fails_removal_validation(tmp_path):
     assert any(not result.passed for result in results)
 
 
-def test_antigravity_skill_requires_native_discovery_frontmatter(tmp_path):
+def test_skill_frontmatter_mode_requires_declared_discovery_text(tmp_path):
     root_map = roots(tmp_path)
     source = tmp_path / "source"
     skill_source = source / "graphify" / "skill.md"
     skill_source.parent.mkdir(parents=True)
     skill_source.write_text("# graphify skill\n", encoding="utf-8")
-    installed = root_map[Root.HOME] / ".gemini/config/skills/graphify/SKILL.md"
+    installed = root_map[Root.HOME] / ".demo/skills/graphify/SKILL.md"
     installed.parent.mkdir(parents=True)
     installed.write_bytes(skill_source.read_bytes())
     effect = Effect(
         kind=EffectKind.SKILL,
         root=Root.HOME,
-        path=".gemini/config/skills/graphify/SKILL.md",
+        path=".demo/skills/graphify/SKILL.md",
         source="graphify/skill.md",
         payload_mode="frontmatter-body",
         required_text=("name: graphify-manager",),

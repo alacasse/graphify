@@ -1,8 +1,8 @@
 universal_uninstall_scopes: [user]
 scopes:
   user:
-    install: [graphify, antigravity, install]
-    uninstall: [graphify, antigravity, uninstall]
+    install_mode: direct
+    uninstall_mode: direct
     effects:
       - kind: skill
         root: home
@@ -13,8 +13,7 @@ scopes:
           - "name: graphify-manager"
           - "description: Rebuild the code graph or perform manual CLI queries when MCP server is offline."
         reference_bundle: claude
-      - kind: file
-        root: user_cwd
+      - root: user_cwd
         path: .agents/rules/graphify.md
         source: graphify/always_on/antigravity-rules.md
       - kind: text
@@ -32,8 +31,7 @@ scopes:
           - "name: graphify-manager"
           - "description: Rebuild the code graph or perform manual CLI queries when MCP server is offline."
         reference_bundle: claude
-      - kind: file
-        root: project
+      - root: project
         path: .agents/rules/graphify.md
         source: graphify/always_on/antigravity-rules.md
       - kind: text

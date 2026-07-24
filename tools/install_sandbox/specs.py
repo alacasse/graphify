@@ -7,7 +7,15 @@ from typing import Any, Mapping
 
 import yaml
 
-from .models import Effect, EffectKind, Root, Scope, ScopeSpec, TargetSpec
+from .models import (
+    CommandMode,
+    Effect,
+    EffectKind,
+    Root,
+    Scope,
+    ScopeSpec,
+    TargetSpec,
+)
 
 
 _TOP_KEYS = {
@@ -16,7 +24,7 @@ _TOP_KEYS = {
     "limitations",
     "universal_uninstall_scopes",
 }
-_SCOPE_KEYS = {"effects", "install", "uninstall"}
+_SCOPE_KEYS = {"effects", "install_mode", "uninstall_mode"}
 _EFFECT_KEYS = {
     "kind",
     "root",
@@ -71,13 +79,20 @@ def _strings(value: Any, label: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _command(value: Any, label: str) -> tuple[str, ...] | None:
-    if value is None:
+def _command_mode(
+    mapping: Mapping[str, Any],
+    key: str,
+    label: str,
+) -> CommandMode | None:
+    if key not in mapping:
         return None
-    command = _strings(value, label)
-    if not command or command[0] != "graphify":
-        raise SpecError(f"{label} must be argv beginning with 'graphify'")
-    return command
+    value = mapping[key]
+    if not isinstance(value, str):
+        raise SpecError(f"{label} must be the scalar 'direct'")
+    try:
+        return CommandMode(value)
+    except ValueError as exc:
+        raise SpecError(f"{label} is invalid: {value!r}") from exc
 
 
 def _scopes(value: Any, label: str) -> frozenset[Scope]:
@@ -175,12 +190,15 @@ def load_target(path: Path) -> TargetSpec:
                 _effect(item, f"{path.name}.{scope.value}.effects[{index}]")
                 for index, item in enumerate(effects_raw)
             ),
-            install=_command(
-                scope_raw.get("install"), f"{path.name}.{scope.value}.install"
+            install_mode=_command_mode(
+                scope_raw,
+                "install_mode",
+                f"{path.name}.{scope.value}.install_mode",
             ),
-            uninstall=_command(
-                scope_raw.get("uninstall"),
-                f"{path.name}.{scope.value}.uninstall",
+            uninstall_mode=_command_mode(
+                scope_raw,
+                "uninstall_mode",
+                f"{path.name}.{scope.value}.uninstall_mode",
             ),
         )
 

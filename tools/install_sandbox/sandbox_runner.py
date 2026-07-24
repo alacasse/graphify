@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 from .lifecycle import (
@@ -21,10 +22,10 @@ from .specs import SpecError, catalog_names, load_catalog
 HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
 
 
-def parser() -> argparse.ArgumentParser:
+def parser(target_names: Iterable[str]) -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     selection = result.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--target", choices=catalog_names(HARNESS_SPEC_DIR))
+    selection.add_argument("--target", choices=tuple(target_names))
     selection.add_argument("--all", action="store_true", dest="all_targets")
     result.add_argument(
         "--scope",
@@ -69,11 +70,15 @@ def _unsupported(target, scope: Scope, output: Path) -> ScenarioResult:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+def main(
+    argv: list[str] | None = None,
+    *,
+    spec_dir: Path = HARNESS_SPEC_DIR,
+) -> int:
+    args = parser(catalog_names(spec_dir)).parse_args(argv)
     roots = roots_from_environment()
     try:
-        catalog = load_catalog(HARNESS_SPEC_DIR)
+        catalog = load_catalog(spec_dir)
     except SpecError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

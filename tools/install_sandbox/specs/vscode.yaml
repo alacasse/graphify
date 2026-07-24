@@ -1,8 +1,8 @@
 universal_uninstall_scopes: [user]
 scopes:
   user:
-    install: [graphify, vscode, install]
-    uninstall: [graphify, vscode, uninstall]
+    install_mode: direct
+    uninstall_mode: direct
     effects:
       - kind: skill
         root: home
@@ -15,8 +15,8 @@ scopes:
         marker: "## graphify"
         source: graphify/always_on/vscode-instructions.md
   project:
-    install: [graphify, vscode, install]
-    uninstall: [graphify, vscode, uninstall]
+    install_mode: direct
+    uninstall_mode: direct
     effects:
       - kind: skill
         root: home

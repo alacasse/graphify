@@ -3,8 +3,8 @@ unsupported:
 universal_uninstall_scopes: [project]
 scopes:
   project:
-    install: [graphify, cursor, install]
-    uninstall: [graphify, cursor, uninstall]
+    install_mode: direct
+    uninstall_mode: direct
     effects:
       - kind: text
         root: project

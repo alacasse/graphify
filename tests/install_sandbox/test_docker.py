@@ -13,8 +13,8 @@ from tools.install_sandbox.docker import (
     build_image_command,
     build_run_command,
 )
-from tools.install_sandbox.sandbox_runner import HARNESS_SPEC_DIR
-from tools.install_sandbox.specs import load_catalog
+from tools.install_sandbox import sandbox_runner
+from tools.install_sandbox.models import SandboxRoots, ScenarioResult
 
 
 def test_docker_commands_mount_source_read_only_and_isolate_every_root(tmp_path):
@@ -25,7 +25,7 @@ def test_docker_commands_mount_source_read_only_and_isolate_every_root(tmp_path)
         image="sandbox:test",
         repo=repo,
         output=output,
-        target="codex",
+        target="demo",
         all_targets=False,
         scope="project",
     )
@@ -59,7 +59,7 @@ def test_docker_commands_mount_source_read_only_and_isolate_every_root(tmp_path)
             CONTAINER_OUTPUT,
         }
     ) == 7
-    assert command[-4:] == ["--scope", "project", "--target", "codex"]
+    assert command[-4:] == ["--scope", "project", "--target", "demo"]
 
 
 def test_docker_command_requires_exactly_one_selection(tmp_path):
@@ -75,15 +75,95 @@ def test_docker_command_requires_exactly_one_selection(tmp_path):
         )
 
 
-def test_container_oracle_is_packaged_with_harness_not_subject_repo(tmp_path):
-    subject_specs = tmp_path / "tools" / "install_sandbox" / "specs"
+def test_container_oracle_is_packaged_with_harness_not_subject_repo(
+    tmp_path,
+    monkeypatch,
+):
+    harness_specs = tmp_path / "harness" / "specs"
+    subject_repo = tmp_path / "subject"
+    subject_specs = subject_repo / "tools" / "install_sandbox" / "specs"
+    harness_specs.mkdir(parents=True)
     subject_specs.mkdir(parents=True)
-    (subject_specs / "codex.yaml").write_text(
-        "scopes: {}\n",
+    body = (
+        "unsupported:\n"
+        "  project: unavailable\n"
+        "scopes:\n"
+        "  user:\n"
+        "    effects:\n"
+        "      - {root: home, path: fixture.txt}\n"
+    )
+    (harness_specs / "demo.yaml").write_text(
+        body,
+        encoding="utf-8",
+    )
+    (subject_specs / "subject-only.yaml").write_text(
+        body,
         encoding="utf-8",
     )
 
-    catalog = load_catalog(HARNESS_SPEC_DIR)
+    root_paths = {
+        name: tmp_path / name
+        for name in (
+            "home",
+            "xdg",
+            "project",
+            "user_cwd",
+            "source",
+            "output",
+        )
+    }
+    roots = SandboxRoots(repo_mount=subject_repo, **root_paths)
+    observed = {}
 
-    assert len(catalog) == 24
-    assert HARNESS_SPEC_DIR.resolve() != subject_specs.resolve()
+    def fake_copy_and_install_package(actual_roots, catalog):
+        observed["repo_mount"] = actual_roots.repo_mount
+        observed["catalog_names"] = tuple(catalog)
+        return {
+            "repo_mount_read_only": True,
+            "package_version": "1.0",
+        }
+
+    def fake_run_scenario(scenario, actual_roots, *, expected_version):
+        observed["scenario_target"] = scenario.target.name
+        return ScenarioResult(
+            scenario=scenario.name,
+            target=scenario.target.name,
+            scope=scenario.scope.value,
+            status="PASS",
+            phases=[],
+        )
+
+    monkeypatch.setattr(
+        sandbox_runner,
+        "roots_from_environment",
+        lambda: roots,
+    )
+    monkeypatch.setattr(
+        sandbox_runner,
+        "copy_and_install_package",
+        fake_copy_and_install_package,
+    )
+    monkeypatch.setattr(sandbox_runner, "run_scenario", fake_run_scenario)
+    monkeypatch.setattr(
+        sandbox_runner,
+        "run_purge_check",
+        lambda actual_roots: {"status": "PASS"},
+    )
+    monkeypatch.setattr(
+        sandbox_runner,
+        "write_run_outputs",
+        lambda output, manifest: None,
+    )
+
+    exit_code = sandbox_runner.main(
+        ["--target", "demo", "--scope", "user"],
+        spec_dir=harness_specs,
+    )
+
+    assert exit_code == 0
+    assert observed == {
+        "repo_mount": subject_repo,
+        "catalog_names": ("demo",),
+        "scenario_target": "demo",
+    }
+    assert harness_specs.resolve() != subject_specs.resolve()

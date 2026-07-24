@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,11 +19,11 @@ from tools.install_sandbox.specs import SpecError, catalog_names, load_catalog
 HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
 
 
-def parser() -> argparse.ArgumentParser:
+def parser(target_names: Iterable[str]) -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--repo", required=True, type=Path)
     selection = result.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--target", choices=catalog_names(HARNESS_SPEC_DIR))
+    selection.add_argument("--target", choices=tuple(target_names))
     selection.add_argument("--all", action="store_true", dest="all_targets")
     result.add_argument(
         "--scope",
@@ -38,14 +39,18 @@ def default_output() -> Path:
     return Path(__file__).resolve().parent / "out" / stamp
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+def main(
+    argv: list[str] | None = None,
+    *,
+    spec_dir: Path = HARNESS_SPEC_DIR,
+) -> int:
+    args = parser(catalog_names(spec_dir)).parse_args(argv)
     repo = args.repo.expanduser().resolve()
     if not (repo / "pyproject.toml").is_file() or not (repo / "graphify").is_dir():
         print(f"error: not a Graphify source checkout: {repo}", file=sys.stderr)
         return 2
     try:
-        load_catalog(HARNESS_SPEC_DIR)
+        load_catalog(spec_dir)
     except SpecError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

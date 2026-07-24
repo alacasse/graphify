@@ -1,12 +1,13 @@
 scopes:
   user:
-    uninstall: [graphify, copilot, uninstall]
+    uninstall_mode: direct
     effects:
       - kind: skill
         root: home
         path: .copilot/skills/graphify/SKILL.md
         source: graphify/skill-copilot.md
         reference_bundle: copilot
+
   project:
     effects:
       - kind: skill
@@ -14,4 +15,3 @@ scopes:
         path: .copilot/skills/graphify/SKILL.md
         source: graphify/skill-copilot.md
         reference_bundle: copilot
-

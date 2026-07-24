@@ -20,6 +20,7 @@ from .effects import (
     validate_removed,
 )
 from .models import (
+    CommandMode,
     CommandResult,
     EffectKind,
     PhaseResult,
@@ -61,8 +62,11 @@ def scenario_steps(scenario: Scenario) -> tuple[str, ...]:
 
 
 def install_command(scenario: Scenario) -> tuple[str, ...]:
-    if scenario.contract.install:
-        return scenario.contract.install
+    mode = scenario.contract.install_mode
+    if mode is CommandMode.DIRECT:
+        return ("graphify", scenario.target.name, "install")
+    if mode is not None:
+        raise ValueError(f"invalid install command mode: {mode!r}")
     command = ["graphify", "install"]
     if scenario.scope is Scope.PROJECT:
         command.append("--project")
@@ -71,8 +75,11 @@ def install_command(scenario: Scenario) -> tuple[str, ...]:
 
 
 def uninstall_command(scenario: Scenario) -> tuple[str, ...] | None:
-    if scenario.contract.uninstall:
-        return scenario.contract.uninstall
+    mode = scenario.contract.uninstall_mode
+    if mode is CommandMode.DIRECT:
+        return ("graphify", scenario.target.name, "uninstall")
+    if mode is not None:
+        raise ValueError(f"invalid uninstall command mode: {mode!r}")
     if scenario.scope is Scope.PROJECT:
         return (
             "graphify",

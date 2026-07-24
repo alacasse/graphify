@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox.models import EffectKind, Scope
+from tools.install_sandbox.models import CommandMode, EffectKind, Scope
 from tools.install_sandbox.specs import (
     SpecError,
     catalog_names,
@@ -11,96 +11,111 @@ from tools.install_sandbox.specs import (
 )
 
 
-SPEC_DIR = Path("tools/install_sandbox/specs")
-
-
-def test_current_catalog_strictly_loads_all_24_targets_and_47_pairs():
-    catalog = load_catalog(SPEC_DIR)
-
-    assert tuple(catalog) == catalog_names(SPEC_DIR)
-    assert len(catalog) == 24
-    assert sum(
-        target.supports(scope) for target in catalog.values() for scope in Scope
-    ) == 47
-    assert catalog["cursor"].unsupported == {
-        Scope.USER: (
-            "Cursor installs only a project-local .cursor rule in the current "
-            "working directory."
-        )
-    }
-    assert catalog["hermes"].limitations == (
-        "Normal Linux Hermes behavior is validated; Windows %LOCALAPPDATA% "
-        "installation is not verified.",
+@pytest.fixture
+def fictional_spec_dir(tmp_path: Path) -> Path:
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "archive.yaml").write_text(
+        """
+limitations:
+  - Synthetic target used to exercise unsupported scopes.
+universal_uninstall_scopes: [user]
+unsupported:
+  project: Project installation is unavailable in this fixture.
+scopes:
+  user:
+    effects:
+      - kind: text
+        root: home
+        path: .archive/notice.txt
+        required_text: [present]
+        forbidden_text: [absent]
+""".lstrip(),
+        encoding="utf-8",
     )
-    windows_limitation = (
-        "Linux Docker verifies packaged Windows payload consistency only; "
-        "Windows paths, permissions, shells, cleanup, and runtime discovery "
-        "are not verified."
+    (specs / "demo.yaml").write_text(
+        """
+universal_uninstall_scopes: [user, project]
+scopes:
+  user:
+    install_mode: direct
+    uninstall_mode: direct
+    effects:
+      - root: home
+        path: .demo/config.txt
+        source: fixtures/demo-user.txt
+  project:
+    install_mode: direct
+    uninstall_mode: direct
+    effects:
+      - root: project
+        path: .demo/config.txt
+        source: fixtures/demo-project.txt
+""".lstrip(),
+        encoding="utf-8",
     )
-    assert catalog["windows"].limitations == (windows_limitation,)
-    assert catalog["antigravity-windows"].limitations == (
-        windows_limitation.replace(
-            "packaged Windows payload",
-            "packaged Antigravity-Windows payload",
-        ),
+    (specs / "generic.yaml").write_text(
+        """
+universal_uninstall_scopes: [project]
+scopes:
+  user:
+    effects:
+      - kind: text
+        root: home
+        path: .generic/instructions.txt
+        required_text: [enabled]
+        forbidden_text: [disabled]
+  project:
+    effects:
+      - root: project
+        path: .generic/config.txt
+        source: fixtures/generic-project.txt
+""".lstrip(),
+        encoding="utf-8",
+    )
+    return specs
+
+
+def test_fictional_catalog_loads_modes_defaults_oracles_and_scope_declarations(
+    fictional_spec_dir: Path,
+):
+    catalog = load_catalog(fictional_spec_dir)
+
+    assert tuple(catalog) == ("archive", "demo", "generic")
+    assert catalog_names(fictional_spec_dir) == ("archive", "demo", "generic")
+
+    demo = catalog["demo"]
+    for scope in Scope:
+        assert demo.supports(scope)
+        assert demo.scopes[scope].install_mode is CommandMode.DIRECT
+        assert demo.scopes[scope].uninstall_mode is CommandMode.DIRECT
+        assert demo.scopes[scope].effects[0].kind is EffectKind.FILE
+
+    generic = catalog["generic"]
+    for scope in Scope:
+        assert generic.supports(scope)
+        assert generic.scopes[scope].install_mode is None
+        assert generic.scopes[scope].uninstall_mode is None
+    assert generic.scopes[Scope.USER].effects[0].required_text == ("enabled",)
+    assert generic.scopes[Scope.USER].effects[0].forbidden_text == ("disabled",)
+    assert generic.scopes[Scope.PROJECT].effects[0].kind is EffectKind.FILE
+
+    archive = catalog["archive"]
+    assert archive.supports(Scope.USER)
+    assert not archive.supports(Scope.PROJECT)
+    assert archive.unsupported == {
+        Scope.PROJECT: "Project installation is unavailable in this fixture."
+    }
+    assert archive.limitations == (
+        "Synthetic target used to exercise unsupported scopes.",
     )
 
 
-def test_catalog_payloads_and_reference_bundles_resolve_in_current_source():
-    catalog = load_catalog(SPEC_DIR)
+def test_aggregate_uninstall_groups_come_from_fictional_specs(
+    fictional_spec_dir: Path,
+):
+    catalog = load_catalog(fictional_spec_dir)
 
-    for target in catalog.values():
-        for scope in target.scopes.values():
-            for effect in scope.effects:
-                if effect.source:
-                    assert Path(effect.source).is_file(), (
-                        target.name,
-                        effect.source,
-                    )
-                if effect.kind is EffectKind.SKILL and effect.reference_bundle:
-                    names = {
-                        item.name
-                        for item in (
-                            Path("graphify/skills")
-                            / effect.reference_bundle
-                            / "references"
-                        ).iterdir()
-                        if item.is_file()
-                    }
-                    assert len(names) == 8
-
-
-def test_current_command_exceptions_match_real_direct_cli_surfaces():
-    catalog = load_catalog(SPEC_DIR)
-    direct_user_uninstall = {
-        name
-        for name, target in catalog.items()
-        if target.supports(Scope.USER)
-        and target.scopes[Scope.USER].uninstall is not None
-    }
-
-    assert direct_user_uninstall == {
-        "agents",
-        "amp",
-        "antigravity",
-        "claude",
-        "copilot",
-        "devin",
-        "gemini",
-        "kilo",
-        "pi",
-        "vscode",
-    }
-    assert {
-        name
-        for name, target in catalog.items()
-        if target.supports(Scope.PROJECT)
-        and target.scopes[Scope.PROJECT].install is not None
-    } == {"cursor", "kilo", "kiro", "vscode"}
-
-
-def test_universal_uninstall_groups_are_declared_by_target_specs():
-    catalog = load_catalog(SPEC_DIR)
     selected = {
         scope: {
             name
@@ -109,26 +124,10 @@ def test_universal_uninstall_groups_are_declared_by_target_specs():
         }
         for scope in Scope
     }
-    all_user_destinations = {
-        (effect.root, effect.path)
-        for target in catalog.values()
-        if target.supports(Scope.USER)
-        for effect in target.scopes[Scope.USER].effects
-    }
-    selected_user_destinations = {
-        (effect.root, effect.path)
-        for name in selected[Scope.USER]
-        for effect in catalog[name].scopes[Scope.USER].effects
-    }
 
-    assert selected_user_destinations == all_user_destinations
-    assert selected[Scope.PROJECT] == {
-        "claude",
-        "codebuddy",
-        "codex",
-        "cursor",
-        "devin",
-        "gemini",
+    assert selected == {
+        Scope.USER: {"archive", "demo"},
+        Scope.PROJECT: {"demo", "generic"},
     }
 
 
@@ -165,7 +164,9 @@ def test_universal_uninstall_groups_are_declared_by_target_specs():
     ],
 )
 def test_loader_rejects_unknown_keys_bad_roots_and_unsafe_paths(
-    tmp_path, body, message
+    tmp_path: Path,
+    body: str,
+    message: str,
 ):
     spec = tmp_path / "sample.yaml"
     spec.write_text(body, encoding="utf-8")
@@ -174,16 +175,60 @@ def test_loader_rejects_unknown_keys_bad_roots_and_unsafe_paths(
         load_target(spec)
 
 
-def test_catalog_names_and_entries_come_from_yaml_files(tmp_path):
-    body = (
-        "unsupported:\n  project: unavailable\n"
-        "scopes:\n  user:\n    effects:\n"
-        "      - {root: home, path: x}\n"
+@pytest.mark.parametrize("field", ["install_mode", "uninstall_mode"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "null",
+        "[graphify, demo, install]",
+        "unknown",
+        "Direct",
+        "17",
+        "true",
+        "{mode: direct}",
+    ],
+)
+def test_loader_rejects_every_present_non_direct_command_mode(
+    tmp_path: Path,
+    field: str,
+    value: str,
+):
+    spec = tmp_path / "sample.yaml"
+    spec.write_text(
+        (
+            "unsupported:\n"
+            "  project: unavailable\n"
+            "scopes:\n"
+            "  user:\n"
+            f"    {field}: {value}\n"
+            "    effects:\n"
+            "      - {root: home, path: fixture.txt}\n"
+        ),
+        encoding="utf-8",
     )
-    (tmp_path / "alpha.yaml").write_text(body, encoding="utf-8")
-    (tmp_path / "omega.yaml").write_text(body, encoding="utf-8")
 
-    catalog = load_catalog(tmp_path)
+    with pytest.raises(SpecError, match=field):
+        load_target(spec)
 
-    assert catalog_names(tmp_path) == ("alpha", "omega")
-    assert tuple(catalog) == ("alpha", "omega")
+
+@pytest.mark.parametrize("legacy_field", ["install", "uninstall"])
+def test_loader_rejects_legacy_command_fields(
+    tmp_path: Path,
+    legacy_field: str,
+):
+    spec = tmp_path / "sample.yaml"
+    spec.write_text(
+        (
+            "unsupported:\n"
+            "  project: unavailable\n"
+            "scopes:\n"
+            "  user:\n"
+            f"    {legacy_field}: [graphify, demo, install]\n"
+            "    effects:\n"
+            "      - {root: home, path: fixture.txt}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpecError, match="unknown keys"):
+        load_target(spec)

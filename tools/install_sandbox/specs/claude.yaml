@@ -1,7 +1,7 @@
 universal_uninstall_scopes: [user, project]
 scopes:
   user:
-    uninstall: [graphify, claude, uninstall]
+    uninstall_mode: direct
     effects:
       - kind: skill
         root: home

@@ -17,7 +17,13 @@ def test_antigravity_project_install_writes_rules_and_workflows(tmp_path):
     assert rules.exists(), "antigravity rules (always-on) must be written"
     assert workflow.exists(), "antigravity workflow must be written"
     # native tool-discovery frontmatter is injected into the skill
-    assert skill.read_text(encoding="utf-8").startswith("---\n")
+    skill_text = skill.read_text(encoding="utf-8")
+    assert skill_text.startswith("---\nname: graphify-manager\n")
+    assert (
+        "description: Rebuild the code graph or perform manual CLI queries "
+        "when MCP server is offline."
+    ) in skill_text.split("---", 2)[1]
+    assert "\nname: graphify\n" not in skill_text.split("---", 2)[1]
 
 
 def test_antigravity_project_uninstall_clears_rules_and_workflows(tmp_path):

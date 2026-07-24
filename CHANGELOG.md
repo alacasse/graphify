@@ -4,6 +4,7 @@ Full release notes with details on each version: [GitHub Releases](https://githu
 
 ## 0.9.25 (2026-07-22)
 
+- Fix: Antigravity installs now replace the shared skill's generic YAML name and description with the native `graphify-manager` discovery metadata, instead of skipping injection merely because some frontmatter already exists.
 - Fix: `graphify claude uninstall` now removes the user skill registration from `~/.claude/CLAUDE.md` along with the user skill tree, while preserving unrelated user instructions.
 - Fix: CodeBuddy installs and uninstalls now keep the skill, `CODEBUDDY.md`, and hook settings in one selected scope. Generic installs use the user CodeBuddy root, project installs and `graphify codebuddy` subcommands stay in the project, and universal uninstall cleans both scopes while preserving unrelated instructions and hooks (fork issue #4).
 - Fix: progressive skill uninstall now removes a stale `references.tmp` staging directory, and Kilo global uninstall removes both `references/` and `references.tmp` before collapsing empty Graphify-owned directories (fork issue #8).

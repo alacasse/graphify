@@ -27,6 +27,10 @@ universal-uninstall eligibility. Python discovers the catalog from the spec
 filenames and derives aggregate scenarios from those declarations; it does not
 maintain a second list of target names.
 
+The [spec authority guide](specs/README.md) explains how to place new target
+facts, deterministic derivations, cross-target policy, and product
+observations without freezing the current YAML schema.
+
 The repository is mounted read-only, copied to a separate container source
 directory, and installed from that copy. HOME, XDG configuration, project,
 user working directory, copied source, and output are distinct isolated roots.

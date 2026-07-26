@@ -1,3 +1,4 @@
+import subprocess
 import shutil
 from pathlib import Path
 from typing import cast
@@ -6,6 +7,7 @@ import pytest
 
 from tools.install_sandbox.effects import REFERENCE_NAMES, resolve_effect
 from tools.install_sandbox.lifecycle import (
+    execute_command,
     install_command,
     run_scenario,
     run_universal_uninstall_scenario,
@@ -151,6 +153,37 @@ def test_manually_constructed_invalid_command_modes_fail_closed(verb):
     command_builder = install_command if verb == "install" else uninstall_command
     with pytest.raises(ValueError, match=f"invalid {verb} command mode"):
         command_builder(scenario)
+
+
+def test_execute_command_decodes_timeout_output(tmp_path, monkeypatch):
+    def time_out(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(
+            ("graphify", "install"),
+            1,
+            output=b"partial stdout\n",
+            stderr=b"partial stderr: \xff\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    result = execute_command(
+        ("graphify", "install"),
+        tmp_path,
+        {},
+        tmp_path / "artifacts",
+        "install",
+    )
+
+    assert result.exit_code == 124
+    assert result.timed_out
+    assert result.stdout == "partial stdout\n"
+    assert result.stderr == "partial stderr: \ufffd\n"
+    assert (tmp_path / "artifacts/install.stdout.log").read_text(
+        encoding="utf-8"
+    ) == result.stdout
+    assert (tmp_path / "artifacts/install.stderr.log").read_text(
+        encoding="utf-8"
+    ) == result.stderr
 
 
 def test_full_lifecycle_is_idempotent_repairs_sidecars_and_preserves_user_content(

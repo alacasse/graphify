@@ -1,7 +1,9 @@
+import sys
 from pathlib import Path
 
 import pytest
 
+from tools.install_sandbox import docker
 from tools.install_sandbox.docker import (
     CONTAINER_HOME,
     CONTAINER_OUTPUT,
@@ -73,6 +75,52 @@ def test_docker_command_requires_exactly_one_selection(tmp_path):
             all_targets=False,
             scope="both",
         )
+
+
+def test_host_command_output_is_streamed_with_phase_and_stream_labels():
+    observed = []
+
+    exit_code = docker._run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('from stdout'); print('from stderr', file=sys.stderr)",
+        ],
+        10,
+        phase="example",
+        on_output=lambda phase, stream, text: observed.append(
+            (phase, stream, text)
+        ),
+    )
+
+    assert exit_code == 0
+    assert observed[0][0:2] == ("example", "command")
+    assert ("example", "stdout", "from stdout\n") in observed
+    assert ("example", "stderr", "from stderr\n") in observed
+
+
+def test_run_sandbox_announces_build_and_container_phases(tmp_path, monkeypatch):
+    phases = []
+    commands = []
+
+    def fake_run(argv, timeout, *, phase, on_output):
+        commands.append((argv, timeout, phase, on_output))
+        return 0
+
+    monkeypatch.setattr(docker, "_run", fake_run)
+
+    exit_code = docker.run_sandbox(
+        repo=tmp_path / "repo",
+        output=tmp_path / "output",
+        target="demo",
+        all_targets=False,
+        scope="project",
+        on_phase=phases.append,
+    )
+
+    assert exit_code == 0
+    assert phases == ["docker_build", "container"]
+    assert [item[2] for item in commands] == ["docker_build", "container"]
 
 
 def test_container_oracle_is_packaged_with_harness_not_subject_repo(

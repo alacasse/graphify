@@ -6,7 +6,10 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
+from collections.abc import Callable
 from pathlib import Path
+from typing import TextIO
 
 
 HARNESS_DIR = Path(__file__).resolve().parent
@@ -21,6 +24,9 @@ CONTAINER_XDG = "/tmp/graphify-xdg"
 CONTAINER_PROJECT = "/tmp/graphify-project"
 CONTAINER_USER_CWD = "/tmp/graphify-user-cwd"
 CONTAINER_SOURCE = "/tmp/graphify-source"
+
+PhaseHandler = Callable[[str], None]
+OutputHandler = Callable[[str, str, str], None]
 
 
 def build_image_command(runtime: str, image: str) -> list[str]:
@@ -72,25 +78,125 @@ def build_run_command(
     return command
 
 
-def _run(argv: list[str], timeout: int) -> int:
-    print(f"$ {shlex.join(argv)}", flush=True)
+def _emit(
+    *,
+    phase: str,
+    stream: str,
+    text: str,
+    on_output: OutputHandler | None,
+) -> None:
+    if on_output is not None:
+        on_output(phase, stream, text)
+        return
+    destination = sys.stderr if stream == "stderr" else sys.stdout
+    print(text, end="", file=destination, flush=True)
+
+
+def _pipe_output(
+    pipe: TextIO,
+    *,
+    phase: str,
+    stream: str,
+    on_output: OutputHandler | None,
+) -> None:
     try:
-        completed = subprocess.run(
+        for line in iter(pipe.readline, ""):
+            _emit(
+                phase=phase,
+                stream=stream,
+                text=line,
+                on_output=on_output,
+            )
+    finally:
+        pipe.close()
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _run(
+    argv: list[str],
+    timeout: int,
+    *,
+    phase: str,
+    on_output: OutputHandler | None = None,
+) -> int:
+    _emit(
+        phase=phase,
+        stream="command",
+        text=f"$ {shlex.join(argv)}\n",
+        on_output=on_output,
+    )
+    try:
+        process = subprocess.Popen(
             argv,
             shell=False,
-            check=False,
-            timeout=timeout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
         )
     except FileNotFoundError:
-        print(f"error: container runtime not found: {argv[0]}", file=sys.stderr)
-        return 127
-    except subprocess.TimeoutExpired:
-        print(
-            f"error: command timed out after {timeout} seconds: {shlex.join(argv)}",
-            file=sys.stderr,
+        _emit(
+            phase=phase,
+            stream="stderr",
+            text=f"error: container runtime not found: {argv[0]}\n",
+            on_output=on_output,
         )
+        return 127
+
+    assert process.stdout is not None
+    assert process.stderr is not None
+    threads = [
+        threading.Thread(
+            target=_pipe_output,
+            args=(process.stdout,),
+            kwargs={
+                "phase": phase,
+                "stream": "stdout",
+                "on_output": on_output,
+            },
+        ),
+        threading.Thread(
+            target=_pipe_output,
+            args=(process.stderr,),
+            kwargs={
+                "phase": phase,
+                "stream": "stderr",
+                "on_output": on_output,
+            },
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _emit(
+            phase=phase,
+            stream="stderr",
+            text=(
+                f"error: command timed out after {timeout} seconds: "
+                f"{shlex.join(argv)}\n"
+            ),
+            on_output=on_output,
+        )
+        _stop_process(process)
         return 124
-    return completed.returncode
+    finally:
+        _stop_process(process)
+        for thread in threads:
+            thread.join()
 
 
 def run_sandbox(
@@ -102,11 +208,22 @@ def run_sandbox(
     scope: str,
     runtime: str = "docker",
     image: str = DEFAULT_IMAGE,
+    on_phase: PhaseHandler | None = None,
+    on_output: OutputHandler | None = None,
 ) -> int:
     output.mkdir(parents=True, exist_ok=True)
-    build = _run(build_image_command(runtime, image), BUILD_TIMEOUT_SECONDS)
+    if on_phase is not None:
+        on_phase("docker_build")
+    build = _run(
+        build_image_command(runtime, image),
+        BUILD_TIMEOUT_SECONDS,
+        phase="docker_build",
+        on_output=on_output,
+    )
     if build:
         return build
+    if on_phase is not None:
+        on_phase("container")
     return _run(
         build_run_command(
             runtime=runtime,
@@ -118,5 +235,6 @@ def run_sandbox(
             scope=scope,
         ),
         RUN_TIMEOUT_SECONDS,
+        phase="container",
+        on_output=on_output,
     )
-

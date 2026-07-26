@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from .models import Effect, EffectKind, Observation, Root, ValidationResult
 
@@ -533,8 +533,8 @@ def snapshot_digest(value: Mapping[str, Any]) -> str:
 
 def validate_no_unexpected_changes(
     effects: Iterable[Effect],
-    before: Mapping[str, list[Mapping[str, object]]],
-    after: Mapping[str, list[Mapping[str, object]]],
+    before: Mapping[str, Sequence[Mapping[str, object]]],
+    after: Mapping[str, Sequence[Mapping[str, object]]],
 ) -> ValidationResult:
     """Require every changed snapshot path to belong to a declared effect."""
     allowed: dict[str, set[str]] = {}

@@ -50,6 +50,14 @@ CommandExecutor = Callable[
 ]
 
 
+def _timeout_output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def scenario_steps(scenario: Scenario) -> tuple[str, ...]:
     steps = ["install", "reinstall"]
     if any(
@@ -127,8 +135,8 @@ def execute_command(
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         exit_code = 124
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
+        stdout = _timeout_output_text(exc.stdout)
+        stderr = _timeout_output_text(exc.stderr)
     (artifact_dir / f"{label}.stdout.log").write_text(stdout, encoding="utf-8")
     (artifact_dir / f"{label}.stderr.log").write_text(stderr, encoding="utf-8")
     record = {

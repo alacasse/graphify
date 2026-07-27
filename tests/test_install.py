@@ -125,6 +125,58 @@ def test_claude_subcommand_project_install_and_uninstall_are_project_scoped(tmp_
     assert not (project / "CLAUDE.md").exists()
 
 
+def test_claude_subcommand_user_uninstall_removes_user_registration(
+    tmp_path, monkeypatch
+):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    registration = home / ".claude" / "CLAUDE.md"
+    registration.parent.mkdir(parents=True)
+    registration.write_text("# User notes\n\nkeep this\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["graphify", "install", "--platform", "claude"],
+        )
+        main()
+        assert (home / ".claude" / "skills" / "graphify" / "SKILL.md").exists()
+        assert "# graphify" in registration.read_text(encoding="utf-8")
+
+        monkeypatch.setattr(sys, "argv", ["graphify", "claude", "uninstall"])
+        main()
+
+    assert not (home / ".claude" / "skills" / "graphify" / "SKILL.md").exists()
+    assert registration.exists()
+    assert "# graphify" not in {
+        line.strip()
+        for line in registration.read_text(encoding="utf-8").splitlines()
+    }
+    assert "keep this" in registration.read_text(encoding="utf-8")
+
+
+def test_claude_project_uninstall_preserves_user_registration(tmp_path):
+    from graphify.__main__ import claude_uninstall
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    registration = home / ".claude" / "CLAUDE.md"
+    registration.parent.mkdir(parents=True)
+    original = "# User notes\n\n# graphify\n\nkeep user registration\n"
+    registration.write_text(original, encoding="utf-8")
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        claude_uninstall(project, project=True)
+
+    assert registration.read_text(encoding="utf-8") == original
+
+
 def test_codex_subcommand_project_install_and_uninstall_are_project_scoped(tmp_path, monkeypatch):
     from graphify.__main__ import main
     home = tmp_path / "home"

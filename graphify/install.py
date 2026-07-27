@@ -1839,6 +1839,7 @@ def claude_uninstall(project_dir: Path | None = None, *, project: bool = False, 
         _remove_skill_file("claude", project=True, project_dir=project_dir)
     if remove_user_skill:
         _remove_skill_file("claude", project=False)
+        _remove_claude_skill_registration(Path.home())
 
     md_targets = [
         project_dir / "CLAUDE.md",

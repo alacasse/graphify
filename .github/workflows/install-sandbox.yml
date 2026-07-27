@@ -131,10 +131,13 @@ jobs:
         if: always()
         shell: bash
         env:
+          RUN_METADATA: ${{ runner.temp }}/graphify-install-sandbox/run.json
           SANDBOX_EXIT_CODE: ${{ steps.sandbox.outputs.exit_code }}
         run: |
           if [[ ! "$SANDBOX_EXIT_CODE" =~ ^[0-9]+$ ]]; then
             echo "::error::The install-sandbox runner did not record an exit code."
             exit 1
           fi
-          exit "$SANDBOX_EXIT_CODE"
+          uv run --frozen python -m tools.install_sandbox.ci_result \
+            --run-json "$RUN_METADATA" \
+            --runner-exit-code "$SANDBOX_EXIT_CODE"

@@ -219,9 +219,14 @@ uses a fresh external leaf at
 `$RUNNER_TEMP/graphify-install-sandbox`, uploads the complete directory after
 success or failure as
 `install-sandbox-<run-id>-<run-attempt>`, writes `report.md` (or `run.json`
-when the report is unavailable) to the job summary, and only then propagates
-the runner's original exit code. This remains advisory until it has a
-trustworthy baseline; it is not a required-check gate.
+when the report is unavailable) to the job summary, and only then evaluates
+the host lifecycle metadata. A `passed` run succeeds. A complete `failed` run
+also succeeds after emitting a warning because it represents behavioral
+findings, not a broken diagnostic. An `incomplete` or `interrupted` run, missing
+metadata, malformed metadata, or an exit-code mismatch fails the workflow. The
+runner's original exit code remains recorded in `run.json` and the job summary.
+This workflow is advisory for completed findings; it is not a required-check
+gate.
 
 Two commented settings near the top of the workflow are the storage-cost
 controls:

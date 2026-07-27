@@ -981,9 +981,30 @@ def _antigravity_finalize(skill_dst: Path, project_dir: Path) -> None:
     # Inject YAML frontmatter for native Antigravity tool discovery.
     if skill_dst.exists():
         content = skill_dst.read_text(encoding="utf-8")
-        if not content.startswith("---\n"):
-            frontmatter = "---\nname: graphify-manager\ndescription: Rebuild the code graph or perform manual CLI queries when MCP server is offline.\n---\n\n"
-            skill_dst.write_text(frontmatter + content, encoding="utf-8")
+        body = content
+        extra_metadata: list[str] = []
+        if content.startswith("---\n"):
+            closing = content.find("\n---\n", 4)
+            if closing != -1:
+                metadata = content[4:closing].splitlines()
+                extra_metadata = [
+                    line
+                    for line in metadata
+                    if line.strip()
+                    and not line.startswith(("name:", "description:"))
+                ]
+                body = content[closing + len("\n---\n") :].lstrip("\n")
+        metadata = [
+            "name: graphify-manager",
+            (
+                "description: Rebuild the code graph or perform manual CLI "
+                "queries when MCP server is offline."
+            ),
+            *extra_metadata,
+        ]
+        payload = "---\n" + "\n".join(metadata) + "\n---\n\n" + body
+        if payload != content:
+            skill_dst.write_text(payload, encoding="utf-8")
 
     # .agents/rules/graphify.md
     rules_path = project_dir / _ANTIGRAVITY_RULES_PATH

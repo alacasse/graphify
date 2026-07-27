@@ -40,6 +40,14 @@ def _settings_path(project_dir):
     return project_dir / ".codebuddy" / "settings.json"
 
 
+def _graphify_hook_count(settings_path):
+    settings = json.loads(settings_path.read_text())
+    return sum(
+        "graphify" in str(hook)
+        for hook in settings.get("hooks", {}).get("PreToolUse", [])
+    )
+
+
 # ---------------------------------------------------------------------------
 # User-scope install (graphify install --platform codebuddy)
 # ---------------------------------------------------------------------------
@@ -49,6 +57,51 @@ def test_codebuddy_install_user_creates_skill_file(tmp_path):
     _codebuddy_install_user(tmp_path)
     skill_path = _skill_path_user(tmp_path)
     assert skill_path.exists()
+
+
+def test_generic_codebuddy_install_writes_complete_user_scope_only(tmp_path, monkeypatch):
+    from graphify.__main__ import install
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        install(platform="codebuddy")
+
+    assert _skill_path_user(home).exists()
+    assert (home / ".codebuddy" / "CODEBUDDY.md").exists()
+    assert _graphify_hook_count(home / ".codebuddy" / "settings.json") == 2
+    assert not _skill_path_project(project).exists()
+    assert not _codebuddy_md_path(project).exists()
+    assert not _settings_path(project).exists()
+
+
+def test_project_codebuddy_install_writes_complete_project_scope_only(
+    tmp_path, monkeypatch
+):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["graphify", "install", "--project", "--platform", "codebuddy"],
+    )
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        main()
+
+    assert _skill_path_project(project).exists()
+    assert _codebuddy_md_path(project).exists()
+    assert _graphify_hook_count(_settings_path(project)) == 2
+    assert not _skill_path_user(home).exists()
+    assert not (home / ".codebuddy" / "CODEBUDDY.md").exists()
+    assert not (home / ".codebuddy" / "settings.json").exists()
 
 
 def test_codebuddy_skill_file_contains_frontmatter(tmp_path):
@@ -79,6 +132,39 @@ def test_codebuddy_install_project_writes_codebuddy_md(tmp_path):
     content = md.read_text()
     assert "## graphify" in content
     assert "graphify-out/" in content
+
+
+def test_codebuddy_subcommand_is_project_scoped_and_preserves_user_install(
+    tmp_path, monkeypatch
+):
+    from graphify.__main__ import codebuddy_install, main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        codebuddy_install(project=False)
+        user_skill = _skill_path_user(home)
+        user_md = home / ".codebuddy" / "CODEBUDDY.md"
+        user_settings = home / ".codebuddy" / "settings.json"
+
+        monkeypatch.setattr(sys, "argv", ["graphify", "codebuddy", "install"])
+        main()
+        assert _skill_path_project(project).exists()
+        assert _codebuddy_md_path(project).exists()
+        assert _graphify_hook_count(_settings_path(project)) == 2
+
+        monkeypatch.setattr(sys, "argv", ["graphify", "codebuddy", "uninstall"])
+        main()
+
+    assert not _skill_path_project(project).exists()
+    assert not _codebuddy_md_path(project).exists()
+    assert _graphify_hook_count(_settings_path(project)) == 0
+    assert user_skill.exists()
+    assert user_md.exists()
+    assert _graphify_hook_count(user_settings) == 2
 
 
 def test_codebuddy_install_project_writes_hook(tmp_path):
@@ -217,6 +303,23 @@ def test_codebuddy_uninstall_noop_if_no_section(tmp_path):
     assert "# Some other project" in content
 
 
+@pytest.mark.parametrize("instructions_state", ["missing", "unrelated"])
+def test_codebuddy_uninstall_removes_hook_without_owned_instructions(
+    tmp_path, instructions_state
+):
+    from graphify.__main__ import _install_codebuddy_hook, codebuddy_uninstall
+
+    if instructions_state == "unrelated":
+        _codebuddy_md_path(tmp_path).write_text("# User instructions\n")
+    _install_codebuddy_hook(tmp_path)
+
+    codebuddy_uninstall(tmp_path, project=True)
+
+    assert _graphify_hook_count(_settings_path(tmp_path)) == 0
+    if instructions_state == "unrelated":
+        assert _codebuddy_md_path(tmp_path).read_text() == "# User instructions\n"
+
+
 def test_codebuddy_uninstall_preserves_other_content(tmp_path):
     """Uninstall preserves non-graphify content in CODEBUDDY.md."""
     from graphify.__main__ import codebuddy_install, codebuddy_uninstall
@@ -268,6 +371,47 @@ def test_uninstall_all_removes_codebuddy_hook(tmp_path, monkeypatch):
         settings = json.loads(settings_path.read_text())
         hooks = settings.get("hooks", {}).get("PreToolUse", [])
         assert not any("graphify" in str(h) for h in hooks)
+
+
+def test_uninstall_all_removes_both_codebuddy_scopes(tmp_path, monkeypatch):
+    from graphify.__main__ import codebuddy_install, uninstall_all
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    user_dir = home / ".codebuddy"
+    user_dir.mkdir(parents=True)
+    user_md = user_dir / "CODEBUDDY.md"
+    user_md.write_text("# User rules\n")
+    user_settings = user_dir / "settings.json"
+    unrelated_hook = {
+        "matcher": "Write",
+        "hooks": [{"type": "command", "command": "keep-me"}],
+    }
+    user_settings.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "hooks": {"PreToolUse": [unrelated_hook]},
+            }
+        )
+    )
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        codebuddy_install(project=False)
+        codebuddy_install(project, project=True)
+        uninstall_all(project)
+
+    assert not _skill_path_user(home).exists()
+    assert user_md.read_text() == "# User rules\n"
+    assert _graphify_hook_count(user_settings) == 0
+    preserved_settings = json.loads(user_settings.read_text())
+    assert preserved_settings["theme"] == "dark"
+    assert preserved_settings["hooks"]["PreToolUse"] == [unrelated_hook]
+    assert not _skill_path_project(project).exists()
+    assert not _codebuddy_md_path(project).exists()
+    assert _graphify_hook_count(_settings_path(project)) == 0
 
 
 # ---------------------------------------------------------------------------

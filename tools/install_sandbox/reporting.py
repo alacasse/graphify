@@ -106,4 +106,3 @@ def write_run_outputs(output: Path, manifest: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     (output / "report.md").write_text(render_report(manifest), encoding="utf-8")
-

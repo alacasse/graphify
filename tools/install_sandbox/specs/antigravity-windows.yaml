@@ -15,4 +15,3 @@ scopes:
         path: .agents/skills/graphify/SKILL.md
         source: graphify/skill-windows.md
         reference_bundle: windows
-

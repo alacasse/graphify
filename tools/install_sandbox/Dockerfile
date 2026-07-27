@@ -36,4 +36,3 @@ COPY . /runner/tools/install_sandbox/
 
 WORKDIR /tmp/graphify-project
 ENTRYPOINT ["python", "-m", "tools.install_sandbox.sandbox_runner"]
-

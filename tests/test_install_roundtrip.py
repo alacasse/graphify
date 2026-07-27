@@ -132,14 +132,18 @@ def test_vscode_install_uninstall_roundtrip(tmp_path, monkeypatch):
     with patch("graphify.__main__.Path.home", return_value=home):
         mainmod.vscode_install(project_dir=project_dir)
         skill = home / ".copilot" / "skills" / "graphify" / "SKILL.md"
+        refs_tmp = skill.parent / "references.tmp"
         instructions = project_dir / ".github" / "copilot-instructions.md"
         assert skill.exists()
         assert instructions.exists()
         assert "## graphify" in instructions.read_text(encoding="utf-8")
         assert (skill.parent / ".graphify_version").read_text() == mainmod.__version__
+        refs_tmp.mkdir()
+        (refs_tmp / "partial.md").write_text("stale staging", encoding="utf-8")
 
         mainmod.vscode_uninstall(project_dir=project_dir)
         assert not skill.exists()
+        assert not refs_tmp.exists()
         # The skill dir tree is walked away.
         assert not (home / ".copilot" / "skills").exists()
         # The graphify section is stripped from the instructions file.

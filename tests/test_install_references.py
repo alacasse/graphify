@@ -134,6 +134,43 @@ def test_uninstall_removes_references_then_walks_dirs(tmp_path, fake_bundle):
     assert not (tmp_path / ".claude" / "skills").exists()
 
 
+def test_uninstall_removes_stale_references_staging_without_other_artifacts(
+    tmp_path, fake_bundle
+):
+    """A failed install's references.tmp is independently owned cleanup."""
+    platform = fake_bundle
+    skill_dir = tmp_path / ".claude" / "skills" / "graphify"
+    refs_tmp = skill_dir / "references.tmp"
+    refs_tmp.mkdir(parents=True)
+    (refs_tmp / "partial.md").write_text("partial staged reference", encoding="utf-8")
+
+    with patch("graphify.__main__.Path.home", return_value=tmp_path):
+        removed = mainmod._remove_skill_file(platform)
+
+    assert removed
+    assert not refs_tmp.exists()
+    assert not skill_dir.exists()
+
+
+def test_uninstall_preserves_unrelated_skill_directory_content(tmp_path, fake_bundle):
+    platform = fake_bundle
+    _install(tmp_path, platform)
+    skill_dir = tmp_path / ".claude" / "skills" / "graphify"
+    unrelated = skill_dir / "user-notes.md"
+    unrelated.write_text("keep this", encoding="utf-8")
+    refs_tmp = skill_dir / "references.tmp"
+    refs_tmp.mkdir()
+    (refs_tmp / "partial.md").write_text("partial", encoding="utf-8")
+
+    with patch("graphify.__main__.Path.home", return_value=tmp_path):
+        removed = mainmod._remove_skill_file(platform)
+
+    assert removed
+    assert unrelated.read_text(encoding="utf-8") == "keep this"
+    assert not (skill_dir / "references").exists()
+    assert not refs_tmp.exists()
+
+
 def test_check_skill_version_warns_on_missing_references(tmp_path, fake_bundle, capsys):
     """If SKILL.md links references/ but the dir is gone, warn to repair."""
     platform = fake_bundle

@@ -873,11 +873,15 @@ def test_kilo_uninstall_removes_plugin_registration_and_command(tmp_path):
     project_dir.mkdir()
     home_dir.mkdir()
     _kilo_install(project_dir, home_dir)
+    skill_dir = home_dir / ".config" / "kilo" / "skills" / "graphify"
+    assert (skill_dir / "references").is_dir()
+    refs_tmp = skill_dir / "references.tmp"
+    refs_tmp.mkdir()
+    (refs_tmp / "partial.md").write_text("partial staged reference", encoding="utf-8")
     _kilo_uninstall(project_dir, home_dir)
     assert not (home_dir / ".config" / "kilo" / "command" / "graphify.md").exists()
-    assert not (
-        home_dir / ".config" / "kilo" / "skills" / "graphify" / "SKILL.md"
-    ).exists()
+    assert not (skill_dir / "SKILL.md").exists()
+    assert not skill_dir.exists()
     assert not (project_dir / ".kilo" / "plugins" / "graphify.js").exists()
     config_file = project_dir / ".kilo" / "kilo.json"
     if config_file.exists():
@@ -885,6 +889,32 @@ def test_kilo_uninstall_removes_plugin_registration_and_command(tmp_path):
         assert (
             project_dir / ".kilo" / "plugins" / "graphify.js"
         ).resolve().as_uri() not in config.get("plugin", [])
+
+
+def test_kilo_uninstall_reports_sidecar_only_cleanup_and_preserves_user_content(
+    tmp_path,
+):
+    from graphify.__main__ import _kilo_uninstall_global
+
+    home_dir = tmp_path / "home"
+    skill_dir = home_dir / ".config" / "kilo" / "skills" / "graphify"
+    refs = skill_dir / "references"
+    refs.mkdir(parents=True)
+    (refs / "query.md").write_text("owned", encoding="utf-8")
+    refs_tmp = skill_dir / "references.tmp"
+    refs_tmp.mkdir()
+    (refs_tmp / "partial.md").write_text("owned staging", encoding="utf-8")
+    unrelated = skill_dir / "user-notes.md"
+    unrelated.write_text("keep this", encoding="utf-8")
+
+    with patch("graphify.__main__.Path.home", return_value=home_dir):
+        removed = _kilo_uninstall_global()
+
+    assert any("references removed" in item for item in removed)
+    assert any("staged references removed" in item for item in removed)
+    assert unrelated.read_text(encoding="utf-8") == "keep this"
+    assert not refs.exists()
+    assert not refs_tmp.exists()
 
 
 # ── Cursor ────────────────────────────────────────────────────────────────────

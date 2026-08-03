@@ -15,7 +15,9 @@ from typing import NoReturn, cast
 
 from .model import (
     AbsentRule,
+    ActionFamily,
     ActionId,
+    ActionPurpose,
     ActionRequest,
     ActionUnavailable,
     AggregatePreparation,
@@ -39,6 +41,9 @@ from .model import (
     ContainsTextRule,
     ExactTextRule,
     Exited,
+    ExpectedAction,
+    FixturePreparationRequest,
+    FixturePreparedFact,
     HarnessPolicy,
     InstallationEstablished,
     InstallationWitness,
@@ -47,6 +52,7 @@ from .model import (
     IsolationScenario,
     LifecycleScenario,
     LifecycleValidation,
+    NotApplicablePhasePlan,
     ObservationFact,
     ObservationReadFailure,
     ObservationRequest,
@@ -59,6 +65,7 @@ from .model import (
     PhaseFinding,
     PhaseIncomplete,
     PhaseKind,
+    PhaseNotApplicable,
     PhasePassed,
     PhasePlan,
     PhaseResult,
@@ -93,10 +100,17 @@ from .model import (
     ScopeFacts,
     StableInstallationEstablished,
     StreamCaptureFailure,
+    SubjectPlan,
+    SubjectPreparationRequest,
+    SubjectPreparedFact,
+    SubjectProbeFact,
+    SubjectProbeRequest,
+    SubjectReady,
     SupportedScopeFacts,
     TargetFacts,
     TargetScope,
     TextEntryEffect,
+    TimedOut,
     UnsupportedScenario,
     UnsupportedScenarioRecord,
     UnsupportedScopeFacts,
@@ -191,14 +205,25 @@ def _decode_scope(raw: object, scope: Scope) -> ScopeFacts:
     data = _mapping(raw, f"{scope.value} scope")
     supported = data.get("supported")
     if supported is True:
-        _exact_keys(data, {"supported", "effects"}, f"{scope.value} supported scope")
+        _exact_keys(
+            data,
+            {"supported", "effects", "target_uninstall", "limitations"},
+            f"{scope.value} supported scope",
+        )
         raw_effects = data["effects"]
         if not isinstance(raw_effects, list) or not raw_effects:
             _fail(f"{scope.value} supported scope requires effects")
         effects = tuple(_decode_effect(item) for item in cast(list[object], raw_effects))
         if len(set(surface_key((effect,)) for effect in effects)) != len(effects):
             _fail(f"{scope.value} supported scope contains duplicate effect surfaces")
-        return SupportedScopeFacts(effects)
+        target_uninstall = data["target_uninstall"]
+        if not isinstance(target_uninstall, bool):
+            _fail(f"{scope.value} target_uninstall must be boolean")
+        return SupportedScopeFacts(
+            effects,
+            target_uninstall,
+            _strings(data["limitations"], f"{scope.value} limitations"),
+        )
     if supported is False:
         _exact_keys(
             data, {"supported", "reason", "limitations"}, f"{scope.value} unsupported scope"
@@ -334,7 +359,7 @@ def _lifecycle(
         return UnsupportedScenario(
             f"{target.name}:{scope.value}", target.name, scope, facts.reason, facts.limitations
         )
-    phases = [
+    phases: list[PhasePlan | NotApplicablePhasePlan] = [
         PhasePlan(
             PhaseKind.INSTALL,
             target.name,
@@ -355,8 +380,20 @@ def _lifecycle(
             (*policy.uninstall_argv, target.name, "--scope", scope.value),
             _absent_spec(facts.effects, scope),
         )
+        if facts.target_uninstall
+        else NotApplicablePhasePlan(
+            PhaseKind.TARGET_UNINSTALL,
+            target.name,
+            scope,
+            "Target Facts declare no target-bounded uninstall interface",
+        )
     )
-    return LifecycleScenario(f"{target.name}:{scope.value}", scope, tuple(phases))
+    return LifecycleScenario(
+        f"{target.name}:{scope.value}",
+        scope,
+        tuple(phases),
+        facts.limitations,
+    )
 
 
 def _aggregate(
@@ -368,11 +405,13 @@ def _aggregate(
         return PlanRejected((f"aggregate {scope.value} has no supported targets",))
     preparations: list[AggregatePreparation] = []
     all_effects: list[InstallEffect] = []
+    limitations: set[str] = set()
     for target in selected:
         facts = target.facts_for(scope)
         if not isinstance(facts, SupportedScopeFacts):
             raise AssertionError("minimum cover selected an unsupported target")
         all_effects.extend(facts.effects)
+        limitations.update(facts.limitations)
         preparations.append(
             AggregatePreparation(
                 target.name,
@@ -388,6 +427,7 @@ def _aggregate(
         tuple(preparations),
         (*policy.aggregate_uninstall_argv, "--scope", scope.value),
         _absent_spec(tuple(all_effects), scope),
+        tuple(sorted(limitations)),
     )
 
 
@@ -397,6 +437,7 @@ def _isolation(
     rules: list[ObservationRule] = []
     targets: list[str] = []
     preparations: list[PhasePlan] = []
+    limitations: set[str] = set()
     for target in catalog.targets:
         selected_facts = target.facts_for(selected)
         preserved_facts = target.facts_for(preserved)
@@ -404,6 +445,8 @@ def _isolation(
             preserved_facts, SupportedScopeFacts
         ):
             targets.append(target.name)
+            limitations.update(selected_facts.limitations)
+            limitations.update(preserved_facts.limitations)
             preparations.extend(
                 (
                     PhasePlan(
@@ -434,7 +477,14 @@ def _isolation(
         (*policy.aggregate_uninstall_argv, "--scope", selected.value),
         ObservationSpecification(tuple(rules)),
     )
-    return IsolationScenario(name, selected, phase, preserved, tuple(preparations))
+    return IsolationScenario(
+        name,
+        selected,
+        phase,
+        preserved,
+        tuple(preparations),
+        tuple(sorted(limitations)),
+    )
 
 
 def _selected(
@@ -521,17 +571,79 @@ def _planned(
     return scenario if isinstance(scenario, PlanRejected) else (scenario,)
 
 
-def _projection(scenarios: tuple[ScenarioPlan, ...], plan_id: PlanId) -> PlanProjection:
+def _phase_label(phase: PhasePlan | NotApplicablePhasePlan) -> str:
+    return f"{phase.kind.value}:{phase.target}:{phase.scope.value}"
+
+
+def _expected_pair(
+    ordinal: int,
+    scenario: str,
+    phase: str,
+    purpose: ActionPurpose,
+) -> tuple[ExpectedAction, ExpectedAction]:
+    return (
+        ExpectedAction(ordinal, scenario, phase, ActionFamily.COMMAND, purpose),
+        ExpectedAction(
+            ordinal + 1,
+            scenario,
+            phase,
+            ActionFamily.OBSERVATION,
+            ActionPurpose.SEMANTIC_OBSERVATION,
+        ),
+    )
+
+
+def _expected_subject_actions(
+    subjects: tuple[SubjectPlan, ...],
+) -> tuple[ExpectedAction, ...]:
+    actions: list[ExpectedAction] = []
+    for index, subject in enumerate(subjects):
+        ordinal = index * 2
+        identity = f"subject:{subject.target}:{subject.scope.value}"
+        actions.extend(
+            (
+                ExpectedAction(
+                    ordinal,
+                    identity,
+                    "prepare",
+                    ActionFamily.SUBJECT_PREPARATION,
+                    ActionPurpose.PACKAGE_PREPARATION,
+                ),
+                ExpectedAction(
+                    ordinal + 1,
+                    identity,
+                    "probe",
+                    ActionFamily.SUBJECT_PROBE,
+                    ActionPurpose.PACKAGE_PROBE,
+                ),
+            )
+        )
+    return tuple(actions)
+
+
+def _projection(
+    scenarios: tuple[ScenarioPlan, ...],
+    subjects: tuple[SubjectPlan, ...],
+    plan_id: PlanId,
+    runtime_limitations: tuple[str, ...],
+) -> PlanProjection:
+    subject_actions = _expected_subject_actions(subjects)
+    ordinal = len(subject_actions)
     projections: list[ScenarioProjection] = []
     for scenario in scenarios:
+        expected_actions: list[ExpectedAction] = []
         if isinstance(scenario, LifecycleScenario):
             kind, targets, phases = (
                 ScenarioKind.LIFECYCLE,
                 (scenario.phases[0].target,),
                 tuple(phase.kind for phase in scenario.phases),
             )
+            action_phases = scenario.phases
+            scenario_limitations = scenario.limitations
         elif isinstance(scenario, UnsupportedScenario):
             kind, targets, phases = ScenarioKind.UNSUPPORTED, (scenario.target,), ()
+            action_phases = ()
+            scenario_limitations = scenario.limitations
         elif isinstance(scenario, AggregateScenario):
             kind = ScenarioKind.AGGREGATE
             targets = tuple(item.target for item in scenario.preparations)
@@ -539,6 +651,26 @@ def _projection(scenarios: tuple[ScenarioPlan, ...], plan_id: PlanId) -> PlanPro
                 *((PhaseKind.AGGREGATE_PREPARE,) * len(targets)),
                 PhaseKind.AGGREGATE_UNINSTALL,
             )
+            action_phases = (
+                *(
+                    PhasePlan(
+                        PhaseKind.AGGREGATE_PREPARE,
+                        item.target,
+                        item.scope,
+                        item.command,
+                        item.observation,
+                    )
+                    for item in scenario.preparations
+                ),
+                PhasePlan(
+                    PhaseKind.AGGREGATE_UNINSTALL,
+                    ",".join(targets),
+                    scenario.scope,
+                    scenario.uninstall_command,
+                    scenario.removal_observation,
+                ),
+            )
+            scenario_limitations = scenario.limitations
         else:
             kind, targets, phases = (
                 ScenarioKind.ISOLATION,
@@ -548,8 +680,54 @@ def _projection(scenarios: tuple[ScenarioPlan, ...], plan_id: PlanId) -> PlanPro
                     PhaseKind.CROSS_SCOPE_PRESERVATION,
                 ),
             )
-        projections.append(ScenarioProjection(scenario.name, kind, scenario.scope, targets, phases))
-    return PlanProjection(plan_id, tuple(projections), True)
+            action_phases = (*scenario.preparations, scenario.phase)
+            scenario_limitations = scenario.limitations
+        for phase in action_phases:
+            if isinstance(phase, NotApplicablePhasePlan):
+                continue
+            expected_actions.extend(
+                _expected_pair(
+                    ordinal,
+                    scenario.name,
+                    _phase_label(phase),
+                    ActionPurpose.PRODUCT_LIFECYCLE,
+                )
+            )
+            ordinal += 2
+        projections.append(
+            ScenarioProjection(
+                scenario.name,
+                kind,
+                scenario.scope,
+                targets,
+                phases,
+                tuple(expected_actions),
+                scenario_limitations,
+            )
+        )
+    purge_actions = (
+        ExpectedAction(
+            ordinal,
+            "purge",
+            "fixture-preparation",
+            ActionFamily.FIXTURE_PREPARATION,
+            ActionPurpose.HARNESS_PREPARATION,
+        ),
+        *_expected_pair(
+            ordinal + 1,
+            "purge",
+            PhaseKind.PURGE.value,
+            ActionPurpose.PRODUCT_PURGE,
+        ),
+    )
+    return PlanProjection(
+        plan_id,
+        subject_actions,
+        tuple(projections),
+        True,
+        purge_actions,
+        runtime_limitations,
+    )
 
 
 def _canonical_plan_payload(scenarios: tuple[ScenarioPlan, ...], purge: PurgePlan) -> str:
@@ -570,11 +748,35 @@ def _canonical_plan_payload(scenarios: tuple[ScenarioPlan, ...], purge: PurgePla
             for scenario in scenarios
         ],
         "purge": {
+            "fixture_entries": purge.fixture_entries,
             "command": purge.command,
             "rules": [rule(item) for item in purge.observation.rules],
         },
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _subject_plans(scenarios: tuple[ScenarioPlan, ...]) -> tuple[SubjectPlan, ...]:
+    selected: set[tuple[str, Scope]] = set()
+    for scenario in scenarios:
+        if isinstance(scenario, LifecycleScenario):
+            selected.update((phase.target, phase.scope) for phase in scenario.phases)
+        elif isinstance(scenario, AggregateScenario):
+            selected.update((item.target, item.scope) for item in scenario.preparations)
+        elif isinstance(scenario, IsolationScenario):
+            selected.update((phase.target, phase.scope) for phase in scenario.preparations)
+    return tuple(SubjectPlan(target, scope) for target, scope in sorted(selected, key=str))
+
+
+def _runtime_limitations(
+    catalog: InstallTargetCatalog,
+    policy: HarnessPolicy,
+) -> tuple[str, ...]:
+    limitations = set(policy.runtime_limitations)
+    for target in catalog.targets:
+        for scoped in target.scopes:
+            limitations.update(scoped.facts.limitations)
+    return tuple(sorted(limitations))
 
 
 def build_validation_plan(
@@ -591,17 +793,34 @@ def build_validation_plan(
     if not names or len(set(names)) != len(names):
         return PlanRejected(("validation plan requires unique scenarios",))
     purge = PurgePlan(
+        (
+            ("installations/representative.txt", "installed\n"),
+            ("graphify-out/seed.txt", "seed\n"),
+            ("unrelated/sentinel.txt", "preserve-me\n"),
+        ),
         policy.purge_argv,
         ObservationSpecification(
             (
                 AbsentRule("purge:installations", "installations"),
                 AbsentRule("purge:graphify-out", "graphify-out"),
+                ExactTextRule(
+                    "purge:unrelated-sentinel",
+                    "unrelated/sentinel.txt",
+                    "preserve-me\n",
+                ),
             )
         ),
     )
     canonical = _canonical_plan_payload(scenarios, purge).encode()
     plan_id = PlanId("plan-" + hashlib.sha256(canonical).hexdigest()[:16])
-    return PlanReady(ValidationPlan(plan_id, scenarios, purge, _projection(scenarios, plan_id)))
+    subjects = _subject_plans(scenarios)
+    projection = _projection(
+        scenarios,
+        subjects,
+        plan_id,
+        _runtime_limitations(catalog, policy),
+    )
+    return PlanReady(ValidationPlan(plan_id, scenarios, purge, projection, subjects))
 
 
 def roll_up_phases(
@@ -617,12 +836,18 @@ def roll_up_phases(
         return ScenarioIncomplete(
             scenario.name,
             (f"phase detail mismatch: expected={expected!r}, actual={actual!r}",),
+            scenario.limitations,
         )
     reasons = tuple(result.reason for result in results if isinstance(result, PhaseIncomplete))
     if reasons:
-        return ScenarioIncomplete(scenario.name, reasons)
+        return ScenarioIncomplete(scenario.name, reasons, scenario.limitations)
     findings = tuple(result.finding for result in results if isinstance(result, PhaseFinding))
-    return ScenarioFinding(scenario.name, findings) if findings else ScenarioPassed(scenario.name)
+    blocked = any(isinstance(result, PhaseBlocked) for result in results)
+    return (
+        ScenarioFinding(scenario.name, findings, scenario.limitations)
+        if findings or blocked
+        else ScenarioPassed(scenario.name, scenario.limitations)
+    )
 
 
 def _judge_observation(
@@ -668,25 +893,49 @@ def _judge_observation(
 def _request_pair(
     run_id: RunId,
     plan_id: PlanId,
-    ordinal: int,
+    command_action: ExpectedAction,
+    observation_action: ExpectedAction,
     scenario: str,
     phase: str,
     argv: tuple[str, ...],
     observation: ObservationSpecification,
 ) -> tuple[CommandRequest, ObservationRequest]:
-    command_id = ActionId(run_id, plan_id, ordinal)
-    observation_id = ActionId(run_id, plan_id, ordinal + 1)
+    command_id = ActionId(run_id, plan_id, command_action.ordinal)
+    observation_id = ActionId(run_id, plan_id, observation_action.ordinal)
     return (
-        CommandRequest(command_id, scenario, phase, argv, "."),
+        CommandRequest(command_id, scenario, phase, argv, ".", command_action.purpose),
         ObservationRequest(observation_id, scenario, phase, observation),
     )
+
+
+def _all_expected(projection: PlanProjection) -> tuple[ExpectedAction, ...]:
+    return (
+        *projection.subject_actions,
+        *(action for scenario in projection.scenarios for action in scenario.expected_actions),
+        *projection.purge_actions,
+    )
+
+
+def _fact_matches_request(request: ActionRequest, fact: RawFact) -> bool:
+    if isinstance(fact, ActionUnavailable):
+        return True
+    if isinstance(request, CommandRequest):
+        return isinstance(fact, CommandFact)
+    if isinstance(request, ObservationRequest):
+        return isinstance(fact, ObservationFact)
+    if isinstance(request, SubjectPreparationRequest):
+        return isinstance(fact, SubjectPreparedFact)
+    if isinstance(request, SubjectProbeRequest):
+        return isinstance(fact, SubjectProbeFact)
+    if isinstance(request, FixturePreparationRequest):
+        return isinstance(fact, FixturePreparedFact)
+    return False
 
 
 @dataclass(frozen=True, slots=True)
 class _RunLedger:
     plan: ValidationPlan
     run_id: RunId
-    next_ordinal: int = 0
     facts: tuple[RawFact, ...] = ()
     findings: tuple[ProductFinding, ...] = ()
     chronology: tuple[ActionId, ...] = ()
@@ -698,15 +947,30 @@ class _RunLedger:
         argv: tuple[str, ...],
         observation: ObservationSpecification,
     ) -> tuple[CommandRequest, ObservationRequest]:
+        command_action = self.expected(scenario, phase, ActionFamily.COMMAND)
+        observation_action = self.expected(scenario, phase, ActionFamily.OBSERVATION)
         return _request_pair(
             self.run_id,
             self.plan.plan_id,
-            self.next_ordinal,
+            command_action,
+            observation_action,
             scenario,
             phase,
             argv,
             observation,
         )
+
+    def expected(self, scenario: str, phase: str, family: ActionFamily) -> ExpectedAction:
+        matches = tuple(
+            action
+            for action in _all_expected(self.plan.projection)
+            if action.scenario == scenario and action.phase == phase and action.family is family
+        )
+        if len(matches) != 1:
+            raise ValueError(
+                f"plan action identity is not unique: {scenario}/{phase}/{family.value}"
+            )
+        return matches[0]
 
     def receive(self, request: ActionRequest, fact: RawFact) -> _RunLedger:
         if fact.action_id != request.action_id:
@@ -715,42 +979,53 @@ class _RunLedger:
             )
         if fact.action_id in self.chronology:
             raise ValueError(f"duplicate or late fact: {fact.action_id!r}")
-        expected = self.next_ordinal
-        if fact.action_id.ordinal != expected:
-            raise ValueError(f"out-of-order fact: expected ordinal {expected}")
-        if isinstance(request, CommandRequest) != isinstance(
-            fact, (CommandFact, ActionUnavailable)
-        ):
-            raise ValueError("fact family does not match command request")
-        if isinstance(request, ObservationRequest) != isinstance(
-            fact, (ObservationFact, ActionUnavailable)
-        ):
-            raise ValueError("fact family does not match observation request")
+        expected_actions = _all_expected(self.plan.projection)
+        expected_ordinals = {item.ordinal for item in expected_actions}
+        if fact.action_id.ordinal not in expected_ordinals:
+            raise ValueError(f"fact does not belong to Validation Plan: {fact.action_id!r}")
+        if self.chronology and fact.action_id.ordinal <= self.chronology[-1].ordinal:
+            raise ValueError("fact chronology is not strictly ordered")
+        if not _fact_matches_request(request, fact):
+            raise ValueError("fact family does not match action request")
         return replace(
             self,
-            next_ordinal=expected + 1,
             facts=(*self.facts, fact),
             chronology=(*self.chronology, fact.action_id),
         )
 
 
-def _command_verdict(fact: RawFact) -> tuple[bool, bool, str]:
+def _command_evidence_failure(fact: CommandFact) -> str | None:
+    if fact.finished_ns < fact.started_ns:
+        return "command finish precedes start"
+    if fact.argv == () or not fact.reaped:
+        return "command evidence is incomplete"
+    if isinstance(fact.stdout, StreamCaptureFailure) or isinstance(
+        fact.stderr, StreamCaptureFailure
+    ):
+        return "command stream capture is incomplete"
+    return None
+
+
+def _command_verdict(
+    request: CommandRequest,
+    fact: RawFact,
+) -> tuple[bool, bool, str]:
     if isinstance(fact, ActionUnavailable):
         return False, True, fact.detail
     if not isinstance(fact, CommandFact):
         raise TypeError("command verdict requires a command fact")
-    if fact.finished_ns < fact.started_ns:
-        return False, True, "command finish precedes start"
-    if fact.argv == () or not fact.reaped:
-        return False, True, "command evidence is incomplete"
-    if isinstance(fact.stdout, StreamCaptureFailure) or isinstance(
-        fact.stderr, StreamCaptureFailure
-    ):
-        return False, True, "command stream capture is incomplete"
+    evidence_failure = _command_evidence_failure(fact)
+    if evidence_failure is not None:
+        return False, True, evidence_failure
     if isinstance(fact.termination, Exited):
         if not 0 <= fact.termination.code <= 255:
             return False, True, f"invalid raw exit code {fact.termination.code}"
         return fact.termination.code == 0, False, f"command exited {fact.termination.code}"
+    if isinstance(fact.termination, TimedOut) and request.purpose in (
+        ActionPurpose.PRODUCT_LIFECYCLE,
+        ActionPurpose.PRODUCT_PURGE,
+    ):
+        return False, False, f"product command timed out after {fact.termination.seconds}s"
     return False, True, f"command did not exit normally: {fact.termination!r}"
 
 
@@ -788,17 +1063,19 @@ def _phase_observation_result(
     request: ObservationRequest,
     fact: RawFact,
     witness: InstallationWitness | None,
+    command_action_id: ActionId,
 ) -> tuple[_RunLedger, PhaseResult, InstallationWitness | None]:
+    evidence = (command_action_id, request.action_id)
     if isinstance(fact, ActionUnavailable):
-        return ledger, PhaseIncomplete(phase.kind, fact.detail), witness
+        return ledger, PhaseIncomplete(phase.kind, fact.detail, evidence), witness
     if not isinstance(fact, ObservationFact):
         raise TypeError("observation request returned a non-observation fact")
     passed, incomplete, established, detail = _judge_observation(phase.observation, fact)
     if incomplete:
-        return ledger, PhaseIncomplete(phase.kind, detail), witness
+        return ledger, PhaseIncomplete(phase.kind, detail, evidence), witness
     next_witness = _witness_after_observation(phase, witness)
     if passed:
-        return ledger, PhasePassed(phase.kind), next_witness
+        return ledger, PhasePassed(phase.kind, evidence), next_witness
     if not established and phase.kind in (
         PhaseKind.INSTALL,
         PhaseKind.REINSTALL,
@@ -810,7 +1087,7 @@ def _phase_observation_result(
     finding = ProductFinding(request.action_id, detail, finding_witness)
     return (
         replace(ledger, findings=(*ledger.findings, finding)),
-        PhaseFinding(phase.kind, finding),
+        PhaseFinding(phase.kind, finding, evidence),
         next_witness,
     )
 
@@ -823,28 +1100,38 @@ def _run_phase(
     fulfil: Fulfil,
 ) -> tuple[_RunLedger, PhaseResult, InstallationWitness | None]:
     command, observation = ledger.request_pair(
-        scenario, phase.kind.value, phase.command, phase.observation
+        scenario, _phase_label(phase), phase.command, phase.observation
     )
     ledger, command_fact = _fulfil(ledger, command, fulfil)
-    passed, incomplete, detail = _command_verdict(command_fact)
+    passed, incomplete, detail = _command_verdict(command, command_fact)
     if incomplete:
-        return ledger, PhaseIncomplete(phase.kind, detail), witness
+        return ledger, PhaseIncomplete(phase.kind, detail, (command.action_id,)), witness
     if not passed:
         finding = ProductFinding(command.action_id, detail, witness)
         return (
             replace(ledger, findings=(*ledger.findings, finding)),
-            PhaseFinding(phase.kind, finding),
+            PhaseFinding(phase.kind, finding, (command.action_id,)),
             witness,
         )
     ledger, observed = _fulfil(ledger, observation, fulfil)
-    return _phase_observation_result(ledger, phase, observation, observed, witness)
+    return _phase_observation_result(
+        ledger,
+        phase,
+        observation,
+        observed,
+        witness,
+        command.action_id,
+    )
 
 
 def _blocked(
-    phases: tuple[PhasePlan, ...], witness: InstallationWitness | None
+    phases: tuple[PhasePlan | NotApplicablePhasePlan, ...],
+    witness: InstallationWitness | None,
 ) -> tuple[PhaseBlocked, ...]:
     blocked: list[PhaseBlocked] = []
     for phase in phases:
+        if isinstance(phase, NotApplicablePhasePlan):
+            continue
         if phase.kind is PhaseKind.REINSTALL and not isinstance(witness, InstallationEstablished):
             blocked.append(PhaseBlocked(phase.kind, "InstallationEstablished"))
         elif phase.kind in (PhaseKind.REPAIR, PhaseKind.TARGET_UNINSTALL) and not isinstance(
@@ -865,19 +1152,52 @@ def _run_lifecycle(
     witness: InstallationWitness | None = None
     results: list[PhaseResult] = []
     for index, phase in enumerate(phases):
+        if isinstance(phase, NotApplicablePhasePlan):
+            results.append(PhaseNotApplicable(phase.kind, phase.reason))
+            continue
         ledger, result, witness = _run_phase(ledger, scenario.name, phase, witness, fulfil)
         results.append(result)
         if isinstance(result, PhaseIncomplete):
-            blocked = _blocked(phases[index + 1 :], witness)
-            projected = tuple(results)
+            remaining = tuple(
+                PhaseNotApplicable(item.kind, item.reason)
+                if isinstance(item, NotApplicablePhasePlan)
+                else PhaseIncomplete(
+                    item.kind,
+                    f"not executed after diagnostic failure in {phase.kind.value}",
+                )
+                for item in phases[index + 1 :]
+            )
+            projected = (*results, *remaining)
             return ledger, PhaseScenarioRecord(
-                ScenarioIncomplete(scenario.name, (result.reason,)), projected, blocked
+                ScenarioIncomplete(
+                    scenario.name,
+                    (result.reason,),
+                    scenario.limitations,
+                ),
+                projected,
+                (),
             )
         if isinstance(result, PhaseFinding) and result.finding.witness is None:
             blocked = _blocked(phases[index + 1 :], witness)
-            projected = tuple(results)
+            blocked_by_kind = {item.phase: item for item in blocked}
+            remaining = tuple(
+                PhaseNotApplicable(item.kind, item.reason)
+                if isinstance(item, NotApplicablePhasePlan)
+                else blocked_by_kind.get(
+                    item.kind,
+                    PhaseBlocked(item.kind, f"blocked by {phase.kind.value} finding"),
+                )
+                for item in phases[index + 1 :]
+            )
+            projected = (*results, *remaining)
             return ledger, PhaseScenarioRecord(
-                ScenarioFinding(scenario.name, (result.finding,)), projected, blocked
+                ScenarioFinding(
+                    scenario.name,
+                    (result.finding,),
+                    scenario.limitations,
+                ),
+                projected,
+                blocked,
             )
     projected = tuple(results)
     return ledger, PhaseScenarioRecord(roll_up_phases(scenario, projected), projected, ())
@@ -899,12 +1219,26 @@ def _run_preparation(
     ledger, result, witness = _run_phase(ledger, scenario.name, phase, None, fulfil)
     established = witness if isinstance(witness, InstallationEstablished) else None
     if isinstance(result, PhaseIncomplete):
-        return ledger, PreparationIncomplete(preparation.target, result.reason), None
+        return (
+            ledger,
+            PreparationIncomplete(preparation.target, result.reason, result.evidence),
+            None,
+        )
     if isinstance(result, PhaseFinding):
-        return ledger, PreparationFinding(preparation.target, result.finding), established
+        return (
+            ledger,
+            PreparationFinding(preparation.target, result.finding, result.evidence),
+            established,
+        )
+    if not isinstance(result, PhasePassed):
+        raise TypeError("aggregate preparation produced an impossible phase result")
     return (
         ledger,
-        PreparationPassed(preparation.target, cast(InstallationEstablished, established)),
+        PreparationPassed(
+            preparation.target,
+            cast(InstallationEstablished, established),
+            result.evidence,
+        ),
         established,
     )
 
@@ -913,16 +1247,21 @@ def _aggregate_rollup(
     name: str,
     preparations: tuple[AggregatePreparationResult, ...],
     removal: AggregateUninstallResult,
+    limitations: tuple[str, ...],
 ) -> ScenarioResult:
     reasons = tuple(item.reason for item in preparations if isinstance(item, PreparationIncomplete))
     if isinstance(removal, AggregateUninstallIncomplete):
         reasons = (*reasons, removal.reason)
     if reasons:
-        return ScenarioIncomplete(name, reasons)
+        return ScenarioIncomplete(name, reasons, limitations)
     findings = tuple(item.finding for item in preparations if isinstance(item, PreparationFinding))
     if isinstance(removal, AggregateUninstallFinding):
         findings = (*findings, removal.finding)
-    return ScenarioFinding(name, findings) if findings else ScenarioPassed(name)
+    return (
+        ScenarioFinding(name, findings, limitations)
+        if findings
+        else ScenarioPassed(name, limitations)
+    )
 
 
 def _aggregate_observation_result(
@@ -933,18 +1272,26 @@ def _aggregate_observation_result(
     fact: RawFact,
 ) -> tuple[_RunLedger, AggregateUninstallResult]:
     if isinstance(fact, ActionUnavailable):
-        return ledger, AggregateUninstallIncomplete(installations, fact.detail)
+        return ledger, AggregateUninstallIncomplete(
+            installations,
+            fact.detail,
+            (request.action_id,),
+        )
     if not isinstance(fact, ObservationFact):
         raise TypeError("aggregate observation returned wrong fact family")
     passed, incomplete, _, detail = _judge_observation(scenario.removal_observation, fact)
     if incomplete:
-        return ledger, AggregateUninstallIncomplete(installations, detail)
+        return ledger, AggregateUninstallIncomplete(
+            installations,
+            detail,
+            (request.action_id,),
+        )
     if passed:
-        return ledger, AggregateUninstallPassed(installations)
+        return ledger, AggregateUninstallPassed(installations, (request.action_id,))
     finding = ProductFinding(request.action_id, detail)
     return (
         replace(ledger, findings=(*ledger.findings, finding)),
-        AggregateUninstallFinding(installations, finding),
+        AggregateUninstallFinding(installations, finding, (request.action_id,)),
     )
 
 
@@ -958,24 +1305,52 @@ def _run_aggregate_removal(
         return ledger, AggregateUninstallNotApplicable(
             "no aggregate preparation established an installation"
         )
+    phase = PhasePlan(
+        PhaseKind.AGGREGATE_UNINSTALL,
+        ",".join(item.target for item in scenario.preparations),
+        scenario.scope,
+        scenario.uninstall_command,
+        scenario.removal_observation,
+    )
     command, observation = ledger.request_pair(
         scenario.name,
-        PhaseKind.AGGREGATE_UNINSTALL.value,
+        _phase_label(phase),
         scenario.uninstall_command,
         scenario.removal_observation,
     )
     ledger, command_fact = _fulfil(ledger, command, fulfil)
-    passed, incomplete, detail = _command_verdict(command_fact)
+    passed, incomplete, detail = _command_verdict(command, command_fact)
     if incomplete:
-        return ledger, AggregateUninstallIncomplete(installations, detail)
+        return ledger, AggregateUninstallIncomplete(
+            installations,
+            detail,
+            (command.action_id,),
+        )
     if not passed:
         finding = ProductFinding(command.action_id, detail)
         return (
             replace(ledger, findings=(*ledger.findings, finding)),
-            AggregateUninstallFinding(installations, finding),
+            AggregateUninstallFinding(installations, finding, (command.action_id,)),
         )
     ledger, observed = _fulfil(ledger, observation, fulfil)
-    return _aggregate_observation_result(ledger, scenario, installations, observation, observed)
+    ledger, result = _aggregate_observation_result(
+        ledger,
+        scenario,
+        installations,
+        observation,
+        observed,
+    )
+    evidence = (command.action_id, observation.action_id)
+    if isinstance(
+        result,
+        (
+            AggregateUninstallPassed,
+            AggregateUninstallFinding,
+            AggregateUninstallIncomplete,
+        ),
+    ):
+        result = replace(result, evidence=evidence)
+    return ledger, result
 
 
 def _run_aggregate(
@@ -991,7 +1366,7 @@ def _run_aggregate(
     preparations = tuple(results)
     ledger, removal = _run_aggregate_removal(ledger, scenario, tuple(established), fulfil)
     record = AggregateScenarioRecord(
-        _aggregate_rollup(scenario.name, preparations, removal),
+        _aggregate_rollup(scenario.name, preparations, removal, scenario.limitations),
         preparations,
         removal,
         tuple(established),
@@ -999,31 +1374,133 @@ def _run_aggregate(
     return ledger, record
 
 
+def _prepare_purge_fixture(
+    ledger: _RunLedger,
+    fulfil: Fulfil,
+) -> tuple[_RunLedger, tuple[ActionId, ...], str | None]:
+    fixture_action = ledger.expected(
+        "purge",
+        "fixture-preparation",
+        ActionFamily.FIXTURE_PREPARATION,
+    )
+    fixture_request = FixturePreparationRequest(
+        ActionId(ledger.run_id, ledger.plan.plan_id, fixture_action.ordinal),
+        "purge",
+        "fixture-preparation",
+        ledger.plan.purge.fixture_entries,
+    )
+    ledger, fixture_fact = _fulfil(ledger, fixture_request, fulfil)
+    fixture_evidence = (fixture_request.action_id,)
+    if isinstance(fixture_fact, ActionUnavailable):
+        return ledger, fixture_evidence, fixture_fact.detail
+    if not isinstance(fixture_fact, FixturePreparedFact):
+        return ledger, fixture_evidence, "purge preparation fact is incoherent"
+    expected_entries = {path for path, _ in ledger.plan.purge.fixture_entries}
+    if {path for path, _ in fixture_fact.entries} != expected_entries:
+        return ledger, fixture_evidence, "purge preparation is incomplete"
+    return ledger, fixture_evidence, None
+
+
 def _run_purge(ledger: _RunLedger, fulfil: Fulfil) -> tuple[_RunLedger, PurgeResult]:
+    ledger, fixture_evidence, fixture_failure = _prepare_purge_fixture(ledger, fulfil)
+    if fixture_failure is not None:
+        return ledger, PurgeIncomplete(fixture_failure, fixture_evidence)
     command, observation = ledger.request_pair(
         "purge", PhaseKind.PURGE.value, ledger.plan.purge.command, ledger.plan.purge.observation
     )
     ledger, command_fact = _fulfil(ledger, command, fulfil)
-    passed, incomplete, detail = _command_verdict(command_fact)
+    passed, incomplete, detail = _command_verdict(command, command_fact)
+    command_evidence = (*fixture_evidence, command.action_id)
     if incomplete:
-        return ledger, PurgeIncomplete(detail)
+        return ledger, PurgeIncomplete(detail, command_evidence)
     if not passed:
         finding = ProductFinding(command.action_id, detail)
-        return replace(ledger, findings=(*ledger.findings, finding)), PurgeFinding(finding)
+        return (
+            replace(ledger, findings=(*ledger.findings, finding)),
+            PurgeFinding(finding, command_evidence),
+        )
     ledger, observed = _fulfil(ledger, observation, fulfil)
     if isinstance(observed, ActionUnavailable):
-        return ledger, PurgeIncomplete(observed.detail)
+        return ledger, PurgeIncomplete(
+            observed.detail,
+            (*command_evidence, observation.action_id),
+        )
     if not isinstance(observed, ObservationFact):
         raise TypeError("purge observation returned wrong fact family")
     ok, is_incomplete, _, observation_detail = _judge_observation(
         ledger.plan.purge.observation, observed
     )
     if is_incomplete:
-        return ledger, PurgeIncomplete(observation_detail)
+        return ledger, PurgeIncomplete(
+            observation_detail,
+            (*command_evidence, observation.action_id),
+        )
     if not ok:
         finding = ProductFinding(observation.action_id, observation_detail)
-        return replace(ledger, findings=(*ledger.findings, finding)), PurgeFinding(finding)
-    return ledger, PurgePassed()
+        return (
+            replace(ledger, findings=(*ledger.findings, finding)),
+            PurgeFinding(finding, (*command_evidence, observation.action_id)),
+        )
+    return ledger, PurgePassed((*command_evidence, observation.action_id))
+
+
+def _run_subjects(
+    ledger: _RunLedger,
+    fulfil: Fulfil,
+) -> tuple[_RunLedger, tuple[SubjectReady, ...], str | None]:
+    ready: list[SubjectReady] = []
+    for subject in ledger.plan.subjects:
+        scenario = f"subject:{subject.target}:{subject.scope.value}"
+        preparation_action = ledger.expected(
+            scenario,
+            "prepare",
+            ActionFamily.SUBJECT_PREPARATION,
+        )
+        preparation_request = SubjectPreparationRequest(
+            ActionId(ledger.run_id, ledger.plan.plan_id, preparation_action.ordinal),
+            subject.target,
+            subject.scope,
+        )
+        ledger, prepared = _fulfil(ledger, preparation_request, fulfil)
+        if isinstance(prepared, ActionUnavailable):
+            return ledger, tuple(ready), prepared.detail
+        if not isinstance(prepared, SubjectPreparedFact) or (
+            prepared.target,
+            prepared.scope,
+        ) != (subject.target, subject.scope):
+            return ledger, tuple(ready), "subject preparation fact is incoherent"
+        probe_action = ledger.expected(scenario, "probe", ActionFamily.SUBJECT_PROBE)
+        probe_request = SubjectProbeRequest(
+            ActionId(ledger.run_id, ledger.plan.plan_id, probe_action.ordinal),
+            subject.target,
+            subject.scope,
+            prepared.prepared_identity,
+        )
+        ledger, probed = _fulfil(ledger, probe_request, fulfil)
+        if isinstance(probed, ActionUnavailable):
+            return ledger, tuple(ready), probed.detail
+        if not isinstance(probed, SubjectProbeFact):
+            return ledger, tuple(ready), "subject probe fact is incoherent"
+        if (
+            probed.target != subject.target
+            or probed.scope is not subject.scope
+            or probed.prepared_identity != prepared.prepared_identity
+            or not probed.package_origin
+            or not probed.package_version
+            or not probed.interface_available
+        ):
+            return ledger, tuple(ready), "subject origin/version/interface probe failed"
+        ready.append(
+            SubjectReady(
+                subject.target,
+                subject.scope,
+                prepared.prepared_identity,
+                probed.package_origin,
+                probed.package_version,
+                (prepared.action_id, probed.action_id),
+            )
+        )
+    return ledger, tuple(ready), None
 
 
 def run_validation(plan: ValidationPlan, run_id: RunId, fulfil: Fulfil) -> ApplicationOutcome:
@@ -1031,7 +1508,19 @@ def run_validation(plan: ValidationPlan, run_id: RunId, fulfil: Fulfil) -> Appli
 
     ledger = _RunLedger(plan, run_id)
     records: list[ScenarioRecord] = []
+    subjects: tuple[SubjectReady, ...] = ()
     try:
+        ledger, subjects, subject_failure = _run_subjects(ledger, fulfil)
+        if subject_failure is not None:
+            return ValidationIncomplete(
+                plan.projection,
+                subjects,
+                subject_failure,
+                (),
+                ledger.facts,
+                ledger.findings,
+                ledger.chronology,
+            )
         for scenario in plan.scenarios:
             if isinstance(scenario, UnsupportedScenario):
                 unsupported = ScenarioUnsupported(
@@ -1048,6 +1537,7 @@ def run_validation(plan: ValidationPlan, run_id: RunId, fulfil: Fulfil) -> Appli
     except (TypeError, ValueError) as error:
         return ValidationIncomplete(
             plan.projection,
+            subjects,
             str(error),
             tuple(records),
             ledger.facts,
@@ -1056,6 +1546,7 @@ def run_validation(plan: ValidationPlan, run_id: RunId, fulfil: Fulfil) -> Appli
         )
     return CompletedValidation(
         plan.projection,
+        subjects,
         tuple(records),
         purge_result,
         ledger.facts,

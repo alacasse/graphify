@@ -56,6 +56,8 @@ type InstallEffect = OwnedFileEffect | TextEntryEffect
 @dataclass(frozen=True, slots=True)
 class SupportedScopeFacts:
     effects: tuple[InstallEffect, ...]
+    target_uninstall: bool
+    limitations: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +147,27 @@ class PhaseKind(Enum):
     PURGE = "purge"
 
 
+class ActionFamily(Enum):
+    COMMAND = "command"
+    OBSERVATION = "observation"
+    IMAGE_BUILD = "image-build"
+    CATALOG_READ = "catalog-read"
+    SUBJECT_PREPARATION = "subject-preparation"
+    SUBJECT_PROBE = "subject-probe"
+    FIXTURE_PREPARATION = "fixture-preparation"
+
+
+class ActionPurpose(Enum):
+    HOST_IMAGE_BUILD = "host-image-build"
+    HOST_CATALOG_READ = "host-catalog-read"
+    PACKAGE_PREPARATION = "package-preparation"
+    PACKAGE_PROBE = "package-probe"
+    PRODUCT_LIFECYCLE = "product-lifecycle"
+    PRODUCT_PURGE = "product-purge"
+    HARNESS_PREPARATION = "harness-preparation"
+    SEMANTIC_OBSERVATION = "semantic-observation"
+
+
 class ScenarioKind(Enum):
     LIFECYCLE = "lifecycle"
     UNSUPPORTED = "unsupported"
@@ -162,10 +185,22 @@ class PhasePlan:
 
 
 @dataclass(frozen=True, slots=True)
+class NotApplicablePhasePlan:
+    kind: PhaseKind
+    target: str
+    scope: Scope
+    reason: str
+
+
+type PlannedPhase = PhasePlan | NotApplicablePhasePlan
+
+
+@dataclass(frozen=True, slots=True)
 class LifecycleScenario:
     name: str
     scope: Scope
-    phases: tuple[PhasePlan, ...]
+    phases: tuple[PlannedPhase, ...]
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +228,7 @@ class AggregateScenario:
     preparations: tuple[AggregatePreparation, ...]
     uninstall_command: tuple[str, ...]
     removal_observation: ObservationSpecification
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +238,7 @@ class IsolationScenario:
     phase: PhasePlan
     preserved_scope: Scope
     preparations: tuple[PhasePlan, ...] = ()
+    limitations: tuple[str, ...] = ()
 
 
 type ScenarioPlan = LifecycleScenario | UnsupportedScenario | AggregateScenario | IsolationScenario
@@ -209,8 +246,18 @@ type ScenarioPlan = LifecycleScenario | UnsupportedScenario | AggregateScenario 
 
 @dataclass(frozen=True, slots=True)
 class PurgePlan:
+    fixture_entries: tuple[tuple[str, str], ...]
     command: tuple[str, ...]
     observation: ObservationSpecification
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedAction:
+    ordinal: int
+    scenario: str
+    phase: str
+    family: ActionFamily
+    purpose: ActionPurpose
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,13 +267,24 @@ class ScenarioProjection:
     scope: Scope
     target_names: tuple[str, ...]
     expected_phases: tuple[PhaseKind, ...]
+    expected_actions: tuple[ExpectedAction, ...]
+    runtime_limitations: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class PlanProjection:
     plan_id: PlanId
+    subject_actions: tuple[ExpectedAction, ...]
     scenarios: tuple[ScenarioProjection, ...]
     purge_required: bool
+    purge_actions: tuple[ExpectedAction, ...]
+    runtime_limitations: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectPlan:
+    target: str
+    scope: Scope
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +293,7 @@ class ValidationPlan:
     scenarios: tuple[ScenarioPlan, ...]
     purge: PurgePlan
     projection: PlanProjection
+    subjects: tuple[SubjectPlan, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +332,7 @@ class HarnessPolicy:
     purge_argv: tuple[str, ...] = ("graphify", "purge")
     reinstall: bool = True
     repair: bool = True
+    runtime_limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +355,7 @@ class CommandRequest:
     phase: str
     argv: tuple[str, ...]
     cwd: str
+    purpose: ActionPurpose = ActionPurpose.PRODUCT_LIFECYCLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,9 +364,53 @@ class ObservationRequest:
     scenario: str
     phase: str
     specification: ObservationSpecification
+    purpose: ActionPurpose = ActionPurpose.SEMANTIC_OBSERVATION
 
 
-type ActionRequest = CommandRequest | ObservationRequest
+@dataclass(frozen=True, slots=True)
+class ImageBuildRequest:
+    action_id: ActionId
+    source_revision: str
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogReadRequest:
+    action_id: ActionId
+    immutable_image_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectPreparationRequest:
+    action_id: ActionId
+    target: str
+    scope: Scope
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectProbeRequest:
+    action_id: ActionId
+    target: str
+    scope: Scope
+    prepared_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class FixturePreparationRequest:
+    action_id: ActionId
+    scenario: str
+    phase: str
+    entries: tuple[tuple[str, str], ...]
+
+
+type ActionRequest = (
+    CommandRequest
+    | ObservationRequest
+    | ImageBuildRequest
+    | CatalogReadRequest
+    | SubjectPreparationRequest
+    | SubjectProbeRequest
+    | FixturePreparationRequest
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +471,9 @@ class CommandFact:
     stdout: StreamCapture
     stderr: StreamCapture
     chronology: tuple[str, ...]
+    scenario: str = ""
+    phase: str = ""
+    purpose: ActionPurpose = ActionPurpose.PRODUCT_LIFECYCLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,6 +506,47 @@ class ObservationFact:
     action_id: ActionId
     items: tuple[ObservationItem, ...]
     chronology: tuple[str, ...]
+    scenario: str = ""
+    phase: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ImmutableImageFact:
+    action_id: ActionId
+    source_revision: str
+    immutable_image_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogDocumentsFact:
+    action_id: ActionId
+    immutable_image_identity: str
+    documents: tuple[RawCatalogDocument, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectPreparedFact:
+    action_id: ActionId
+    target: str
+    scope: Scope
+    prepared_identity: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectProbeFact:
+    action_id: ActionId
+    target: str
+    scope: Scope
+    prepared_identity: str
+    package_origin: str
+    package_version: str
+    interface_available: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FixturePreparedFact:
+    action_id: ActionId
+    entries: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,13 +556,26 @@ class ActionUnavailable:
     chronology: tuple[str, ...]
 
 
-type RawFact = CommandFact | ObservationFact | ActionUnavailable
+type RawFact = (
+    CommandFact
+    | ObservationFact
+    | ImmutableImageFact
+    | CatalogDocumentsFact
+    | SubjectPreparedFact
+    | SubjectProbeFact
+    | FixturePreparedFact
+    | ActionUnavailable
+)
 
 
 @dataclass(frozen=True, slots=True)
 class SubjectReady:
     target: str
     scope: Scope
+    prepared_identity: str = ""
+    package_origin: str = ""
+    package_version: str = ""
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,18 +611,21 @@ class ProductFinding:
 @dataclass(frozen=True, slots=True)
 class PhasePassed:
     phase: PhaseKind
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PhaseFinding:
     phase: PhaseKind
     finding: ProductFinding
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PhaseIncomplete:
     phase: PhaseKind
     reason: str
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,25 +634,34 @@ class PhaseBlocked:
     missing_witness: str
 
 
-type PhaseResult = PhasePassed | PhaseFinding | PhaseIncomplete
+@dataclass(frozen=True, slots=True)
+class PhaseNotApplicable:
+    phase: PhaseKind
+    reason: str
+
+
+type PhaseResult = PhasePassed | PhaseFinding | PhaseIncomplete | PhaseBlocked | PhaseNotApplicable
 
 
 @dataclass(frozen=True, slots=True)
 class PreparationPassed:
     target: str
     witness: InstallationEstablished
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PreparationFinding:
     target: str
     finding: ProductFinding
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PreparationIncomplete:
     target: str
     reason: str
+    evidence: tuple[ActionId, ...] = ()
 
 
 type AggregatePreparationResult = PreparationPassed | PreparationFinding | PreparationIncomplete
@@ -496,18 +670,21 @@ type AggregatePreparationResult = PreparationPassed | PreparationFinding | Prepa
 @dataclass(frozen=True, slots=True)
 class AggregateUninstallPassed:
     installations: tuple[str, ...]
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class AggregateUninstallFinding:
     installations: tuple[str, ...]
     finding: ProductFinding
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class AggregateUninstallIncomplete:
     installations: tuple[str, ...]
     reason: str
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -526,12 +703,14 @@ type AggregateUninstallResult = (
 @dataclass(frozen=True, slots=True)
 class ScenarioPassed:
     name: str
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ScenarioFinding:
     name: str
     findings: tuple[ProductFinding, ...]
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -545,6 +724,7 @@ class ScenarioUnsupported:
 class ScenarioIncomplete:
     name: str
     reasons: tuple[str, ...]
+    limitations: tuple[str, ...] = ()
 
 
 type ScenarioResult = ScenarioPassed | ScenarioFinding | ScenarioUnsupported | ScenarioIncomplete
@@ -575,17 +755,19 @@ type ScenarioRecord = PhaseScenarioRecord | AggregateScenarioRecord | Unsupporte
 
 @dataclass(frozen=True, slots=True)
 class PurgePassed:
-    pass
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PurgeFinding:
     finding: ProductFinding
+    evidence: tuple[ActionId, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PurgeIncomplete:
     reason: str
+    evidence: tuple[ActionId, ...] = ()
 
 
 type PurgeResult = PurgePassed | PurgeFinding | PurgeIncomplete
@@ -594,6 +776,7 @@ type PurgeResult = PurgePassed | PurgeFinding | PurgeIncomplete
 @dataclass(frozen=True, slots=True)
 class CompletedValidation:
     plan: PlanProjection
+    subjects: tuple[SubjectReady, ...]
     scenario_records: tuple[ScenarioRecord, ...]
     purge_result: PurgeResult
     raw_facts: tuple[RawFact, ...]
@@ -604,6 +787,7 @@ class CompletedValidation:
 @dataclass(frozen=True, slots=True)
 class ValidationIncomplete:
     plan: PlanProjection
+    subjects: tuple[SubjectReady, ...]
     reason: str
     scenario_records: tuple[ScenarioRecord, ...]
     raw_facts: tuple[RawFact, ...]

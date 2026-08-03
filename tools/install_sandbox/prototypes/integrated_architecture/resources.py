@@ -10,6 +10,7 @@ mutation capabilities remain private to this module.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import signal
 import stat
@@ -17,9 +18,9 @@ import subprocess
 import threading
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Literal, Protocol, cast
+from typing import ClassVar, Literal, Protocol, cast
 
 from .bundle import (
     BundleFaults,
@@ -29,9 +30,12 @@ from .bundle import (
     PersistenceResult,
     QuiescenceProof,
     RecoveryClaim,
+    RecoveryCommitPermit,
     RecoveryManager,
     RecoveryRejected,
+    TerminalCommitPermit,
     TerminalCommitResult,
+    reopen_completed_bundle,
 )
 from .model import (
     ActionId,
@@ -39,20 +43,31 @@ from .model import (
     ActionUnavailable,
     Cancelled,
     CapturedStream,
+    CatalogDocumentsFact,
+    CatalogReadRequest,
     CommandFact,
     CommandRequest,
     CommandTermination,
     Exited,
+    FixturePreparationRequest,
+    FixturePreparedFact,
+    ImageBuildRequest,
+    ImmutableImageFact,
     ObservationFact,
     ObservationReadFailure,
     ObservationRequest,
     ObservedAbsent,
     ObservedContent,
+    RawCatalogDocument,
     RawFact,
     RunId,
     Signalled,
     SpawnFailed,
     StreamCaptureFailure,
+    SubjectPreparationRequest,
+    SubjectPreparedFact,
+    SubjectProbeFact,
+    SubjectProbeRequest,
     TimedOut,
 )
 
@@ -73,6 +88,10 @@ class ResourceFaults:
     cancel_scenarios: frozenset[str] = frozenset()
     fail_observations: frozenset[str] = frozenset()
     max_observation_bytes: int = 1024 * 1024
+    fail_image_build: bool = False
+    fail_catalog_read: bool = False
+    fail_preparations: frozenset[str] = frozenset()
+    fail_probes: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if self.fail_after_bytes < 0:
@@ -85,6 +104,72 @@ class ResourceFaults:
 
 _DEFAULT_RESOURCE_FAULTS = ResourceFaults()
 _DEFAULT_BUNDLE_FAULTS = BundleFaults()
+
+
+@dataclass(frozen=True)
+class ResourceInputs:
+    """Immutable deterministic inputs owned by the resource adapter."""
+
+    source_revision: str
+    catalog_documents: tuple[RawCatalogDocument, ...]
+    package_origin: str = "local-wheel"
+    package_version: str = "prototype-1"
+    interface_available: bool = True
+    _catalog_payloads: tuple[str, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not self.source_revision:
+            raise ValueError("source revision must be nonempty")
+        if not self.catalog_documents:
+            raise ValueError("resource-owned catalog must be nonempty")
+        try:
+            payloads = tuple(
+                json.dumps(item, sort_keys=True, separators=(",", ":"))
+                for item in self.catalog_documents
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("resource-owned catalog must be JSON data") from error
+        object.__setattr__(self, "_catalog_payloads", payloads)
+
+
+_DEFAULT_RESOURCE_INPUTS = ResourceInputs(
+    "prototype-source",
+    (
+        {
+            "source": "prototype.yaml",
+            "name": "prototype",
+            "scopes": {
+                "user": {
+                    "supported": True,
+                    "target_uninstall": True,
+                    "limitations": [],
+                    "effects": [
+                        {
+                            "kind": "owned_file",
+                            "location": "prototype.txt",
+                            "expected_text": "prototype",
+                        }
+                    ],
+                },
+                "project": {
+                    "supported": False,
+                    "reason": "prototype default",
+                    "limitations": ["prototype default catalog"],
+                },
+            },
+        },
+    ),
+)
+
+
+def _fresh_catalog_documents(inputs: ResourceInputs) -> tuple[RawCatalogDocument, ...]:
+    documents: list[RawCatalogDocument] = []
+    for payload in inputs._catalog_payloads:
+        decoded: object = json.loads(payload)
+        if not isinstance(decoded, dict):
+            raise ValueError("resource-owned catalog document must be an object")
+        documents.append(cast(RawCatalogDocument, decoded))
+    return tuple(documents)
 
 
 @dataclass(frozen=True)
@@ -123,11 +208,54 @@ class ResourceSnapshot:
     chronology: tuple[ResourceChronologyEntry, ...]
 
 
-class DockerNamespaceRegistry:
-    """One exact-name registry shared by adapters for one daemon namespace."""
+@dataclass(frozen=True)
+class RetentionRequest:
+    bundle: Path
+    run_id: str
+    keep_newest: int = 5
 
-    def __init__(self, namespace: str = "default") -> None:
-        self.namespace = namespace
+
+@dataclass(frozen=True)
+class RetentionApplied:
+    bundle: Path
+    run_id: str
+    keep_newest: int
+
+
+@dataclass(frozen=True)
+class RetentionRejected:
+    detail: str
+
+
+type RetentionResult = RetentionApplied | RetentionRejected
+
+
+class RetentionAdapter:
+    """Deterministic resource stand-in invoked only after diagnostic authorization."""
+
+    def __init__(self) -> None:
+        self._applied: list[RetentionApplied] = []
+
+    def apply(self, request: RetentionRequest) -> RetentionResult:
+        if request.keep_newest != 5:
+            return RetentionRejected("prototype models the approved keep-five policy only")
+        if not request.run_id:
+            return RetentionRejected("retention run identity is empty")
+        reopened = reopen_completed_bundle(request.bundle)
+        if isinstance(reopened, RecoveryRejected):
+            return RetentionRejected(reopened.detail)
+        applied = RetentionApplied(request.bundle, request.run_id, request.keep_newest)
+        self._applied.append(applied)
+        return applied
+
+    def applied(self) -> tuple[RetentionApplied, ...]:
+        return tuple(self._applied)
+
+
+class _DockerNamespaceRegistry:
+    """Private exact-name registry for one daemon identity."""
+
+    def __init__(self) -> None:
         self._claims: dict[str, str] = {}
         self._external: set[str] = set()
         self._lock = threading.Lock()
@@ -166,6 +294,53 @@ class DockerNamespaceRegistry:
                 self._external.add(exact_name)
             else:
                 self._external.discard(exact_name)
+
+
+class _DockerNamespaceClient:
+    """Owner-bound view; callers cannot claim or release another run's names."""
+
+    def __init__(self, owner_id: str, registry: _DockerNamespaceRegistry) -> None:
+        self.owner_id = owner_id
+        self._registry = registry
+
+    def claim_exact(self, exact_name: str) -> ContainerClaimResult:
+        return self._registry.claim_exact(self.owner_id, exact_name)
+
+    def release_exact(self, exact_name: str) -> bool:
+        return self._registry.release_exact(self.owner_id, exact_name)
+
+    def owned_names(self) -> tuple[str, ...]:
+        return self._registry.owned_by(self.owner_id)
+
+
+class DockerDaemonAdapter:
+    """Daemon-scoped owner that manufactures private per-run namespace clients.
+
+    The identity map is process-wide in this deterministic stand-in. Constructing
+    two adapters for the same daemon identity therefore cannot manufacture two
+    independent ownership authorities for the same Docker namespace.
+    """
+
+    _registries: ClassVar[dict[str, _DockerNamespaceRegistry]] = {}
+    _registries_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(self, daemon_identity: str = "default") -> None:
+        if not daemon_identity or "\0" in daemon_identity:
+            raise ValueError("daemon identity must be a nonempty safe string")
+        self.daemon_identity = daemon_identity
+        with self._registries_lock:
+            self._registry = self._registries.setdefault(
+                daemon_identity,
+                _DockerNamespaceRegistry(),
+            )
+
+    def _client(self, owner_id: str) -> _DockerNamespaceClient:
+        return _DockerNamespaceClient(owner_id, self._registry)
+
+    def mark_external_presence(self, exact_name: str, *, present: bool) -> None:
+        """Deterministic daemon observation used by the prototype harness."""
+
+        self._registry.mark_external_presence(exact_name, present=present)
 
 
 class _SandboxLease:
@@ -210,6 +385,39 @@ class _SandboxLease:
             for descriptor in reversed(opened):
                 os.close(descriptor)
 
+    def prepare_fixtures(
+        self,
+        entries: tuple[tuple[str, str], ...],
+    ) -> tuple[tuple[str, str], ...]:
+        prepared: list[tuple[str, str]] = []
+        for relative, text in entries:
+            path = PurePosixPath(relative)
+            if path.is_absolute() or not path.parts:
+                raise OSError("fixture path must be relative")
+            if any(part in {"", ".", ".."} for part in path.parts):
+                raise OSError("fixture path must be canonical")
+            parent = self.path.joinpath(*path.parts[:-1])
+            parent.mkdir(parents=True, exist_ok=True)
+            resolved_parent = parent.resolve(strict=True)
+            resolved_parent.relative_to(self.path)
+            leaf = resolved_parent / path.parts[-1]
+            descriptor = os.open(
+                leaf,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW,
+                0o600,
+            )
+            try:
+                content = text.encode()
+                view = memoryview(content)
+                while view:
+                    written = os.write(descriptor, view)
+                    view = view[written:]
+            finally:
+                os.close(descriptor)
+            prepared.append((relative, hashlib.sha256(text.encode()).hexdigest()))
+        self._assert_identity()
+        return tuple(prepared)
+
     def close(self) -> None:
         if not self._closed:
             os.close(self._descriptor)
@@ -231,12 +439,12 @@ class _HostRunLease:
         owner_id: str,
         store: BundleStore,
         sandbox: _SandboxLease,
-        registry: DockerNamespaceRegistry,
+        docker: DockerDaemonAdapter,
     ) -> None:
         self.owner_id = owner_id
         self.store = store
         self.sandbox = sandbox
-        self.registry = registry
+        self.docker = docker._client(owner_id)
         self.active_processes: set[int] = set()
         self.container_names: set[str] = set()
         self.active = True
@@ -248,7 +456,7 @@ class _HostRunLease:
         with self._lock:
             if not self.active:
                 return ContainerClaimRejected(exact_name, "host owner is closed")
-            result = self.registry.claim_exact(self.owner_id, exact_name)
+            result = self.docker.claim_exact(exact_name)
             if isinstance(result, ContainerClaimed):
                 self.container_names.add(exact_name)
             return result
@@ -256,9 +464,9 @@ class _HostRunLease:
     def release_containers(self) -> bool:
         with self._lock:
             for name in tuple(sorted(self.container_names)):
-                if self.registry.release_exact(self.owner_id, name):
+                if self.docker.release_exact(name):
                     self.container_names.discard(name)
-            return not self.container_names and not self.registry.owned_by(self.owner_id)
+            return not self.container_names and not self.docker.owned_names()
 
     def prove_quiescence(self) -> QuiescenceProof:
         with self._lock:
@@ -291,17 +499,20 @@ class LeaseBackedFulfilment:
         run_id: RunId,
         store: BundleStore,
         sandbox_root: Path,
-        registry: DockerNamespaceRegistry,
+        docker: DockerDaemonAdapter,
         *,
         faults: ResourceFaults = _DEFAULT_RESOURCE_FAULTS,
+        inputs: ResourceInputs = _DEFAULT_RESOURCE_INPUTS,
     ) -> None:
         self.run_id = run_id
         self._faults = faults
+        self._inputs = inputs
+        self._prepared_subjects: dict[tuple[str, str], str] = {}
         self._host = _HostRunLease(
             run_id.value,
             store,
             _SandboxLease(sandbox_root),
-            registry,
+            docker,
         )
         self._chronology: list[ResourceChronologyEntry] = []
         self._chronology_lock = threading.Lock()
@@ -314,10 +525,11 @@ class LeaseBackedFulfilment:
         run_id: RunId,
         running_record: bytes,
         sandbox_root: Path,
-        registry: DockerNamespaceRegistry,
+        docker: DockerDaemonAdapter,
         *,
         faults: ResourceFaults = _DEFAULT_RESOURCE_FAULTS,
         bundle_faults: BundleFaults = _DEFAULT_BUNDLE_FAULTS,
+        inputs: ResourceInputs = _DEFAULT_RESOURCE_INPUTS,
     ) -> LeaseBackedFulfilment:
         store = BundleStore.allocate(
             root,
@@ -326,16 +538,32 @@ class LeaseBackedFulfilment:
             running_record,
             faults=bundle_faults,
         )
-        return cls(run_id, store, sandbox_root, registry, faults=faults)
+        return cls(run_id, store, sandbox_root, docker, faults=faults, inputs=inputs)
 
     def fulfil(self, request: ActionRequest) -> RawFact:
         if request.action_id.run_id != self.run_id:
             return self._unavailable(request.action_id, "request belongs to another run")
+        control_fact = self._fulfil_control(request)
+        if control_fact is not None:
+            return control_fact
         if isinstance(request, CommandRequest):
             return self._execute(request)
         if isinstance(request, ObservationRequest):
             return self._observe(request)
         return self._unavailable(request.action_id, "unsupported resource request")
+
+    def _fulfil_control(self, request: ActionRequest) -> RawFact | None:
+        if isinstance(request, ImageBuildRequest):
+            return self._build_image(request)
+        if isinstance(request, CatalogReadRequest):
+            return self._read_catalog(request)
+        if isinstance(request, SubjectPreparationRequest):
+            return self._prepare_subject(request)
+        if isinstance(request, SubjectProbeRequest):
+            return self._probe_subject(request)
+        if isinstance(request, FixturePreparationRequest):
+            return self._prepare_fixtures(request)
+        return None
 
     def reserve_container(self, exact_name: str) -> ContainerClaimResult:
         result = self._host.claim_container(exact_name)
@@ -374,20 +602,14 @@ class LeaseBackedFulfilment:
 
     def commit_terminal(
         self,
-        assessed: CoherentBundleReadView,
-        run_record: bytes,
+        permit: TerminalCommitPermit,
     ) -> TerminalCommitResult:
-        result = self._host.store.commit_terminal(assessed, run_record)
+        result = self._host.store.commit_terminal(permit)
         self._record(None, "commit-terminal", type(result).__name__)
         return result
 
-    def recovery_manager(self) -> RecoveryManager:
-        """Return the path-nomination service, never the live capabilities."""
-
-        return RecoveryManager()
-
-    def _invalidate_owner_for_recovery_demo(self, proof: QuiescenceProof) -> None:
-        """Simulate owner loss only after the resource layer minted absence proof."""
+    def abandon_after_failure(self, proof: QuiescenceProof) -> None:
+        """Invalidate ownership only from this lease's positive quiescence proof."""
 
         self._host.store._invalidate_owner_for_recovery(proof)
         self._host.active = False
@@ -408,6 +630,68 @@ class LeaseBackedFulfilment:
 
     def close(self) -> None:
         self._host.close()
+
+    def _build_image(self, request: ImageBuildRequest) -> RawFact:
+        if self._faults.fail_image_build:
+            return self._unavailable(request.action_id, "immutable image build failed")
+        if request.source_revision != self._inputs.source_revision:
+            return self._unavailable(request.action_id, "source revision is not resource-owned")
+        identity = "sha256:" + hashlib.sha256(request.source_revision.encode()).hexdigest()
+        self._record(request.action_id, "image-built", identity)
+        return ImmutableImageFact(request.action_id, request.source_revision, identity)
+
+    def _read_catalog(self, request: CatalogReadRequest) -> RawFact:
+        if self._faults.fail_catalog_read:
+            return self._unavailable(request.action_id, "catalog acquisition failed")
+        expected = "sha256:" + hashlib.sha256(self._inputs.source_revision.encode()).hexdigest()
+        if request.immutable_image_identity != expected:
+            return self._unavailable(request.action_id, "catalog image identity mismatch")
+        self._record(
+            request.action_id, "catalog-read", f"{len(self._inputs.catalog_documents)} docs"
+        )
+        return CatalogDocumentsFact(
+            request.action_id,
+            request.immutable_image_identity,
+            _fresh_catalog_documents(self._inputs),
+        )
+
+    def _prepare_subject(self, request: SubjectPreparationRequest) -> RawFact:
+        key = f"{request.target}:{request.scope.value}"
+        if key in self._faults.fail_preparations:
+            return self._unavailable(request.action_id, "subject preparation failed")
+        identity = hashlib.sha256(f"{self._inputs.source_revision}:{key}".encode()).hexdigest()
+        self._prepared_subjects[(request.target, request.scope.value)] = identity
+        self._record(request.action_id, "subject-prepared", key)
+        return SubjectPreparedFact(
+            request.action_id,
+            request.target,
+            request.scope,
+            identity,
+        )
+
+    def _probe_subject(self, request: SubjectProbeRequest) -> RawFact:
+        key = f"{request.target}:{request.scope.value}"
+        prepared = self._prepared_subjects.get((request.target, request.scope.value))
+        if key in self._faults.fail_probes or prepared != request.prepared_identity:
+            return self._unavailable(request.action_id, "subject probe failed")
+        self._record(request.action_id, "subject-probed", key)
+        return SubjectProbeFact(
+            request.action_id,
+            request.target,
+            request.scope,
+            request.prepared_identity,
+            self._inputs.package_origin,
+            self._inputs.package_version,
+            self._inputs.interface_available,
+        )
+
+    def _prepare_fixtures(self, request: FixturePreparationRequest) -> RawFact:
+        try:
+            prepared = self._host.sandbox.prepare_fixtures(request.entries)
+        except (OSError, ValueError) as error:
+            return self._unavailable(request.action_id, f"fixture preparation failed: {error}")
+        self._record(request.action_id, "fixtures-prepared", str(len(prepared)))
+        return FixturePreparedFact(request.action_id, prepared)
 
     def _execute(self, request: CommandRequest) -> CommandFact:
         started_ns = time.monotonic_ns()
@@ -440,6 +724,9 @@ class LeaseBackedFulfilment:
             stdout_fact,
             stderr_fact,
             tuple(lines),
+            request.scenario,
+            request.phase,
+            request.purpose,
         )
 
     def _start_process(
@@ -554,7 +841,13 @@ class LeaseBackedFulfilment:
                 items.append(ObservationReadFailure(rule.key, rule.location, str(error)))
                 chronology.append(f"{rule.key}: read failure")
         self._record(request.action_id, "observation-completed", "; ".join(chronology[1:]))
-        return ObservationFact(request.action_id, tuple(items), tuple(chronology))
+        return ObservationFact(
+            request.action_id,
+            tuple(items),
+            tuple(chronology),
+            request.scenario,
+            request.phase,
+        )
 
     def _unavailable(self, action_id: ActionId, detail: str) -> ActionUnavailable:
         chronology = (f"{action_id.ordinal}: action unavailable", detail)
@@ -573,10 +866,37 @@ class LeaseBackedFulfilment:
             )
 
 
-def nominate_recovery(path: Path) -> RecoveryClaim | RecoveryRejected:
-    """Public recovery seam: callers nominate a path and receive no live lease."""
+class RecoverySession:
+    """Opaque resource-owned recovery session; raw descriptors never escape."""
 
-    return RecoveryManager().claim(path)
+    def __init__(self, claim: RecoveryClaim) -> None:
+        self._claim = claim
+
+    @property
+    def bundle_path(self) -> Path:
+        return self._claim.path
+
+    def read_bundle(self) -> CoherentBundleReadView:
+        return self._claim.read_coherent()
+
+    def commit_incomplete(self, permit: RecoveryCommitPermit) -> TerminalCommitResult:
+        return self._claim.commit_incomplete(permit)
+
+    def close(self) -> None:
+        self._claim.close()
+
+
+def nominate_recovery(path: Path) -> RecoverySession | RecoveryRejected:
+    """Nominate a path; only an opaque permit-bound session may escape."""
+
+    claimed = RecoveryManager().claim(path)
+    return claimed if isinstance(claimed, RecoveryRejected) else RecoverySession(claimed)
+
+
+def reopen_completed(path: Path) -> CoherentBundleReadView | RecoveryRejected:
+    """Open a terminal bundle through a fresh descriptor-bound stable reader."""
+
+    return reopen_completed_bundle(path)
 
 
 @dataclass(frozen=True)
@@ -601,6 +921,9 @@ def _spawn_failure_fact(request: CommandRequest, started_ns: int, detail: str) -
         empty,
         empty,
         (f"{request.action_id.ordinal}: command requested", f"spawn failed: {detail}"),
+        request.scenario,
+        request.phase,
+        request.purpose,
     )
 
 

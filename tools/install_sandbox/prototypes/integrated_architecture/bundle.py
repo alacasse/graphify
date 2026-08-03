@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 import secrets
 import stat
@@ -43,6 +44,15 @@ _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 class BundleCoherenceError(OSError):
     """A stable view could not be proven."""
+
+
+class BundleAllocationError(OSError):
+    """Allocation created a named bundle but could not persist Running authority."""
+
+    def __init__(self, path: Path, detail: str) -> None:
+        super().__init__(detail)
+        self.path = path
+        self.detail = detail
 
 
 class PersistenceFailureKind(StrEnum):
@@ -132,11 +142,74 @@ class QuiescenceProof:
 
 
 @dataclass(frozen=True)
-class IncompleteTerminalIntent:
-    """Recovery's only permitted terminal intent."""
-
-    report: bytes
+class _PermitMaterial:
+    revision: BundleRevision
+    bundle_digest: str
+    diagnostic_digest: str
+    report: bytes | None
     run_record: bytes
+
+
+_PERMIT_SEAL = object()
+
+
+class TerminalCommitPermit:
+    """Opaque diagnostics-issued authorization for one assessed live commit."""
+
+    __slots__ = ("_material",)
+
+    def __init__(self, material: _PermitMaterial, seal: object) -> None:
+        if seal is not _PERMIT_SEAL:
+            raise TypeError("terminal permits are issued only by diagnostics")
+        self._material = material
+
+
+class RecoveryCommitPermit:
+    """Opaque diagnostics-issued authorization for one assessed recovery."""
+
+    __slots__ = ("_material",)
+
+    def __init__(self, material: _PermitMaterial, seal: object) -> None:
+        if seal is not _PERMIT_SEAL:
+            raise TypeError("recovery permits are issued only by diagnostics")
+        if material.report is None:
+            raise TypeError("recovery requires a derived report")
+        self._material = material
+
+
+def _issue_terminal_commit_permit(
+    view: CoherentBundleReadView,
+    diagnostic_digest: str,
+    run_record: bytes,
+) -> TerminalCommitPermit:
+    """Private adapter used only after diagnostic assessment succeeds."""
+
+    material = _PermitMaterial(
+        view.revision,
+        _bundle_entries_digest(view.entries),
+        diagnostic_digest,
+        None,
+        run_record,
+    )
+    return TerminalCommitPermit(material, _PERMIT_SEAL)
+
+
+def _issue_recovery_commit_permit(
+    view: CoherentBundleReadView,
+    diagnostic_digest: str,
+    report: bytes,
+    run_record: bytes,
+) -> RecoveryCommitPermit:
+    """Private adapter used only after diagnostic recovery assessment succeeds."""
+
+    material = _PermitMaterial(
+        view.revision,
+        _bundle_entries_digest(view.entries),
+        diagnostic_digest,
+        report,
+        run_record,
+    )
+    return RecoveryCommitPermit(material, _PERMIT_SEAL)
 
 
 @dataclass(frozen=True)
@@ -205,6 +278,8 @@ class BundleStore:
     ) -> BundleStore:
         _require_leaf(leaf)
         root.mkdir(parents=True, exist_ok=True)
+        path = root / leaf
+        existed_before = path.exists()
         parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW)
         bundle: int | None = None
         lease: int | None = None
@@ -214,11 +289,14 @@ class BundleStore:
             parent = -1
             bundle = None
             lease = None
-            result = store.store_running(running_record)
-            if isinstance(result, PersistenceRejected):
-                store.close()
-                raise OSError(result.detail)
+            _persist_initial_running(store, running_record)
             return store
+        except BundleAllocationError:
+            raise
+        except (OSError, ValueError) as error:
+            if not existed_before and path.exists():
+                raise BundleAllocationError(path, str(error)) from error
+            raise
         finally:
             if lease is not None:
                 os.close(lease)
@@ -293,8 +371,7 @@ class BundleStore:
 
     def commit_terminal(
         self,
-        assessed: CoherentBundleReadView,
-        run_record: bytes,
+        permit: TerminalCommitPermit,
     ) -> TerminalCommitResult:
         with self._lock:
             if self._terminal_committed:
@@ -308,11 +385,10 @@ class BundleStore:
                     "evidence must be sealed before terminal publication",
                 )
             try:
-                self.recheck(assessed)
-                assessed.one(REPORT_RECORD)
-                assessed.one(RUN_RECORD)
+                assessed = self.read_coherent()
+                _validate_permit(permit._material, assessed, require_report=True)
                 _write_exclusive_at(self._root_descriptor, TERMINAL_CLAIM, b"claimed\n")
-                result = self._replace_public(RUN_RECORD, run_record)
+                result = self._replace_public(RUN_RECORD, permit._material.run_record)
                 if isinstance(result, PersistenceRejected):
                     return TerminalCommitRejected(result.kind, result.detail)
                 self._terminal_committed = True
@@ -497,7 +573,7 @@ class RecoveryClaim:
 
     def commit_incomplete(
         self,
-        intent: IncompleteTerminalIntent,
+        permit: RecoveryCommitPermit,
     ) -> TerminalCommitResult:
         with self._lock:
             if self._consumed:
@@ -508,12 +584,29 @@ class RecoveryClaim:
             self._consumed = True
             try:
                 self._recheck_basis()
-                _persist_recovery_report(self._root_descriptor, intent.report)
+                assessed = self.read_coherent()
+                _validate_permit(permit._material, assessed, require_report=False)
+                report = permit._material.report
+                if report is None:
+                    raise BundleCoherenceError("recovery permit omitted its report")
+                _persist_recovery_report(self._root_descriptor, report)
                 self._recheck_basis()
+                after_report = self.read_coherent()
+                _validate_recovery_report_transition(
+                    permit._material,
+                    assessed,
+                    after_report,
+                )
                 _write_exclusive_at(self._root_descriptor, TERMINAL_CLAIM, b"recovery\n")
-                _atomic_replace_at(self._root_descriptor, RUN_RECORD, intent.run_record)
+                _atomic_replace_at(
+                    self._root_descriptor,
+                    RUN_RECORD,
+                    permit._material.run_record,
+                )
                 _bump_generation_at(self._root_descriptor)
-                return TerminalCommitted(_artifact_reference(RUN_RECORD, intent.run_record))
+                return TerminalCommitted(
+                    _artifact_reference(RUN_RECORD, permit._material.run_record)
+                )
             except FileExistsError as error:
                 return TerminalCommitRejected(PersistenceFailureKind.CONFLICT, str(error))
             except (BundleCoherenceError, OSError) as error:
@@ -553,6 +646,13 @@ class RecoveryClaim:
         for relative, content in expected:
             if _read_file_at(self._root_descriptor, PurePosixPath(relative)) != content:
                 raise BundleCoherenceError(f"{relative} changed after recovery claim")
+
+
+def _persist_initial_running(store: BundleStore, content: bytes) -> None:
+    result = store.store_running(content)
+    if isinstance(result, PersistenceRejected):
+        store.close()
+        raise BundleAllocationError(store.path, result.detail)
 
 
 class RecoveryManager:
@@ -596,6 +696,106 @@ class RecoveryManager:
         finally:
             if handles is not None:
                 handles.close()
+
+
+def reopen_completed_bundle(path: Path) -> CoherentBundleReadView | RecoveryRejected:
+    """Reopen one terminal bundle through fresh descriptor-bound stable reads."""
+
+    try:
+        return _read_completed_bundle(path)
+    except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        return RecoveryRejected(PersistenceFailureKind.IDENTITY, str(error))
+
+
+def _read_completed_bundle(path: Path) -> CoherentBundleReadView:
+    parent, root, identity = _open_completed_bundle(path)
+    try:
+        return _stable_completed_view(path, parent, root, identity)
+    finally:
+        os.close(root)
+        os.close(parent)
+
+
+def _open_completed_bundle(path: Path) -> tuple[int, int, tuple[int, int]]:
+    _require_leaf(path.name)
+    parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW)
+    try:
+        initial = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(initial.st_mode):
+            raise BundleCoherenceError("completed bundle nomination is not a directory")
+        root = os.open(
+            path.name,
+            os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW,
+            dir_fd=parent,
+        )
+    except BaseException:
+        os.close(parent)
+        raise
+    identity = (os.fstat(root).st_dev, os.fstat(root).st_ino)
+    if identity != (initial.st_dev, initial.st_ino):
+        os.close(root)
+        os.close(parent)
+        raise BundleCoherenceError("completed bundle changed while opening")
+    return parent, root, identity
+
+
+def _stable_completed_view(
+    path: Path,
+    parent: int,
+    root: int,
+    identity: tuple[int, int],
+) -> CoherentBundleReadView:
+    before = _snapshot_signatures(root)
+    _require_terminal_structure(root)
+    entries = _read_public_entries(root, before)
+    after = _snapshot_signatures(root)
+    _require_completed_path_binding(path, parent, identity)
+    if before != after:
+        raise BundleCoherenceError("completed bundle changed during stable reopen")
+    generation = _read_generation(root)
+    final = _snapshot_signatures(root)
+    if after != final:
+        raise BundleCoherenceError("completed bundle changed while reading generation")
+    parent_details = os.fstat(parent)
+    revision = BundleRevision(
+        parent_details.st_dev,
+        parent_details.st_ino,
+        identity[0],
+        identity[1],
+        generation,
+        _signature_digest(final),
+    )
+    return CoherentBundleReadView(path, revision, entries)
+
+
+def _require_terminal_structure(root: int) -> None:
+    terminal_claim = _read_file_at(root, PurePosixPath(TERMINAL_CLAIM))
+    if terminal_claim not in {b"claimed\n", b"recovery\n"}:
+        raise BundleCoherenceError("bundle has no recognized terminal claim")
+    run_record = _read_file_at(root, PurePosixPath(RUN_RECORD))
+    if not _structurally_terminal_run_record(run_record):
+        raise BundleCoherenceError("bundle Run Record is not structurally terminal")
+
+
+def _require_completed_path_binding(
+    path: Path,
+    parent: int,
+    identity: tuple[int, int],
+) -> None:
+    current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+    if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != identity:
+        raise BundleCoherenceError("completed bundle path identity changed")
+
+
+def _structurally_terminal_run_record(content: bytes) -> bool:
+    value = json.loads(content.decode("utf-8"))
+    if not isinstance(value, dict):
+        return False
+    return (
+        value.get("kind") == "run_record"
+        and value.get("version") == 1
+        and value.get("state") in {"passed", "failed", "incomplete", "interrupted"}
+    )
 
 
 @dataclass
@@ -836,6 +1036,83 @@ def _signature_digest(signatures: tuple[_Signature, ...]) -> str:
             ).encode()
         )
     return digest.hexdigest()
+
+
+def _bundle_entries_digest(entries: tuple[BundleEntry, ...]) -> str:
+    digest = hashlib.sha256()
+    for entry in entries:
+        digest.update(
+            (f"{entry.relative_path}\0{entry.reference.size}\0{entry.reference.sha256}\n").encode()
+        )
+    return digest.hexdigest()
+
+
+def _validate_permit(
+    material: _PermitMaterial,
+    current: CoherentBundleReadView,
+    *,
+    require_report: bool,
+) -> None:
+    if current.revision != material.revision:
+        raise BundleCoherenceError("bundle revision differs from diagnostic permit")
+    if _bundle_entries_digest(current.entries) != material.bundle_digest:
+        raise BundleCoherenceError("bundle evidence differs from diagnostic permit")
+    if len(material.diagnostic_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in material.diagnostic_digest
+    ):
+        raise BundleCoherenceError("diagnostic permit has no valid evidence digest")
+    if require_report:
+        current.one(REPORT_RECORD)
+    current.one(RUN_RECORD)
+
+
+def _validate_recovery_report_transition(
+    material: _PermitMaterial,
+    assessed: CoherentBundleReadView,
+    current: CoherentBundleReadView,
+) -> None:
+    report = material.report
+    if report is None:
+        raise BundleCoherenceError("recovery permit omitted report bytes")
+    if (
+        current.revision.parent_device,
+        current.revision.parent_inode,
+        current.revision.device,
+        current.revision.inode,
+    ) != (
+        assessed.revision.parent_device,
+        assessed.revision.parent_inode,
+        assessed.revision.device,
+        assessed.revision.inode,
+    ):
+        raise BundleCoherenceError("bundle identity changed while recovery report was persisted")
+    prior_reports = assessed.all(REPORT_RECORD)
+    if len(prior_reports) > 1:
+        raise BundleCoherenceError("recovery assessment contained duplicate reports")
+    generation_delta = 0 if prior_reports else 1
+    if current.revision.generation != assessed.revision.generation + generation_delta:
+        raise BundleCoherenceError(
+            "unexpected generation change during recovery report persistence"
+        )
+    expected = tuple(
+        sorted(
+            (
+                *((str(entry.relative_path), entry.content) for entry in assessed.entries),
+                *(() if prior_reports else ((REPORT_RECORD, report),)),
+            ),
+            key=lambda item: item[0],
+        )
+    )
+    observed = tuple(
+        sorted(
+            ((str(entry.relative_path), entry.content) for entry in current.entries),
+            key=lambda item: item[0],
+        )
+    )
+    if expected != observed:
+        raise BundleCoherenceError("public evidence changed while recovery report was persisted")
+    if current.one(REPORT_RECORD).content != report:
+        raise BundleCoherenceError("recovery report bytes differ from diagnostic permit")
 
 
 def _stat_key(details: os.stat_result) -> tuple[int, int, int, int, int, int]:

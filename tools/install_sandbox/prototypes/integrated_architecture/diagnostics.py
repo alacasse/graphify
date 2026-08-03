@@ -18,10 +18,20 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
-from .bundle import ArtifactReference, BundleEntry, BundleRevision, CoherentBundleReadView
+from .bundle import (
+    ArtifactReference,
+    BundleEntry,
+    BundleRevision,
+    CoherentBundleReadView,
+    RecoveryCommitPermit,
+    TerminalCommitPermit,
+    _issue_recovery_commit_permit,  # pyright: ignore[reportPrivateUsage]
+    _issue_terminal_commit_permit,  # pyright: ignore[reportPrivateUsage]
+)
 from .documents import (
     BindingFailure,
     CaptureFailure,
+    CatalogDocumentsFactDocument,
     CoherenceFailure,
     CommandFactDocument,
     DiagnosticFailure,
@@ -30,29 +40,43 @@ from .documents import (
     EvidenceKind,
     EvidenceReference,
     FindingDocument,
+    FixturePreparedFactDocument,
+    ImmutableImageFactDocument,
     InvalidExitFailure,
     ManifestProjection,
     ObservationFactDocument,
     ObservationFailure,
     ObservationItemDocument,
+    ObservationKind,
+    PersistenceFailure,
     PhaseDocument,
+    PhaseStatus,
     PlanCoverageFailure,
     PurgeDocument,
+    PurgeStatus,
     ReferenceFailure,
     ReportFailure,
     RunningRunRecord,
     RunOutcome,
     ScenarioDocument,
+    ScenarioStatus,
     SchemaFailure,
     StreamDocument,
+    SubjectPreparedFactDocument,
+    SubjectProbeFactDocument,
     TerminalRunRecord,
     TerminationDocument,
+    TerminationKind,
     UnavailableFactDocument,
+    WitnessKind,
     decode_manifest,
     decode_run_record,
+    encode_document,
 )
 from .model import (
+    ActionFamily,
     ActionId,
+    ActionUnavailable,
     AggregateScenarioRecord,
     AggregateUninstallFinding,
     AggregateUninstallIncomplete,
@@ -61,14 +85,20 @@ from .model import (
     ApplicationOutcome,
     Cancelled,
     CapturedStream,
+    CatalogDocumentsFact,
     CommandFact,
     Exited,
+    ExpectedAction,
+    FixturePreparedFact,
+    ImmutableImageFact,
     ObservationFact,
     ObservationReadFailure,
     ObservedAbsent,
     ObservedContent,
+    PhaseBlocked,
     PhaseFinding,
     PhaseIncomplete,
+    PhaseNotApplicable,
     PhasePassed,
     PhaseScenarioRecord,
     PlanProjection,
@@ -88,6 +118,8 @@ from .model import (
     SpawnFailed,
     StableInstallationEstablished,
     StreamCaptureFailure,
+    SubjectPreparedFact,
+    SubjectProbeFact,
     TimedOut,
     UnsupportedScenarioRecord,
     ValidationIncomplete,
@@ -144,6 +176,15 @@ class ReadyToCommit:
     report: str
     assessed_revision: BundleRevision
     report_was_present: bool
+    permit: TerminalCommitPermit | None
+
+
+@dataclass(frozen=True)
+class RecoveryReady:
+    terminal_record: TerminalRunRecord
+    report: str
+    assessed_revision: BundleRevision
+    permit: RecoveryCommitPermit
 
 
 @dataclass(frozen=True)
@@ -155,6 +196,13 @@ class CompletedAssessment:
 
 
 @dataclass(frozen=True)
+class RetentionAuthorized:
+    run_id: str
+    revision: BundleRevision
+    evidence_set_digest: str | None
+
+
+@dataclass(frozen=True)
 class InvalidBundle:
     run_record: RunningRunRecord | TerminalRunRecord | None
     failures: tuple[DiagnosticFailure, ...]
@@ -163,6 +211,7 @@ class InvalidBundle:
 
 
 type BundleAssessment = RunningAssessment | ReadyToCommit | CompletedAssessment | InvalidBundle
+type RecoveryAssessment = RecoveryReady | InvalidBundle
 
 
 class Annotation(StrEnum):
@@ -211,6 +260,104 @@ def make_running_record(expected: ExpectedDiagnostic, phase: str = "allocated") 
     )
 
 
+def derive_terminal_facts(
+    outcome: ApplicationOutcome,
+    observed_raw_exit: int | None,
+    interrupt_signal: str | None,
+    failures: tuple[DiagnosticFailure, ...] = (),
+) -> TerminalFacts:
+    """Own the exact runner-exit policy used before terminal assessment."""
+
+    raw_exit = observed_raw_exit
+    if raw_exit is None:
+        raw_exit = _default_runner_exit(outcome, interrupt_signal)
+    return TerminalFacts(raw_exit, interrupt_signal, failures)
+
+
+def persistence_failure(stage: str, path: str, detail: str) -> DiagnosticFailure:
+    """Translate a resource persistence fact without leaking resource variants."""
+
+    return PersistenceFailure(stage, path, detail)
+
+
+def controller_failure(stage: str, path: str, error: BaseException) -> DiagnosticFailure:
+    """Classify an exception at the lifecycle edge without fabricating meaning."""
+
+    if isinstance(error, DocumentError):
+        message = "diagnostic document operation failed"
+    elif isinstance(error, OSError):
+        message = "resource operation failed"
+    elif isinstance(error, ValueError):
+        message = "value validation failed"
+    elif isinstance(error, RuntimeError):
+        message = "runtime operation failed"
+    else:
+        message = "unexpected controller operation failed"
+    return PersistenceFailure(stage, path, message)
+
+
+def encode_failure_evidence(values: tuple[DiagnosticFailure, ...]) -> bytes:
+    """Encode controller-edge diagnostic failures without exposing document internals."""
+
+    payload = {
+        "kind": "controller_failure_evidence",
+        "version": 1,
+        "failures": [_failure_evidence_value(value) for value in values],
+    }
+    return (json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n").encode()
+
+
+def derive_abandoned_running_record(
+    view: CoherentBundleReadView,
+) -> RunningRunRecord | DiagnosticFailure:
+    """Preserve bound Running identities while marking controller abandonment."""
+
+    failures: list[DiagnosticFailure] = []
+    record = _read_run_record(view, failures)
+    if isinstance(record, RunningRunRecord) and not failures:
+        return RunningRunRecord(
+            record.run_id,
+            record.selection,
+            record.image_identity,
+            record.subject_identity,
+            "abandoned-after-lifecycle-error",
+        )
+    return CoherenceFailure(
+        "abandon-after-failure",
+        RUN_PATH,
+        "current Run Record is not valid Running authority",
+    )
+
+
+def _failure_evidence_value(value: DiagnosticFailure) -> dict[str, str | int]:
+    if isinstance(value, InvalidExitFailure):
+        return {
+            "kind": "invalid_exit",
+            "stage": value.stage,
+            "path": value.path,
+            "message": value.message,
+            "observed_exit": value.observed_exit,
+        }
+    return {
+        "kind": _failure_name(value),
+        "stage": value.stage,
+        "path": value.path,
+        "message": value.message,
+    }
+
+
+def assessment_failures(value: BundleAssessment) -> tuple[DiagnosticFailure, ...]:
+    """Total typed projection for nonterminal controller dispositions."""
+
+    if isinstance(value, InvalidBundle):
+        return value.failures
+    if isinstance(value, RunningAssessment):
+        return (CoherenceFailure("controller", RUN_PATH, "diagnostic remains running"),)
+    if isinstance(value, ReadyToCommit):
+        return (CoherenceFailure("controller", RUN_PATH, "terminal permit was not committed"),)
+    return (CoherenceFailure("controller", RUN_PATH, "unexpected completed diagnostic state"),)
+
+
 def build_manifest(
     expected: ExpectedDiagnostic,
     outcome: ApplicationOutcome,
@@ -222,7 +369,10 @@ def build_manifest(
     raw_facts = tuple(_raw_fact_document(fact) for fact in outcome.raw_facts)
     findings = tuple(_finding_document(finding) for finding in outcome.findings)
     failures = _translation_failures(outcome)
-    limitations = tuple(limitation for scenario in scenarios for limitation in scenario.limitations)
+    limitations = (
+        *expected.plan.runtime_limitations,
+        *(limitation for scenario in scenarios for limitation in scenario.limitations),
+    )
     references = tuple(_evidence_reference(item) for item in inventory)
     projection = _projection(scenarios)
     chronology = tuple(_action_identity(action) for action in outcome.chronology)
@@ -271,6 +421,68 @@ def assess_bundle(
     return _assess_terminal(view, expected, run_record)
 
 
+def prepare_recovery(
+    view: CoherentBundleReadView,
+    expected: ExpectedDiagnostic,
+    reason: str,
+) -> RecoveryAssessment:
+    """Derive one validated incomplete terminal transition from an abandoned view."""
+
+    if not reason:
+        return InvalidBundle(
+            None,
+            (SchemaFailure("recovery", RUN_PATH, "recovery reason must be non-empty"),),
+            None,
+            view.revision,
+        )
+    assessed = assess_bundle(
+        view,
+        expected,
+        TerminalFacts(
+            2,
+            additional_failures=(PersistenceFailure("recovery", RUN_PATH, reason),),
+        ),
+    )
+    if isinstance(assessed, InvalidBundle):
+        return assessed
+    if not isinstance(assessed, ReadyToCommit):
+        return InvalidBundle(
+            assessed.run_record,
+            (CoherenceFailure("recovery", RUN_PATH, "bundle is not recoverable running state"),),
+            _recorded_exit(assessed.run_record),
+            view.revision,
+        )
+    terminal_bytes = encode_document(assessed.terminal_record)
+    report_bytes = assessed.report.encode()
+    digest = hashlib.sha256(
+        _diagnostic_binding_digest(view, assessed.terminal_record, None).encode()
+        + report_bytes
+        + terminal_bytes
+    ).hexdigest()
+    permit = _issue_recovery_commit_permit(
+        view,
+        digest,
+        report_bytes,
+        terminal_bytes,
+    )
+    return RecoveryReady(
+        assessed.terminal_record,
+        assessed.report,
+        assessed.assessed_revision,
+        permit,
+    )
+
+
+def authorize_retention(value: CompletedAssessment) -> RetentionAuthorized:
+    """Mint retention authority only from a fresh successful terminal assessment."""
+
+    return RetentionAuthorized(
+        value.run_record.run_id,
+        value.revision,
+        value.run_record.evidence_set_digest,
+    )
+
+
 def _prepare_terminal(
     view: CoherentBundleReadView,
     expected: ExpectedDiagnostic,
@@ -281,6 +493,7 @@ def _prepare_terminal(
     manifest = _read_manifest(view, failures)
     if manifest is not None:
         failures.extend(_manifest_failures(view, expected, manifest))
+        failures.extend(manifest.failures)
     raw_exit, invalid_raw_exit = _classify_raw_exit(facts.raw_exit, failures)
     outcome = _compose_outcome(manifest, failures, facts.interrupt_signal)
     raw_exit = _normalize_terminal_exit(outcome, raw_exit, facts.interrupt_signal, failures)
@@ -316,12 +529,21 @@ def _prepare_terminal(
             raw_exit,
             view.revision,
         )
+    report_was_present = bool(_entries(view, REPORT_PATH))
+    permit = None
+    if report_was_present:
+        permit = _issue_terminal_commit_permit(
+            view,
+            _diagnostic_binding_digest(view, terminal, manifest),
+            encode_document(terminal),
+        )
     return ReadyToCommit(
         running,
         terminal,
         report,
         view.revision,
-        bool(_entries(view, REPORT_PATH)),
+        report_was_present,
+        permit,
     )
 
 
@@ -341,6 +563,7 @@ def _assess_terminal(
             )
         failures.extend(_manifest_failures(view, expected, manifest))
         failures.extend(_reference_binding_failures(record.manifest, view, MANIFEST_PATH))
+        failures.extend(_manifest_failure_omission(record, manifest))
     if record.host_log.kind is not EvidenceKind.HOST_LOG:
         failures.append(
             ReferenceFailure("reference", HOST_LOG_PATH, "host log reference has wrong kind")
@@ -364,6 +587,22 @@ def _assess_terminal(
             record, _ordered_failures(failures), _recorded_exit(record), view.revision
         )
     return CompletedAssessment(record, manifest, report, view.revision)
+
+
+def _manifest_failure_omission(
+    record: TerminalRunRecord,
+    manifest: DiagnosticManifest,
+) -> tuple[DiagnosticFailure, ...]:
+    omitted = any(failure not in record.failures for failure in manifest.failures)
+    if not omitted:
+        return ()
+    return (
+        CoherenceFailure(
+            "terminal",
+            RUN_PATH,
+            "terminal Run Record omits manifest diagnostic failures",
+        ),
+    )
 
 
 def render_report(value: ReportInput) -> str:
@@ -444,12 +683,17 @@ def _ci_exit_reasons(
 def _scenario_document(record: object) -> ScenarioDocument:
     if isinstance(record, UnsupportedScenarioRecord):
         result = record.result
-        return ScenarioDocument(result.name, "unsupported", (), (), (), result.limitations)
-    if isinstance(record, PhaseScenarioRecord):
-        phases = tuple(_phase_document(item) for item in record.phases) + tuple(
-            PhaseDocument(item.phase.value, "blocked", item.missing_witness, item.missing_witness)
-            for item in record.blocked
+        return ScenarioDocument(
+            result.name,
+            ScenarioStatus.UNSUPPORTED,
+            (),
+            (),
+            (),
+            result.limitations,
+            result.reason,
         )
+    if isinstance(record, PhaseScenarioRecord):
+        phases = tuple(_phase_document(item) for item in record.phases)
         return _scenario_from_result(record.result, phases)
     if isinstance(record, AggregateScenarioRecord):
         phases = tuple(_preparation_document(item) for item in record.preparations)
@@ -460,70 +704,164 @@ def _scenario_document(record: object) -> ScenarioDocument:
 
 def _scenario_from_result(result: object, phases: tuple[PhaseDocument, ...]) -> ScenarioDocument:
     if isinstance(result, ScenarioPassed):
-        return ScenarioDocument(result.name, "passed", phases, (), (), ())
+        return ScenarioDocument(
+            result.name,
+            ScenarioStatus.PASS,
+            phases,
+            (),
+            (),
+            result.limitations,
+        )
     if isinstance(result, ScenarioFinding):
         return ScenarioDocument(
             result.name,
-            "finding",
+            ScenarioStatus.FINDING,
             phases,
             tuple(_finding_document(item) for item in result.findings),
             (),
-            (),
+            result.limitations,
         )
     if isinstance(result, ScenarioIncomplete):
-        return ScenarioDocument(result.name, "incomplete", phases, (), result.reasons, ())
+        return ScenarioDocument(
+            result.name,
+            ScenarioStatus.INCOMPLETE,
+            phases,
+            (),
+            result.reasons,
+            result.limitations,
+        )
     if isinstance(result, ScenarioUnsupported):
-        return ScenarioDocument(result.name, "unsupported", (), (), (), result.limitations)
+        return ScenarioDocument(
+            result.name,
+            ScenarioStatus.UNSUPPORTED,
+            (),
+            (),
+            (),
+            result.limitations,
+            result.reason,
+        )
     raise TypeError(f"unknown scenario result: {type(result).__name__}")
 
 
 def _phase_document(value: object) -> PhaseDocument:
     if isinstance(value, PhasePassed):
-        return PhaseDocument(value.phase.value, "passed")
+        return PhaseDocument(
+            value.phase.value,
+            PhaseStatus.PASS,
+            tuple(_action_identity(item) for item in value.evidence),
+        )
     if isinstance(value, PhaseFinding):
-        return PhaseDocument(value.phase.value, "finding", reason=value.finding.summary)
+        return PhaseDocument(
+            value.phase.value,
+            PhaseStatus.FINDING,
+            tuple(_action_identity(item) for item in value.evidence),
+            reason=value.finding.summary,
+        )
     if isinstance(value, PhaseIncomplete):
-        return PhaseDocument(value.phase.value, "incomplete", reason=value.reason)
+        return PhaseDocument(
+            value.phase.value,
+            PhaseStatus.INCOMPLETE,
+            tuple(_action_identity(item) for item in value.evidence),
+            reason=value.reason,
+        )
+    if isinstance(value, PhaseNotApplicable):
+        return PhaseDocument(
+            value.phase.value,
+            PhaseStatus.NOT_APPLICABLE,
+            reason=value.reason,
+        )
+    if isinstance(value, PhaseBlocked):
+        return PhaseDocument(
+            value.phase.value,
+            PhaseStatus.BLOCKED,
+            blocked_by=value.missing_witness,
+            reason=f"missing witness: {value.missing_witness}",
+        )
     raise TypeError(f"unknown phase result: {type(value).__name__}")
 
 
 def _preparation_document(value: object) -> PhaseDocument:
     if isinstance(value, PreparationPassed):
-        return PhaseDocument(f"aggregate-prepare:{value.target}", "passed")
+        return PhaseDocument(
+            f"aggregate-prepare:{value.target}",
+            PhaseStatus.PASS,
+            tuple(_action_identity(item) for item in value.evidence),
+        )
     if isinstance(value, PreparationFinding):
         return PhaseDocument(
-            f"aggregate-prepare:{value.target}", "finding", reason=value.finding.summary
+            f"aggregate-prepare:{value.target}",
+            PhaseStatus.FINDING,
+            tuple(_action_identity(item) for item in value.evidence),
+            reason=value.finding.summary,
         )
     if isinstance(value, PreparationIncomplete):
-        return PhaseDocument(f"aggregate-prepare:{value.target}", "incomplete", reason=value.reason)
+        return PhaseDocument(
+            f"aggregate-prepare:{value.target}",
+            PhaseStatus.INCOMPLETE,
+            tuple(_action_identity(item) for item in value.evidence),
+            reason=value.reason,
+        )
     raise TypeError(f"unknown aggregate preparation: {type(value).__name__}")
 
 
 def _aggregate_removal_document(value: object) -> PhaseDocument:
     if isinstance(value, AggregateUninstallPassed):
-        return PhaseDocument("aggregate-uninstall", "passed")
+        return PhaseDocument(
+            "aggregate-uninstall",
+            PhaseStatus.PASS,
+            tuple(_action_identity(item) for item in value.evidence),
+        )
     if isinstance(value, AggregateUninstallFinding):
-        return PhaseDocument("aggregate-uninstall", "finding", reason=value.finding.summary)
+        return PhaseDocument(
+            "aggregate-uninstall",
+            PhaseStatus.FINDING,
+            tuple(_action_identity(item) for item in value.evidence),
+            reason=value.finding.summary,
+        )
     if isinstance(value, AggregateUninstallIncomplete):
-        return PhaseDocument("aggregate-uninstall", "incomplete", reason=value.reason)
+        return PhaseDocument(
+            "aggregate-uninstall",
+            PhaseStatus.INCOMPLETE,
+            tuple(_action_identity(item) for item in value.evidence),
+            reason=value.reason,
+        )
     if isinstance(value, AggregateUninstallNotApplicable):
-        return PhaseDocument("aggregate-uninstall", "not_applicable", reason=value.reason)
+        return PhaseDocument(
+            "aggregate-uninstall",
+            PhaseStatus.NOT_APPLICABLE,
+            reason=value.reason,
+        )
     raise TypeError(f"unknown aggregate removal: {type(value).__name__}")
 
 
 def _purge_document(value: object) -> PurgeDocument:
     if isinstance(value, PurgePassed):
-        return PurgeDocument("passed", (), ())
+        return PurgeDocument(
+            PurgeStatus.PASS,
+            (),
+            (),
+            tuple(_action_identity(item) for item in value.evidence),
+        )
     if isinstance(value, PurgeFinding):
-        return PurgeDocument("finding", (_finding_document(value.finding),), ())
+        return PurgeDocument(
+            PurgeStatus.FINDING,
+            (_finding_document(value.finding),),
+            (),
+            tuple(_action_identity(item) for item in value.evidence),
+        )
     if isinstance(value, PurgeIncomplete):
-        return PurgeDocument("incomplete", (), (value.reason,))
+        return PurgeDocument(
+            PurgeStatus.INCOMPLETE,
+            (),
+            (value.reason,),
+            tuple(_action_identity(item) for item in value.evidence),
+        )
     raise TypeError(f"unknown purge result: {type(value).__name__}")
 
 
 def _outcome_purge_document(value: ApplicationOutcome) -> PurgeDocument:
     if isinstance(value, ValidationIncomplete):
-        return PurgeDocument("incomplete", (), (value.reason,))
+        return PurgeDocument(PurgeStatus.INCOMPLETE, (), (value.reason,), ())
     return _purge_document(value.purge_result)
 
 
@@ -543,19 +881,31 @@ def _finding_document(value: ProductFinding) -> FindingDocument:
     return FindingDocument(
         _action_identity(value.action_id),
         value.summary,
-        "stable_installation"
+        WitnessKind.STABLE_INSTALLATION
         if isinstance(witness, StableInstallationEstablished)
-        else "installation",
+        else WitnessKind.INSTALLATION,
         identity,
     )
 
 
 def _raw_fact_document(
     value: RawFact,
-) -> CommandFactDocument | ObservationFactDocument | UnavailableFactDocument:
+) -> (
+    CommandFactDocument
+    | ObservationFactDocument
+    | UnavailableFactDocument
+    | ImmutableImageFactDocument
+    | CatalogDocumentsFactDocument
+    | SubjectPreparedFactDocument
+    | SubjectProbeFactDocument
+    | FixturePreparedFactDocument
+):
     if isinstance(value, CommandFact):
         return CommandFactDocument(
             _action_identity(value.action_id),
+            value.scenario,
+            value.phase,
+            value.purpose.value,
             value.argv,
             value.cwd,
             value.started_ns,
@@ -569,9 +919,47 @@ def _raw_fact_document(
     if isinstance(value, ObservationFact):
         return ObservationFactDocument(
             _action_identity(value.action_id),
+            value.scenario,
+            value.phase,
+            "semantic-observation",
             tuple(_observation_document(item) for item in value.items),
             value.chronology,
         )
+    if isinstance(value, ImmutableImageFact):
+        return ImmutableImageFactDocument(
+            _action_identity(value.action_id),
+            value.source_revision,
+            value.immutable_image_identity,
+        )
+    if isinstance(value, CatalogDocumentsFact):
+        canonical_documents = tuple(
+            json.dumps(document, separators=(",", ":"), sort_keys=True)
+            for document in value.documents
+        )
+        return CatalogDocumentsFactDocument(
+            _action_identity(value.action_id),
+            value.immutable_image_identity,
+            canonical_documents,
+        )
+    if isinstance(value, SubjectPreparedFact):
+        return SubjectPreparedFactDocument(
+            _action_identity(value.action_id),
+            value.target,
+            value.scope.value,
+            value.prepared_identity,
+        )
+    if isinstance(value, SubjectProbeFact):
+        return SubjectProbeFactDocument(
+            _action_identity(value.action_id),
+            value.target,
+            value.scope.value,
+            value.prepared_identity,
+            value.package_origin,
+            value.package_version,
+            value.interface_available,
+        )
+    if isinstance(value, FixturePreparedFact):
+        return FixturePreparedFactDocument(_action_identity(value.action_id), value.entries)
     return UnavailableFactDocument(
         _action_identity(value.action_id), value.detail, value.chronology
     )
@@ -579,15 +967,15 @@ def _raw_fact_document(
 
 def _termination_document(value: object) -> TerminationDocument:
     if isinstance(value, Exited):
-        return TerminationDocument("exited", raw_exit=value.code)
+        return TerminationDocument(TerminationKind.EXITED, raw_exit=value.code)
     if isinstance(value, Signalled):
-        return TerminationDocument("signalled", signal=str(value.signal))
+        return TerminationDocument(TerminationKind.SIGNALLED, signal=str(value.signal))
     if isinstance(value, TimedOut):
-        return TerminationDocument("timed_out", detail=f"{value.seconds!r}s")
+        return TerminationDocument(TerminationKind.TIMED_OUT, detail=f"{value.seconds!r}s")
     if isinstance(value, Cancelled):
-        return TerminationDocument("cancelled", detail=value.reason)
+        return TerminationDocument(TerminationKind.CANCELLED, detail=value.reason)
     if isinstance(value, SpawnFailed):
-        return TerminationDocument("spawn_failed", detail=value.detail)
+        return TerminationDocument(TerminationKind.SPAWN_FAILED, detail=value.detail)
     raise TypeError(f"unknown command termination: {type(value).__name__}")
 
 
@@ -602,21 +990,27 @@ def _observation_document(value: object) -> ObservationItemDocument:
         return ObservationItemDocument(
             value.rule_key,
             value.location,
-            "content",
+            ObservationKind.CONTENT,
             value.size,
             value.digest,
             None,
-            value.content,
+            "OBSERVED",
         )
     if isinstance(value, ObservedAbsent):
         return ObservationItemDocument(
-            value.rule_key, value.location, "absent", None, None, None, None
+            value.rule_key,
+            value.location,
+            ObservationKind.ABSENT,
+            None,
+            None,
+            None,
+            "ABSENT",
         )
     if isinstance(value, ObservationReadFailure):
         return ObservationItemDocument(
             value.rule_key,
             value.location,
-            "read_failure",
+            ObservationKind.READ_FAILURE,
             None,
             None,
             value.detail,
@@ -628,7 +1022,7 @@ def _observation_document(value: object) -> ObservationItemDocument:
 def _translation_failures(outcome: ApplicationOutcome) -> tuple[DiagnosticFailure, ...]:
     failures: list[DiagnosticFailure] = []
     if isinstance(outcome, ValidationIncomplete):
-        failures.append(CoherenceFailure("domain", MANIFEST_PATH, outcome.reason))
+        failures.append(CoherenceFailure("application", MANIFEST_PATH, outcome.reason))
     for fact in outcome.raw_facts:
         failures.extend(_fact_failures(fact))
     for scenario in outcome.scenario_records:
@@ -649,7 +1043,9 @@ def _fact_failures(value: RawFact) -> tuple[DiagnosticFailure, ...]:
         return _command_fact_failures(value)
     if isinstance(value, ObservationFact):
         return _observation_fact_failures(value)
-    return (CoherenceFailure("fulfilment", _action_identity(value.action_id), value.detail),)
+    if isinstance(value, ActionUnavailable):
+        return (CoherenceFailure("fulfilment", _action_identity(value.action_id), value.detail),)
+    return ()
 
 
 def _command_fact_failures(value: CommandFact) -> tuple[DiagnosticFailure, ...]:
@@ -736,7 +1132,9 @@ def _manifest_failures(
         failures.append(
             PlanCoverageFailure("manifest", MANIFEST_PATH, "purge applicability mismatch")
         )
-    failures.extend(_scenario_coverage_failures(expected.plan, manifest.scenarios))
+    failures.extend(_scenario_coverage_failures(expected.plan, manifest))
+    failures.extend(_action_evidence_failures(expected, manifest))
+    failures.extend(_stream_inventory_failures(manifest))
     failures.extend(_projection_failures(manifest))
     failures.extend(_inventory_failures(view, manifest))
     if tuple(sorted(manifest.operational_chronology)) == manifest.operational_chronology:
@@ -753,14 +1151,190 @@ def _manifest_failures(
     return tuple(failures)
 
 
-def _scenario_coverage_failures(
-    plan: PlanProjection,
-    scenarios: tuple[ScenarioDocument, ...],
+def _stream_inventory_failures(
+    manifest: DiagnosticManifest,
 ) -> tuple[DiagnosticFailure, ...]:
     failures: list[DiagnosticFailure] = []
+    inventory = {reference.path: reference for reference in manifest.inventory}
+    expected_paths: list[str] = []
+    for fact in manifest.raw_facts:
+        if not isinstance(fact, CommandFactDocument):
+            continue
+        ordinal_text = fact.action_id.rpartition(":")[2]
+        try:
+            ordinal = int(ordinal_text)
+        except ValueError:
+            failures.append(
+                PlanCoverageFailure("streams", fact.action_id, "command action ordinal is invalid")
+            )
+            continue
+        for stream_name, stream in (("stdout", fact.stdout), ("stderr", fact.stderr)):
+            path = f"commands/{ordinal:04d}.{stream_name}"
+            expected_paths.append(path)
+            reference = inventory.get(path)
+            if reference is None:
+                failures.append(ReferenceFailure("streams", path, "captured stream is absent"))
+                continue
+            observed = (len(stream.captured), hashlib.sha256(stream.captured).hexdigest())
+            if (reference.byte_size, reference.sha256) != observed:
+                failures.append(
+                    ReferenceFailure(
+                        "streams", path, "stream inventory reference disagrees with captured bytes"
+                    )
+                )
+    observed_paths = tuple(
+        reference.path for reference in manifest.inventory if reference.path.startswith("commands/")
+    )
+    if tuple(sorted(expected_paths)) != tuple(sorted(observed_paths)):
+        failures.append(
+            ReferenceFailure(
+                "streams",
+                MANIFEST_PATH,
+                "command stream inventory is not an exact one-to-one projection",
+            )
+        )
+    return tuple(failures)
+
+
+def _action_evidence_failures(
+    expected: ExpectedDiagnostic,
+    manifest: DiagnosticManifest,
+) -> tuple[DiagnosticFailure, ...]:
+    """Prove that every captured fact has one planned identity and one evidence owner."""
+
+    failures: list[DiagnosticFailure] = []
+    planned = _expected_actions(expected.plan)
+    planned_by_id = {
+        _expected_action_identity(expected.run_id, expected.plan.plan_id.value, action): action
+        for action in planned
+    }
+    actual_ids = tuple(fact.action_id for fact in manifest.raw_facts)
+    if len(set(actual_ids)) != len(actual_ids):
+        failures.append(
+            PlanCoverageFailure("actions", MANIFEST_PATH, "raw facts repeat an action identity")
+        )
+    planned_positions = {identity: index for index, identity in enumerate(planned_by_id)}
+    actual_positions: list[int] = []
+    for fact in manifest.raw_facts:
+        planned_action = planned_by_id.get(fact.action_id)
+        if planned_action is None:
+            failures.append(
+                PlanCoverageFailure(
+                    "actions", fact.action_id, "raw fact has no matching expected action"
+                )
+            )
+            continue
+        actual_positions.append(planned_positions[fact.action_id])
+        observed_family = _fact_family(fact)
+        if observed_family is not None and observed_family is not planned_action.family:
+            failures.append(
+                PlanCoverageFailure(
+                    "actions",
+                    fact.action_id,
+                    "raw fact family disagrees with expected action",
+                )
+            )
+        failures.extend(_fact_projection_failures(fact, planned_action))
+    if actual_positions != sorted(actual_positions):
+        failures.append(
+            PlanCoverageFailure(
+                "actions", MANIFEST_PATH, "raw fact order contradicts expected action order"
+            )
+        )
+
+    subject_ids = {
+        _expected_action_identity(expected.run_id, expected.plan.plan_id.value, action)
+        for action in expected.plan.subject_actions
+    }
+    evidence_ids = (
+        tuple(
+            action_id
+            for scenario in manifest.scenarios
+            for phase in scenario.phases
+            for action_id in phase.evidence_actions
+        )
+        + manifest.purge.evidence_actions
+    )
+    captured_product_ids = tuple(
+        action_id for action_id in actual_ids if action_id not in subject_ids
+    )
+    if evidence_ids != captured_product_ids:
+        failures.append(
+            PlanCoverageFailure(
+                "actions",
+                MANIFEST_PATH,
+                (
+                    "phase and purge evidence is not a one-to-one ordered projection "
+                    "of captured actions"
+                ),
+            )
+        )
+    return tuple(failures)
+
+
+def _expected_actions(plan: PlanProjection) -> tuple[ExpectedAction, ...]:
+    return (
+        *plan.subject_actions,
+        *(action for scenario in plan.scenarios for action in scenario.expected_actions),
+        *plan.purge_actions,
+    )
+
+
+def _expected_action_identity(run_id: str, plan_id: str, action: ExpectedAction) -> str:
+    return f"{run_id}:{plan_id}:{action.ordinal}"
+
+
+def _fact_family(value: object) -> ActionFamily | None:
+    if isinstance(value, CommandFactDocument):
+        return ActionFamily.COMMAND
+    if isinstance(value, ObservationFactDocument):
+        return ActionFamily.OBSERVATION
+    if isinstance(value, ImmutableImageFactDocument):
+        return ActionFamily.IMAGE_BUILD
+    if isinstance(value, CatalogDocumentsFactDocument):
+        return ActionFamily.CATALOG_READ
+    if isinstance(value, SubjectPreparedFactDocument):
+        return ActionFamily.SUBJECT_PREPARATION
+    if isinstance(value, SubjectProbeFactDocument):
+        return ActionFamily.SUBJECT_PROBE
+    if isinstance(value, FixturePreparedFactDocument):
+        return ActionFamily.FIXTURE_PREPARATION
+    return None
+
+
+def _fact_projection_failures(
+    value: object,
+    expected: ExpectedAction,
+) -> tuple[DiagnosticFailure, ...]:
+    if not isinstance(value, (CommandFactDocument, ObservationFactDocument)):
+        return ()
+    observed = (value.scenario, value.phase, value.purpose)
+    projected = (expected.scenario, expected.phase, expected.purpose.value)
+    if observed == projected:
+        return ()
+    return (
+        PlanCoverageFailure(
+            "actions",
+            value.action_id,
+            "raw fact scenario, phase, or purpose disagrees with expected action",
+        ),
+    )
+
+
+def _scenario_coverage_failures(
+    plan: PlanProjection,
+    manifest: DiagnosticManifest,
+) -> tuple[DiagnosticFailure, ...]:
+    failures: list[DiagnosticFailure] = []
+    scenarios = manifest.scenarios
     names = tuple(item.name for item in scenarios)
     expected_names = tuple(item.name for item in plan.scenarios)
-    if names != expected_names or len(set(names)) != len(names):
+    ordered_prefix = names == expected_names[: len(names)] and len(set(names)) == len(names)
+    incomplete_explains_prefix = bool(manifest.failures) or (
+        manifest.projection.incomplete > 0 or manifest.purge.status is PurgeStatus.INCOMPLETE
+    )
+    missing_without_failure = len(names) != len(expected_names) and not incomplete_explains_prefix
+    if not ordered_prefix or missing_without_failure:
         failures.append(
             PlanCoverageFailure("manifest", MANIFEST_PATH, "scenario order or cardinality mismatch")
         )
@@ -770,7 +1344,7 @@ def _scenario_coverage_failures(
         expected = by_name[scenario.name]
         expected_phases = tuple(item.value for item in expected.expected_phases)
         actual = tuple(_base_phase_name(item.name) for item in scenario.phases)
-        if scenario.status == "unsupported":
+        if scenario.status is ScenarioStatus.UNSUPPORTED:
             if expected.kind.value != "unsupported" or actual:
                 failures.append(
                     PlanCoverageFailure(
@@ -784,15 +1358,17 @@ def _scenario_coverage_failures(
                     "scenario", scenario.name, "phase order or cardinality mismatch"
                 )
             )
-        has_incomplete = any(item.status == "incomplete" for item in scenario.phases)
-        has_finding = any(item.status in {"finding", "blocked"} for item in scenario.phases)
-        if scenario.status == "passed" and (has_incomplete or has_finding):
+        has_incomplete = any(item.status is PhaseStatus.INCOMPLETE for item in scenario.phases)
+        has_finding = any(
+            item.status in {PhaseStatus.FINDING, PhaseStatus.BLOCKED} for item in scenario.phases
+        )
+        if scenario.status is ScenarioStatus.PASS and (has_incomplete or has_finding):
             failures.append(
                 CoherenceFailure(
                     "scenario", scenario.name, "passed summary contradicts phase evidence"
                 )
             )
-        if scenario.status == "finding" and has_incomplete:
+        if scenario.status is ScenarioStatus.FINDING and has_incomplete:
             failures.append(
                 CoherenceFailure(
                     "scenario", scenario.name, "finding summary hides incomplete phase"
@@ -905,12 +1481,16 @@ def _compose_outcome(
         or manifest is None
         or manifest.failures
         or manifest.projection.incomplete
-        or manifest.purge.status == "incomplete"
+        or manifest.purge.status is PurgeStatus.INCOMPLETE
     ):
         return RunOutcome.INCOMPLETE
     if interrupt_signal is not None:
         return RunOutcome.INTERRUPTED
-    if manifest.findings or manifest.projection.findings or manifest.purge.status == "finding":
+    if (
+        manifest.findings
+        or manifest.projection.findings
+        or manifest.purge.status is PurgeStatus.FINDING
+    ):
         return RunOutcome.FAILED
     return RunOutcome.PASSED
 
@@ -1079,10 +1659,10 @@ def _report_input(record: TerminalRunRecord, manifest: DiagnosticManifest | None
 def _projection(scenarios: tuple[ScenarioDocument, ...]) -> ManifestProjection:
     statuses = tuple(item.status for item in scenarios)
     return ManifestProjection(
-        statuses.count("passed"),
-        statuses.count("finding"),
-        statuses.count("unsupported"),
-        statuses.count("incomplete"),
+        statuses.count(ScenarioStatus.PASS),
+        statuses.count(ScenarioStatus.FINDING),
+        statuses.count(ScenarioStatus.UNSUPPORTED),
+        statuses.count(ScenarioStatus.INCOMPLETE),
     )
 
 
@@ -1103,6 +1683,20 @@ def evidence_set_digest(references: tuple[EvidenceReference, ...]) -> str:
     digest = hashlib.sha256()
     for item in sorted(references, key=lambda value: (value.path, value.kind.value)):
         digest.update(f"{item.path}\0{item.kind.value}\0{item.byte_size}\0{item.sha256}\n".encode())
+    return digest.hexdigest()
+
+
+def _diagnostic_binding_digest(
+    view: CoherentBundleReadView,
+    record: TerminalRunRecord,
+    manifest: DiagnosticManifest | None,
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(view.revision.signature.encode())
+    digest.update(b"\0")
+    digest.update(("0" * 64 if manifest is None else manifest.evidence_set_digest).encode())
+    digest.update(b"\0")
+    digest.update(encode_document(record))
     return digest.hexdigest()
 
 
@@ -1139,6 +1733,18 @@ def _classify_raw_exit(
         )
         return 2, observed
     return observed, None
+
+
+def _default_runner_exit(
+    outcome: ApplicationOutcome,
+    interrupt_signal: str | None,
+) -> int:
+    if isinstance(outcome, ValidationIncomplete):
+        return 2
+    if outcome.findings:
+        return 1
+    expected_interrupt = _expected_terminal_exit(RunOutcome.INTERRUPTED, interrupt_signal)
+    return 0 if expected_interrupt is None else expected_interrupt
 
 
 def _normalize_terminal_exit(
@@ -1228,7 +1834,29 @@ def _ordered_failures(
 
 
 def _failure_name(value: DiagnosticFailure) -> str:
-    return type(value).__name__
+    if isinstance(value, SchemaFailure):
+        return "schema"
+    if isinstance(value, BindingFailure):
+        return "binding"
+    if isinstance(value, ReferenceFailure):
+        return "reference"
+    if isinstance(value, CoherenceFailure):
+        return "coherence"
+    if isinstance(value, PlanCoverageFailure):
+        return "plan_coverage"
+    return _secondary_failure_name(value)
+
+
+def _secondary_failure_name(value: DiagnosticFailure) -> str:
+    if isinstance(value, CaptureFailure):
+        return "capture"
+    if isinstance(value, ObservationFailure):
+        return "observation"
+    if isinstance(value, PersistenceFailure):
+        return "persistence"
+    if isinstance(value, ReportFailure):
+        return "report"
+    return "invalid_exit"
 
 
 def _unique(values: tuple[str, ...]) -> tuple[str, ...]:

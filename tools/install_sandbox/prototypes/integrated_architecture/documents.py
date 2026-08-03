@@ -35,6 +35,46 @@ class EvidenceKind(StrEnum):
     OTHER = "other"
 
 
+class PhaseStatus(StrEnum):
+    PASS = "PASS"
+    FINDING = "FINDING"
+    BLOCKED = "BLOCKED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    INCOMPLETE = "INCOMPLETE"
+
+
+class ScenarioStatus(StrEnum):
+    PASS = "PASS"
+    FINDING = "FINDING"
+    UNSUPPORTED = "UNSUPPORTED"
+    INCOMPLETE = "INCOMPLETE"
+
+
+class PurgeStatus(StrEnum):
+    PASS = "PASS"
+    FINDING = "FINDING"
+    INCOMPLETE = "INCOMPLETE"
+
+
+class TerminationKind(StrEnum):
+    EXITED = "EXITED"
+    SIGNALLED = "SIGNALLED"
+    TIMED_OUT = "TIMED_OUT"
+    CANCELLED = "CANCELLED"
+    SPAWN_FAILED = "SPAWN_FAILED"
+
+
+class ObservationKind(StrEnum):
+    CONTENT = "CONTENT"
+    ABSENT = "ABSENT"
+    READ_FAILURE = "READ_FAILURE"
+
+
+class WitnessKind(StrEnum):
+    INSTALLATION = "INSTALLATION"
+    STABLE_INSTALLATION = "STABLE_INSTALLATION"
+
+
 @dataclass(frozen=True)
 class SchemaFailure:
     stage: str
@@ -132,14 +172,15 @@ class EvidenceReference:
 class FindingDocument:
     action_id: str
     summary: str
-    witness_kind: str | None
+    witness_kind: WitnessKind | None
     witness_identity: str | None
 
 
 @dataclass(frozen=True)
 class PhaseDocument:
     name: str
-    status: str
+    status: PhaseStatus
+    evidence_actions: tuple[str, ...] = ()
     blocked_by: str | None = None
     reason: str | None = None
 
@@ -147,23 +188,25 @@ class PhaseDocument:
 @dataclass(frozen=True)
 class ScenarioDocument:
     name: str
-    status: str
+    status: ScenarioStatus
     phases: tuple[PhaseDocument, ...]
     findings: tuple[FindingDocument, ...]
     failures: tuple[str, ...]
     limitations: tuple[str, ...]
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
 class PurgeDocument:
-    status: str
+    status: PurgeStatus
     findings: tuple[FindingDocument, ...]
     failures: tuple[str, ...]
+    evidence_actions: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class TerminationDocument:
-    kind: str
+    kind: TerminationKind
     raw_exit: int | None = None
     signal: str | None = None
     detail: str | None = None
@@ -180,6 +223,9 @@ class StreamDocument:
 @dataclass(frozen=True)
 class CommandFactDocument:
     action_id: str
+    scenario: str
+    phase: str
+    purpose: str
     argv: tuple[str, ...]
     cwd: str
     started_ns: int
@@ -195,16 +241,19 @@ class CommandFactDocument:
 class ObservationItemDocument:
     rule_key: str
     path: str
-    entry_kind: str
+    entry_kind: ObservationKind
     byte_size: int | None
     sha256: str | None
     detail: str | None
-    content: bytes | None
+    semantic_verdict: str | None
 
 
 @dataclass(frozen=True)
 class ObservationFactDocument:
     action_id: str
+    scenario: str
+    phase: str
+    purpose: str
     items: tuple[ObservationItemDocument, ...]
     chronology: tuple[str, ...]
 
@@ -216,7 +265,55 @@ class UnavailableFactDocument:
     chronology: tuple[str, ...]
 
 
-type RawFactDocument = CommandFactDocument | ObservationFactDocument | UnavailableFactDocument
+@dataclass(frozen=True)
+class ImmutableImageFactDocument:
+    action_id: str
+    source_revision: str
+    immutable_image_identity: str
+
+
+@dataclass(frozen=True)
+class CatalogDocumentsFactDocument:
+    action_id: str
+    immutable_image_identity: str
+    canonical_documents: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SubjectPreparedFactDocument:
+    action_id: str
+    target: str
+    scope: str
+    prepared_identity: str
+
+
+@dataclass(frozen=True)
+class SubjectProbeFactDocument:
+    action_id: str
+    target: str
+    scope: str
+    prepared_identity: str
+    package_origin: str
+    package_version: str
+    interface_available: bool
+
+
+@dataclass(frozen=True)
+class FixturePreparedFactDocument:
+    action_id: str
+    entries: tuple[tuple[str, str], ...]
+
+
+type RawFactDocument = (
+    CommandFactDocument
+    | ObservationFactDocument
+    | UnavailableFactDocument
+    | ImmutableImageFactDocument
+    | CatalogDocumentsFactDocument
+    | SubjectPreparedFactDocument
+    | SubjectProbeFactDocument
+    | FixturePreparedFactDocument
+)
 
 
 @dataclass(frozen=True)
@@ -283,6 +380,7 @@ type JsonObject = dict[str, JsonValue]
 def encode_document(document: EvidenceDocument) -> bytes:
     """Encode a closed document deterministically."""
 
+    _validate_document(document)
     value = (
         _manifest_value(document)
         if isinstance(document, DiagnosticManifest)
@@ -322,7 +420,7 @@ def decode_manifest(data: bytes) -> DiagnosticManifest:
         },
         "manifest",
     )
-    return DiagnosticManifest(
+    result = DiagnosticManifest(
         run_id=_string(value["run_id"], "run_id"),
         selection=_string(value["selection"], "selection"),
         image_identity=_string(value["image_identity"], "image_identity"),
@@ -342,6 +440,8 @@ def decode_manifest(data: bytes) -> DiagnosticManifest:
         operational_chronology=_strings(value["operational_chronology"], "operational_chronology"),
         presentation_order=_strings(value["presentation_order"], "presentation_order"),
     )
+    _validate_document(result)
+    return result
 
 
 def decode_run_record(data: bytes) -> RunRecord:
@@ -394,7 +494,7 @@ def decode_run_record(data: bytes) -> RunRecord:
         outcome = RunOutcome(state)
     except ValueError as exc:
         raise DocumentError(f"unknown run state: {state}") from exc
-    return TerminalRunRecord(
+    result = TerminalRunRecord(
         **common,
         outcome=outcome,
         raw_exit=_optional_integer(value["raw_exit"], "raw_exit"),
@@ -405,6 +505,8 @@ def decode_run_record(data: bytes) -> RunRecord:
         evidence_set_digest=_optional_string(value["evidence_set_digest"], "evidence_set_digest"),
         failures=tuple(_failure(item) for item in _array(value["failures"], "failures")),
     )
+    _validate_terminal_record(result)
+    return result
 
 
 def _manifest_value(value: DiagnosticManifest) -> JsonObject:
@@ -462,11 +564,12 @@ def _run_value(value: RunRecord) -> JsonObject:
 def _scenario_value(value: ScenarioDocument) -> JsonObject:
     return {
         "name": value.name,
-        "status": value.status,
+        "status": value.status.value,
         "phases": [
             {
                 "name": item.name,
-                "status": item.status,
+                "status": item.status.value,
+                "evidence_actions": list(item.evidence_actions),
                 "blocked_by": item.blocked_by,
                 "reason": item.reason,
             }
@@ -475,56 +578,75 @@ def _scenario_value(value: ScenarioDocument) -> JsonObject:
         "findings": [_finding_value(item) for item in value.findings],
         "failures": list(value.failures),
         "limitations": list(value.limitations),
+        "reason": value.reason,
     }
 
 
 def _scenario(value: JsonValue) -> ScenarioDocument:
     item = _object(value, "scenario")
-    _exact(item, {"name", "status", "phases", "findings", "failures", "limitations"}, "scenario")
-    return ScenarioDocument(
+    _exact(
+        item,
+        {"name", "status", "phases", "findings", "failures", "limitations", "reason"},
+        "scenario",
+    )
+    result = ScenarioDocument(
         _string(item["name"], "name"),
-        _string(item["status"], "status"),
+        _enum(ScenarioStatus, item["status"], "scenario status"),
         tuple(_phase(part) for part in _array(item["phases"], "phases")),
         tuple(_finding(part) for part in _array(item["findings"], "findings")),
         _strings(item["failures"], "failures"),
         _strings(item["limitations"], "limitations"),
+        _optional_string(item["reason"], "reason"),
     )
+    _validate_scenario(result)
+    return result
 
 
 def _phase(value: JsonValue) -> PhaseDocument:
     item = _object(value, "phase")
-    _exact(item, {"name", "status", "blocked_by", "reason"}, "phase")
-    return PhaseDocument(
+    _exact(
+        item,
+        {"name", "status", "evidence_actions", "blocked_by", "reason"},
+        "phase",
+    )
+    result = PhaseDocument(
         _string(item["name"], "name"),
-        _string(item["status"], "status"),
+        _enum(PhaseStatus, item["status"], "phase status"),
+        _strings(item["evidence_actions"], "evidence_actions"),
         _optional_string(item["blocked_by"], "blocked_by"),
         _optional_string(item["reason"], "reason"),
     )
+    _validate_phase(result)
+    return result
 
 
 def _purge_value(value: PurgeDocument) -> JsonObject:
     return {
-        "status": value.status,
+        "status": value.status.value,
         "findings": [_finding_value(item) for item in value.findings],
         "failures": list(value.failures),
+        "evidence_actions": list(value.evidence_actions),
     }
 
 
 def _purge(value: JsonValue) -> PurgeDocument:
     item = _object(value, "purge")
-    _exact(item, {"status", "findings", "failures"}, "purge")
-    return PurgeDocument(
-        _string(item["status"], "status"),
+    _exact(item, {"status", "findings", "failures", "evidence_actions"}, "purge")
+    result = PurgeDocument(
+        _enum(PurgeStatus, item["status"], "purge status"),
         tuple(_finding(part) for part in _array(item["findings"], "findings")),
         _strings(item["failures"], "failures"),
+        _strings(item["evidence_actions"], "evidence_actions"),
     )
+    _validate_purge(result)
+    return result
 
 
 def _finding_value(value: FindingDocument) -> JsonObject:
     return {
         "action_id": value.action_id,
         "summary": value.summary,
-        "witness_kind": value.witness_kind,
+        "witness_kind": None if value.witness_kind is None else value.witness_kind.value,
         "witness_identity": value.witness_identity,
     }
 
@@ -532,12 +654,14 @@ def _finding_value(value: FindingDocument) -> JsonObject:
 def _finding(value: JsonValue) -> FindingDocument:
     item = _object(value, "finding")
     _exact(item, {"action_id", "summary", "witness_kind", "witness_identity"}, "finding")
-    return FindingDocument(
+    result = FindingDocument(
         _string(item["action_id"], "action_id"),
         _string(item["summary"], "summary"),
-        _optional_string(item["witness_kind"], "witness_kind"),
+        _optional_enum(WitnessKind, item["witness_kind"], "witness_kind"),
         _optional_string(item["witness_identity"], "witness_identity"),
     )
+    _validate_finding(result)
+    return result
 
 
 def _raw_fact_value(value: RawFactDocument) -> JsonObject:
@@ -545,6 +669,9 @@ def _raw_fact_value(value: RawFactDocument) -> JsonObject:
         return {
             "fact": "command",
             "action_id": value.action_id,
+            "scenario": value.scenario,
+            "phase": value.phase,
+            "purpose": value.purpose,
             "argv": list(value.argv),
             "cwd": value.cwd,
             "started_ns": value.started_ns,
@@ -559,8 +686,50 @@ def _raw_fact_value(value: RawFactDocument) -> JsonObject:
         return {
             "fact": "observation",
             "action_id": value.action_id,
+            "scenario": value.scenario,
+            "phase": value.phase,
+            "purpose": value.purpose,
             "items": [_observation_item_value(item) for item in value.items],
             "chronology": list(value.chronology),
+        }
+    if isinstance(value, ImmutableImageFactDocument):
+        return {
+            "fact": "immutable_image",
+            "action_id": value.action_id,
+            "source_revision": value.source_revision,
+            "immutable_image_identity": value.immutable_image_identity,
+        }
+    if isinstance(value, CatalogDocumentsFactDocument):
+        return {
+            "fact": "catalog_documents",
+            "action_id": value.action_id,
+            "immutable_image_identity": value.immutable_image_identity,
+            "canonical_documents": list(value.canonical_documents),
+        }
+    if isinstance(value, SubjectPreparedFactDocument):
+        return {
+            "fact": "subject_prepared",
+            "action_id": value.action_id,
+            "target": value.target,
+            "scope": value.scope,
+            "prepared_identity": value.prepared_identity,
+        }
+    if isinstance(value, SubjectProbeFactDocument):
+        return {
+            "fact": "subject_probe",
+            "action_id": value.action_id,
+            "target": value.target,
+            "scope": value.scope,
+            "prepared_identity": value.prepared_identity,
+            "package_origin": value.package_origin,
+            "package_version": value.package_version,
+            "interface_available": value.interface_available,
+        }
+    if isinstance(value, FixturePreparedFactDocument):
+        return {
+            "fact": "fixture_prepared",
+            "action_id": value.action_id,
+            "entries": [{"path": path, "content": content} for path, content in value.entries],
         }
     return {
         "fact": "unavailable",
@@ -574,55 +743,186 @@ def _raw_fact(value: JsonValue) -> RawFactDocument:
     item = _object(value, "raw fact")
     kind = _string(item.get("fact"), "fact")
     if kind == "command":
-        _exact(
-            item,
-            {
-                "fact",
-                "action_id",
-                "argv",
-                "cwd",
-                "started_ns",
-                "finished_ns",
-                "termination",
-                "reaped",
-                "stdout",
-                "stderr",
-                "chronology",
-            },
-            "command fact",
-        )
-        return CommandFactDocument(
-            _string(item["action_id"], "action_id"),
-            _strings(item["argv"], "argv"),
-            _string(item["cwd"], "cwd"),
-            _integer(item["started_ns"], "started_ns"),
-            _integer(item["finished_ns"], "finished_ns"),
-            _termination(item["termination"]),
-            _boolean(item["reaped"], "reaped"),
-            _stream(item["stdout"]),
-            _stream(item["stderr"]),
-            _strings(item["chronology"], "chronology"),
-        )
+        return _command_fact(item)
     if kind == "observation":
-        _exact(item, {"fact", "action_id", "items", "chronology"}, "observation fact")
-        return ObservationFactDocument(
-            _string(item["action_id"], "action_id"),
-            tuple(_observation_item(part) for part in _array(item["items"], "items")),
-            _strings(item["chronology"], "chronology"),
-        )
+        return _observation_fact(item)
+    return _mechanism_fact(item, kind)
+
+
+def _command_fact(item: JsonObject) -> CommandFactDocument:
+    _exact(
+        item,
+        {
+            "fact",
+            "action_id",
+            "scenario",
+            "phase",
+            "purpose",
+            "argv",
+            "cwd",
+            "started_ns",
+            "finished_ns",
+            "termination",
+            "reaped",
+            "stdout",
+            "stderr",
+            "chronology",
+        },
+        "command fact",
+    )
+    return CommandFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["scenario"], "scenario"),
+        _string(item["phase"], "phase"),
+        _string(item["purpose"], "purpose"),
+        _strings(item["argv"], "argv"),
+        _string(item["cwd"], "cwd"),
+        _integer(item["started_ns"], "started_ns"),
+        _integer(item["finished_ns"], "finished_ns"),
+        _termination(item["termination"]),
+        _boolean(item["reaped"], "reaped"),
+        _stream(item["stdout"]),
+        _stream(item["stderr"]),
+        _strings(item["chronology"], "chronology"),
+    )
+
+
+def _observation_fact(item: JsonObject) -> ObservationFactDocument:
+    _exact(
+        item,
+        {"fact", "action_id", "scenario", "phase", "purpose", "items", "chronology"},
+        "observation fact",
+    )
+    return ObservationFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["scenario"], "scenario"),
+        _string(item["phase"], "phase"),
+        _string(item["purpose"], "purpose"),
+        tuple(_observation_item(part) for part in _array(item["items"], "items")),
+        _strings(item["chronology"], "chronology"),
+    )
+
+
+def _mechanism_fact(item: JsonObject, kind: str) -> RawFactDocument:
+    if kind == "immutable_image":
+        return _immutable_image_fact(item)
+    if kind == "catalog_documents":
+        return _catalog_documents_fact(item)
+    if kind == "subject_prepared":
+        return _subject_prepared_fact(item)
+    if kind == "subject_probe":
+        return _subject_probe_fact(item)
+    if kind == "fixture_prepared":
+        return _fixture_prepared_fact(item)
     if kind == "unavailable":
-        _exact(item, {"fact", "action_id", "detail", "chronology"}, "unavailable fact")
-        return UnavailableFactDocument(
-            _string(item["action_id"], "action_id"),
-            _string(item["detail"], "detail"),
-            _strings(item["chronology"], "chronology"),
-        )
+        return _unavailable_fact(item)
     raise DocumentError(f"unknown raw fact variant: {kind}")
+
+
+def _immutable_image_fact(item: JsonObject) -> ImmutableImageFactDocument:
+    _exact(
+        item,
+        {"fact", "action_id", "source_revision", "immutable_image_identity"},
+        "immutable image fact",
+    )
+    return ImmutableImageFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["source_revision"], "source_revision"),
+        _string(item["immutable_image_identity"], "immutable_image_identity"),
+    )
+
+
+def _catalog_documents_fact(item: JsonObject) -> CatalogDocumentsFactDocument:
+    _exact(
+        item,
+        {"fact", "action_id", "immutable_image_identity", "canonical_documents"},
+        "catalog documents fact",
+    )
+    documents = _strings(item["canonical_documents"], "canonical_documents")
+    for document in documents:
+        _require_canonical_catalog_document(document)
+    return CatalogDocumentsFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["immutable_image_identity"], "immutable_image_identity"),
+        documents,
+    )
+
+
+def _require_canonical_catalog_document(document: str) -> None:
+    try:
+        decoded = json.loads(document)
+    except json.JSONDecodeError as exc:
+        raise DocumentError("canonical catalog document is invalid JSON") from exc
+    if not isinstance(decoded, dict):
+        raise DocumentError("canonical catalog document must be an object")
+    if json.dumps(decoded, separators=(",", ":"), sort_keys=True) != document:
+        raise DocumentError("catalog document is not in canonical form")
+
+
+def _subject_prepared_fact(item: JsonObject) -> SubjectPreparedFactDocument:
+    _exact(
+        item,
+        {"fact", "action_id", "target", "scope", "prepared_identity"},
+        "subject prepared fact",
+    )
+    return SubjectPreparedFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["target"], "target"),
+        _string(item["scope"], "scope"),
+        _string(item["prepared_identity"], "prepared_identity"),
+    )
+
+
+def _subject_probe_fact(item: JsonObject) -> SubjectProbeFactDocument:
+    _exact(
+        item,
+        {
+            "fact",
+            "action_id",
+            "target",
+            "scope",
+            "prepared_identity",
+            "package_origin",
+            "package_version",
+            "interface_available",
+        },
+        "subject probe fact",
+    )
+    return SubjectProbeFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["target"], "target"),
+        _string(item["scope"], "scope"),
+        _string(item["prepared_identity"], "prepared_identity"),
+        _string(item["package_origin"], "package_origin"),
+        _string(item["package_version"], "package_version"),
+        _boolean(item["interface_available"], "interface_available"),
+    )
+
+
+def _fixture_prepared_fact(item: JsonObject) -> FixturePreparedFactDocument:
+    _exact(item, {"fact", "action_id", "entries"}, "fixture prepared fact")
+    entries = tuple(_fixture_entry(part) for part in _array(item["entries"], "entries"))
+    return FixturePreparedFactDocument(_string(item["action_id"], "action_id"), entries)
+
+
+def _fixture_entry(value: JsonValue) -> tuple[str, str]:
+    entry = _object(value, "fixture entry")
+    _exact(entry, {"path", "content"}, "fixture entry")
+    return _string(entry["path"], "path"), _string(entry["content"], "content")
+
+
+def _unavailable_fact(item: JsonObject) -> UnavailableFactDocument:
+    _exact(item, {"fact", "action_id", "detail", "chronology"}, "unavailable fact")
+    return UnavailableFactDocument(
+        _string(item["action_id"], "action_id"),
+        _string(item["detail"], "detail"),
+        _strings(item["chronology"], "chronology"),
+    )
 
 
 def _termination_value(value: TerminationDocument) -> JsonObject:
     return {
-        "kind": value.kind,
+        "kind": value.kind.value,
         "raw_exit": value.raw_exit,
         "signal": value.signal,
         "detail": value.detail,
@@ -632,12 +932,14 @@ def _termination_value(value: TerminationDocument) -> JsonObject:
 def _termination(value: JsonValue) -> TerminationDocument:
     item = _object(value, "termination")
     _exact(item, {"kind", "raw_exit", "signal", "detail"}, "termination")
-    return TerminationDocument(
-        _string(item["kind"], "kind"),
+    result = TerminationDocument(
+        _enum(TerminationKind, item["kind"], "termination kind"),
         _optional_integer(item["raw_exit"], "raw_exit"),
         _optional_string(item["signal"], "signal"),
         _optional_string(item["detail"], "detail"),
     )
+    _validate_termination(result)
+    return result
 
 
 def _stream_value(value: StreamDocument) -> JsonObject:
@@ -673,13 +975,11 @@ def _observation_item_value(value: ObservationItemDocument) -> JsonObject:
     return {
         "rule_key": value.rule_key,
         "path": value.path,
-        "entry_kind": value.entry_kind,
+        "entry_kind": value.entry_kind.value,
         "byte_size": value.byte_size,
         "sha256": value.sha256,
         "detail": value.detail,
-        "content_base64": None
-        if value.content is None
-        else base64.b64encode(value.content).decode("ascii"),
+        "semantic_verdict": value.semantic_verdict,
     }
 
 
@@ -694,39 +994,237 @@ def _observation_item(value: JsonValue) -> ObservationItemDocument:
             "byte_size",
             "sha256",
             "detail",
-            "content_base64",
+            "semantic_verdict",
         },
         "observation item",
     )
-    encoded = _optional_string(item["content_base64"], "content_base64")
-    try:
-        content = None if encoded is None else base64.b64decode(encoded, validate=True)
-    except ValueError as exc:
-        raise DocumentError("content_base64 is invalid") from exc
-    return ObservationItemDocument(
+    result = ObservationItemDocument(
         _string(item["rule_key"], "rule_key"),
         _string(item["path"], "path"),
-        _string(item["entry_kind"], "entry_kind"),
+        _enum(ObservationKind, item["entry_kind"], "observation kind"),
         _optional_integer(item["byte_size"], "byte_size"),
         _optional_string(item["sha256"], "sha256"),
         _optional_string(item["detail"], "detail"),
-        content,
+        _optional_string(item["semantic_verdict"], "semantic_verdict"),
     )
+    _validate_observation(result)
+    return result
 
 
 def _failure_kind(value: DiagnosticFailure) -> str:
-    return {
-        SchemaFailure: "schema",
-        BindingFailure: "binding",
-        ReferenceFailure: "reference",
-        CoherenceFailure: "coherence",
-        PlanCoverageFailure: "plan_coverage",
-        CaptureFailure: "capture",
-        ObservationFailure: "observation",
-        PersistenceFailure: "persistence",
-        ReportFailure: "report",
-        InvalidExitFailure: "invalid_exit",
-    }[type(value)]
+    if isinstance(value, SchemaFailure):
+        return "schema"
+    if isinstance(value, BindingFailure):
+        return "binding"
+    if isinstance(value, ReferenceFailure):
+        return "reference"
+    if isinstance(value, CoherenceFailure):
+        return "coherence"
+    if isinstance(value, PlanCoverageFailure):
+        return "plan_coverage"
+    return _secondary_failure_kind(value)
+
+
+def _secondary_failure_kind(value: DiagnosticFailure) -> str:
+    if isinstance(value, CaptureFailure):
+        return "capture"
+    if isinstance(value, ObservationFailure):
+        return "observation"
+    if isinstance(value, PersistenceFailure):
+        return "persistence"
+    if isinstance(value, ReportFailure):
+        return "report"
+    return "invalid_exit"
+
+
+def _validate_document(value: EvidenceDocument) -> None:
+    if isinstance(value, DiagnosticManifest):
+        _validate_manifest(value)
+        return
+    if isinstance(value, RunningRunRecord):
+        if not value.phase:
+            raise DocumentError("running phase must be non-empty")
+        return
+    _validate_terminal_record(value)
+
+
+def _validate_manifest(value: DiagnosticManifest) -> None:
+    for scenario in value.scenarios:
+        _validate_scenario(scenario)
+    _validate_purge(value.purge)
+    for finding in value.findings:
+        _validate_finding(finding)
+    for fact in value.raw_facts:
+        _validate_manifest_fact(fact)
+
+
+def _validate_manifest_fact(value: RawFactDocument) -> None:
+    _validate_raw_fact(value)
+    if isinstance(value, CommandFactDocument):
+        _validate_termination(value.termination)
+    if isinstance(value, ObservationFactDocument):
+        for item in value.items:
+            _validate_observation(item)
+
+
+def _validate_terminal_record(value: TerminalRunRecord) -> None:
+    completed = value.outcome in {RunOutcome.PASSED, RunOutcome.FAILED}
+    if completed and (value.manifest is None or value.evidence_set_digest is None):
+        raise DocumentError("completed run requires bound manifest evidence")
+    if value.outcome is RunOutcome.INTERRUPTED and value.interrupt_signal is None:
+        raise DocumentError("interrupted run requires an interrupt signal")
+    if value.outcome is not RunOutcome.INCOMPLETE and value.invalid_raw_exit is not None:
+        raise DocumentError("invalid raw exit is allowed only for incomplete runs")
+    if value.outcome in {RunOutcome.PASSED, RunOutcome.FAILED} and value.failures:
+        raise DocumentError("completed run cannot contain diagnostic failures")
+
+
+def _validate_phase(value: PhaseDocument) -> None:
+    has_evidence = bool(value.evidence_actions)
+    if value.status is PhaseStatus.PASS and (not has_evidence or value.reason or value.blocked_by):
+        raise DocumentError("PASS phase requires evidence and no reason or blocker")
+    if value.status is PhaseStatus.FINDING and (
+        not has_evidence or not value.reason or value.blocked_by
+    ):
+        raise DocumentError("FINDING phase requires evidence and a reason")
+    if value.status is PhaseStatus.BLOCKED and (
+        has_evidence or not value.reason or not value.blocked_by
+    ):
+        raise DocumentError("BLOCKED phase is command-free and requires blocker and reason")
+    if value.status is PhaseStatus.NOT_APPLICABLE and (
+        has_evidence or not value.reason or value.blocked_by
+    ):
+        raise DocumentError("NOT_APPLICABLE phase is command-free and requires a reason")
+    if value.status is PhaseStatus.INCOMPLETE and (not value.reason or value.blocked_by):
+        raise DocumentError("INCOMPLETE phase requires a reason")
+
+
+def _validate_scenario(value: ScenarioDocument) -> None:
+    if value.status is ScenarioStatus.PASS:
+        _validate_pass_scenario(value)
+    elif value.status is ScenarioStatus.FINDING:
+        _validate_finding_scenario(value)
+    elif value.status is ScenarioStatus.UNSUPPORTED:
+        _validate_unsupported_scenario(value)
+    else:
+        _validate_incomplete_scenario(value)
+    for phase in value.phases:
+        _validate_phase(phase)
+
+
+def _validate_pass_scenario(value: ScenarioDocument) -> None:
+    if value.findings or value.failures or value.reason:
+        raise DocumentError("PASS scenario cannot contain findings, failures, or reason")
+    if any(
+        phase.status not in {PhaseStatus.PASS, PhaseStatus.NOT_APPLICABLE} for phase in value.phases
+    ):
+        raise DocumentError("PASS scenario contradicts phase evidence")
+
+
+def _validate_finding_scenario(value: ScenarioDocument) -> None:
+    if not value.findings or value.failures or value.reason:
+        raise DocumentError("FINDING scenario requires findings and no diagnostic failure")
+    if any(phase.status is PhaseStatus.INCOMPLETE for phase in value.phases):
+        raise DocumentError("FINDING scenario cannot hide incomplete phase evidence")
+
+
+def _validate_unsupported_scenario(value: ScenarioDocument) -> None:
+    if value.phases or value.findings or value.failures or not value.reason:
+        raise DocumentError("UNSUPPORTED scenario must be command-free with a reason")
+
+
+def _validate_incomplete_scenario(value: ScenarioDocument) -> None:
+    incomplete_phase = any(phase.status is PhaseStatus.INCOMPLETE for phase in value.phases)
+    if not value.failures and not incomplete_phase:
+        raise DocumentError("INCOMPLETE scenario requires diagnostic failure evidence")
+
+
+def _validate_purge(value: PurgeDocument) -> None:
+    if value.status is PurgeStatus.PASS and (
+        value.findings or value.failures or not value.evidence_actions
+    ):
+        raise DocumentError("PASS purge requires evidence and no findings or failures")
+    if value.status is PurgeStatus.FINDING and (
+        not value.findings or value.failures or not value.evidence_actions
+    ):
+        raise DocumentError("FINDING purge requires findings and no failures")
+    if value.status is PurgeStatus.INCOMPLETE and not value.failures:
+        raise DocumentError("INCOMPLETE purge requires failures")
+
+
+def _validate_termination(value: TerminationDocument) -> None:
+    if value.kind is TerminationKind.EXITED:
+        valid = value.raw_exit is not None and value.signal is None and value.detail is None
+    elif value.kind is TerminationKind.SIGNALLED:
+        valid = value.raw_exit is None and value.signal is not None and value.detail is None
+    else:
+        valid = value.raw_exit is None and value.signal is None and value.detail is not None
+    if not valid:
+        raise DocumentError(f"contradictory {value.kind.value} termination fields")
+
+
+def _validate_observation(value: ObservationItemDocument) -> None:
+    if value.entry_kind is ObservationKind.CONTENT:
+        valid = (
+            value.byte_size is not None
+            and value.byte_size >= 0
+            and value.sha256 is not None
+            and value.detail is None
+            and value.semantic_verdict is not None
+        )
+    elif value.entry_kind is ObservationKind.ABSENT:
+        valid = (
+            value.byte_size is None
+            and value.sha256 is None
+            and value.detail is None
+            and value.semantic_verdict is not None
+        )
+    else:
+        valid = (
+            value.byte_size is None
+            and value.sha256 is None
+            and value.detail is not None
+            and value.semantic_verdict is None
+        )
+    if not valid:
+        raise DocumentError(f"contradictory {value.entry_kind.value} observation fields")
+
+
+def _validate_finding(value: FindingDocument) -> None:
+    if (value.witness_kind is None) != (value.witness_identity is None):
+        raise DocumentError("finding witness kind and identity must appear together")
+
+
+def _validate_raw_fact(value: RawFactDocument) -> None:
+    if not value.action_id:
+        raise DocumentError("raw fact action identity must be non-empty")
+    if isinstance(value, (CommandFactDocument, ObservationFactDocument)):
+        _validate_projected_fact(value)
+        return
+    if isinstance(value, CatalogDocumentsFactDocument):
+        _validate_catalog_fact(value)
+    if isinstance(value, FixturePreparedFactDocument):
+        _validate_fixture_fact(value)
+
+
+def _validate_projected_fact(
+    value: CommandFactDocument | ObservationFactDocument,
+) -> None:
+    if not value.scenario or not value.phase or not value.purpose:
+        raise DocumentError("action projection fields must be non-empty")
+
+
+def _validate_catalog_fact(value: CatalogDocumentsFactDocument) -> None:
+    if not value.canonical_documents:
+        raise DocumentError("catalog fact requires documents")
+    for document in value.canonical_documents:
+        _require_canonical_catalog_document(document)
+
+
+def _validate_fixture_fact(value: FixturePreparedFactDocument) -> None:
+    paths = tuple(path for path, _ in value.entries)
+    if len(set(paths)) != len(paths):
+        raise DocumentError("fixture preparation repeats a path")
 
 
 def _failure_value(value: DiagnosticFailure) -> JsonObject:
@@ -884,6 +1382,22 @@ def _possibly_empty_string(value: JsonValue, field: str) -> str:
 
 def _optional_string(value: JsonValue, field: str) -> str | None:
     return None if value is None else _string(value, field)
+
+
+def _enum[EnumT: StrEnum](enum_type: type[EnumT], value: JsonValue, field: str) -> EnumT:
+    token = _string(value, field)
+    try:
+        return enum_type(token)
+    except ValueError as exc:
+        raise DocumentError(f"unknown {field}: {token}") from exc
+
+
+def _optional_enum[EnumT: StrEnum](
+    enum_type: type[EnumT],
+    value: JsonValue,
+    field: str,
+) -> EnumT | None:
+    return None if value is None else _enum(enum_type, value, field)
 
 
 def _strings(value: JsonValue, field: str) -> tuple[str, ...]:

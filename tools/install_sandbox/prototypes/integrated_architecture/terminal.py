@@ -49,8 +49,15 @@ def _interactive(*, ansi: bool) -> int:
         print(_render_frame(frame, ansi=ansi), flush=True)
         emitted += 1
 
-    stream_interactive_frames(render)
+    streamed = stream_interactive_frames(render)
     print("\nPREPARED — NOT RESOLVED; human architecture acceptance remains in #38")
+    if streamed.presentation_failures:
+        print(
+            f"interactive presentation incomplete: "
+            f"{len(streamed.presentation_failures)} callback failure(s)",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, Protocol, cast
 
 from .bundle import (
+    OWNER_MARKER,
     BundleFaults,
     BundleStore,
     CoherentBundleReadView,
@@ -367,6 +368,8 @@ def _terminal_candidate(
         return None
     if not stat.S_ISDIR(details.st_mode):
         return None
+    if not _managed_owner_at(parent, leaf):
+        return None
     reopened = reopen_completed_bundle(parent_path / leaf)
     if isinstance(reopened, RecoveryRejected):
         return None
@@ -423,6 +426,8 @@ def _retire_candidate(
     device: int,
     inode: int,
 ) -> str:
+    if not _managed_owner_at(parent, leaf):
+        raise OSError(f"retention candidate lacks valid managed owner state: {leaf}")
     reopened = reopen_completed_bundle(parent_path / leaf)
     if isinstance(reopened, RecoveryRejected):
         raise OSError(f"retention candidate is no longer a valid terminal bundle: {leaf}")
@@ -438,6 +443,37 @@ def _retire_candidate(
         os.rename(leaf, destination, src_dir_fd=parent, dst_dir_fd=quarantine)
         return destination
     raise OSError(f"retention quarantine collision: {destination}")
+
+
+def _managed_owner_at(parent: int, leaf: str) -> bool:
+    bundle: int | None = None
+    marker: int | None = None
+    try:
+        bundle = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW, dir_fd=parent)
+        marker = os.open(OWNER_MARKER, os.O_RDONLY | _NOFOLLOW, dir_fd=bundle)
+        details = os.fstat(marker)
+        if not stat.S_ISREG(details.st_mode) or details.st_size > 1024:
+            return False
+        content = os.read(marker, 1025)
+        lines = content.decode("utf-8").splitlines()
+        if len(lines) != 3 or any(line.count("=") != 1 for line in lines):
+            return False
+        items = tuple(line.split("=", 1) for line in lines)
+        fields = dict(items)
+        return (
+            len(fields) == len(items)
+            and set(fields) == {"owner", "pid", "state"}
+            and bool(fields["owner"])
+            and fields["pid"].isdigit()
+            and fields["state"] in {"active", "invalidated"}
+        )
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    finally:
+        if marker is not None:
+            os.close(marker)
+        if bundle is not None:
+            os.close(bundle)
 
 
 class _DockerNamespaceRegistry:

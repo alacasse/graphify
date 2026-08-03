@@ -92,6 +92,7 @@ from .model import (
     Cancelled,
     CapturedStream,
     CatalogDocumentsFact,
+    CatalogRejected,
     CommandFact,
     Exited,
     ExpectedAction,
@@ -108,6 +109,7 @@ from .model import (
     PhasePassed,
     PhaseScenarioRecord,
     PlanProjection,
+    PlanRejected,
     PreparationFinding,
     PreparationIncomplete,
     PreparationPassed,
@@ -116,10 +118,10 @@ from .model import (
     PurgeIncomplete,
     PurgePassed,
     RawFact,
-    ScenarioProjection,
     ScenarioFinding,
     ScenarioIncomplete,
     ScenarioPassed,
+    ScenarioProjection,
     ScenarioUnsupported,
     Signalled,
     SpawnFailed,
@@ -308,9 +310,26 @@ def persistence_failure(stage: str, path: str, detail: str) -> DiagnosticFailure
 
 
 def preparation_failure(stage: str, path: str, detail: str) -> DiagnosticFailure:
-    """Translate a failed acquisition or compilation without leaking variants."""
+    """Translate malformed preparation protocol data at the diagnostic boundary."""
 
     return SchemaFailure(stage, path, detail)
+
+
+type PreparationFailureSource = ActionUnavailable | CatalogRejected | PlanRejected
+
+
+def preparation_failures(
+    stage: str,
+    path: str,
+    source: PreparationFailureSource,
+) -> tuple[DiagnosticFailure, ...]:
+    """Preserve resource, catalog-schema, and domain-plan failure ownership."""
+
+    if isinstance(source, ActionUnavailable):
+        return (PersistenceFailure(stage, path, source.detail),)
+    if isinstance(source, CatalogRejected):
+        return tuple(SchemaFailure(stage, path, reason) for reason in source.reasons)
+    return tuple(PlanCoverageFailure(stage, path, reason) for reason in source.reasons)
 
 
 def controller_failure(stage: str, path: str, error: BaseException) -> DiagnosticFailure:
@@ -1563,47 +1582,49 @@ def _scenario_coverage_failures(
         return tuple(failures)
     by_name = {item.name: item for item in plan.scenarios}
     for scenario in scenarios:
-        expected = by_name[scenario.name]
-        if scenario.limitations != expected.runtime_limitations:
-            failures.append(
-                PlanCoverageFailure(
-                    "scenario",
-                    scenario.name,
-                    "scenario limitations disagree with the selected plan",
-                )
+        failures.extend(_scenario_projection_failures(by_name[scenario.name], scenario))
+    return tuple(failures)
+
+
+def _scenario_projection_failures(
+    expected: ScenarioProjection,
+    scenario: ScenarioDocument,
+) -> tuple[DiagnosticFailure, ...]:
+    failures: list[DiagnosticFailure] = []
+    if scenario.limitations != expected.runtime_limitations:
+        failures.append(
+            PlanCoverageFailure(
+                "scenario",
+                scenario.name,
+                "scenario limitations disagree with the selected plan",
             )
-        expected_phases = tuple(item.value for item in expected.expected_phases)
-        actual = tuple(_base_phase_name(item.name) for item in scenario.phases)
-        if scenario.status is ScenarioStatus.UNSUPPORTED:
-            if expected.kind.value != "unsupported" or actual:
-                failures.append(
-                    PlanCoverageFailure(
-                        "scenario", scenario.name, "unsupported scenario contradicts plan"
-                    )
-                )
-            continue
-        if actual != expected_phases:
-            failures.append(
-                PlanCoverageFailure(
-                    "scenario", scenario.name, "phase order or cardinality mismatch"
-                )
-            )
-        has_incomplete = any(item.status is PhaseStatus.INCOMPLETE for item in scenario.phases)
-        has_finding = any(
-            item.status in {PhaseStatus.FINDING, PhaseStatus.BLOCKED} for item in scenario.phases
         )
-        if scenario.status is ScenarioStatus.PASS and (has_incomplete or has_finding):
+    expected_phases = tuple(item.value for item in expected.expected_phases)
+    actual = tuple(_base_phase_name(item.name) for item in scenario.phases)
+    if scenario.status is ScenarioStatus.UNSUPPORTED:
+        if expected.kind.value != "unsupported" or actual:
             failures.append(
-                CoherenceFailure(
-                    "scenario", scenario.name, "passed summary contradicts phase evidence"
+                PlanCoverageFailure(
+                    "scenario", scenario.name, "unsupported scenario contradicts plan"
                 )
             )
-        if scenario.status is ScenarioStatus.FINDING and has_incomplete:
-            failures.append(
-                CoherenceFailure(
-                    "scenario", scenario.name, "finding summary hides incomplete phase"
-                )
-            )
+        return tuple(failures)
+    if actual != expected_phases:
+        failures.append(
+            PlanCoverageFailure("scenario", scenario.name, "phase order or cardinality mismatch")
+        )
+    has_incomplete = any(item.status is PhaseStatus.INCOMPLETE for item in scenario.phases)
+    has_finding = any(
+        item.status in {PhaseStatus.FINDING, PhaseStatus.BLOCKED} for item in scenario.phases
+    )
+    if scenario.status is ScenarioStatus.PASS and (has_incomplete or has_finding):
+        failures.append(
+            CoherenceFailure("scenario", scenario.name, "passed summary contradicts phase evidence")
+        )
+    if scenario.status is ScenarioStatus.FINDING and has_incomplete:
+        failures.append(
+            CoherenceFailure("scenario", scenario.name, "finding summary hides incomplete phase")
+        )
     return tuple(failures)
 
 

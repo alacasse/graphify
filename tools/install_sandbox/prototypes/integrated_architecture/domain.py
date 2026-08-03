@@ -124,6 +124,56 @@ type Fulfil = Callable[[ActionRequest], RawFact]
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
 
+@dataclass(frozen=True)
+class ValidationBindingProjection:
+    selection: str
+    canonical_payload: str
+
+
+def project_validation_binding(
+    request: ValidationRequest,
+    policy: HarnessPolicy,
+) -> ValidationBindingProjection:
+    """Own the public validation name and deterministic request-binding projection."""
+
+    if isinstance(request, (LifecycleValidation, UnsupportedValidation)):
+        selection = f"{request.target}:{request.scope.value}"
+        validation: object = {
+            "kind": type(request).__name__,
+            "target": request.target,
+            "scope": request.scope.value,
+        }
+    elif isinstance(request, AggregateValidation):
+        selection = f"aggregate:{request.scope.value}"
+        validation = {"kind": "AggregateValidation", "scope": request.scope.value}
+    else:
+        selection = (
+            f"complete:{','.join(request.targets)}:"
+            f"{','.join(scope.value for scope in request.scopes)}"
+        )
+        validation = {
+            "kind": "CompleteValidation",
+            "targets": list(request.targets),
+            "scopes": [scope.value for scope in request.scopes],
+        }
+    payload = {
+        "validation": validation,
+        "policy": {
+            "install_argv": list(policy.install_argv),
+            "uninstall_argv": list(policy.uninstall_argv),
+            "aggregate_uninstall_argv": list(policy.aggregate_uninstall_argv),
+            "purge_argv": list(policy.purge_argv),
+            "reinstall": policy.reinstall,
+            "repair": policy.repair,
+            "runtime_limitations": list(policy.runtime_limitations),
+        },
+    }
+    return ValidationBindingProjection(
+        selection,
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
+    )
+
+
 def _fail(message: str) -> NoReturn:
     raise ValueError(message)
 

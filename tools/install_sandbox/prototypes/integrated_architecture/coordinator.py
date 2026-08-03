@@ -43,6 +43,7 @@ from .diagnostics import (
     make_pending_running_record,
     persistence_failure,
     preparation_failure,
+    preparation_failures,
     prepare_recovery,
 )
 from .documents import (
@@ -51,7 +52,12 @@ from .documents import (
     TerminalRunRecord,
     encode_document,
 )
-from .domain import build_validation_plan, compile_catalog, run_validation
+from .domain import (
+    build_validation_plan,
+    compile_catalog,
+    project_validation_binding,
+    run_validation,
+)
 from .model import (
     ActionId,
     ActionUnavailable,
@@ -59,18 +65,15 @@ from .model import (
     CatalogDocumentsFact,
     CatalogReadRequest,
     CatalogRejected,
-    AggregateValidation,
     HarnessPolicy,
     ImageBuildRequest,
     ImmutableImageFact,
-    LifecycleValidation,
     PlanId,
     PlanProjection,
     PlanRejected,
     RunId,
     ValidationPlan,
     ValidationRequest,
-    UnsupportedValidation,
 )
 from .resources import (
     ContainerClaimed,
@@ -89,7 +92,6 @@ from .resources import (
 @dataclass(frozen=True)
 class RunRequest:
     run_id: RunId
-    selection: str
     source_revision: str
     validation: ValidationRequest
     policy: HarnessPolicy
@@ -290,18 +292,6 @@ class RunController:
 
         trace: list[str] = []
         self._observer_failures.clear()
-        selection = _validation_selection(request.validation)
-        if request.selection != selection:
-            return PreflightRejected(
-                (
-                    preparation_failure(
-                        "request",
-                        "selection",
-                        "selection does not match the typed validation request",
-                    ),
-                ),
-                ("contradictory request rejected before bundle allocation",),
-            )
         try:
             resources = self._allocate(request)
         except BundleAllocationError as error:
@@ -332,11 +322,19 @@ class RunController:
         try:
             disposition = self._drive(resources, request, trace)
         except Exception as error:
-            disposition = DurableNonterminal(
-                resources.snapshot().bundle_path,
-                (controller_failure("lifecycle", request.run_id.value, error),),
-                tuple(trace),
-            )
+            failure = controller_failure("lifecycle", request.run_id.value, error)
+            if _terminal_was_committed(trace):
+                disposition = TerminalTrustFailure(
+                    resources.snapshot().bundle_path,
+                    (failure,),
+                    (*trace, "post-commit exception failed terminal trust closed"),
+                )
+            else:
+                disposition = DurableNonterminal(
+                    resources.snapshot().bundle_path,
+                    (failure,),
+                    tuple(trace),
+                )
         if isinstance(disposition, DurableNonterminal):
             disposition = _make_recovery_claimable(resources, request, disposition)
         try:
@@ -468,7 +466,7 @@ class RunController:
     def _allocate(self, request: RunRequest) -> LeaseBackedFulfilment:
         running = make_pending_running_record(
             request.run_id.value,
-            _validation_selection(request.validation),
+            project_validation_binding(request.validation, request.policy).selection,
             _request_digest(request),
         )
         return LeaseBackedFulfilment.allocate(
@@ -627,9 +625,6 @@ class RunController:
                 (persistence_failure("commit-terminal", "run.json", committed.detail),),
                 tuple(trace),
             )
-        hook_after = self._harness.after_terminal_commit
-        if hook_after is not None:
-            hook_after(resources)
         self._transition(
             trace,
             "diagnostics-bound terminal permit committed last and exclusively",
@@ -637,6 +632,9 @@ class RunController:
             expected,
             with_report.terminal_record,
         )
+        hook_after = self._harness.after_terminal_commit
+        if hook_after is not None:
+            hook_after(resources)
         return None
 
     def _finish_terminal(
@@ -788,7 +786,7 @@ def _acquire_and_plan(
         ImageBuildRequest(ActionId(request.run_id, acquisition_plan, 0), request.source_revision)
     )
     if isinstance(image, ActionUnavailable):
-        return _PreparationFailed((preparation_failure("image-build", "image", image.detail),))
+        return _PreparationFailed(preparation_failures("image-build", "image", image))
     if not isinstance(image, ImmutableImageFact):
         return _PreparationFailed(
             (preparation_failure("image-build", "image", "resource returned wrong fact family"),)
@@ -802,9 +800,7 @@ def _acquire_and_plan(
         )
     )
     if isinstance(catalog_fact, ActionUnavailable):
-        return _PreparationFailed(
-            (preparation_failure("catalog-read", "catalog", catalog_fact.detail),)
-        )
+        return _PreparationFailed(preparation_failures("catalog-read", "catalog", catalog_fact))
     if not isinstance(catalog_fact, CatalogDocumentsFact):
         return _PreparationFailed(
             (preparation_failure("catalog-read", "catalog", "resource returned wrong fact family"),)
@@ -813,18 +809,14 @@ def _acquire_and_plan(
     _preparation_transition(trace, transition, action)
     catalog = compile_catalog(catalog_fact.documents)
     if isinstance(catalog, CatalogRejected):
-        return _PreparationFailed(
-            tuple(preparation_failure("catalog", "catalog", reason) for reason in catalog.reasons)
-        )
+        return _PreparationFailed(preparation_failures("catalog", "catalog", catalog))
     planned = build_validation_plan(catalog.catalog, request.validation, request.policy)
     if isinstance(planned, PlanRejected):
-        return _PreparationFailed(
-            tuple(preparation_failure("plan", "plan", reason) for reason in planned.reasons)
-        )
+        return _PreparationFailed(preparation_failures("plan", "plan", planned))
     subject_identity = _subject_identity(planned.plan.projection)
     expected = ExpectedDiagnostic(
         request.run_id.value,
-        _validation_selection(request.validation),
+        project_validation_binding(request.validation, request.policy).selection,
         _request_digest(request),
         image.immutable_image_identity,
         subject_identity,
@@ -854,23 +846,18 @@ def _rederive_expected(
 ) -> _ApplicationPrepared | _PreparationFailed:
     """Rebuild private diagnostic expectations from public stable inputs."""
 
-    if request.selection != _validation_selection(request.validation):
-        return _PreparationFailed(
-            (
-                preparation_failure(
-                    "recovery-request",
-                    "selection",
-                    "selection does not match the typed validation request",
-                ),
-            )
-        )
     acquisition_plan = PlanId("recovery-acquisition")
     image = inputs.fulfil(
         ImageBuildRequest(ActionId(request.run_id, acquisition_plan, 0), request.source_revision)
     )
     if not isinstance(image, ImmutableImageFact):
         detail = image.detail if isinstance(image, ActionUnavailable) else "wrong fact family"
-        return _PreparationFailed((preparation_failure("recovery-image", "image", detail),))
+        failures = (
+            preparation_failures("recovery-image", "image", image)
+            if isinstance(image, ActionUnavailable)
+            else (preparation_failure("recovery-image", "image", detail),)
+        )
+        return _PreparationFailed(failures)
     catalog_fact = inputs.fulfil(
         CatalogReadRequest(
             ActionId(request.run_id, acquisition_plan, 1),
@@ -883,25 +870,21 @@ def _rederive_expected(
             if isinstance(catalog_fact, ActionUnavailable)
             else "wrong fact family"
         )
-        return _PreparationFailed((preparation_failure("recovery-catalog", "catalog", detail),))
+        failures = (
+            preparation_failures("recovery-catalog", "catalog", catalog_fact)
+            if isinstance(catalog_fact, ActionUnavailable)
+            else (preparation_failure("recovery-catalog", "catalog", detail),)
+        )
+        return _PreparationFailed(failures)
     catalog = compile_catalog(catalog_fact.documents)
     if isinstance(catalog, CatalogRejected):
-        return _PreparationFailed(
-            tuple(
-                preparation_failure("recovery-catalog", "catalog", reason)
-                for reason in catalog.reasons
-            )
-        )
+        return _PreparationFailed(preparation_failures("recovery-catalog", "catalog", catalog))
     planned = build_validation_plan(catalog.catalog, request.validation, request.policy)
     if isinstance(planned, PlanRejected):
-        return _PreparationFailed(
-            tuple(
-                preparation_failure("recovery-plan", "plan", reason) for reason in planned.reasons
-            )
-        )
+        return _PreparationFailed(preparation_failures("recovery-plan", "plan", planned))
     expected = ExpectedDiagnostic(
         request.run_id.value,
-        _validation_selection(request.validation),
+        project_validation_binding(request.validation, request.policy).selection,
         _request_digest(request),
         image.immutable_image_identity,
         _subject_identity(planned.plan.projection),
@@ -930,46 +913,13 @@ def _running(expected: ExpectedDiagnostic, phase: str) -> RunningRunRecord:
     )
 
 
-def _validation_selection(request: ValidationRequest) -> str:
-    if isinstance(request, (LifecycleValidation, UnsupportedValidation)):
-        return f"{request.target}:{request.scope.value}"
-    if isinstance(request, AggregateValidation):
-        return f"aggregate:{request.scope.value}"
-    return (
-        f"complete:{','.join(request.targets)}:{','.join(scope.value for scope in request.scopes)}"
-    )
-
-
 def _request_digest(request: RunRequest) -> str:
-    validation = request.validation
-    if isinstance(validation, (LifecycleValidation, UnsupportedValidation)):
-        validation_value: object = {
-            "kind": type(validation).__name__,
-            "target": validation.target,
-            "scope": validation.scope.value,
-        }
-    elif isinstance(validation, AggregateValidation):
-        validation_value = {"kind": "AggregateValidation", "scope": validation.scope.value}
-    else:
-        validation_value = {
-            "kind": "CompleteValidation",
-            "targets": list(validation.targets),
-            "scopes": [scope.value for scope in validation.scopes],
-        }
+    binding = project_validation_binding(request.validation, request.policy)
     payload = {
         "run_id": request.run_id.value,
-        "selection": _validation_selection(validation),
+        "selection": binding.selection,
         "source_revision": request.source_revision,
-        "validation": validation_value,
-        "policy": {
-            "install_argv": list(request.policy.install_argv),
-            "uninstall_argv": list(request.policy.uninstall_argv),
-            "aggregate_uninstall_argv": list(request.policy.aggregate_uninstall_argv),
-            "purge_argv": list(request.policy.purge_argv),
-            "reinstall": request.policy.reinstall,
-            "repair": request.policy.repair,
-            "runtime_limitations": list(request.policy.runtime_limitations),
-        },
+        "domain_binding": binding.canonical_payload,
     }
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -1077,6 +1027,17 @@ def _nonterminal(
         resources.snapshot().bundle_path,
         assessment_failures(assessment),
         tuple(trace),
+    )
+
+
+def _terminal_was_committed(trace: list[str]) -> bool:
+    return any(
+        action
+        in {
+            "diagnostics-bound terminal permit committed last and exclusively",
+            "exclusive peer committed the diagnostics-bound terminal record",
+        }
+        for action in trace
     )
 
 

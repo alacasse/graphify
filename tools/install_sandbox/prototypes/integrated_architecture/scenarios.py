@@ -30,7 +30,7 @@ from .coordinator import (
     DurableTerminal,
     ExecutionObserver,
     ExecutionSnapshot,
-    PreflightRejected,
+    ObserverFailure,
     PublicationAdapter,
     RecoveryCommitted,
     RecoveryDeclined,
@@ -50,20 +50,22 @@ from .diagnostics import (
     prepare_recovery,
 )
 from .documents import (
-    CaptureFailure,
     BindingFailure,
+    CaptureFailure,
     CoherenceFailure,
     CommandFactDocument,
     ContentObservationDocument,
-    DocumentError,
     DiagnosticManifest,
+    DocumentError,
     ExitedTerminationDocument,
     ObservationFactDocument,
+    PersistenceFailure,
     PhaseStatus,
     PlanCoverageFailure,
     RunningRunRecord,
     RunOutcome,
     ScenarioStatus,
+    SchemaFailure,
     TerminalRunRecord,
     decode_manifest,
     decode_run_record,
@@ -73,6 +75,7 @@ from .domain import (
     build_validation_plan,
     compile_catalog,
     independent_aggregate_cover_oracle,
+    project_validation_binding,
     roll_up_phases,
     run_validation,
 )
@@ -131,13 +134,15 @@ from .model import (
 from .resources import (
     ContainerClaimed,
     ContainerClaimRejected,
-    DockerDaemonAdapter,
     DockerAuthorityRegistry,
+    DockerDaemonAdapter,
     LeaseBackedFulfilment,
     RecoverySession,
     ResourceFaults,
     ResourceInputs,
     RetentionAdapter,
+    RetentionRequest,
+    RetentionResult,
     nominate_recovery,
     reopen_completed,
 )
@@ -159,6 +164,12 @@ class DemoFrame:
     number: int
     action: str
     sections: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+@dataclass(frozen=True)
+class InteractiveRun:
+    frames: tuple[DemoFrame, ...]
+    presentation_failures: tuple[ObserverFailure, ...]
 
 
 _INSTALL_SCRIPT = (
@@ -412,18 +423,8 @@ def _request(
     selected_validation = (
         LifecycleValidation("alpha", Scope.USER) if validation is None else validation
     )
-    if isinstance(selected_validation, LifecycleValidation):
-        selection = f"{selected_validation.target}:{selected_validation.scope.value}"
-    elif isinstance(selected_validation, AggregateValidation):
-        selection = f"aggregate:{selected_validation.scope.value}"
-    else:
-        selection = (
-            f"complete:{','.join(selected_validation.targets)}:"
-            f"{','.join(scope.value for scope in selected_validation.scopes)}"
-        )
     return RunRequest(
         RunId(run_id),
-        selection,
         "prototype-source",
         selected_validation,
         _policy(limitations=("fake runtime is Component Evidence",)),
@@ -621,7 +622,6 @@ def _timeout_and_probe_case() -> str:
         )
         request = RunRequest(
             RunId("command-finding"),
-            "alpha:user",
             "prototype-source",
             LifecycleValidation("alpha", Scope.USER),
             policy,
@@ -803,6 +803,12 @@ def _active_recovery_case() -> str:
 
 
 def _capture_case() -> str:
+    _assert_capture_adapter()
+    _assert_full_layer_capture()
+    return "full-layer capture failure retained termination, reap, bytes, digest, and inventory"
+
+
+def _assert_capture_adapter() -> None:
     with TemporaryDirectory(prefix="issue41-capture-") as temporary:
         resource = _allocate_resources(
             Path(temporary),
@@ -825,6 +831,8 @@ def _capture_case() -> str:
         finally:
             resource.close()
 
+
+def _assert_full_layer_capture() -> None:
     with TemporaryDirectory(prefix="issue41-capture-full-") as temporary:
         base = Path(temporary)
         install_argv = (
@@ -842,7 +850,6 @@ def _capture_case() -> str:
         )
         request = RunRequest(
             RunId("capture-full"),
-            "alpha:user",
             "prototype-source",
             LifecycleValidation("alpha", Scope.USER),
             policy,
@@ -856,58 +863,83 @@ def _capture_case() -> str:
         assert result.assessment.run_record.outcome is RunOutcome.INCOMPLETE
         manifest = result.assessment.manifest
         assert manifest is not None
-        command = next(
-            fact
-            for fact in manifest.raw_facts
-            if isinstance(fact, CommandFactDocument) and fact.argv == expected_argv
-        )
-        captured_failure = next(
-            failure
-            for failure in result.assessment.run_record.failures
-            if isinstance(failure, CaptureFailure)
-            and failure.path == command.action_id
-            and "stdout" in failure.message
-        )
-        retained = next(
-            fact
-            for fact in result.outcome.raw_facts
-            if isinstance(fact, CommandFact)
-            and fact.action_id.ordinal == int(command.action_id.rpartition(":")[2])
-        )
-        assert isinstance(retained.termination, Exited)
-        assert isinstance(retained.stdout, StreamCaptureFailure)
-        assert isinstance(retained.stderr, CapturedStream)
-        assert captured_failure.path == command.action_id
-        assert command.argv == retained.argv == expected_argv
-        assert command.cwd == retained.cwd == "."
-        assert command.started_ns == retained.started_ns
-        assert command.finished_ns == retained.finished_ns
-        assert command.started_ns < command.finished_ns
-        assert command.termination == ExitedTerminationDocument(0)
-        assert command.reaped is retained.reaped is True
-        assert command.stdout.captured == retained.stdout.partial_content == b"STDOUT-M"
-        assert command.stdout.capture_error == retained.stdout.detail
-        assert command.stderr.captured == retained.stderr.content == b"STDERR-MARKER-41\n"
-        assert command.stderr.capture_error is None
-        assert command.stdout.declared_size == retained.stdout.size == 8
-        assert command.stdout.declared_digest == hashlib.sha256(b"STDOUT-M").hexdigest()
-        assert command.stderr.declared_size == retained.stderr.size == 17
-        assert command.stderr.declared_digest == hashlib.sha256(b"STDERR-MARKER-41\n").hexdigest()
-        ordinal = int(command.action_id.rpartition(":")[2])
-        stdout_path = f"commands/{ordinal:04d}.stdout"
-        stderr_path = f"commands/{ordinal:04d}.stderr"
-        references = {item.path: item for item in manifest.inventory}
-        assert (references[stdout_path].byte_size, references[stdout_path].sha256) == (
-            8,
-            hashlib.sha256(b"STDOUT-M").hexdigest(),
-        )
-        assert (references[stderr_path].byte_size, references[stderr_path].sha256) == (
-            17,
-            hashlib.sha256(b"STDERR-MARKER-41\n").hexdigest(),
-        )
-        assert (result.bundle / stdout_path).read_bytes() == b"STDOUT-M"
-        assert (result.bundle / stderr_path).read_bytes() == b"STDERR-MARKER-41\n"
-    return "full-layer capture failure retained termination, reap, bytes, digest, and inventory"
+        _assert_capture_documents(result, manifest, expected_argv)
+
+
+def _assert_capture_documents(
+    result: DurableTerminal,
+    manifest: DiagnosticManifest,
+    expected_argv: tuple[str, ...],
+) -> None:
+    command = next(
+        fact
+        for fact in manifest.raw_facts
+        if isinstance(fact, CommandFactDocument) and fact.argv == expected_argv
+    )
+    captured_failure = next(
+        failure
+        for failure in result.assessment.run_record.failures
+        if isinstance(failure, CaptureFailure)
+        and failure.path == command.action_id
+        and "stdout" in failure.message
+    )
+    retained = next(
+        fact
+        for fact in result.outcome.raw_facts
+        if isinstance(fact, CommandFact)
+        and fact.action_id.ordinal == int(command.action_id.rpartition(":")[2])
+    )
+    assert isinstance(retained.termination, Exited)
+    assert isinstance(retained.stdout, StreamCaptureFailure)
+    assert isinstance(retained.stderr, CapturedStream)
+    assert captured_failure.path == command.action_id
+    _assert_command_document(command, retained, expected_argv)
+    _assert_stream_files(result.bundle, manifest, command)
+
+
+def _assert_command_document(
+    command: CommandFactDocument,
+    retained: CommandFact,
+    expected_argv: tuple[str, ...],
+) -> None:
+    assert command.argv == retained.argv == expected_argv
+    assert command.cwd == retained.cwd == "."
+    assert command.started_ns == retained.started_ns
+    assert command.finished_ns == retained.finished_ns
+    assert command.started_ns < command.finished_ns
+    assert command.termination == ExitedTerminationDocument(0)
+    assert command.reaped is retained.reaped is True
+    assert isinstance(retained.stdout, StreamCaptureFailure)
+    assert isinstance(retained.stderr, CapturedStream)
+    assert command.stdout.captured == retained.stdout.partial_content == b"STDOUT-M"
+    assert command.stdout.capture_error == retained.stdout.detail
+    assert command.stderr.captured == retained.stderr.content == b"STDERR-MARKER-41\n"
+    assert command.stderr.capture_error is None
+    assert command.stdout.declared_size == retained.stdout.size == 8
+    assert command.stdout.declared_digest == hashlib.sha256(b"STDOUT-M").hexdigest()
+    assert command.stderr.declared_size == retained.stderr.size == 17
+    assert command.stderr.declared_digest == hashlib.sha256(b"STDERR-MARKER-41\n").hexdigest()
+
+
+def _assert_stream_files(
+    bundle: Path,
+    manifest: DiagnosticManifest,
+    command: CommandFactDocument,
+) -> None:
+    ordinal = int(command.action_id.rpartition(":")[2])
+    stdout_path = f"commands/{ordinal:04d}.stdout"
+    stderr_path = f"commands/{ordinal:04d}.stderr"
+    references = {item.path: item for item in manifest.inventory}
+    assert (references[stdout_path].byte_size, references[stdout_path].sha256) == (
+        8,
+        hashlib.sha256(b"STDOUT-M").hexdigest(),
+    )
+    assert (references[stderr_path].byte_size, references[stderr_path].sha256) == (
+        17,
+        hashlib.sha256(b"STDERR-MARKER-41\n").hexdigest(),
+    )
+    assert (bundle / stdout_path).read_bytes() == b"STDOUT-M"
+    assert (bundle / stderr_path).read_bytes() == b"STDERR-MARKER-41\n"
 
 
 def _content_case() -> str:
@@ -978,7 +1010,6 @@ def _assert_semantic_content_projection() -> None:
         )
         request = RunRequest(
             RunId("content-projection"),
-            "secret:user",
             "prototype-source",
             LifecycleValidation("secret", Scope.USER),
             policy,
@@ -1304,6 +1335,12 @@ class _OrderedPublication:
         return Published("ordered-artifact")
 
 
+class _RaisingRetention(RetentionAdapter):
+    def apply(self, request: RetentionRequest) -> RetentionResult:
+        del request
+        raise RuntimeError("retention adapter raised after terminal commit")
+
+
 class _BoundaryObserver:
     def __init__(
         self,
@@ -1333,6 +1370,12 @@ class _BoundaryObserver:
 
 
 def _retention_publication_case() -> str:
+    _assert_retention_order()
+    _assert_retention_recheck()
+    return "mixed invalid fixtures were preserved and changed terminal validity blocked quarantine"
+
+
+def _assert_retention_order() -> None:
     with TemporaryDirectory(prefix="issue41-retention-") as temporary:
         base = Path(temporary)
         retention = RetentionAdapter()
@@ -1349,11 +1392,7 @@ def _retention_publication_case() -> str:
             assert isinstance(disposition, DurableTerminal)
             result = disposition
             if index == 0:
-                invalid_root = base / "out"
-                (invalid_root / "missing-owner").mkdir()
-                (invalid_root / "malformed").mkdir()
-                (invalid_root / "malformed" / "run.json").write_text("{}", encoding="utf-8")
-                (invalid_root / "linked-terminal").symlink_to("retention-0")
+                _create_retention_invalid_fixtures(base / "out")
         assert result is not None
         assert publication.calls == [f"retention-{index}" for index in range(7)]
         joined = " | ".join(result.trace)
@@ -1370,17 +1409,35 @@ def _retention_publication_case() -> str:
                 if path.is_dir() and path.name.startswith("retention-")
             )
         )
-        assert active == tuple(f"retention-{index}" for index in range(2, 7))
+        assert active == (
+            "retention-0",
+            "retention-2",
+            "retention-3",
+            "retention-4",
+            "retention-5",
+            "retention-6",
+        )
         quarantined = tuple(sorted((base / "out" / ".retired").iterdir()))
-        assert len(quarantined) == 2
+        assert len(quarantined) == 1
         for path in quarantined:
             reopened = reopen_completed(path)
             assert not isinstance(reopened, RecoveryRejected)
         assert (base / "out" / "missing-owner").is_dir()
+        assert not (base / "out" / "retention-0" / OWNER_MARKER).exists()
         assert (base / "out" / "malformed").is_dir()
         assert (base / "out" / "linked-terminal").is_symlink()
         assert observer.snapshots[-1].action.startswith("CI classified")
 
+
+def _create_retention_invalid_fixtures(output: Path) -> None:
+    (output / "retention-0" / OWNER_MARKER).unlink()
+    (output / "missing-owner").mkdir()
+    (output / "malformed").mkdir()
+    (output / "malformed" / "run.json").write_text("{}", encoding="utf-8")
+    (output / "linked-terminal").symlink_to("retention-0")
+
+
+def _assert_retention_recheck() -> None:
     with TemporaryDirectory(prefix="issue41-retention-recheck-") as temporary:
         base = Path(temporary)
         mutated: list[Path] = []
@@ -1400,7 +1457,6 @@ def _retention_publication_case() -> str:
         assert len(mutated) == 1 and mutated[0].exists()
         retired = base / "out" / ".retired"
         assert not retired.exists() or not tuple(retired.iterdir())
-    return "mixed invalid fixtures were preserved and changed terminal validity blocked quarantine"
 
 
 def _post_commit_mutation_case() -> str:
@@ -1428,6 +1484,19 @@ def _post_commit_mutation_case() -> str:
         assert not any("fresh reopen" in item for item in actions)
         assert not any(item.startswith("CI classified") for item in actions)
     return "post-commit mutation blocked reopen, retention, publication, and CI"
+
+
+def _post_commit_exception_case() -> str:
+    with TemporaryDirectory(prefix="issue41-post-commit-exception-") as temporary:
+        result = _controller(
+            Path(temporary),
+            retention=_RaisingRetention(),
+        ).run(_request("post-commit-exception"))
+        assert isinstance(result, TerminalTrustFailure)
+        record = decode_run_record((result.bundle / "run.json").read_bytes())
+        assert isinstance(record, TerminalRunRecord)
+        assert "post-commit exception failed terminal trust closed" in result.trace
+    return "retention exception after terminal commit remained a terminal trust failure"
 
 
 class _FailedPublication:
@@ -1480,6 +1549,14 @@ def _assert_terminal_commit_race(base: Path) -> None:
         assert all(not worker.is_alive() for worker in workers)
 
     disposition = _controller(base, before_terminal_commit=race).run(_request("exclusive"))
+    _assert_terminal_race_result(commits, exceptions, disposition)
+
+
+def _assert_terminal_race_result(
+    commits: list[TerminalCommitted | TerminalCommitRejected],
+    exceptions: list[BaseException],
+    disposition: object,
+) -> None:
     assert exceptions == []
     assert len(commits) == 2
     assert sum(isinstance(item, TerminalCommitted) for item in commits) == 1
@@ -1635,10 +1712,11 @@ def _request_binding_case() -> str:
     with TemporaryDirectory(prefix="issue41-request-binding-") as temporary:
         base = Path(temporary)
         valid = _request("request-binding")
-        contradictory = replace(valid, selection="beta:user")
-        rejected = _controller(base / "contradictory").run(contradictory)
-        assert isinstance(rejected, PreflightRejected)
-        assert not (base / "contradictory" / "out" / valid.run_id.value).exists()
+        binding = project_validation_binding(valid.validation, valid.policy)
+        assert binding.selection == "alpha:user"
+        terminal = _controller(base / "derived").run(valid)
+        assert isinstance(terminal, DurableTerminal)
+        assert terminal.assessment.run_record.selection == binding.selection
 
         controller = _controller(base / "recovery")
         bundle, _ = controller._abandon_for_harness(  # pyright: ignore[reportPrivateUsage]
@@ -1648,7 +1726,34 @@ def _request_binding_case() -> str:
         recovery = controller.recover(RecoveryRequest(bundle, changed, "owner disappeared"))
         assert isinstance(recovery, RecoveryDeclined)
         assert any(isinstance(failure, BindingFailure) for failure in recovery.failures)
-    return "typed selection and durable request digest rejected contradictory public requests"
+    return "domain-owned selection and durable request digest bound public recovery requests"
+
+
+def _preparation_translation_case() -> str:
+    with TemporaryDirectory(prefix="issue41-preparation-translation-") as temporary:
+        base = Path(temporary)
+        resource_failure = _controller(
+            base / "resource",
+            resource_faults=ResourceFaults(fail_image_build=True),
+        ).run(_request("resource-preparation"))
+        assert isinstance(resource_failure, DurableNonterminal)
+        assert isinstance(resource_failure.failures[0], PersistenceFailure)
+
+        invalid_document = cast(RawCatalogDocument, {"source": "invalid.yaml"})
+        catalog_failure = _controller(
+            base / "catalog",
+            inputs=_inputs((invalid_document,)),
+        ).run(_request("catalog-preparation"))
+        assert isinstance(catalog_failure, DurableNonterminal)
+        assert isinstance(catalog_failure.failures[0], SchemaFailure)
+
+        request = _request("plan-preparation")
+        plan_failure = _controller(base / "plan").run(
+            replace(request, policy=replace(request.policy, reinstall=False))
+        )
+        assert isinstance(plan_failure, DurableNonterminal)
+        assert isinstance(plan_failure.failures[0], PlanCoverageFailure)
+    return "diagnostics preserved resource, catalog-schema, and domain-plan failure ownership"
 
 
 def _observer_and_live_stream_case() -> str:
@@ -1674,13 +1779,26 @@ def _observer_and_live_stream_case() -> str:
         assert not returned
         emitted.append(frame)
 
-    frames = stream_interactive_frames(emit)
+    streamed = stream_interactive_frames(emit)
     returned = True
-    assert frames == tuple(emitted) and len(frames) > 1
+    assert streamed.frames == tuple(emitted) and len(streamed.frames) > 1
+    assert streamed.presentation_failures == ()
     assert any(
         any(label == "resources" and len(values) > 4 for label, values in frame.sections)
-        for frame in frames
+        for frame in streamed.frames
     )
+
+    failed_once = False
+
+    def fail_render(frame: DemoFrame) -> None:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError(f"frame {frame.number} could not render")
+
+    incomplete = stream_interactive_frames(fail_render)
+    assert len(incomplete.presentation_failures) == 1
+    assert incomplete.presentation_failures[0].failure.stage == "observer"
     return "observer failure was isolated and rich frames rendered during controller execution"
 
 
@@ -1772,12 +1890,14 @@ def run_all() -> tuple[ScenarioResult, ...]:
         ("strict-document-codecs", _codec_case),
         ("retention-publication-order", _retention_publication_case),
         ("post-commit-mutation", _post_commit_mutation_case),
+        ("post-commit-exception", _post_commit_exception_case),
         ("exclusive-terminal-and-publication", _exclusive_and_publication_case),
         ("interrupt-and-ordering", _interrupt_and_ordering_case),
         ("complete-plan-cardinality", _complete_plan_case),
         ("manifest-action-completeness", _manifest_action_completeness_case),
         ("scoped-runtime-limitations", _limitation_projection_case),
         ("durable-request-binding", _request_binding_case),
+        ("typed-preparation-translation", _preparation_translation_case),
         ("observer-and-live-stream", _observer_and_live_stream_case),
         ("acyclic-imports", _dag_case),
     )
@@ -1823,7 +1943,7 @@ def _demo_frame(snapshot: ExecutionSnapshot) -> DemoFrame:
     )
 
 
-def stream_interactive_frames(emit: Callable[[DemoFrame], None]) -> tuple[DemoFrame, ...]:
+def stream_interactive_frames(emit: Callable[[DemoFrame], None]) -> InteractiveRun:
     """Execute and render each frame at the synchronous controller boundary."""
 
     frames: list[DemoFrame] = []
@@ -1836,19 +1956,20 @@ def stream_interactive_frames(emit: Callable[[DemoFrame], None]) -> tuple[DemoFr
         retention = RetentionAdapter()
         publication = _OrderedPublication(retention)
         observer = _BoundaryObserver(retention, publication, emit_and_retain)
-        result = _controller(
+        controller = _controller(
             Path(temporary),
             retention=retention,
             publication=publication,
             observer=observer,
-        ).run(_request("interactive"))
+        )
+        result = controller.run(_request("interactive"))
     if not isinstance(result, DurableTerminal):
         failures = tuple(f"{item.stage}:{item.path}:{item.message}" for item in result.failures)
         emit_and_retain(DemoFrame(1, "run remained nonterminal", (("failures", failures),)))
-    return tuple(frames)
+    return InteractiveRun(tuple(frames), controller.observer_failures())
 
 
 def interactive_frames() -> tuple[DemoFrame, ...]:
     """Compatibility collector over the live streaming presentation seam."""
 
-    return stream_interactive_frames(lambda frame: None)
+    return stream_interactive_frames(lambda frame: None).frames

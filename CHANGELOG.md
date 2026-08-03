@@ -2,6 +2,13 @@
 
 Full release notes with details on each version: [GitHub Releases](https://github.com/safishamsi/graphify/releases)
 
+## Unreleased
+
+- Prototype: add issue #41 throwaway integration evidence for the proposed
+  install-sandbox replacement architecture. The prototype composes typed
+  domain, resource-custody, diagnostic, terminalization, and recovery
+  responsibilities without production imports or cutover authority.
+
 ## 0.9.28 (2026-07-27)
 
 - Fix: incremental extraction no longer drops cross-file edges whose target file wasn't in the batch (#2211, #2213). Python relative imports and markdown reference links emitted absolute-path-derived target ids without the `target_file` stamp the incremental canonicalization needs, so a re-extracted file's imports/references dangled or vanished; both now stamp the resolved target and canonicalize to the root-relative node.

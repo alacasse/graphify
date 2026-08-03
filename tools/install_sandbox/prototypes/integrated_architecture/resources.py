@@ -17,6 +17,7 @@ import stat
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -131,10 +132,33 @@ class ResourceInputs:
             raise ValueError("resource-owned catalog must be JSON data") from error
         object.__setattr__(self, "_catalog_payloads", payloads)
 
-    def catalog_snapshot(self) -> tuple[RawCatalogDocument, ...]:
-        """Return a fresh stable snapshot suitable for recovery rederivation."""
+    def fulfil(self, request: ImageBuildRequest | CatalogReadRequest) -> RawFact:
+        """Reacquire stable image/catalog facts through the resource-owned seam."""
 
-        return _fresh_catalog_documents(self)
+        if isinstance(request, ImageBuildRequest):
+            if request.source_revision != self.source_revision:
+                return ActionUnavailable(
+                    request.action_id,
+                    "source revision is not resource-owned",
+                    ("stable-input-image-rejected",),
+                )
+            identity = _image_identity(self.source_revision)
+            return ImmutableImageFact(request.action_id, request.source_revision, identity)
+        if request.immutable_image_identity != _image_identity(self.source_revision):
+            return ActionUnavailable(
+                request.action_id,
+                "catalog image identity mismatch",
+                ("stable-input-catalog-rejected",),
+            )
+        return CatalogDocumentsFact(
+            request.action_id,
+            request.immutable_image_identity,
+            _fresh_catalog_documents(self),
+        )
+
+
+def _image_identity(source_revision: str) -> str:
+    return "sha256:" + hashlib.sha256(source_revision.encode()).hexdigest()
 
 
 _DEFAULT_RESOURCE_INPUTS = ResourceInputs(
@@ -240,8 +264,9 @@ type RetentionResult = RetentionApplied | RetentionRejected
 class RetentionAdapter:
     """Safe prototype stand-in that quarantines surplus managed terminals."""
 
-    def __init__(self) -> None:
+    def __init__(self, before_quarantine: Callable[[Path], None] | None = None) -> None:
         self._applied: list[RetentionApplied] = []
+        self._before_quarantine = before_quarantine
 
     def apply(self, request: RetentionRequest) -> RetentionResult:
         if request.keep_newest != 5:
@@ -255,6 +280,7 @@ class RetentionAdapter:
             retired, remaining = _quarantine_surplus_terminals(
                 request.bundle,
                 request.keep_newest,
+                self._before_quarantine,
             )
         except OSError as error:
             return RetentionRejected(str(error))
@@ -275,6 +301,7 @@ class RetentionAdapter:
 def _quarantine_surplus_terminals(
     current: Path,
     keep_newest: int,
+    before_quarantine: Callable[[Path], None] | None,
 ) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
     """Move only descriptor-revalidated terminal leaves out of the active set."""
 
@@ -300,6 +327,7 @@ def _quarantine_surplus_terminals(
             quarantine,
             candidates,
             newest_names,
+            before_quarantine,
         )
         os.fsync(quarantine)
         os.fsync(parent)
@@ -367,22 +395,39 @@ def _retire_candidates(
     quarantine: int,
     candidates: tuple[_RetentionCandidate, ...],
     newest_names: set[str],
+    before_quarantine: Callable[[Path], None] | None,
 ) -> list[Path]:
     retired: list[Path] = []
     for _, leaf, device, inode in candidates:
         if leaf not in newest_names:
-            destination = _retire_candidate(parent, quarantine, leaf, device, inode)
+            candidate = parent_path / leaf
+            if before_quarantine is not None:
+                before_quarantine(candidate)
+            destination = _retire_candidate(
+                parent_path,
+                parent,
+                quarantine,
+                leaf,
+                device,
+                inode,
+            )
             retired.append(parent_path / ".retired" / destination)
     return retired
 
 
 def _retire_candidate(
+    parent_path: Path,
     parent: int,
     quarantine: int,
     leaf: str,
     device: int,
     inode: int,
 ) -> str:
+    reopened = reopen_completed_bundle(parent_path / leaf)
+    if isinstance(reopened, RecoveryRejected):
+        raise OSError(f"retention candidate is no longer a valid terminal bundle: {leaf}")
+    if (reopened.revision.device, reopened.revision.inode) != (device, inode):
+        raise OSError(f"retention candidate descriptor identity changed: {leaf}")
     current = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
     if (current.st_dev, current.st_ino) != (device, inode):
         raise OSError(f"retention candidate identity changed: {leaf}")
@@ -459,14 +504,33 @@ class _DockerNamespaceClient:
 class DockerDaemonAuthority:
     """Explicit composition-root authority for exactly one daemon namespace."""
 
-    def __init__(self, daemon_identity: str) -> None:
+    def __init__(
+        self,
+        daemon_identity: str,
+        registry: _DockerNamespaceRegistry,
+    ) -> None:
         if not daemon_identity or "\0" in daemon_identity:
             raise ValueError("daemon identity must be a nonempty safe string")
         self.daemon_identity = daemon_identity
-        self._registry = _DockerNamespaceRegistry()
+        self._registry = registry
 
     def adapter(self) -> DockerDaemonAdapter:
         return DockerDaemonAdapter(self)
+
+
+class DockerAuthorityRegistry:
+    """Explicit owner of daemon-identity registries shared by duplicate authorities."""
+
+    def __init__(self) -> None:
+        self._registries: dict[str, _DockerNamespaceRegistry] = {}
+        self._lock = threading.Lock()
+
+    def authority(self, daemon_identity: str) -> DockerDaemonAuthority:
+        if not daemon_identity or "\0" in daemon_identity:
+            raise ValueError("daemon identity must be a nonempty safe string")
+        with self._lock:
+            registry = self._registries.setdefault(daemon_identity, _DockerNamespaceRegistry())
+        return DockerDaemonAuthority(daemon_identity, registry)
 
 
 class DockerDaemonAdapter:
@@ -781,26 +845,18 @@ class LeaseBackedFulfilment:
     def _build_image(self, request: ImageBuildRequest) -> RawFact:
         if self._faults.fail_image_build:
             return self._unavailable(request.action_id, "immutable image build failed")
-        if request.source_revision != self._inputs.source_revision:
-            return self._unavailable(request.action_id, "source revision is not resource-owned")
-        identity = "sha256:" + hashlib.sha256(request.source_revision.encode()).hexdigest()
-        self._record(request.action_id, "image-built", identity)
-        return ImmutableImageFact(request.action_id, request.source_revision, identity)
+        result = self._inputs.fulfil(request)
+        if isinstance(result, ImmutableImageFact):
+            self._record(request.action_id, "image-built", result.immutable_image_identity)
+        return result
 
     def _read_catalog(self, request: CatalogReadRequest) -> RawFact:
         if self._faults.fail_catalog_read:
             return self._unavailable(request.action_id, "catalog acquisition failed")
-        expected = "sha256:" + hashlib.sha256(self._inputs.source_revision.encode()).hexdigest()
-        if request.immutable_image_identity != expected:
-            return self._unavailable(request.action_id, "catalog image identity mismatch")
-        self._record(
-            request.action_id, "catalog-read", f"{len(self._inputs.catalog_documents)} docs"
-        )
-        return CatalogDocumentsFact(
-            request.action_id,
-            request.immutable_image_identity,
-            _fresh_catalog_documents(self._inputs),
-        )
+        result = self._inputs.fulfil(request)
+        if isinstance(result, CatalogDocumentsFact):
+            self._record(request.action_id, "catalog-read", f"{len(result.documents)} docs")
+        return result
 
     def _prepare_subject(self, request: SubjectPreparationRequest) -> RawFact:
         key = f"{request.target}:{request.scope.value}"

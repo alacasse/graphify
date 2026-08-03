@@ -769,13 +769,12 @@ def _subject_plans(scenarios: tuple[ScenarioPlan, ...]) -> tuple[SubjectPlan, ..
 
 
 def _runtime_limitations(
-    catalog: InstallTargetCatalog,
+    scenarios: tuple[ScenarioPlan, ...],
     policy: HarnessPolicy,
 ) -> tuple[str, ...]:
     limitations = set(policy.runtime_limitations)
-    for target in catalog.targets:
-        for scoped in target.scopes:
-            limitations.update(scoped.facts.limitations)
+    for scenario in scenarios:
+        limitations.update(scenario.limitations)
     return tuple(sorted(limitations))
 
 
@@ -818,7 +817,7 @@ def build_validation_plan(
         scenarios,
         subjects,
         plan_id,
-        _runtime_limitations(catalog, policy),
+        _runtime_limitations(scenarios, policy),
     )
     return PlanReady(ValidationPlan(plan_id, scenarios, purge, projection, subjects))
 

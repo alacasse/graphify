@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,15 +59,18 @@ from .model import (
     CatalogDocumentsFact,
     CatalogReadRequest,
     CatalogRejected,
+    AggregateValidation,
     HarnessPolicy,
     ImageBuildRequest,
     ImmutableImageFact,
+    LifecycleValidation,
     PlanId,
     PlanProjection,
     PlanRejected,
     RunId,
     ValidationPlan,
     ValidationRequest,
+    UnsupportedValidation,
 )
 from .resources import (
     ContainerClaimed,
@@ -159,11 +163,25 @@ class ExecutionSnapshot:
     action: str
     bundle: Path
     plan_identity: str | None
+    plan_scenarios: tuple[str, ...]
+    purge_required: bool | None
     authority: str
     outcome: str | None
     raw_exit: int | None
     ci_annotation: str | None
+    resource_active: bool
+    evidence_sealed: bool
+    containers: tuple[str, ...]
+    active_processes: tuple[int, ...]
+    resource_chronology: tuple[str, ...]
     chronology: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ObserverFailure:
+    sequence: int
+    action: str
+    failure: DiagnosticFailure
 
 
 class ExecutionObserver(Protocol):
@@ -231,6 +249,7 @@ class RunController:
         self._publication = _NamedPublicationAdapter() if publication is None else publication
         self._retention = RetentionAdapter() if retention is None else retention
         self._harness = _harness
+        self._observer_failures: list[ObserverFailure] = []
 
     @classmethod
     def _for_harness(
@@ -270,6 +289,19 @@ class RunController:
         """Run one validation; public callers cannot inject mid-run facts or faults."""
 
         trace: list[str] = []
+        self._observer_failures.clear()
+        selection = _validation_selection(request.validation)
+        if request.selection != selection:
+            return PreflightRejected(
+                (
+                    preparation_failure(
+                        "request",
+                        "selection",
+                        "selection does not match the typed validation request",
+                    ),
+                ),
+                ("contradictory request rejected before bundle allocation",),
+            )
         try:
             resources = self._allocate(request)
         except BundleAllocationError as error:
@@ -313,6 +345,11 @@ class RunController:
             failure = controller_failure("close", request.run_id.value, error)
             return _with_close_failure(disposition, failure)
         return disposition
+
+    def observer_failures(self) -> tuple[ObserverFailure, ...]:
+        """Return deterministic presentation failures isolated from run authority."""
+
+        return tuple(self._observer_failures)
 
     def recover(self, request: RecoveryRequest) -> RecoveryDisposition:
         """Claim, assess, terminalize, freshly reopen, and reassess an abandoned run."""
@@ -429,7 +466,11 @@ class RunController:
             resources.close()
 
     def _allocate(self, request: RunRequest) -> LeaseBackedFulfilment:
-        running = make_pending_running_record(request.run_id.value, request.selection)
+        running = make_pending_running_record(
+            request.run_id.value,
+            _validation_selection(request.validation),
+            _request_digest(request),
+        )
         return LeaseBackedFulfilment.allocate(
             self._output_root,
             request.run_id.value,
@@ -692,19 +733,37 @@ class RunController:
         observer = self._harness.observer
         if observer is None:
             return
-        observer.observe(
-            ExecutionSnapshot(
-                len(trace),
-                action,
-                resources.snapshot().bundle_path,
-                None if expected is None else expected.plan.plan_id.value,
-                "TERMINAL" if terminal is not None else "RUNNING",
-                None if terminal is None else terminal.outcome.value,
-                None if terminal is None else terminal.raw_exit,
-                None if decision is None else decision.annotation.value,
-                tuple(trace),
-            )
+        resource = resources.snapshot()
+        snapshot = ExecutionSnapshot(
+            len(trace),
+            action,
+            resource.bundle_path,
+            None if expected is None else expected.plan.plan_id.value,
+            () if expected is None else tuple(item.name for item in expected.plan.scenarios),
+            None if expected is None else expected.plan.purge_required,
+            "TERMINAL" if terminal is not None else "RUNNING",
+            None if terminal is None else terminal.outcome.value,
+            None if terminal is None else terminal.raw_exit,
+            None if decision is None else decision.annotation.value,
+            resource.active,
+            resource.evidence_sealed,
+            resource.exact_container_names,
+            resource.active_processes,
+            tuple(
+                f"{item.sequence}:{item.operation}:{item.detail}" for item in resource.chronology
+            ),
+            tuple(trace),
         )
+        try:
+            observer.observe(snapshot)
+        except Exception as error:
+            self._observer_failures.append(
+                ObserverFailure(
+                    snapshot.sequence,
+                    action,
+                    controller_failure("observer", action, error),
+                )
+            )
 
 
 def _peer_terminal_assessment(
@@ -765,7 +824,8 @@ def _acquire_and_plan(
     subject_identity = _subject_identity(planned.plan.projection)
     expected = ExpectedDiagnostic(
         request.run_id.value,
-        request.selection,
+        _validation_selection(request.validation),
+        _request_digest(request),
         image.immutable_image_identity,
         subject_identity,
         planned.plan.projection,
@@ -794,17 +854,37 @@ def _rederive_expected(
 ) -> _ApplicationPrepared | _PreparationFailed:
     """Rebuild private diagnostic expectations from public stable inputs."""
 
-    if request.source_revision != inputs.source_revision:
+    if request.selection != _validation_selection(request.validation):
         return _PreparationFailed(
             (
                 preparation_failure(
-                    "recovery-image",
-                    "image",
-                    "source revision is not the configured stable resource input",
+                    "recovery-request",
+                    "selection",
+                    "selection does not match the typed validation request",
                 ),
             )
         )
-    catalog = compile_catalog(inputs.catalog_snapshot())
+    acquisition_plan = PlanId("recovery-acquisition")
+    image = inputs.fulfil(
+        ImageBuildRequest(ActionId(request.run_id, acquisition_plan, 0), request.source_revision)
+    )
+    if not isinstance(image, ImmutableImageFact):
+        detail = image.detail if isinstance(image, ActionUnavailable) else "wrong fact family"
+        return _PreparationFailed((preparation_failure("recovery-image", "image", detail),))
+    catalog_fact = inputs.fulfil(
+        CatalogReadRequest(
+            ActionId(request.run_id, acquisition_plan, 1),
+            image.immutable_image_identity,
+        )
+    )
+    if not isinstance(catalog_fact, CatalogDocumentsFact):
+        detail = (
+            catalog_fact.detail
+            if isinstance(catalog_fact, ActionUnavailable)
+            else "wrong fact family"
+        )
+        return _PreparationFailed((preparation_failure("recovery-catalog", "catalog", detail),))
+    catalog = compile_catalog(catalog_fact.documents)
     if isinstance(catalog, CatalogRejected):
         return _PreparationFailed(
             tuple(
@@ -819,11 +899,11 @@ def _rederive_expected(
                 preparation_failure("recovery-plan", "plan", reason) for reason in planned.reasons
             )
         )
-    image_identity = "sha256:" + hashlib.sha256(request.source_revision.encode()).hexdigest()
     expected = ExpectedDiagnostic(
         request.run_id.value,
-        request.selection,
-        image_identity,
+        _validation_selection(request.validation),
+        _request_digest(request),
+        image.immutable_image_identity,
         _subject_identity(planned.plan.projection),
         planned.plan.projection,
         request.policy.runtime_limitations,
@@ -843,10 +923,56 @@ def _running(expected: ExpectedDiagnostic, phase: str) -> RunningRunRecord:
     return RunningRunRecord(
         expected.run_id,
         expected.selection,
+        expected.request_digest,
         expected.image_identity,
         expected.subject_identity,
         phase,
     )
+
+
+def _validation_selection(request: ValidationRequest) -> str:
+    if isinstance(request, (LifecycleValidation, UnsupportedValidation)):
+        return f"{request.target}:{request.scope.value}"
+    if isinstance(request, AggregateValidation):
+        return f"aggregate:{request.scope.value}"
+    return (
+        f"complete:{','.join(request.targets)}:{','.join(scope.value for scope in request.scopes)}"
+    )
+
+
+def _request_digest(request: RunRequest) -> str:
+    validation = request.validation
+    if isinstance(validation, (LifecycleValidation, UnsupportedValidation)):
+        validation_value: object = {
+            "kind": type(validation).__name__,
+            "target": validation.target,
+            "scope": validation.scope.value,
+        }
+    elif isinstance(validation, AggregateValidation):
+        validation_value = {"kind": "AggregateValidation", "scope": validation.scope.value}
+    else:
+        validation_value = {
+            "kind": "CompleteValidation",
+            "targets": list(validation.targets),
+            "scopes": [scope.value for scope in validation.scopes],
+        }
+    payload = {
+        "run_id": request.run_id.value,
+        "selection": _validation_selection(validation),
+        "source_revision": request.source_revision,
+        "validation": validation_value,
+        "policy": {
+            "install_argv": list(request.policy.install_argv),
+            "uninstall_argv": list(request.policy.uninstall_argv),
+            "aggregate_uninstall_argv": list(request.policy.aggregate_uninstall_argv),
+            "purge_argv": list(request.policy.purge_argv),
+            "reinstall": request.policy.reinstall,
+            "repair": request.policy.repair,
+            "runtime_limitations": list(request.policy.runtime_limitations),
+        },
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _persist_diagnostic_inputs(

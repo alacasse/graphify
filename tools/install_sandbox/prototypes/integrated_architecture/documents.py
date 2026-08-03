@@ -393,6 +393,7 @@ class DiagnosticManifest:
 class RunningRunRecord:
     run_id: str
     selection: str
+    request_digest: str
     image_identity: str
     subject_identity: str
     phase: str
@@ -402,6 +403,7 @@ class RunningRunRecord:
 class TerminalRunRecord:
     run_id: str
     selection: str
+    request_digest: str
     image_identity: str
     subject_identity: str
     outcome: RunOutcome
@@ -494,6 +496,7 @@ def decode_run_record(data: bytes) -> RunRecord:
     common = {
         "run_id": _string(value.get("run_id"), "run_id"),
         "selection": _string(value.get("selection"), "selection"),
+        "request_digest": _digest(value.get("request_digest"), "request_digest"),
         "image_identity": _string(value.get("image_identity"), "image_identity"),
         "subject_identity": _string(value.get("subject_identity"), "subject_identity"),
     }
@@ -506,6 +509,7 @@ def decode_run_record(data: bytes) -> RunRecord:
                 "state",
                 "run_id",
                 "selection",
+                "request_digest",
                 "image_identity",
                 "subject_identity",
                 "phase",
@@ -521,6 +525,7 @@ def decode_run_record(data: bytes) -> RunRecord:
             "state",
             "run_id",
             "selection",
+            "request_digest",
             "image_identity",
             "subject_identity",
             "raw_exit",
@@ -583,6 +588,7 @@ def _run_value(value: RunRecord) -> JsonObject:
         "version": 1,
         "run_id": value.run_id,
         "selection": value.selection,
+        "request_digest": value.request_digest,
         "image_identity": value.image_identity,
         "subject_identity": value.subject_identity,
     }

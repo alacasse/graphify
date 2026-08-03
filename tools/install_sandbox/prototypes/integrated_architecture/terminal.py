@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from .scenarios import DemoFrame, ScenarioResult, interactive_frames, run_all
+from .scenarios import DemoFrame, ScenarioResult, run_all, stream_interactive_frames
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,15 +37,19 @@ def _render_frame(frame: DemoFrame, *, ansi: bool) -> str:
     return "\n".join(sections)
 
 
-def _interactive(frames: Sequence[DemoFrame], *, ansi: bool) -> int:
-    for index, frame in enumerate(frames):
+def _interactive(*, ansi: bool) -> int:
+    emitted = 0
+
+    def render(frame: DemoFrame) -> None:
+        nonlocal emitted
         if ansi and sys.stdout.isatty():
             print("\033[2J\033[H", end="")
-        print(_render_frame(frame, ansi=ansi))
-        if index + 1 < len(frames) and sys.stdin.isatty():
-            input("\nPress Enter for the next action...")
-        elif index + 1 < len(frames):
+        elif emitted:
             print("\n---")
+        print(_render_frame(frame, ansi=ansi), flush=True)
+        emitted += 1
+
+    stream_interactive_frames(render)
     print("\nPREPARED — NOT RESOLVED; human architecture acceptance remains in #38")
     return 0
 
@@ -66,7 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.demo == "all":
         return _batch(run_all())
-    return _interactive(interactive_frames(), ansi=not args.no_ansi)
+    return _interactive(ansi=not args.no_ansi)
 
 
 if __name__ == "__main__":

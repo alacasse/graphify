@@ -116,6 +116,7 @@ from .model import (
     PurgeIncomplete,
     PurgePassed,
     RawFact,
+    ScenarioProjection,
     ScenarioFinding,
     ScenarioIncomplete,
     ScenarioPassed,
@@ -141,6 +142,7 @@ HOST_LOG_PATH = "runner.log"
 class ExpectedDiagnostic:
     run_id: str
     selection: str
+    request_digest: str
     image_identity: str
     subject_identity: str
     plan: PlanProjection
@@ -261,16 +263,28 @@ def make_running_record(expected: ExpectedDiagnostic, phase: str = "allocated") 
     return RunningRunRecord(
         expected.run_id,
         expected.selection,
+        expected.request_digest,
         expected.image_identity,
         expected.subject_identity,
         phase,
     )
 
 
-def make_pending_running_record(run_id: str, selection: str) -> RunningRunRecord:
+def make_pending_running_record(
+    run_id: str,
+    selection: str,
+    request_digest: str,
+) -> RunningRunRecord:
     """Construct minimal typed authority before image and plan identities exist."""
 
-    return RunningRunRecord(run_id, selection, "PENDING", "PENDING", "allocated")
+    return RunningRunRecord(
+        run_id,
+        selection,
+        request_digest,
+        "PENDING",
+        "PENDING",
+        "allocated",
+    )
 
 
 def derive_terminal_facts(
@@ -337,6 +351,7 @@ def derive_abandoned_running_record(
         return RunningRunRecord(
             record.run_id,
             record.selection,
+            record.request_digest,
             record.image_identity,
             record.subject_identity,
             "abandoned-after-lifecycle-error",
@@ -384,13 +399,21 @@ def build_manifest(
 ) -> DiagnosticManifest:
     """Translate domain authority and raw facts into one diagnostic manifest."""
 
-    scenarios = tuple(_scenario_document(record) for record in outcome.scenario_records)
+    projections = {item.name: item for item in expected.plan.scenarios}
+    scenarios = tuple(
+        _scenario_document(record, projections.get(record.result.name))
+        for record in outcome.scenario_records
+    )
     raw_facts = tuple(_raw_fact_document(fact) for fact in outcome.raw_facts)
     findings = tuple(_finding_document(finding) for finding in outcome.findings)
     failures = _translation_failures(outcome)
     limitations = (
         *expected.global_runtime_limitations,
-        *(limitation for scenario in scenarios for limitation in scenario.limitations),
+        *(
+            limitation
+            for scenario in expected.plan.scenarios
+            for limitation in scenario.runtime_limitations
+        ),
     )
     references = tuple(_evidence_reference(item) for item in inventory)
     projection = _projection(scenarios)
@@ -533,6 +556,7 @@ def _prepare_terminal(
     terminal = TerminalRunRecord(
         run_id=expected.run_id,
         selection=expected.selection,
+        request_digest=expected.request_digest,
         image_identity=expected.image_identity,
         subject_identity=expected.subject_identity,
         outcome=outcome,
@@ -704,7 +728,10 @@ def _ci_exit_reasons(
     return ()
 
 
-def _scenario_document(record: object) -> ScenarioDocument:
+def _scenario_document(
+    record: object,
+    projection: ScenarioProjection | None,
+) -> ScenarioDocument:
     if isinstance(record, UnsupportedScenarioRecord):
         result = record.result
         return ScenarioDocument(
@@ -717,11 +744,11 @@ def _scenario_document(record: object) -> ScenarioDocument:
             result.reason,
         )
     if isinstance(record, PhaseScenarioRecord):
-        phases = tuple(_phase_document(item) for item in record.phases)
+        phases = tuple(_phase_document(item, projection) for item in record.phases)
         return _scenario_from_result(record.result, phases)
     if isinstance(record, AggregateScenarioRecord):
-        phases = tuple(_preparation_document(item) for item in record.preparations)
-        phases += (_aggregate_removal_document(record.removal),)
+        phases = tuple(_preparation_document(item, projection) for item in record.preparations)
+        phases += (_aggregate_removal_document(record.removal, projection),)
         return _scenario_from_result(record.result, phases)
     raise TypeError(f"unknown scenario record: {type(record).__name__}")
 
@@ -767,23 +794,27 @@ def _scenario_from_result(result: object, phases: tuple[PhaseDocument, ...]) -> 
     raise TypeError(f"unknown scenario result: {type(result).__name__}")
 
 
-def _phase_document(value: object) -> PhaseDocument:
+def _phase_document(value: object, projection: ScenarioProjection | None) -> PhaseDocument:
+    if isinstance(value, (PhasePassed, PhaseFinding, PhaseIncomplete)):
+        name = _phase_owner(value.phase.value, value.evidence, projection)
+    else:
+        name = "unknown"
     if isinstance(value, PhasePassed):
         return PhaseDocument(
-            value.phase.value,
+            name,
             PhaseStatus.PASS,
             tuple(_action_identity(item) for item in value.evidence),
         )
     if isinstance(value, PhaseFinding):
         return PhaseDocument(
-            value.phase.value,
+            name,
             PhaseStatus.FINDING,
             tuple(_action_identity(item) for item in value.evidence),
             reason=value.finding.summary,
         )
     if isinstance(value, PhaseIncomplete):
         return PhaseDocument(
-            value.phase.value,
+            name,
             PhaseStatus.INCOMPLETE,
             tuple(_action_identity(item) for item in value.evidence),
             reason=value.reason,
@@ -804,47 +835,67 @@ def _phase_document(value: object) -> PhaseDocument:
     raise TypeError(f"unknown phase result: {type(value).__name__}")
 
 
-def _preparation_document(value: object) -> PhaseDocument:
+def _preparation_document(
+    value: object,
+    projection: ScenarioProjection | None,
+) -> PhaseDocument:
+    if not isinstance(value, (PreparationPassed, PreparationFinding, PreparationIncomplete)):
+        raise TypeError(f"unknown aggregate preparation: {type(value).__name__}")
+    name = _phase_owner(f"aggregate-prepare:{value.target}", value.evidence, projection)
     if isinstance(value, PreparationPassed):
         return PhaseDocument(
-            f"aggregate-prepare:{value.target}",
+            name,
             PhaseStatus.PASS,
             tuple(_action_identity(item) for item in value.evidence),
         )
     if isinstance(value, PreparationFinding):
         return PhaseDocument(
-            f"aggregate-prepare:{value.target}",
+            name,
             PhaseStatus.FINDING,
             tuple(_action_identity(item) for item in value.evidence),
             reason=value.finding.summary,
         )
-    if isinstance(value, PreparationIncomplete):
-        return PhaseDocument(
-            f"aggregate-prepare:{value.target}",
-            PhaseStatus.INCOMPLETE,
-            tuple(_action_identity(item) for item in value.evidence),
-            reason=value.reason,
+    return PhaseDocument(
+        name,
+        PhaseStatus.INCOMPLETE,
+        tuple(_action_identity(item) for item in value.evidence),
+        reason=value.reason,
+    )
+
+
+def _aggregate_removal_document(
+    value: object,
+    projection: ScenarioProjection | None,
+) -> PhaseDocument:
+    evidence = (
+        value.evidence
+        if isinstance(
+            value,
+            (
+                AggregateUninstallPassed,
+                AggregateUninstallFinding,
+                AggregateUninstallIncomplete,
+            ),
         )
-    raise TypeError(f"unknown aggregate preparation: {type(value).__name__}")
-
-
-def _aggregate_removal_document(value: object) -> PhaseDocument:
+        else ()
+    )
+    name = _phase_owner("aggregate-uninstall", evidence, projection)
     if isinstance(value, AggregateUninstallPassed):
         return PhaseDocument(
-            "aggregate-uninstall",
+            name,
             PhaseStatus.PASS,
             tuple(_action_identity(item) for item in value.evidence),
         )
     if isinstance(value, AggregateUninstallFinding):
         return PhaseDocument(
-            "aggregate-uninstall",
+            name,
             PhaseStatus.FINDING,
             tuple(_action_identity(item) for item in value.evidence),
             reason=value.finding.summary,
         )
     if isinstance(value, AggregateUninstallIncomplete):
         return PhaseDocument(
-            "aggregate-uninstall",
+            name,
             PhaseStatus.INCOMPLETE,
             tuple(_action_identity(item) for item in value.evidence),
             reason=value.reason,
@@ -856,6 +907,22 @@ def _aggregate_removal_document(value: object) -> PhaseDocument:
             reason=value.reason,
         )
     raise TypeError(f"unknown aggregate removal: {type(value).__name__}")
+
+
+def _phase_owner(
+    fallback: str,
+    evidence: tuple[ActionId, ...],
+    projection: ScenarioProjection | None,
+) -> str:
+    """Recover the exact plan-owned phase identity from its first captured action."""
+
+    if projection is None or not evidence:
+        return fallback
+    ordinal = evidence[0].ordinal
+    return next(
+        (item.phase for item in projection.expected_actions if item.ordinal == ordinal),
+        fallback,
+    )
 
 
 def _purge_document(value: object) -> PurgeDocument:
@@ -1146,6 +1213,24 @@ def _manifest_failures(
         failures.append(
             PlanCoverageFailure("manifest", MANIFEST_PATH, "purge applicability mismatch")
         )
+    expected_limitations = _unique(
+        (
+            *expected.global_runtime_limitations,
+            *(
+                limitation
+                for scenario in expected.plan.scenarios
+                for limitation in scenario.runtime_limitations
+            ),
+        )
+    )
+    if manifest.runtime_limitations != expected_limitations:
+        failures.append(
+            PlanCoverageFailure(
+                "manifest",
+                MANIFEST_PATH,
+                "runtime limitations are not the exact selected plan projection",
+            )
+        )
     failures.extend(_scenario_coverage_failures(expected.plan, manifest))
     failures.extend(_action_evidence_failures(expected, manifest))
     failures.extend(_stream_inventory_failures(manifest))
@@ -1326,6 +1411,7 @@ def _required_action_completeness_failures(
                 scenario.name,
                 phase,
                 planned_by_id,
+                tuple(item.action_id for item in scenario.findings),
             )
             if failure is not None:
                 failures.append(failure)
@@ -1334,7 +1420,11 @@ def _required_action_completeness_failures(
         _expected_action_identity(expected.run_id, expected.plan.plan_id.value, action)
         for action in expected.plan.purge_actions
     )
-    purge_failure = _purge_action_completeness_failure(manifest.purge, required_purge)
+    purge_failure = _purge_action_completeness_failure(
+        manifest.purge,
+        required_purge,
+        tuple(item.action_id for item in manifest.purge.findings),
+    )
     if purge_failure is not None:
         failures.append(purge_failure)
     return tuple(failures)
@@ -1344,16 +1434,19 @@ def _phase_action_completeness_failure(
     scenario_name: str,
     phase: PhaseDocument,
     planned_by_id: dict[str, ExpectedAction],
+    finding_ids: tuple[str, ...],
 ) -> PlanCoverageFailure | None:
     required = tuple(
         identity
         for identity, action in planned_by_id.items()
-        if action.scenario == scenario_name
-        and _phase_projection_key(action.phase) == _phase_projection_key(phase.name)
+        if action.scenario == scenario_name and action.phase == phase.name
     )
-    if phase.status in {PhaseStatus.PASS, PhaseStatus.FINDING}:
+    if phase.status is PhaseStatus.PASS:
         message = "completed phase does not contain its exact required action tuple"
         valid = phase.evidence_actions == required
+    elif phase.status is PhaseStatus.FINDING:
+        message = "finding phase evidence is not the exact prefix through its finding action"
+        valid = _is_finding_prefix(phase.evidence_actions, required, finding_ids)
     elif phase.status is PhaseStatus.INCOMPLETE:
         message = "incomplete phase evidence is not an ordered required-action prefix"
         valid = phase.evidence_actions == required[: len(phase.evidence_actions)]
@@ -1373,10 +1466,14 @@ def _phase_action_completeness_failure(
 def _purge_action_completeness_failure(
     purge: PurgeDocument,
     required: tuple[str, ...],
+    finding_ids: tuple[str, ...],
 ) -> PlanCoverageFailure | None:
-    completed = purge.status in {PurgeStatus.PASS, PurgeStatus.FINDING}
-    valid = purge.evidence_actions == (
-        required if completed else required[: len(purge.evidence_actions)]
+    completed = purge.status is PurgeStatus.PASS
+    valid = (
+        _is_finding_prefix(purge.evidence_actions, required, finding_ids)
+        if purge.status is PurgeStatus.FINDING
+        else purge.evidence_actions
+        == (required if completed else required[: len(purge.evidence_actions)])
     )
     if valid:
         return None
@@ -1389,11 +1486,12 @@ def _purge_action_completeness_failure(
     )
 
 
-def _phase_projection_key(name: str) -> str:
-    parts = name.split(":")
-    if parts[0] == "aggregate-prepare" and len(parts) > 1:
-        return ":".join(parts[:2])
-    return parts[0]
+def _is_finding_prefix(
+    evidence: tuple[str, ...],
+    required: tuple[str, ...],
+    finding_ids: tuple[str, ...],
+) -> bool:
+    return bool(evidence) and evidence == required[: len(evidence)] and evidence[-1] in finding_ids
 
 
 def _expected_actions(plan: PlanProjection) -> tuple[ExpectedAction, ...]:
@@ -1466,6 +1564,14 @@ def _scenario_coverage_failures(
     by_name = {item.name: item for item in plan.scenarios}
     for scenario in scenarios:
         expected = by_name[scenario.name]
+        if scenario.limitations != expected.runtime_limitations:
+            failures.append(
+                PlanCoverageFailure(
+                    "scenario",
+                    scenario.name,
+                    "scenario limitations disagree with the selected plan",
+                )
+            )
         expected_phases = tuple(item.value for item in expected.expected_phases)
         actual = tuple(_base_phase_name(item.name) for item in scenario.phases)
         if scenario.status is ScenarioStatus.UNSUPPORTED:
@@ -1665,23 +1771,35 @@ def _identity_failures(
             record.subject_identity,
         )
         == ("PENDING", "PENDING")
-        and (record.run_id, record.selection)
+        and (record.run_id, record.selection, record.request_digest)
         == (
             expected.run_id,
             expected.selection,
+            expected.request_digest,
         )
     ):
         return ()
-    actual = (record.run_id, record.selection, record.image_identity, record.subject_identity)
+    actual = (
+        record.run_id,
+        record.selection,
+        record.request_digest,
+        record.image_identity,
+        record.subject_identity,
+    )
     wanted = (
         expected.run_id,
         expected.selection,
+        expected.request_digest,
         expected.image_identity,
         expected.subject_identity,
     )
     if actual != wanted:
         return (
-            BindingFailure("run", RUN_PATH, "run, selection, image, or subject identity mismatch"),
+            BindingFailure(
+                "run",
+                RUN_PATH,
+                "run, selection, request, image, or subject identity mismatch",
+            ),
         )
     return ()
 

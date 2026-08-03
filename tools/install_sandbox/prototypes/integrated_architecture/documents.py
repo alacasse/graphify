@@ -205,11 +205,37 @@ class PurgeDocument:
 
 
 @dataclass(frozen=True)
-class TerminationDocument:
-    kind: TerminationKind
-    raw_exit: int | None = None
-    signal: str | None = None
-    detail: str | None = None
+class ExitedTerminationDocument:
+    raw_exit: int
+
+
+@dataclass(frozen=True)
+class SignalledTerminationDocument:
+    signal: str
+
+
+@dataclass(frozen=True)
+class TimedOutTerminationDocument:
+    detail: str
+
+
+@dataclass(frozen=True)
+class CancelledTerminationDocument:
+    detail: str
+
+
+@dataclass(frozen=True)
+class SpawnFailedTerminationDocument:
+    detail: str
+
+
+type TerminationDocument = (
+    ExitedTerminationDocument
+    | SignalledTerminationDocument
+    | TimedOutTerminationDocument
+    | CancelledTerminationDocument
+    | SpawnFailedTerminationDocument
+)
 
 
 @dataclass(frozen=True)
@@ -238,14 +264,31 @@ class CommandFactDocument:
 
 
 @dataclass(frozen=True)
-class ObservationItemDocument:
+class ContentObservationDocument:
     rule_key: str
     path: str
-    entry_kind: ObservationKind
-    byte_size: int | None
-    sha256: str | None
-    detail: str | None
-    semantic_verdict: str | None
+    byte_size: int
+    sha256: str
+    semantic_verdict: str
+
+
+@dataclass(frozen=True)
+class AbsentObservationDocument:
+    rule_key: str
+    path: str
+    semantic_verdict: str
+
+
+@dataclass(frozen=True)
+class ReadFailureObservationDocument:
+    rule_key: str
+    path: str
+    detail: str
+
+
+type ObservationItemDocument = (
+    ContentObservationDocument | AbsentObservationDocument | ReadFailureObservationDocument
+)
 
 
 @dataclass(frozen=True)
@@ -921,25 +964,53 @@ def _unavailable_fact(item: JsonObject) -> UnavailableFactDocument:
 
 
 def _termination_value(value: TerminationDocument) -> JsonObject:
+    if isinstance(value, ExitedTerminationDocument):
+        kind, raw_exit, signal, detail = TerminationKind.EXITED, value.raw_exit, None, None
+    elif isinstance(value, SignalledTerminationDocument):
+        kind, raw_exit, signal, detail = TerminationKind.SIGNALLED, None, value.signal, None
+    elif isinstance(value, TimedOutTerminationDocument):
+        kind, raw_exit, signal, detail = TerminationKind.TIMED_OUT, None, None, value.detail
+    elif isinstance(value, CancelledTerminationDocument):
+        kind, raw_exit, signal, detail = TerminationKind.CANCELLED, None, None, value.detail
+    else:
+        kind, raw_exit, signal, detail = TerminationKind.SPAWN_FAILED, None, None, value.detail
     return {
-        "kind": value.kind.value,
-        "raw_exit": value.raw_exit,
-        "signal": value.signal,
-        "detail": value.detail,
+        "kind": kind.value,
+        "raw_exit": raw_exit,
+        "signal": signal,
+        "detail": detail,
     }
 
 
 def _termination(value: JsonValue) -> TerminationDocument:
     item = _object(value, "termination")
     _exact(item, {"kind", "raw_exit", "signal", "detail"}, "termination")
-    result = TerminationDocument(
-        _enum(TerminationKind, item["kind"], "termination kind"),
-        _optional_integer(item["raw_exit"], "raw_exit"),
-        _optional_string(item["signal"], "signal"),
-        _optional_string(item["detail"], "detail"),
-    )
-    _validate_termination(result)
-    return result
+    kind = _enum(TerminationKind, item["kind"], "termination kind")
+    raw_exit = _optional_integer(item["raw_exit"], "raw_exit")
+    signal = _optional_string(item["signal"], "signal")
+    detail = _optional_string(item["detail"], "detail")
+    if (
+        kind is TerminationKind.EXITED
+        and raw_exit is not None
+        and signal is None
+        and detail is None
+    ):
+        return ExitedTerminationDocument(raw_exit)
+    if (
+        kind is TerminationKind.SIGNALLED
+        and raw_exit is None
+        and signal is not None
+        and detail is None
+    ):
+        return SignalledTerminationDocument(signal)
+    if raw_exit is None and signal is None and detail is not None:
+        if kind is TerminationKind.TIMED_OUT:
+            return TimedOutTerminationDocument(detail)
+        if kind is TerminationKind.CANCELLED:
+            return CancelledTerminationDocument(detail)
+        if kind is TerminationKind.SPAWN_FAILED:
+            return SpawnFailedTerminationDocument(detail)
+    raise DocumentError(f"contradictory {kind.value} termination fields")
 
 
 def _stream_value(value: StreamDocument) -> JsonObject:
@@ -972,14 +1043,26 @@ def _stream(value: JsonValue) -> StreamDocument:
 
 
 def _observation_item_value(value: ObservationItemDocument) -> JsonObject:
+    if isinstance(value, ContentObservationDocument):
+        kind = ObservationKind.CONTENT
+        byte_size, sha256, detail = value.byte_size, value.sha256, None
+        verdict: str | None = value.semantic_verdict
+    elif isinstance(value, AbsentObservationDocument):
+        kind = ObservationKind.ABSENT
+        byte_size, sha256, detail = None, None, None
+        verdict = value.semantic_verdict
+    else:
+        kind = ObservationKind.READ_FAILURE
+        byte_size, sha256, detail = None, None, value.detail
+        verdict = None
     return {
         "rule_key": value.rule_key,
         "path": value.path,
-        "entry_kind": value.entry_kind.value,
-        "byte_size": value.byte_size,
-        "sha256": value.sha256,
-        "detail": value.detail,
-        "semantic_verdict": value.semantic_verdict,
+        "entry_kind": kind.value,
+        "byte_size": byte_size,
+        "sha256": sha256,
+        "detail": detail,
+        "semantic_verdict": verdict,
     }
 
 
@@ -998,17 +1081,22 @@ def _observation_item(value: JsonValue) -> ObservationItemDocument:
         },
         "observation item",
     )
-    result = ObservationItemDocument(
-        _string(item["rule_key"], "rule_key"),
-        _string(item["path"], "path"),
-        _enum(ObservationKind, item["entry_kind"], "observation kind"),
-        _optional_integer(item["byte_size"], "byte_size"),
-        _optional_string(item["sha256"], "sha256"),
-        _optional_string(item["detail"], "detail"),
-        _optional_string(item["semantic_verdict"], "semantic_verdict"),
-    )
-    _validate_observation(result)
-    return result
+    rule_key = _string(item["rule_key"], "rule_key")
+    path = _string(item["path"], "path")
+    kind = _enum(ObservationKind, item["entry_kind"], "observation kind")
+    byte_size = _optional_integer(item["byte_size"], "byte_size")
+    sha256 = _optional_string(item["sha256"], "sha256")
+    detail = _optional_string(item["detail"], "detail")
+    verdict = _optional_string(item["semantic_verdict"], "semantic_verdict")
+    if kind is ObservationKind.CONTENT:
+        if byte_size is not None and sha256 is not None and detail is None and verdict is not None:
+            return ContentObservationDocument(rule_key, path, byte_size, sha256, verdict)
+    elif kind is ObservationKind.ABSENT:
+        if byte_size is None and sha256 is None and detail is None and verdict is not None:
+            return AbsentObservationDocument(rule_key, path, verdict)
+    elif byte_size is None and sha256 is None and detail is not None and verdict is None:
+        return ReadFailureObservationDocument(rule_key, path, detail)
+    raise DocumentError(f"contradictory {kind.value} observation fields")
 
 
 def _failure_kind(value: DiagnosticFailure) -> str:
@@ -1153,41 +1241,31 @@ def _validate_purge(value: PurgeDocument) -> None:
 
 
 def _validate_termination(value: TerminationDocument) -> None:
-    if value.kind is TerminationKind.EXITED:
-        valid = value.raw_exit is not None and value.signal is None and value.detail is None
-    elif value.kind is TerminationKind.SIGNALLED:
-        valid = value.raw_exit is None and value.signal is not None and value.detail is None
-    else:
-        valid = value.raw_exit is None and value.signal is None and value.detail is not None
-    if not valid:
-        raise DocumentError(f"contradictory {value.kind.value} termination fields")
+    if isinstance(value, SignalledTerminationDocument) and not value.signal:
+        raise DocumentError("SIGNALLED termination requires a signal")
+    if (
+        isinstance(
+            value,
+            (
+                TimedOutTerminationDocument,
+                CancelledTerminationDocument,
+                SpawnFailedTerminationDocument,
+            ),
+        )
+        and not value.detail
+    ):
+        raise DocumentError("non-exit termination requires detail")
 
 
 def _validate_observation(value: ObservationItemDocument) -> None:
-    if value.entry_kind is ObservationKind.CONTENT:
-        valid = (
-            value.byte_size is not None
-            and value.byte_size >= 0
-            and value.sha256 is not None
-            and value.detail is None
-            and value.semantic_verdict is not None
-        )
-    elif value.entry_kind is ObservationKind.ABSENT:
-        valid = (
-            value.byte_size is None
-            and value.sha256 is None
-            and value.detail is None
-            and value.semantic_verdict is not None
-        )
-    else:
-        valid = (
-            value.byte_size is None
-            and value.sha256 is None
-            and value.detail is not None
-            and value.semantic_verdict is None
-        )
-    if not valid:
-        raise DocumentError(f"contradictory {value.entry_kind.value} observation fields")
+    if isinstance(value, ContentObservationDocument):
+        if value.byte_size < 0 or not value.sha256 or not value.semantic_verdict:
+            raise DocumentError("CONTENT observation requires size, digest, and verdict")
+    elif isinstance(value, AbsentObservationDocument):
+        if not value.semantic_verdict:
+            raise DocumentError("ABSENT observation requires a verdict")
+    elif not value.detail:
+        raise DocumentError("READ_FAILURE observation requires detail")
 
 
 def _validate_finding(value: FindingDocument) -> None:

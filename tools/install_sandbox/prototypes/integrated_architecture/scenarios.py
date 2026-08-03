@@ -9,7 +9,8 @@ import hashlib
 import json
 import threading
 from collections.abc import Callable
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import FrozenInstanceError, dataclass, replace
+from itertools import combinations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
@@ -26,11 +27,14 @@ from .bundle import (
 from .coordinator import (
     DurableNonterminal,
     DurableTerminal,
+    ExecutionObserver,
+    ExecutionSnapshot,
     PublicationAdapter,
     RecoveryCommitted,
     RecoveryRequest,
     RunController,
     RunRequest,
+    TerminalTrustFailure,
 )
 from .diagnostics import (
     CompletedAssessment,
@@ -38,11 +42,16 @@ from .diagnostics import (
     PublicationFailed,
     Published,
     RecoveryReady,
+    _manifest_failures,  # pyright: ignore[reportPrivateUsage]
     prepare_recovery,
 )
 from .documents import (
+    CommandFactDocument,
+    ContentObservationDocument,
     DocumentError,
+    ObservationFactDocument,
     PhaseStatus,
+    PlanCoverageFailure,
     RunningRunRecord,
     RunOutcome,
     ScenarioStatus,
@@ -62,6 +71,8 @@ from .model import (
     ActionId,
     ActionRequest,
     AggregateScenario,
+    AggregateScenarioRecord,
+    AggregateUninstallPassed,
     AggregateValidation,
     CapturedStream,
     CatalogDocumentsFact,
@@ -111,12 +122,14 @@ from .resources import (
     ContainerClaimed,
     ContainerClaimRejected,
     DockerDaemonAdapter,
+    DockerDaemonAuthority,
     LeaseBackedFulfilment,
     RecoverySession,
     ResourceFaults,
     ResourceInputs,
     RetentionAdapter,
     nominate_recovery,
+    reopen_completed,
 )
 
 
@@ -354,7 +367,7 @@ def _allocate_resources(
 ) -> LeaseBackedFulfilment:
     output = base / "out"
     sandbox = base / f"sandbox-{run_id}"
-    sandbox.mkdir(parents=True)
+    sandbox.mkdir(parents=True, exist_ok=True)
     return LeaseBackedFulfilment.allocate(
         output,
         run_id,
@@ -397,31 +410,37 @@ def _controller(
     before_terminal_commit: (
         Callable[[LeaseBackedFulfilment, TerminalCommitPermit], None] | None
     ) = None,
+    after_terminal_commit: Callable[[LeaseBackedFulfilment], None] | None = None,
+    observer: ExecutionObserver | None = None,
 ) -> RunController:
     sandbox = base / "sandbox"
-    sandbox.mkdir(parents=True)
+    sandbox.mkdir(parents=True, exist_ok=True)
     if before_terminal_commit is None:
         return RunController._for_harness(  # pyright: ignore[reportPrivateUsage]
             base / "out",
             sandbox,
-            DockerDaemonAdapter(f"demo:{base}"),
+            DockerDaemonAuthority(f"demo:{base}").adapter(),
             _inputs() if inputs is None else inputs,
             resource_faults=resource_faults,
             bundle_faults=bundle_faults,
             publication=publication,
             retention=retention,
+            after_terminal_commit=after_terminal_commit,
+            observer=observer,
         )
 
     return RunController._for_harness(  # pyright: ignore[reportPrivateUsage]
         base / "out",
         sandbox,
-        DockerDaemonAdapter(f"demo:{base}"),
+        DockerDaemonAuthority(f"demo:{base}").adapter(),
         _inputs() if inputs is None else inputs,
         resource_faults=resource_faults,
         bundle_faults=bundle_faults,
         publication=publication,
         retention=retention,
         before_terminal_commit=before_terminal_commit,
+        after_terminal_commit=after_terminal_commit,
+        observer=observer,
     )
 
 
@@ -460,7 +479,7 @@ def _catalog_immutability() -> None:
         resource = _allocate_resources(
             Path(temporary),
             "catalog-owned",
-            DockerDaemonAdapter("catalog-owned"),
+            DockerDaemonAuthority("catalog-owned").adapter(),
             inputs=resource_inputs,
         )
         plan_id = _lifecycle_plan().plan.plan_id
@@ -499,6 +518,23 @@ def _summary_case() -> str:
     scenario = plan.scenarios[0]
     assert isinstance(scenario, LifecycleScenario)
     assert isinstance(roll_up_phases(scenario, ()), ScenarioIncomplete)
+    with TemporaryDirectory(prefix="issue41-summary-") as temporary:
+        result = _controller(Path(temporary)).run(_request("summary"))
+        assert isinstance(result, DurableTerminal)
+        payload = cast(
+            dict[str, object], json.loads((result.bundle / "manifest.json").read_bytes())
+        )
+        scenarios = cast(list[dict[str, object]], payload["scenarios"])
+        phases = cast(list[dict[str, object]], scenarios[0]["phases"])
+        phases[0]["status"] = "FINDING"
+        phases[0]["reason"] = "contradicts PASS summary"
+        contradictory = (json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n").encode()
+        try:
+            decode_manifest(contradictory)
+        except DocumentError:
+            pass
+        else:
+            raise AssertionError("PASS summary accepted FINDING phase evidence")
     return "scenario summary cannot contradict phase cardinality"
 
 
@@ -576,41 +612,110 @@ def _not_applicable_case() -> str:
     aggregate_scenario = aggregate.plan.scenarios[0]
     assert isinstance(aggregate_scenario, AggregateScenario)
     assert "alpha" in tuple(item.target for item in aggregate_scenario.preparations)
+    aggregate_outcome = run_validation(
+        aggregate.plan, RunId("not-applicable-aggregate"), _scripted_fulfil
+    )
+    assert not isinstance(aggregate_outcome, ValidationIncomplete)
+    aggregate_record = aggregate_outcome.scenario_records[0]
+    assert isinstance(aggregate_record, AggregateScenarioRecord)
+    assert isinstance(aggregate_record.removal, AggregateUninstallPassed)
+    assert any(
+        isinstance(fact, CommandFact) and fact.phase.startswith("aggregate-uninstall:")
+        for fact in aggregate_outcome.raw_facts
+    )
     return "target uninstall N/A was command-free but independently joined to aggregate cleanup"
 
 
 def _aggregate_case() -> str:
-    duplicate_surface: tuple[RawCatalogDocument, ...] = (
+    def supported(*locations: str) -> dict[str, object]:
+        return {
+            "supported": True,
+            "target_uninstall": True,
+            "limitations": [],
+            "effects": [
+                {"kind": "owned_file", "location": location, "expected_text": location}
+                for location in locations
+            ],
+        }
+
+    cover_documents: tuple[RawCatalogDocument, ...] = (
         {
             "source": "x.yaml",
             "name": "x",
-            "scopes": {"user": _scope("shared", "user"), "project": _scope("x", "project")},
+            "scopes": {"user": supported("a", "b"), "project": _scope("x", "project")},
         },
         {
             "source": "y.yaml",
             "name": "y",
-            "scopes": {"user": _scope("shared", "user"), "project": _scope("y", "project")},
+            "scopes": {"user": supported("b", "c"), "project": _scope("y", "project")},
+        },
+        {
+            "source": "z.yaml",
+            "name": "z",
+            "scopes": {"user": supported("c", "d"), "project": _scope("z", "project")},
+        },
+        {
+            "source": "w.yaml",
+            "name": "w",
+            "scopes": {"user": supported("d"), "project": _scope("w", "project")},
         },
     )
-    compiled = compile_catalog(duplicate_surface)
+    compiled = compile_catalog(cover_documents)
     assert isinstance(compiled, CatalogReady)
     planned = build_validation_plan(compiled.catalog, AggregateValidation(Scope.USER), _policy())
     assert isinstance(planned, PlanReady)
     scenario = planned.plan.scenarios[0]
     assert isinstance(scenario, AggregateScenario)
     selected = tuple(item.target for item in scenario.preparations)
-    assert selected == independent_aggregate_cover_oracle(compiled.catalog, Scope.USER) == ("x",)
+    fixture_surfaces = {
+        "w": frozenset({"d"}),
+        "x": frozenset({"a", "b"}),
+        "y": frozenset({"b", "c"}),
+        "z": frozenset({"c", "d"}),
+    }
+    universe = frozenset(surface for surfaces in fixture_surfaces.values() for surface in surfaces)
+    independent = min(
+        (
+            names
+            for size in range(1, len(fixture_surfaces) + 1)
+            for names in combinations(tuple(sorted(fixture_surfaces)), size)
+            if frozenset().union(*(fixture_surfaces[name] for name in names)) == universe
+        ),
+        key=lambda names: (len(names), names),
+    )
+    assert selected == independent_aggregate_cover_oracle(compiled.catalog, Scope.USER)
+    assert selected == independent == ("x", "z")
     return "minimum aggregate cover matched the independent oracle"
 
 
 def _namespace_case() -> str:
     with TemporaryDirectory(prefix="issue41-namespace-") as temporary:
         base = Path(temporary)
-        first = _allocate_resources(base / "first", "owner-a", DockerDaemonAdapter("shared"))
-        second = _allocate_resources(base / "second", "owner-b", DockerDaemonAdapter("shared"))
+        authority = DockerDaemonAuthority("shared")
+        first = _allocate_resources(base / "first", "owner-a", authority.adapter())
+        second = _allocate_resources(base / "second", "owner-b", authority.adapter())
         try:
-            assert isinstance(first.reserve_container("exact-name"), ContainerClaimed)
-            assert isinstance(second.reserve_container("exact-name"), ContainerClaimRejected)
+            barrier = threading.Barrier(3)
+            results: list[ContainerClaimed | ContainerClaimRejected] = []
+            lock = threading.Lock()
+
+            def claim(resource: LeaseBackedFulfilment) -> None:
+                barrier.wait()
+                result = resource.reserve_container("exact-name")
+                with lock:
+                    results.append(result)
+
+            workers = (
+                threading.Thread(target=claim, args=(first,)),
+                threading.Thread(target=claim, args=(second,)),
+            )
+            for worker in workers:
+                worker.start()
+            barrier.wait()
+            for worker in workers:
+                worker.join()
+            assert sum(isinstance(item, ContainerClaimed) for item in results) == 1
+            assert sum(isinstance(item, ContainerClaimRejected) for item in results) == 1
         finally:
             first.close()
             second.close()
@@ -620,7 +725,9 @@ def _namespace_case() -> str:
 def _active_recovery_case() -> str:
     with TemporaryDirectory(prefix="issue41-active-") as temporary:
         resource = _allocate_resources(
-            Path(temporary), "active-owner", DockerDaemonAdapter("active")
+            Path(temporary),
+            "active-owner",
+            DockerDaemonAuthority("active").adapter(),
         )
         try:
             assert isinstance(nominate_recovery(resource.snapshot().bundle_path), RecoveryRejected)
@@ -634,7 +741,7 @@ def _capture_case() -> str:
         resource = _allocate_resources(
             Path(temporary),
             "capture",
-            DockerDaemonAdapter("capture"),
+            DockerDaemonAuthority("capture").adapter(),
             faults=ResourceFaults(fail_stream="stdout", fail_after_bytes=2),
         )
         try:
@@ -651,13 +758,50 @@ def _capture_case() -> str:
             assert fact.stdout.partial_content == b"ca" and fact.reaped
         finally:
             resource.close()
-    return "capture failure retained raw termination, reap, and partial bytes"
+
+    with TemporaryDirectory(prefix="issue41-capture-full-") as temporary:
+        base = Path(temporary)
+        policy = replace(
+            _policy(limitations=("capture proof",)),
+            install_argv=("python3.12", "-c", f"print('captured'); {_INSTALL_SCRIPT}"),
+        )
+        request = RunRequest(
+            RunId("capture-full"),
+            "alpha:user",
+            "prototype-source",
+            LifecycleValidation("alpha", Scope.USER),
+            policy,
+        )
+        result = _controller(
+            base,
+            resource_faults=ResourceFaults(fail_stream="stdout", fail_after_bytes=2),
+        ).run(request)
+        assert isinstance(result, DurableTerminal)
+        manifest = result.assessment.manifest
+        assert manifest is not None
+        command = next(
+            fact
+            for fact in manifest.raw_facts
+            if isinstance(fact, CommandFactDocument) and fact.stdout.captured == b"ca"
+        )
+        assert command.reaped and command.stdout.capture_error is not None
+        assert command.stdout.declared_size == 2
+        assert command.stdout.declared_digest == hashlib.sha256(b"ca").hexdigest()
+        ordinal = int(command.action_id.rpartition(":")[2])
+        path = f"commands/{ordinal:04d}.stdout"
+        reference = next(item for item in manifest.inventory if item.path == path)
+        assert (reference.byte_size, reference.sha256) == (
+            2,
+            hashlib.sha256(b"ca").hexdigest(),
+        )
+        assert (result.bundle / path).read_bytes() == b"ca"
+    return "full-layer capture failure retained termination, reap, bytes, digest, and inventory"
 
 
 def _content_case() -> str:
     with TemporaryDirectory(prefix="issue41-content-") as temporary:
         base = Path(temporary)
-        resource = _allocate_resources(base, "content", DockerDaemonAdapter("content"))
+        resource = _allocate_resources(base, "content", DockerDaemonAuthority("content").adapter())
         sandbox = base / "sandbox-content"
         (sandbox / "wanted.txt").write_text("wanted", encoding="utf-8")
         (sandbox / "secret.txt").write_text("TOP-SECRET", encoding="utf-8")
@@ -675,6 +819,11 @@ def _content_case() -> str:
             assert b"TOP-SECRET" not in repr(fact).encode()
         finally:
             resource.close()
+    _assert_semantic_content_projection()
+    return "bounded content informed semantics but unrelated secret text was not persisted"
+
+
+def _assert_semantic_content_projection() -> None:
     secret_documents: tuple[RawCatalogDocument, ...] = (
         {
             "source": "secret.yaml",
@@ -724,10 +873,23 @@ def _content_case() -> str:
         )
         result = controller.run(request)
         assert isinstance(result, DurableTerminal)
+        assert result.assessment.run_record.outcome is RunOutcome.PASSED
+        manifest = result.assessment.manifest
+        assert manifest is not None
+        projected = next(
+            fact
+            for fact in manifest.raw_facts
+            if isinstance(fact, ObservationFactDocument)
+            and any(item.path == "secret-user.txt" for item in fact.items)
+        )
+        item = next(item for item in projected.items if item.path == "secret-user.txt")
+        assert isinstance(item, ContentObservationDocument)
+        assert item.semantic_verdict == "OBSERVED"
+        scenario = next(item for item in manifest.scenarios if item.name == "secret:user")
+        assert scenario.status is ScenarioStatus.PASS
         manifest_bytes = (result.bundle / "manifest.json").read_bytes()
         assert b"TOP-SECRET" not in manifest_bytes
         assert b"wanted TOP-SECRET" not in manifest_bytes
-    return "bounded content informed semantics but unrelated secret text was not persisted"
 
 
 def _coherent_mutation_case() -> str:
@@ -735,7 +897,7 @@ def _coherent_mutation_case() -> str:
         resource = _allocate_resources(
             Path(temporary),
             "mutation",
-            DockerDaemonAdapter("mutation"),
+            DockerDaemonAuthority("mutation").adapter(),
             bundle_faults=BundleFaults(mutate_during_next_read=True),
         )
         try:
@@ -777,28 +939,79 @@ def _invalid_exit_case() -> str:
     return "impossible raw exit forced incomplete while retaining 999"
 
 
+def _recover_nonterminal(
+    controller: RunController,
+    request: RunRequest,
+    result: DurableNonterminal,
+) -> RecoveryCommitted:
+    assert any("positively invalidated" in item for item in result.trace)
+    recovered = controller.recover(
+        RecoveryRequest(result.bundle, request, "controller relinquished nonterminal run")
+    )
+    assert isinstance(recovered, RecoveryCommitted)
+    assert recovered.assessment.run_record.outcome is RunOutcome.INCOMPLETE
+    return recovered
+
+
+def _early_acquisition_recovery_case() -> str:
+    with TemporaryDirectory(prefix="issue41-acquisition-recovery-") as temporary:
+        controller = _controller(
+            Path(temporary),
+            resource_faults=ResourceFaults(fail_image_build=True),
+        )
+        request = _request("acquisition-recovery")
+        result = controller.run(request)
+        assert isinstance(result, DurableNonterminal)
+        _recover_nonterminal(controller, request, result)
+    return "early acquisition failure was quiesced, invalidated, claimed, and recovered"
+
+
 def _report_failure_case() -> str:
     with TemporaryDirectory(prefix="issue41-report-failure-") as temporary:
-        result = _controller(
+        controller = _controller(
             Path(temporary),
             bundle_faults=BundleFaults(fail_writes=frozenset({"report.md"})),
-        ).run(_request("report-failure"))
+        )
+        request = _request("report-failure")
+        result = controller.run(request)
         assert isinstance(result, DurableNonterminal)
         assert isinstance(
             decode_run_record((result.bundle / "run.json").read_bytes()), RunningRunRecord
         )
-    return "report persistence failure preserved Running authority"
+        _recover_nonterminal(controller, request, result)
+    return "report persistence failure preserved Running authority and recovery custody"
 
 
 def _initial_running_failure_case() -> str:
     with TemporaryDirectory(prefix="issue41-running-failure-") as temporary:
-        result = _controller(
+        controller = _controller(
             Path(temporary),
             bundle_faults=BundleFaults(fail_writes=frozenset({"run.json"})),
-        ).run(_request("running-failure"))
+        )
+        request = _request("running-failure")
+        result = controller.run(request)
         assert isinstance(result, DurableNonterminal)
         assert result.bundle.name == "running-failure" and result.failures
-    return "post-allocation initial Running failure returned the exact orphan path"
+        recovered = controller.recover(
+            RecoveryRequest(result.bundle, request, "initial Running persistence failed")
+        )
+        assert isinstance(recovered, RecoveryCommitted)
+    return "initial Running failure returned a recovery-claimable exact bundle path"
+
+
+def _terminal_commit_failure_case() -> str:
+    with TemporaryDirectory(prefix="issue41-terminal-commit-failure-") as temporary:
+        controller = _controller(
+            Path(temporary),
+            bundle_faults=BundleFaults(fail_terminal_commit=True),
+        )
+        request = _request("terminal-commit-failure")
+        result = controller.run(request)
+        assert isinstance(result, DurableNonterminal)
+        assert (result.bundle / ".uncommitted-report").is_file()
+        assert not (result.bundle / "report.md").exists()
+        _recover_nonterminal(controller, request, result)
+    return "failed terminal claim rolled back and preserved report bytes for recovery"
 
 
 def _commit_mutation_case() -> str:
@@ -823,10 +1036,12 @@ def _commit_mutation_case() -> str:
 def _recovery_case() -> str:
     with TemporaryDirectory(prefix="issue41-recovery-") as temporary:
         controller = _controller(Path(temporary))
+        request = _request("recoverable")
         bundle, expected = controller._abandon_for_harness(  # pyright: ignore[reportPrivateUsage]
-            _request("recoverable")
+            request
         )
-        result = controller.recover(RecoveryRequest(bundle, expected, "owner process disappeared"))
+        del expected
+        result = controller.recover(RecoveryRequest(bundle, request, "owner process disappeared"))
         assert isinstance(result, RecoveryCommitted)
         assert result.assessment.run_record.outcome is RunOutcome.INCOMPLETE
         assert result.assessment.run_record.failures
@@ -893,7 +1108,7 @@ def _race_recovery_once(index: int) -> None:
         resource = _allocate_resources(
             Path(temporary),
             f"race-{index}",
-            DockerDaemonAdapter(f"race-{index}"),
+            DockerDaemonAuthority(f"race-{index}").adapter(),
         )
         proof = resource.quiesce_and_seal()
         resource.abandon_after_failure(proof)
@@ -977,24 +1192,93 @@ class _OrderedPublication:
         return Published("ordered-artifact")
 
 
+class _BoundaryObserver:
+    def __init__(self, retention: RetentionAdapter, publication: _OrderedPublication) -> None:
+        self.retention = retention
+        self.publication = publication
+        self.snapshots: list[ExecutionSnapshot] = []
+
+    def observe(self, snapshot: ExecutionSnapshot) -> None:
+        if "fresh reopen" in snapshot.action:
+            assert not isinstance(
+                decode_run_record((snapshot.bundle / "run.json").read_bytes()), RunningRunRecord
+            )
+        if "keep-five" in snapshot.action:
+            assert self.retention.applied()
+        if "publication fact" in snapshot.action:
+            assert self.publication.calls
+        if snapshot.action.startswith("CI classified"):
+            assert snapshot.ci_annotation is not None
+        self.snapshots.append(snapshot)
+
+
 def _retention_publication_case() -> str:
     with TemporaryDirectory(prefix="issue41-retention-") as temporary:
+        base = Path(temporary)
         retention = RetentionAdapter()
         publication = _OrderedPublication(retention)
-        result = _controller(
-            Path(temporary),
-            retention=retention,
-            publication=publication,
-        ).run(_request("retention"))
-        assert isinstance(result, DurableTerminal)
-        assert publication.calls == ["retention"]
+        observer = _BoundaryObserver(retention, publication)
+        result: DurableTerminal | None = None
+        for index in range(7):
+            disposition = _controller(
+                base,
+                retention=retention,
+                publication=publication,
+                observer=observer,
+            ).run(_request(f"retention-{index}"))
+            assert isinstance(disposition, DurableTerminal)
+            result = disposition
+        assert result is not None
+        assert publication.calls == [f"retention-{index}" for index in range(7)]
         joined = " | ".join(result.trace)
         assert (
             joined.index("fresh reopen")
             < joined.index("keep-five")
             < joined.index("publication fact")
+            < joined.index("CI classified")
         )
-    return "fresh trust authorized keep-five retention before publication and CI"
+        active = tuple(
+            sorted(
+                path.name
+                for path in (base / "out").iterdir()
+                if path.is_dir() and path.name != ".retired"
+            )
+        )
+        assert active == tuple(f"retention-{index}" for index in range(2, 7))
+        quarantined = tuple(sorted((base / "out" / ".retired").iterdir()))
+        assert len(quarantined) == 2
+        for path in quarantined:
+            reopened = reopen_completed(path)
+            assert not isinstance(reopened, RecoveryRejected)
+        assert observer.snapshots[-1].action.startswith("CI classified")
+    return "fresh trust retained newest five and recoverably quarantined two before publish/CI"
+
+
+def _post_commit_mutation_case() -> str:
+    def mutate(resources: LeaseBackedFulfilment) -> None:
+        (resources.snapshot().bundle_path / "post-commit.txt").write_text(
+            "changed",
+            encoding="utf-8",
+        )
+
+    with TemporaryDirectory(prefix="issue41-post-commit-") as temporary:
+        retention = RetentionAdapter()
+        publication = _OrderedPublication(retention)
+        observer = _BoundaryObserver(retention, publication)
+        result = _controller(
+            Path(temporary),
+            retention=retention,
+            publication=publication,
+            after_terminal_commit=mutate,
+            observer=observer,
+        ).run(_request("post-commit-mutation"))
+        assert isinstance(result, TerminalTrustFailure)
+        assert not retention.applied()
+        assert not publication.calls
+        actions = tuple(item.action for item in observer.snapshots)
+        assert not any("fresh reopen" in item for item in actions)
+        assert not any(item.startswith("CI classified") for item in actions)
+    return "post-commit mutation blocked reopen, retention, publication, and CI"
 
 
 class _FailedPublication:
@@ -1070,15 +1354,60 @@ def _complete_plan_case() -> str:
     assert not isinstance(outcome, ValidationIncomplete)
     assert len(outcome.scenario_records) == len(compiled.plan.projection.scenarios)
     assert outcome.purge_result.evidence
-    planned = {
-        action.ordinal
-        for scenario in compiled.plan.projection.scenarios
-        for action in scenario.expected_actions
-    }
-    planned.update(action.ordinal for action in compiled.plan.projection.subject_actions)
-    planned.update(action.ordinal for action in compiled.plan.projection.purge_actions)
-    assert {fact.action_id.ordinal for fact in outcome.raw_facts}.issubset(planned)
+    planned = (
+        *(action.ordinal for action in compiled.plan.projection.subject_actions),
+        *(
+            action.ordinal
+            for scenario in compiled.plan.projection.scenarios
+            for action in scenario.expected_actions
+        ),
+        *(action.ordinal for action in compiled.plan.projection.purge_actions),
+    )
+    observed = tuple(fact.action_id.ordinal for fact in outcome.raw_facts)
+    chronology = tuple(action.ordinal for action in outcome.chronology)
+    assert observed == planned
+    assert chronology == planned
     return "complete plan preserved exact scenario cardinality, action bindings, and one purge"
+
+
+def _manifest_action_completeness_case() -> str:
+    with TemporaryDirectory(prefix="issue41-manifest-completeness-") as temporary:
+        controller = _controller(Path(temporary))
+        bundle, expected = controller._abandon_for_harness(  # pyright: ignore[reportPrivateUsage]
+            _request("manifest-completeness")
+        )
+        session = nominate_recovery(bundle)
+        assert not isinstance(session, RecoveryRejected)
+        try:
+            view = session.read_bundle()
+            manifest = decode_manifest(view.one("manifest.json").content)
+            scenario = manifest.scenarios[0]
+            phase = next(item for item in scenario.phases if item.status is PhaseStatus.PASS)
+            removed_id = phase.evidence_actions[-1]
+            altered_phase = replace(phase, evidence_actions=phase.evidence_actions[:-1])
+            altered_scenario = replace(
+                scenario,
+                phases=tuple(altered_phase if item is phase else item for item in scenario.phases),
+            )
+            altered = replace(
+                manifest,
+                scenarios=(altered_scenario, *manifest.scenarios[1:]),
+                raw_facts=tuple(
+                    fact for fact in manifest.raw_facts if fact.action_id != removed_id
+                ),
+                operational_chronology=tuple(
+                    action for action in manifest.operational_chronology if action != removed_id
+                ),
+            )
+            failures = _manifest_failures(view, expected, altered)
+            assert any(
+                isinstance(failure, PlanCoverageFailure)
+                and "exact required action tuple" in failure.message
+                for failure in failures
+            )
+        finally:
+            session.close()
+    return "removing one PASS observation fact, evidence id, and chronology entry failed closed"
 
 
 def _dag_case() -> str:
@@ -1123,65 +1452,73 @@ def run_all() -> tuple[ScenarioResult, ...]:
         ("whole-bundle-mutation", _coherent_mutation_case),
         ("full-integrated-run", _basic_run_case),
         ("invalid-raw-exit", _invalid_exit_case),
+        ("early-acquisition-recovery", _early_acquisition_recovery_case),
         ("report-failure-running", _report_failure_case),
         ("initial-running-failure", _initial_running_failure_case),
+        ("terminal-commit-recovery", _terminal_commit_failure_case),
         ("assessment-to-commit-mutation", _commit_mutation_case),
         ("typed-recovery", _recovery_case),
         ("recovery-path-identity", _recovery_identity_case),
         ("recovery-adversarial", _recovery_adversarial_case),
         ("strict-document-codecs", _codec_case),
         ("retention-publication-order", _retention_publication_case),
+        ("post-commit-mutation", _post_commit_mutation_case),
         ("exclusive-terminal-and-publication", _exclusive_and_publication_case),
         ("interrupt-and-ordering", _interrupt_and_ordering_case),
         ("complete-plan-cardinality", _complete_plan_case),
+        ("manifest-action-completeness", _manifest_action_completeness_case),
         ("acyclic-imports", _dag_case),
     )
     return tuple(_case(name, proof) for name, proof in proofs)
 
 
 def interactive_frames() -> tuple[DemoFrame, ...]:
-    """Render complete state known at each actual controller transition."""
+    """Render snapshots synchronously captured at actual controller transitions."""
 
     with TemporaryDirectory(prefix="issue41-interactive-") as temporary:
-        result = _controller(Path(temporary)).run(_request("interactive"))
+        retention = RetentionAdapter()
+        publication = _OrderedPublication(retention)
+        observer = _BoundaryObserver(retention, publication)
+        result = _controller(
+            Path(temporary),
+            retention=retention,
+            publication=publication,
+            observer=observer,
+        ).run(_request("interactive"))
     if not isinstance(result, DurableTerminal):
         failures = tuple(f"{item.stage}:{item.path}:{item.message}" for item in result.failures)
         return (DemoFrame(1, "run remained nonterminal", (("failures", failures),)),)
-    record = result.assessment.run_record
     frames: list[DemoFrame] = []
-    actions = (*result.trace, "CI classified from fresh assessment and publication fact")
-    plan_number = next(
-        index for index, item in enumerate(actions, 1) if "Validation Plan compiled" in item
-    )
-    commit_number = next(index for index, item in enumerate(actions, 1) if "committed last" in item)
-    ci_number = len(actions)
-    for number, action in enumerate(actions, 1):
+    for snapshot in observer.snapshots:
         domain_lines = (
-            (f"plan={result.outcome.plan.plan_id.value}",)
-            if number >= plan_number
+            (f"plan={snapshot.plan_identity}",)
+            if snapshot.plan_identity is not None
             else ("plan=not-yet-compiled",)
         )
         diagnostic_lines = (
-            (f"outcome={record.outcome.value}", f"raw_exit={record.raw_exit}")
-            if number >= commit_number
+            (f"outcome={snapshot.outcome}", f"raw_exit={snapshot.raw_exit}")
+            if snapshot.authority == "TERMINAL"
             else ("authority=RUNNING", "outcome=not-yet-published")
         )
-        if number >= ci_number:
+        if snapshot.ci_annotation is not None:
             diagnostic_lines = (
                 *diagnostic_lines,
-                f"ci={result.ci_decision.annotation.value}",
+                f"ci={snapshot.ci_annotation}",
             )
         else:
             diagnostic_lines = (*diagnostic_lines, "ci=not-yet-classified")
         frames.append(
             DemoFrame(
-                number,
-                action,
+                snapshot.sequence,
+                snapshot.action,
                 (
                     ("domain", domain_lines),
-                    ("resources", (f"bundle={result.bundle.name}", action)),
+                    (
+                        "resources",
+                        (f"bundle={snapshot.bundle.name}", snapshot.action),
+                    ),
                     ("diagnostics", diagnostic_lines),
-                    ("chronology", actions[:number]),
+                    ("chronology", snapshot.chronology),
                 ),
             )
         )

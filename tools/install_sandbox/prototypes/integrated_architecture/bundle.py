@@ -28,6 +28,7 @@ GENERATION_RECORD = ".generation"
 QUIESCENCE_RECORD = ".quiescence"
 TERMINAL_CLAIM = ".terminal-claim"
 RECOVERY_CLAIM = ".recovery-claim"
+UNCOMMITTED_REPORT = ".uncommitted-report"
 
 _INTERNAL_NAMES = frozenset(
     {
@@ -37,6 +38,7 @@ _INTERNAL_NAMES = frozenset(
         QUIESCENCE_RECORD,
         TERMINAL_CLAIM,
         RECOVERY_CLAIM,
+        UNCOMMITTED_REPORT,
     }
 )
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -49,10 +51,11 @@ class BundleCoherenceError(OSError):
 class BundleAllocationError(OSError):
     """Allocation created a named bundle but could not persist Running authority."""
 
-    def __init__(self, path: Path, detail: str) -> None:
+    def __init__(self, path: Path, detail: str, *, recovery_ready: bool = False) -> None:
         super().__init__(detail)
         self.path = path
         self.detail = detail
+        self.recovery_ready = recovery_ready
 
 
 class PersistenceFailureKind(StrEnum):
@@ -222,6 +225,7 @@ class RecoveryRejected:
 class BundleFaults:
     fail_writes: frozenset[str] = frozenset()
     mutate_during_next_read: bool = False
+    fail_terminal_commit: bool = False
 
 
 _DEFAULT_BUNDLE_FAULTS = BundleFaults()
@@ -273,6 +277,7 @@ class BundleStore:
         leaf: str,
         owner_id: str,
         running_record: bytes,
+        recovery_evidence: tuple[tuple[str, bytes], ...] = (),
         *,
         faults: BundleFaults = _DEFAULT_BUNDLE_FAULTS,
     ) -> BundleStore:
@@ -289,7 +294,7 @@ class BundleStore:
             parent = -1
             bundle = None
             lease = None
-            _persist_initial_running(store, running_record)
+            _persist_initial_running(store, running_record, recovery_evidence)
             return store
         except BundleAllocationError:
             raise
@@ -384,12 +389,21 @@ class BundleStore:
                     PersistenceFailureKind.ORDERING,
                     "evidence must be sealed before terminal publication",
                 )
+            claim_created = False
             try:
                 assessed = self.read_coherent()
                 _validate_permit(permit._material, assessed, require_report=True)
                 _write_exclusive_at(self._root_descriptor, TERMINAL_CLAIM, b"claimed\n")
+                claim_created = True
+                if self._faults.fail_terminal_commit:
+                    _unlink_at(self._root_descriptor, TERMINAL_CLAIM)
+                    return TerminalCommitRejected(
+                        PersistenceFailureKind.IO,
+                        "injected terminal commit failure",
+                    )
                 result = self._replace_public(RUN_RECORD, permit._material.run_record)
                 if isinstance(result, PersistenceRejected):
+                    _unlink_at(self._root_descriptor, TERMINAL_CLAIM)
                     return TerminalCommitRejected(result.kind, result.detail)
                 self._terminal_committed = True
                 return TerminalCommitted(result.reference)
@@ -399,7 +413,53 @@ class BundleStore:
                     "another terminal publisher already claimed the bundle",
                 )
             except (BundleCoherenceError, OSError) as error:
+                if claim_created and not self._terminal_committed:
+                    with suppress(OSError):
+                        _unlink_at(self._root_descriptor, TERMINAL_CLAIM)
                 return TerminalCommitRejected(PersistenceFailureKind.IDENTITY, str(error))
+
+    def archive_uncommitted_report(self) -> None:
+        """Preserve attempted report bytes internally before recovery handoff."""
+
+        with self._lock:
+            try:
+                report = _read_file_at(self._root_descriptor, PurePosixPath(REPORT_RECORD))
+            except FileNotFoundError:
+                return
+            running = _read_file_at(self._root_descriptor, PurePosixPath(RUN_RECORD))
+            if _structurally_terminal_run_record(running):
+                raise OSError("cannot archive a report after terminal publication")
+            try:
+                os.stat(TERMINAL_CLAIM, dir_fd=self._root_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise OSError("cannot archive a report while a terminal claim exists")
+            _write_exclusive_at(self._root_descriptor, UNCOMMITTED_REPORT, report)
+            os.unlink(REPORT_RECORD, dir_fd=self._root_descriptor)
+            os.fsync(self._root_descriptor)
+            self._bump_generation()
+
+    def _prepare_recovery_after_initial_failure(
+        self,
+        content: bytes,
+        recovery_evidence: tuple[tuple[str, bytes], ...],
+    ) -> None:
+        """Persist fallback Running authority, quiesce, and release failed allocation."""
+
+        with self._lock:
+            _atomic_replace_at(self._root_descriptor, RUN_RECORD, content)
+            self._bump_generation()
+            for path, evidence in recovery_evidence:
+                persisted = self._write_public_once(path, evidence)
+                if isinstance(persisted, PersistenceRejected):
+                    raise OSError(persisted.detail)
+            self._evidence_sealed = True
+            proof = self.issue_quiescence(
+                processes_absent=True,
+                containers_absent=True,
+            )
+            self._invalidate_owner_for_recovery(proof)
 
     def issue_quiescence(
         self,
@@ -648,11 +708,28 @@ class RecoveryClaim:
                 raise BundleCoherenceError(f"{relative} changed after recovery claim")
 
 
-def _persist_initial_running(store: BundleStore, content: bytes) -> None:
+def _persist_initial_running(
+    store: BundleStore,
+    content: bytes,
+    recovery_evidence: tuple[tuple[str, bytes], ...],
+) -> None:
     result = store.store_running(content)
     if isinstance(result, PersistenceRejected):
-        store.close()
-        raise BundleAllocationError(store.path, result.detail)
+        recovery_ready = False
+        detail = result.detail
+        try:
+            store._prepare_recovery_after_initial_failure(content, recovery_evidence)
+            recovery_ready = True
+        except (OSError, ValueError) as error:
+            detail = f"{detail}; recovery fallback failed: {error}"
+        finally:
+            store.close()
+        raise BundleAllocationError(store.path, detail, recovery_ready=recovery_ready)
+
+
+def _unlink_at(directory: int, leaf: str) -> None:
+    os.unlink(leaf, dir_fd=directory)
+    os.fsync(directory)
 
 
 class RecoveryManager:

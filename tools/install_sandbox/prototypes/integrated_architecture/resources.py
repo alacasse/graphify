@@ -20,7 +20,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import ClassVar, Literal, Protocol, cast
+from typing import Literal, Protocol, cast
 
 from .bundle import (
     BundleFaults,
@@ -131,6 +131,11 @@ class ResourceInputs:
             raise ValueError("resource-owned catalog must be JSON data") from error
         object.__setattr__(self, "_catalog_payloads", payloads)
 
+    def catalog_snapshot(self) -> tuple[RawCatalogDocument, ...]:
+        """Return a fresh stable snapshot suitable for recovery rederivation."""
+
+        return _fresh_catalog_documents(self)
+
 
 _DEFAULT_RESOURCE_INPUTS = ResourceInputs(
     "prototype-source",
@@ -220,6 +225,8 @@ class RetentionApplied:
     bundle: Path
     run_id: str
     keep_newest: int
+    retired: tuple[Path, ...]
+    remaining: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
@@ -231,7 +238,7 @@ type RetentionResult = RetentionApplied | RetentionRejected
 
 
 class RetentionAdapter:
-    """Deterministic resource stand-in invoked only after diagnostic authorization."""
+    """Safe prototype stand-in that quarantines surplus managed terminals."""
 
     def __init__(self) -> None:
         self._applied: list[RetentionApplied] = []
@@ -244,12 +251,148 @@ class RetentionAdapter:
         reopened = reopen_completed_bundle(request.bundle)
         if isinstance(reopened, RecoveryRejected):
             return RetentionRejected(reopened.detail)
-        applied = RetentionApplied(request.bundle, request.run_id, request.keep_newest)
+        try:
+            retired, remaining = _quarantine_surplus_terminals(
+                request.bundle,
+                request.keep_newest,
+            )
+        except OSError as error:
+            return RetentionRejected(str(error))
+        applied = RetentionApplied(
+            request.bundle,
+            request.run_id,
+            request.keep_newest,
+            retired,
+            remaining,
+        )
         self._applied.append(applied)
         return applied
 
     def applied(self) -> tuple[RetentionApplied, ...]:
         return tuple(self._applied)
+
+
+def _quarantine_surplus_terminals(
+    current: Path,
+    keep_newest: int,
+) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+    """Move only descriptor-revalidated terminal leaves out of the active set."""
+
+    parent_path = current.parent
+    parent = os.open(parent_path, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW)
+    quarantine: int | None = None
+    try:
+        candidates = _terminal_candidates(parent_path, parent)
+        newest = _newest_candidates(candidates, keep_newest)
+        newest_names = {item[1] for item in newest}
+        if current.name not in newest_names:
+            raise OSError("authorized bundle was not in the newest managed terminal set")
+        with suppress(FileExistsError):
+            os.mkdir(".retired", mode=0o700, dir_fd=parent)
+        quarantine = os.open(
+            ".retired",
+            os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW,
+            dir_fd=parent,
+        )
+        retired = _retire_candidates(
+            parent_path,
+            parent,
+            quarantine,
+            candidates,
+            newest_names,
+        )
+        os.fsync(quarantine)
+        os.fsync(parent)
+        remaining = tuple(
+            parent_path / item[1] for item in sorted(newest, key=lambda item: item[1])
+        )
+        return tuple(sorted(retired, key=lambda path: path.name)), remaining
+    finally:
+        if quarantine is not None:
+            os.close(quarantine)
+        os.close(parent)
+
+
+type _RetentionCandidate = tuple[int, str, int, int]
+
+
+def _terminal_candidates(parent_path: Path, parent: int) -> tuple[_RetentionCandidate, ...]:
+    candidates = tuple(
+        candidate
+        for leaf in os.listdir(parent)
+        if (candidate := _terminal_candidate(parent_path, parent, leaf)) is not None
+    )
+    return candidates
+
+
+def _terminal_candidate(
+    parent_path: Path,
+    parent: int,
+    leaf: str,
+) -> _RetentionCandidate | None:
+    if leaf == ".retired":
+        return None
+    try:
+        _require_leaf(leaf)
+        details = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISDIR(details.st_mode):
+        return None
+    reopened = reopen_completed_bundle(parent_path / leaf)
+    if isinstance(reopened, RecoveryRejected):
+        return None
+    identity = (reopened.revision.device, reopened.revision.inode)
+    if (details.st_dev, details.st_ino) != identity:
+        return None
+    bundle = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW, dir_fd=parent)
+    try:
+        modified_ns = os.stat("run.json", dir_fd=bundle, follow_symlinks=False).st_mtime_ns
+    finally:
+        os.close(bundle)
+    return modified_ns, leaf, *identity
+
+
+def _newest_candidates(
+    candidates: tuple[_RetentionCandidate, ...],
+    keep_newest: int,
+) -> tuple[_RetentionCandidate, ...]:
+    ordered = sorted(candidates, key=lambda item: (item[0], item[1]), reverse=True)
+    return tuple(ordered[:keep_newest])
+
+
+def _retire_candidates(
+    parent_path: Path,
+    parent: int,
+    quarantine: int,
+    candidates: tuple[_RetentionCandidate, ...],
+    newest_names: set[str],
+) -> list[Path]:
+    retired: list[Path] = []
+    for _, leaf, device, inode in candidates:
+        if leaf not in newest_names:
+            destination = _retire_candidate(parent, quarantine, leaf, device, inode)
+            retired.append(parent_path / ".retired" / destination)
+    return retired
+
+
+def _retire_candidate(
+    parent: int,
+    quarantine: int,
+    leaf: str,
+    device: int,
+    inode: int,
+) -> str:
+    current = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != (device, inode):
+        raise OSError(f"retention candidate identity changed: {leaf}")
+    destination = f"{leaf}.{device}.{inode}"
+    try:
+        os.stat(destination, dir_fd=quarantine, follow_symlinks=False)
+    except FileNotFoundError:
+        os.rename(leaf, destination, src_dir_fd=parent, dst_dir_fd=quarantine)
+        return destination
+    raise OSError(f"retention quarantine collision: {destination}")
 
 
 class _DockerNamespaceRegistry:
@@ -313,26 +456,25 @@ class _DockerNamespaceClient:
         return self._registry.owned_by(self.owner_id)
 
 
-class DockerDaemonAdapter:
-    """Daemon-scoped owner that manufactures private per-run namespace clients.
+class DockerDaemonAuthority:
+    """Explicit composition-root authority for exactly one daemon namespace."""
 
-    The identity map is process-wide in this deterministic stand-in. Constructing
-    two adapters for the same daemon identity therefore cannot manufacture two
-    independent ownership authorities for the same Docker namespace.
-    """
-
-    _registries: ClassVar[dict[str, _DockerNamespaceRegistry]] = {}
-    _registries_lock: ClassVar[threading.Lock] = threading.Lock()
-
-    def __init__(self, daemon_identity: str = "default") -> None:
+    def __init__(self, daemon_identity: str) -> None:
         if not daemon_identity or "\0" in daemon_identity:
             raise ValueError("daemon identity must be a nonempty safe string")
         self.daemon_identity = daemon_identity
-        with self._registries_lock:
-            self._registry = self._registries.setdefault(
-                daemon_identity,
-                _DockerNamespaceRegistry(),
-            )
+        self._registry = _DockerNamespaceRegistry()
+
+    def adapter(self) -> DockerDaemonAdapter:
+        return DockerDaemonAdapter(self)
+
+
+class DockerDaemonAdapter:
+    """Capability manufactured only by an explicit daemon authority."""
+
+    def __init__(self, authority: DockerDaemonAuthority) -> None:
+        self.daemon_identity = authority.daemon_identity
+        self._registry = authority._registry  # pyright: ignore[reportPrivateUsage]
 
     def _client(self, owner_id: str) -> _DockerNamespaceClient:
         return _DockerNamespaceClient(owner_id, self._registry)
@@ -536,6 +678,7 @@ class LeaseBackedFulfilment:
             leaf,
             run_id.value,
             running_record,
+            (("runner.log", b"allocation failed before resource chronology\n"),),
             faults=bundle_faults,
         )
         return cls(run_id, store, sandbox_root, docker, faults=faults, inputs=inputs)
@@ -599,6 +742,10 @@ class LeaseBackedFulfilment:
         result = self._host.store.persist_report(content)
         self._record(None, "persist-report", type(result).__name__)
         return result
+
+    def archive_uncommitted_report(self) -> None:
+        self._host.store.archive_uncommitted_report()
+        self._record(None, "archive-report", "uncommitted report preserved for recovery")
 
     def commit_terminal(
         self,

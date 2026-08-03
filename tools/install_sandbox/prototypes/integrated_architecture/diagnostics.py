@@ -29,16 +29,20 @@ from .bundle import (
     _issue_terminal_commit_permit,  # pyright: ignore[reportPrivateUsage]
 )
 from .documents import (
+    AbsentObservationDocument,
     BindingFailure,
+    CancelledTerminationDocument,
     CaptureFailure,
     CatalogDocumentsFactDocument,
     CoherenceFailure,
     CommandFactDocument,
+    ContentObservationDocument,
     DiagnosticFailure,
     DiagnosticManifest,
     DocumentError,
     EvidenceKind,
     EvidenceReference,
+    ExitedTerminationDocument,
     FindingDocument,
     FixturePreparedFactDocument,
     ImmutableImageFactDocument,
@@ -47,13 +51,13 @@ from .documents import (
     ObservationFactDocument,
     ObservationFailure,
     ObservationItemDocument,
-    ObservationKind,
     PersistenceFailure,
     PhaseDocument,
     PhaseStatus,
     PlanCoverageFailure,
     PurgeDocument,
     PurgeStatus,
+    ReadFailureObservationDocument,
     ReferenceFailure,
     ReportFailure,
     RunningRunRecord,
@@ -61,12 +65,14 @@ from .documents import (
     ScenarioDocument,
     ScenarioStatus,
     SchemaFailure,
+    SignalledTerminationDocument,
+    SpawnFailedTerminationDocument,
     StreamDocument,
     SubjectPreparedFactDocument,
     SubjectProbeFactDocument,
     TerminalRunRecord,
     TerminationDocument,
-    TerminationKind,
+    TimedOutTerminationDocument,
     UnavailableFactDocument,
     WitnessKind,
     decode_manifest,
@@ -138,6 +144,7 @@ class ExpectedDiagnostic:
     image_identity: str
     subject_identity: str
     plan: PlanProjection
+    global_runtime_limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -260,6 +267,12 @@ def make_running_record(expected: ExpectedDiagnostic, phase: str = "allocated") 
     )
 
 
+def make_pending_running_record(run_id: str, selection: str) -> RunningRunRecord:
+    """Construct minimal typed authority before image and plan identities exist."""
+
+    return RunningRunRecord(run_id, selection, "PENDING", "PENDING", "allocated")
+
+
 def derive_terminal_facts(
     outcome: ApplicationOutcome,
     observed_raw_exit: int | None,
@@ -278,6 +291,12 @@ def persistence_failure(stage: str, path: str, detail: str) -> DiagnosticFailure
     """Translate a resource persistence fact without leaking resource variants."""
 
     return PersistenceFailure(stage, path, detail)
+
+
+def preparation_failure(stage: str, path: str, detail: str) -> DiagnosticFailure:
+    """Translate a failed acquisition or compilation without leaking variants."""
+
+    return SchemaFailure(stage, path, detail)
 
 
 def controller_failure(stage: str, path: str, error: BaseException) -> DiagnosticFailure:
@@ -370,7 +389,7 @@ def build_manifest(
     findings = tuple(_finding_document(finding) for finding in outcome.findings)
     failures = _translation_failures(outcome)
     limitations = (
-        *expected.plan.runtime_limitations,
+        *expected.global_runtime_limitations,
         *(limitation for scenario in scenarios for limitation in scenario.limitations),
     )
     references = tuple(_evidence_reference(item) for item in inventory)
@@ -435,8 +454,13 @@ def prepare_recovery(
             None,
             view.revision,
         )
+    assessment_view = CoherentBundleReadView(
+        view.path,
+        view.revision,
+        tuple(entry for entry in view.entries if str(entry.relative_path) != REPORT_PATH),
+    )
     assessed = assess_bundle(
-        view,
+        assessment_view,
         expected,
         TerminalFacts(
             2,
@@ -967,15 +991,15 @@ def _raw_fact_document(
 
 def _termination_document(value: object) -> TerminationDocument:
     if isinstance(value, Exited):
-        return TerminationDocument(TerminationKind.EXITED, raw_exit=value.code)
+        return ExitedTerminationDocument(value.code)
     if isinstance(value, Signalled):
-        return TerminationDocument(TerminationKind.SIGNALLED, signal=str(value.signal))
+        return SignalledTerminationDocument(str(value.signal))
     if isinstance(value, TimedOut):
-        return TerminationDocument(TerminationKind.TIMED_OUT, detail=f"{value.seconds!r}s")
+        return TimedOutTerminationDocument(f"{value.seconds!r}s")
     if isinstance(value, Cancelled):
-        return TerminationDocument(TerminationKind.CANCELLED, detail=value.reason)
+        return CancelledTerminationDocument(value.reason)
     if isinstance(value, SpawnFailed):
-        return TerminationDocument(TerminationKind.SPAWN_FAILED, detail=value.detail)
+        return SpawnFailedTerminationDocument(value.detail)
     raise TypeError(f"unknown command termination: {type(value).__name__}")
 
 
@@ -987,34 +1011,24 @@ def _stream_document(value: CapturedStream | StreamCaptureFailure) -> StreamDocu
 
 def _observation_document(value: object) -> ObservationItemDocument:
     if isinstance(value, ObservedContent):
-        return ObservationItemDocument(
+        return ContentObservationDocument(
             value.rule_key,
             value.location,
-            ObservationKind.CONTENT,
             value.size,
             value.digest,
-            None,
             "OBSERVED",
         )
     if isinstance(value, ObservedAbsent):
-        return ObservationItemDocument(
+        return AbsentObservationDocument(
             value.rule_key,
             value.location,
-            ObservationKind.ABSENT,
-            None,
-            None,
-            None,
             "ABSENT",
         )
     if isinstance(value, ObservationReadFailure):
-        return ObservationItemDocument(
+        return ReadFailureObservationDocument(
             value.rule_key,
             value.location,
-            ObservationKind.READ_FAILURE,
-            None,
-            None,
             value.detail,
-            None,
         )
     raise TypeError(f"unknown observation item: {type(value).__name__}")
 
@@ -1241,6 +1255,14 @@ def _action_evidence_failures(
                 "actions", MANIFEST_PATH, "raw fact order contradicts expected action order"
             )
         )
+    if manifest.operational_chronology != actual_ids:
+        failures.append(
+            PlanCoverageFailure(
+                "actions",
+                MANIFEST_PATH,
+                "operational chronology is not the exact captured action tuple",
+            )
+        )
 
     subject_ids = {
         _expected_action_identity(expected.run_id, expected.plan.plan_id.value, action)
@@ -1269,7 +1291,109 @@ def _action_evidence_failures(
                 ),
             )
         )
+    failures.extend(_required_action_completeness_failures(expected, manifest, planned_by_id))
     return tuple(failures)
+
+
+def _required_action_completeness_failures(
+    expected: ExpectedDiagnostic,
+    manifest: DiagnosticManifest,
+    planned_by_id: dict[str, ExpectedAction],
+) -> tuple[DiagnosticFailure, ...]:
+    """Require exact facts for completed phases while allowing explained prefixes."""
+
+    failures: list[DiagnosticFailure] = []
+    actual_ids = {fact.action_id for fact in manifest.raw_facts}
+    subject_ids = tuple(
+        _expected_action_identity(expected.run_id, expected.plan.plan_id.value, action)
+        for action in expected.plan.subject_actions
+    )
+    if manifest.scenarios and any(identity not in actual_ids for identity in subject_ids):
+        failures.append(
+            PlanCoverageFailure(
+                "actions",
+                MANIFEST_PATH,
+                "completed scenario evidence is missing required subject actions",
+            )
+        )
+
+    projection_names = {item.name for item in expected.plan.scenarios}
+    for scenario in manifest.scenarios:
+        if scenario.name not in projection_names:
+            continue
+        for phase in scenario.phases:
+            failure = _phase_action_completeness_failure(
+                scenario.name,
+                phase,
+                planned_by_id,
+            )
+            if failure is not None:
+                failures.append(failure)
+
+    required_purge = tuple(
+        _expected_action_identity(expected.run_id, expected.plan.plan_id.value, action)
+        for action in expected.plan.purge_actions
+    )
+    purge_failure = _purge_action_completeness_failure(manifest.purge, required_purge)
+    if purge_failure is not None:
+        failures.append(purge_failure)
+    return tuple(failures)
+
+
+def _phase_action_completeness_failure(
+    scenario_name: str,
+    phase: PhaseDocument,
+    planned_by_id: dict[str, ExpectedAction],
+) -> PlanCoverageFailure | None:
+    required = tuple(
+        identity
+        for identity, action in planned_by_id.items()
+        if action.scenario == scenario_name
+        and _phase_projection_key(action.phase) == _phase_projection_key(phase.name)
+    )
+    if phase.status in {PhaseStatus.PASS, PhaseStatus.FINDING}:
+        message = "completed phase does not contain its exact required action tuple"
+        valid = phase.evidence_actions == required
+    elif phase.status is PhaseStatus.INCOMPLETE:
+        message = "incomplete phase evidence is not an ordered required-action prefix"
+        valid = phase.evidence_actions == required[: len(phase.evidence_actions)]
+    else:
+        return None
+    return (
+        None
+        if valid
+        else PlanCoverageFailure(
+            "actions",
+            f"{scenario_name}:{phase.name}",
+            message,
+        )
+    )
+
+
+def _purge_action_completeness_failure(
+    purge: PurgeDocument,
+    required: tuple[str, ...],
+) -> PlanCoverageFailure | None:
+    completed = purge.status in {PurgeStatus.PASS, PurgeStatus.FINDING}
+    valid = purge.evidence_actions == (
+        required if completed else required[: len(purge.evidence_actions)]
+    )
+    if valid:
+        return None
+    qualifier = "completed" if completed else "incomplete"
+    suffix = "exact required action tuple" if completed else "ordered required-action prefix"
+    return PlanCoverageFailure(
+        "actions",
+        "purge",
+        f"{qualifier} purge does not contain its {suffix}",
+    )
+
+
+def _phase_projection_key(name: str) -> str:
+    parts = name.split(":")
+    if parts[0] == "aggregate-prepare" and len(parts) > 1:
+        return ":".join(parts[:2])
+    return parts[0]
 
 
 def _expected_actions(plan: PlanProjection) -> tuple[ExpectedAction, ...]:
@@ -1534,6 +1658,20 @@ def _identity_failures(
     record: RunningRunRecord | TerminalRunRecord,
     expected: ExpectedDiagnostic,
 ) -> tuple[DiagnosticFailure, ...]:
+    if (
+        isinstance(record, RunningRunRecord)
+        and (
+            record.image_identity,
+            record.subject_identity,
+        )
+        == ("PENDING", "PENDING")
+        and (record.run_id, record.selection)
+        == (
+            expected.run_id,
+            expected.selection,
+        )
+    ):
+        return ()
     actual = (record.run_id, record.selection, record.image_identity, record.subject_identity)
     wanted = (
         expected.run_id,

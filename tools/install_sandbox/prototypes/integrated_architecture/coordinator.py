@@ -13,6 +13,7 @@ from typing import Protocol
 from .bundle import (
     BundleAllocationError,
     BundleFaults,
+    CoherentBundleReadView,
     PersistenceRejected,
     RecoveryRejected,
     TerminalCommitPermit,
@@ -38,14 +39,15 @@ from .diagnostics import (
     derive_abandoned_running_record,
     derive_terminal_facts,
     encode_failure_evidence,
+    make_pending_running_record,
     persistence_failure,
+    preparation_failure,
     prepare_recovery,
 )
 from .documents import (
     DiagnosticFailure,
-    PersistenceFailure,
     RunningRunRecord,
-    SchemaFailure,
+    TerminalRunRecord,
     encode_document,
 )
 from .domain import build_validation_plan, compile_catalog, run_validation
@@ -94,7 +96,7 @@ class RunRequest:
 @dataclass(frozen=True)
 class RecoveryRequest:
     bundle: Path
-    expected: ExpectedDiagnostic
+    original: RunRequest
     reason: str
 
 
@@ -149,6 +151,25 @@ class RecoveryDeclined:
 type RecoveryDisposition = RecoveryCommitted | RecoveryDeclined
 
 
+@dataclass(frozen=True)
+class ExecutionSnapshot:
+    """State captured synchronously at an actual controller boundary."""
+
+    sequence: int
+    action: str
+    bundle: Path
+    plan_identity: str | None
+    authority: str
+    outcome: str | None
+    raw_exit: int | None
+    ci_annotation: str | None
+    chronology: tuple[str, ...]
+
+
+class ExecutionObserver(Protocol):
+    def observe(self, snapshot: ExecutionSnapshot) -> None: ...
+
+
 class PublicationAdapter(Protocol):
     def publish(self, bundle: Path, assessment: CompletedAssessment) -> PublicationFact: ...
 
@@ -169,6 +190,8 @@ class _HarnessAdapters:
     before_terminal_commit: Callable[[LeaseBackedFulfilment, TerminalCommitPermit], None] | None = (
         None
     )
+    after_terminal_commit: Callable[[LeaseBackedFulfilment], None] | None = None
+    observer: ExecutionObserver | None = None
 
 
 _DEFAULT_RESOURCE_FAULTS = ResourceFaults()
@@ -224,6 +247,8 @@ class RunController:
         before_terminal_commit: (
             Callable[[LeaseBackedFulfilment, TerminalCommitPermit], None] | None
         ) = None,
+        after_terminal_commit: Callable[[LeaseBackedFulfilment], None] | None = None,
+        observer: ExecutionObserver | None = None,
     ) -> RunController:
         return cls(
             output_root,
@@ -236,6 +261,8 @@ class RunController:
                 resource_faults,
                 bundle_faults,
                 before_terminal_commit,
+                after_terminal_commit,
+                observer,
             ),
         )
 
@@ -246,32 +273,40 @@ class RunController:
         try:
             resources = self._allocate(request)
         except BundleAllocationError as error:
+            failure = controller_failure("allocate-running", "run.json", error)
+            if not error.recovery_ready:
+                return PreflightRejected(
+                    (failure,),
+                    ("allocation failed before recoverable Running authority existed",),
+                )
             return DurableNonterminal(
                 error.path,
-                (controller_failure("allocate-running", "run.json", error),),
-                ("bundle allocated but initial Running persistence failed",),
+                (failure,),
+                (
+                    "bundle allocated but initial Running persistence failed",
+                    "allocation fallback quiesced, sealed, and invalidated owner for recovery",
+                ),
             )
         except Exception as error:
             return PreflightRejected(
                 (controller_failure("allocate", request.run_id.value, error),),
                 tuple(trace),
             )
-        trace.append("Running authority persisted before image and catalog acquisition")
+        self._transition(
+            trace,
+            "Running authority persisted before image and catalog acquisition",
+            resources,
+        )
         try:
             disposition = self._drive(resources, request, trace)
         except Exception as error:
-            failures = _abandon_after_exception(
-                resources,
-                request,
-                controller_failure("lifecycle", request.run_id.value, error),
-            )
             disposition = DurableNonterminal(
                 resources.snapshot().bundle_path,
-                failures,
-                tuple(
-                    (*trace, "lifecycle exception persisted and resource owner abandoned safely")
-                ),
+                (controller_failure("lifecycle", request.run_id.value, error),),
+                tuple(trace),
             )
+        if isinstance(disposition, DurableNonterminal):
+            disposition = _make_recovery_claimable(resources, request, disposition)
         try:
             resources.close()
         except Exception as error:
@@ -282,6 +317,27 @@ class RunController:
     def recover(self, request: RecoveryRequest) -> RecoveryDisposition:
         """Claim, assess, terminalize, freshly reopen, and reassess an abandoned run."""
 
+        try:
+            prepared_application = _rederive_expected(request.original, self._inputs)
+            if isinstance(prepared_application, _PreparationFailed):
+                return RecoveryDeclined(
+                    request.bundle,
+                    prepared_application.failures,
+                    ("stable recovery inputs could not rederive the expected plan",),
+                )
+            return self._recover_with_expected(request, prepared_application.expected)
+        except Exception as error:
+            return RecoveryDeclined(
+                request.bundle,
+                (controller_failure("recovery", "run.json", error),),
+                (),
+            )
+
+    def _recover_with_expected(
+        self,
+        request: RecoveryRequest,
+        expected: ExpectedDiagnostic,
+    ) -> RecoveryDisposition:
         trace: list[str] = []
         try:
             session = nominate_recovery(request.bundle)
@@ -294,7 +350,7 @@ class RunController:
             try:
                 prepared = prepare_recovery(
                     session.read_bundle(),
-                    request.expected,
+                    expected,
                     request.reason,
                 )
                 if isinstance(prepared, InvalidBundle):
@@ -317,7 +373,7 @@ class RunController:
                     (persistence_failure("recovery-reopen", "run.json", reopened.detail),),
                     tuple(trace),
                 )
-            assessed = assess_bundle(reopened, request.expected)
+            assessed = assess_bundle(reopened, expected)
             if not isinstance(assessed, CompletedAssessment):
                 return RecoveryDeclined(
                     request.bundle,
@@ -373,13 +429,7 @@ class RunController:
             resources.close()
 
     def _allocate(self, request: RunRequest) -> LeaseBackedFulfilment:
-        running = RunningRunRecord(
-            request.run_id.value,
-            request.selection,
-            "PENDING",
-            "PENDING",
-            "allocated",
-        )
+        running = make_pending_running_record(request.run_id.value, request.selection)
         return LeaseBackedFulfilment.allocate(
             self._output_root,
             request.run_id.value,
@@ -398,7 +448,17 @@ class RunController:
         request: RunRequest,
         trace: list[str],
     ) -> RunDisposition:
-        prepared = _acquire_and_plan(resources, request, trace)
+        prepared = _acquire_and_plan(
+            resources,
+            request,
+            trace,
+            lambda action, expected=None: self._transition(
+                trace,
+                action,
+                resources,
+                expected,
+            ),
+        )
         if isinstance(prepared, _PreparationFailed):
             return DurableNonterminal(
                 resources.snapshot().bundle_path,
@@ -413,7 +473,12 @@ class RunController:
                 (persistence_failure("persist-running", "run.json", updated.detail),),
                 tuple(trace),
             )
-        trace.append("Running authority bound to acquired image and domain plan")
+        self._transition(
+            trace,
+            "Running authority bound to acquired image and domain plan",
+            resources,
+            expected,
+        )
         claim = resources.reserve_container(f"graphify-{request.run_id.value}")
         if not isinstance(claim, ContainerClaimed):
             return DurableNonterminal(
@@ -422,10 +487,20 @@ class RunController:
                 tuple(trace),
             )
         outcome = run_validation(plan, request.run_id, resources.fulfil)
-        trace.append("application completed through one correlated fulfilment seam")
+        self._transition(
+            trace,
+            "application completed through one correlated fulfilment seam",
+            resources,
+            expected,
+        )
         failures = _persist_diagnostic_inputs(resources, expected, outcome)
         resources.quiesce_and_seal()
-        trace.append("cleanup, absence proof, and evidence sealing completed")
+        self._transition(
+            trace,
+            "cleanup, absence proof, and evidence sealing completed",
+            resources,
+            expected,
+        )
         return self._terminalize(resources, request, expected, outcome, failures, trace)
 
     def _terminalize(
@@ -463,16 +538,31 @@ class RunController:
         ready = assess_bundle(resources.read_bundle(), expected, facts)
         if not isinstance(ready, ReadyToCommit):
             return _nonterminal(resources, ready, trace)
-        trace.append("whole bundle assessed before report persistence")
+        self._transition(
+            trace,
+            "whole bundle assessed before report persistence",
+            resources,
+            expected,
+        )
         report_result = resources.persist_report(ready.report.encode())
         if isinstance(report_result, PersistenceRejected):
-            trace.append("report persistence failed; Running authority preserved")
+            self._transition(
+                trace,
+                "report persistence failed; Running authority preserved",
+                resources,
+                expected,
+            )
             return DurableNonterminal(
                 resources.snapshot().bundle_path,
                 (persistence_failure("persist-report", "report.md", report_result.detail),),
                 tuple(trace),
             )
-        trace.append("report persisted before terminal Run Record")
+        self._transition(
+            trace,
+            "report persisted before terminal Run Record",
+            resources,
+            expected,
+        )
         with_report = assess_bundle(resources.read_bundle(), expected, facts)
         if not isinstance(with_report, ReadyToCommit) or with_report.permit is None:
             return _nonterminal(resources, with_report, trace)
@@ -481,12 +571,31 @@ class RunController:
             hook(resources, with_report.permit)
         committed = resources.commit_terminal(with_report.permit)
         if isinstance(committed, TerminalCommitRejected):
+            assessed = _peer_terminal_assessment(resources.snapshot().bundle_path, expected)
+            if assessed is not None:
+                self._transition(
+                    trace,
+                    "exclusive peer committed the diagnostics-bound terminal record",
+                    resources,
+                    expected,
+                    assessed.run_record,
+                )
+                return None
             return DurableNonterminal(
                 resources.snapshot().bundle_path,
                 (persistence_failure("commit-terminal", "run.json", committed.detail),),
                 tuple(trace),
             )
-        trace.append("diagnostics-bound terminal permit committed last and exclusively")
+        hook_after = self._harness.after_terminal_commit
+        if hook_after is not None:
+            hook_after(resources)
+        self._transition(
+            trace,
+            "diagnostics-bound terminal permit committed last and exclusively",
+            resources,
+            expected,
+            with_report.terminal_record,
+        )
         return None
 
     def _finish_terminal(
@@ -510,7 +619,13 @@ class RunController:
                 assessment_failures(reopened),
                 tuple((*trace, "fresh terminal reassessment failed")),
             )
-        trace.append("fresh reopen and reassessment completed before publication")
+        self._transition(
+            trace,
+            "fresh reopen and reassessment completed before publication",
+            resources,
+            expected,
+            reopened.run_record,
+        )
         authorized = authorize_retention(reopened)
         retained = self._retention.apply(
             RetentionRequest(resources.snapshot().bundle_path, authorized.run_id)
@@ -521,7 +636,13 @@ class RunController:
                 (persistence_failure("retention", "run.json", retained.detail),),
                 tuple(trace),
             )
-        trace.append("diagnostic authorization preceded resource-owned keep-five retention")
+        self._transition(
+            trace,
+            "diagnostic authorization preceded resource-owned keep-five retention",
+            resources,
+            expected,
+            reopened.run_record,
+        )
         try:
             publication = self._publication.publish(resources.snapshot().bundle_path, reopened)
         except Exception as error:
@@ -530,9 +651,23 @@ class RunController:
                 (controller_failure("publication", "run.json", error),),
                 tuple((*trace, "publication adapter failure classified after terminal proof")),
             )
-        trace.append("publication fact obtained only after fresh reassessment")
+        self._transition(
+            trace,
+            "publication fact obtained only after fresh reassessment",
+            resources,
+            expected,
+            reopened.run_record,
+        )
         decision = classify_ci(
             CIClassificationInput(reopened, reopened.run_record.raw_exit, publication)
+        )
+        self._transition(
+            trace,
+            "CI classified from fresh assessment and publication fact",
+            resources,
+            expected,
+            reopened.run_record,
+            decision,
         )
         return DurableTerminal(
             resources.snapshot().bundle_path,
@@ -542,21 +677,62 @@ class RunController:
             tuple(trace),
         )
 
+    def _transition(
+        self,
+        trace: list[str],
+        action: str,
+        resources: LeaseBackedFulfilment,
+        expected: ExpectedDiagnostic | None = None,
+        terminal: TerminalRunRecord | None = None,
+        decision: CIDecision | None = None,
+    ) -> None:
+        """Record and synchronously expose one real lifecycle boundary."""
+
+        trace.append(action)
+        observer = self._harness.observer
+        if observer is None:
+            return
+        observer.observe(
+            ExecutionSnapshot(
+                len(trace),
+                action,
+                resources.snapshot().bundle_path,
+                None if expected is None else expected.plan.plan_id.value,
+                "TERMINAL" if terminal is not None else "RUNNING",
+                None if terminal is None else terminal.outcome.value,
+                None if terminal is None else terminal.raw_exit,
+                None if decision is None else decision.annotation.value,
+                tuple(trace),
+            )
+        )
+
+
+def _peer_terminal_assessment(
+    bundle: Path,
+    expected: ExpectedDiagnostic,
+) -> CompletedAssessment | None:
+    reopened = reopen_completed(bundle)
+    if isinstance(reopened, RecoveryRejected):
+        return None
+    assessed = assess_bundle(reopened, expected)
+    return assessed if isinstance(assessed, CompletedAssessment) else None
+
 
 def _acquire_and_plan(
     resources: LeaseBackedFulfilment,
     request: RunRequest,
     trace: list[str],
+    transition: Callable[[str, ExpectedDiagnostic | None], None] | None = None,
 ) -> _ApplicationPrepared | _PreparationFailed:
     acquisition_plan = PlanId("preflight-acquisition")
     image = resources.fulfil(
         ImageBuildRequest(ActionId(request.run_id, acquisition_plan, 0), request.source_revision)
     )
     if isinstance(image, ActionUnavailable):
-        return _PreparationFailed((PersistenceFailure("image-build", "image", image.detail),))
+        return _PreparationFailed((preparation_failure("image-build", "image", image.detail),))
     if not isinstance(image, ImmutableImageFact):
         return _PreparationFailed(
-            (SchemaFailure("image-build", "image", "resource returned wrong fact family"),)
+            (preparation_failure("image-build", "image", "resource returned wrong fact family"),)
         )
     catalog_fact = resources.fulfil(
         CatalogReadRequest(
@@ -568,22 +744,23 @@ def _acquire_and_plan(
     )
     if isinstance(catalog_fact, ActionUnavailable):
         return _PreparationFailed(
-            (PersistenceFailure("catalog-read", "catalog", catalog_fact.detail),)
+            (preparation_failure("catalog-read", "catalog", catalog_fact.detail),)
         )
     if not isinstance(catalog_fact, CatalogDocumentsFact):
         return _PreparationFailed(
-            (SchemaFailure("catalog-read", "catalog", "resource returned wrong fact family"),)
+            (preparation_failure("catalog-read", "catalog", "resource returned wrong fact family"),)
         )
-    trace.append("immutable image built and catalog acquired from that exact image")
+    action = "immutable image built and catalog acquired from that exact image"
+    _preparation_transition(trace, transition, action)
     catalog = compile_catalog(catalog_fact.documents)
     if isinstance(catalog, CatalogRejected):
         return _PreparationFailed(
-            tuple(SchemaFailure("catalog", "catalog", reason) for reason in catalog.reasons)
+            tuple(preparation_failure("catalog", "catalog", reason) for reason in catalog.reasons)
         )
     planned = build_validation_plan(catalog.catalog, request.validation, request.policy)
     if isinstance(planned, PlanRejected):
         return _PreparationFailed(
-            tuple(SchemaFailure("plan", "plan", reason) for reason in planned.reasons)
+            tuple(preparation_failure("plan", "plan", reason) for reason in planned.reasons)
         )
     subject_identity = _subject_identity(planned.plan.projection)
     expected = ExpectedDiagnostic(
@@ -592,8 +769,65 @@ def _acquire_and_plan(
         image.immutable_image_identity,
         subject_identity,
         planned.plan.projection,
+        request.policy.runtime_limitations,
     )
-    trace.append("domain-owned Validation Plan compiled")
+    action = "domain-owned Validation Plan compiled"
+    _preparation_transition(trace, transition, action, expected)
+    return _ApplicationPrepared(expected, planned.plan)
+
+
+def _preparation_transition(
+    trace: list[str],
+    transition: Callable[[str, ExpectedDiagnostic | None], None] | None,
+    action: str,
+    expected: ExpectedDiagnostic | None = None,
+) -> None:
+    if transition is None:
+        trace.append(action)
+        return
+    transition(action, expected)
+
+
+def _rederive_expected(
+    request: RunRequest,
+    inputs: ResourceInputs,
+) -> _ApplicationPrepared | _PreparationFailed:
+    """Rebuild private diagnostic expectations from public stable inputs."""
+
+    if request.source_revision != inputs.source_revision:
+        return _PreparationFailed(
+            (
+                preparation_failure(
+                    "recovery-image",
+                    "image",
+                    "source revision is not the configured stable resource input",
+                ),
+            )
+        )
+    catalog = compile_catalog(inputs.catalog_snapshot())
+    if isinstance(catalog, CatalogRejected):
+        return _PreparationFailed(
+            tuple(
+                preparation_failure("recovery-catalog", "catalog", reason)
+                for reason in catalog.reasons
+            )
+        )
+    planned = build_validation_plan(catalog.catalog, request.validation, request.policy)
+    if isinstance(planned, PlanRejected):
+        return _PreparationFailed(
+            tuple(
+                preparation_failure("recovery-plan", "plan", reason) for reason in planned.reasons
+            )
+        )
+    image_identity = "sha256:" + hashlib.sha256(request.source_revision.encode()).hexdigest()
+    expected = ExpectedDiagnostic(
+        request.run_id.value,
+        request.selection,
+        image_identity,
+        _subject_identity(planned.plan.projection),
+        planned.plan.projection,
+        request.policy.runtime_limitations,
+    )
     return _ApplicationPrepared(expected, planned.plan)
 
 
@@ -637,41 +871,75 @@ def _persist_diagnostic_inputs(
     return tuple(failures)
 
 
-def _abandon_after_exception(
+def _make_recovery_claimable(
     resources: LeaseBackedFulfilment,
     request: RunRequest,
-    failure: DiagnosticFailure,
-) -> tuple[DiagnosticFailure, ...]:
-    failures: list[DiagnosticFailure] = [failure]
+    disposition: DurableNonterminal,
+) -> DurableNonterminal:
+    """Centralize every post-allocation nonterminal exit into recovery custody."""
+
+    failures = list(disposition.failures)
+    trace = list(disposition.trace)
     try:
         view = resources.read_bundle()
-        manifest_present = bool(view.all("manifest.json"))
-        running = derive_abandoned_running_record(view)
-        if isinstance(running, RunningRunRecord):
-            updated = resources.update_running(encode_document(running))
-        else:
-            failures.append(running)
-            updated = None
-        if isinstance(updated, PersistenceRejected):
-            failures.append(persistence_failure("persist-running", "run.json", updated.detail))
-        if not manifest_present:
-            persisted = resources.persist_evidence(
-                "controller-failure.json",
-                encode_failure_evidence((failure,)),
-            )
-            if isinstance(persisted, PersistenceRejected):
-                failures.append(
-                    persistence_failure(
-                        "persist-controller-failure",
-                        "controller-failure.json",
-                        persisted.detail,
-                    )
-                )
+        sealed = resources.snapshot().evidence_sealed
+        if not sealed:
+            _mark_running_abandoned(resources, view, failures)
+            _persist_recovery_inputs(resources, view, failures)
+        resources.archive_uncommitted_report()
         proof = resources.quiesce_and_seal()
         resources.abandon_after_failure(proof)
+        trace.append(
+            "nonterminal exit quiesced, sealed, positively invalidated, and released for recovery"
+        )
     except Exception as error:
         failures.append(controller_failure("abandon-after-failure", request.run_id.value, error))
-    return tuple(failures)
+        trace.append("nonterminal recovery handoff failed closed")
+    return DurableNonterminal(
+        resources.snapshot().bundle_path,
+        tuple(failures),
+        tuple(trace),
+    )
+
+
+def _mark_running_abandoned(
+    resources: LeaseBackedFulfilment,
+    view: CoherentBundleReadView,
+    failures: list[DiagnosticFailure],
+) -> None:
+    running = derive_abandoned_running_record(view)
+    if not isinstance(running, RunningRunRecord):
+        failures.append(running)
+        return
+    updated = resources.update_running(encode_document(running))
+    if isinstance(updated, PersistenceRejected):
+        failures.append(persistence_failure("persist-running", "run.json", updated.detail))
+
+
+def _persist_recovery_inputs(
+    resources: LeaseBackedFulfilment,
+    view: CoherentBundleReadView,
+    failures: list[DiagnosticFailure],
+) -> None:
+    if not view.all("runner.log"):
+        host_log = "\n".join(item.operation for item in resources.snapshot().chronology).encode()
+        persisted = resources.persist_evidence("runner.log", host_log)
+        if isinstance(persisted, PersistenceRejected):
+            failures.append(persistence_failure("persist", "runner.log", persisted.detail))
+    if view.all("manifest.json") or view.all("controller-failure.json"):
+        return
+    persisted = resources.persist_evidence(
+        "controller-failure.json",
+        encode_failure_evidence(tuple(failures)),
+    )
+    if isinstance(persisted, PersistenceRejected):
+        failures.append(
+            persistence_failure(
+                "persist-controller-failure",
+                "controller-failure.json",
+                persisted.detail,
+            )
+        )
 
 
 def _nonterminal(

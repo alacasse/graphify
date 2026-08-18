@@ -1,56 +1,12 @@
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-QUALITY_SCRIPT = PROJECT_ROOT / "scripts" / "install_sandbox_quality.py"
-RUFF_CONFIG = PROJECT_ROOT / "ruff.install-sandbox.toml"
-PYRIGHT_CONFIG = PROJECT_ROOT / "pyrightconfig.install-sandbox.json"
-
-
-def _run_fast_gate(
-    tmp_path: Path,
-    source: str,
-    *,
-    config: str | None = None,
-) -> subprocess.CompletedProcess[str]:
-    fixture_root = tmp_path / "repository"
-    production = fixture_root / "tools" / "install_sandbox"
-    production.mkdir(parents=True)
-    (production / "reporting.py").write_text(source, encoding="utf-8")
-    fixture_config = fixture_root / RUFF_CONFIG.name
-    if config is None:
-        shutil.copyfile(RUFF_CONFIG, fixture_config)
-    else:
-        fixture_config.write_text(config, encoding="utf-8")
-    shutil.copyfile(PYRIGHT_CONFIG, fixture_root / PYRIGHT_CONFIG.name)
-
-    environment = os.environ.copy()
-    environment["UV_PROJECT"] = str(PROJECT_ROOT)
-    return subprocess.run(
-        [
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
-            "python",
-            str(QUALITY_SCRIPT),
-            "fast",
-        ],
-        cwd=fixture_root,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+from tests.quality_gate_support import PROJECT_ROOT, run_fast_gate, run_quality_gate
 
 
 def test_fast_gate_accepts_corrected_ruff_fixture(tmp_path: Path) -> None:
-    result = _run_fast_gate(tmp_path, 'MESSAGE = "hello"\n')
+    result = run_fast_gate(tmp_path, 'MESSAGE = "hello"\n')
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[PASS] ruff-format (exit 0)" in result.stdout
@@ -59,7 +15,7 @@ def test_fast_gate_accepts_corrected_ruff_fixture(tmp_path: Path) -> None:
 
 
 def test_fast_gate_reports_format_failure_after_running_lint(tmp_path: Path) -> None:
-    result = _run_fast_gate(tmp_path, "MESSAGE = 'hello'\n")
+    result = run_fast_gate(tmp_path, "MESSAGE = 'hello'\n")
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "[FAIL] ruff-format (exit 1)" in result.stdout
@@ -68,7 +24,7 @@ def test_fast_gate_reports_format_failure_after_running_lint(tmp_path: Path) -> 
 
 
 def test_fast_gate_rejects_lint_violation(tmp_path: Path) -> None:
-    result = _run_fast_gate(tmp_path, "import os\n")
+    result = run_fast_gate(tmp_path, "import os\n")
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "[PASS] ruff-format (exit 0)" in result.stdout
@@ -77,7 +33,7 @@ def test_fast_gate_rejects_lint_violation(tmp_path: Path) -> None:
 
 
 def test_fast_gate_enforces_all_approved_complexity_limits(tmp_path: Path) -> None:
-    result = _run_fast_gate(
+    result = run_fast_gate(
         tmp_path,
         """
 def classify(value: int) -> int:
@@ -134,7 +90,7 @@ def classify(value: int) -> int:
 
 
 def test_fast_gate_does_not_offer_legacy_enum_disposition_to_new_code(tmp_path: Path) -> None:
-    result = _run_fast_gate(
+    result = run_fast_gate(
         tmp_path,
         """
 from enum import Enum
@@ -151,7 +107,7 @@ class NewMode(str, Enum):
 
 
 def test_fast_gate_reports_every_child_before_configuration_exit(tmp_path: Path) -> None:
-    result = _run_fast_gate(
+    result = run_fast_gate(
         tmp_path,
         'MESSAGE = "hello"\n',
         config='target-version = "not-a-python-version"\n',
@@ -166,24 +122,7 @@ def test_fast_gate_reports_every_child_before_configuration_exit(tmp_path: Path)
 
 
 def test_quality_gate_rejects_missing_command_as_invalid_usage() -> None:
-    environment = os.environ.copy()
-    environment["UV_PROJECT"] = str(PROJECT_ROOT)
-    result = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
-            "python",
-            str(QUALITY_SCRIPT),
-        ],
-        cwd=PROJECT_ROOT,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_quality_gate(PROJECT_ROOT, arguments=())
 
     assert result.returncode == 2
     assert "the following arguments are required: command" in result.stderr

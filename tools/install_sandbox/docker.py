@@ -11,7 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
-
 HARNESS_DIR = Path(__file__).resolve().parent
 DEFAULT_IMAGE = "graphify-install-sandbox-v8:local"
 BUILD_TIMEOUT_SECONDS = 900
@@ -185,10 +184,7 @@ def _run(
         _emit(
             phase=phase,
             stream="stderr",
-            text=(
-                f"error: command timed out after {timeout} seconds: "
-                f"{shlex.join(argv)}\n"
-            ),
+            text=(f"error: command timed out after {timeout} seconds: {shlex.join(argv)}\n"),
             on_output=on_output,
         )
         _stop_process(process)

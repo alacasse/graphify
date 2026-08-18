@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
@@ -16,7 +17,6 @@ from .models import (
     ScopeSpec,
     TargetSpec,
 )
-
 
 _TOP_KEYS = {
     "scopes",
@@ -73,9 +73,7 @@ def _safe_relative(value: Any, label: str) -> str:
 def _strings(value: Any, label: str) -> tuple[str, ...]:
     if value is None:
         return ()
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item for item in value
-    ):
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
         raise SpecError(f"{label} must be a list of non-empty strings")
     return tuple(value)
 
@@ -106,7 +104,9 @@ def _scopes(value: Any, label: str) -> frozenset[Scope]:
         raise SpecError(f"{label} contains an invalid scope") from exc
 
 
-def _effect(value: Any, label: str) -> Effect:
+def _effect(  # noqa: C901, PLR0912, PLR0915 - approved legacy disposition
+    value: Any, label: str
+) -> Effect:
     raw = _mapping(value, label)
     _unknown(raw, _EFFECT_KEYS, label)
     try:
@@ -133,9 +133,7 @@ def _effect(value: Any, label: str) -> Effect:
     entries = _mapping(entries, f"{label}.entries")
     reference_bundle = raw.get("reference_bundle")
     if reference_bundle is not None:
-        reference_bundle = _safe_relative(
-            reference_bundle, f"{label}.reference_bundle"
-        )
+        reference_bundle = _safe_relative(reference_bundle, f"{label}.reference_bundle")
         if "/" in reference_bundle:
             raise SpecError(f"{label}.reference_bundle must be one directory name")
     if kind is EffectKind.SKILL and source is None:
@@ -144,18 +142,14 @@ def _effect(value: Any, label: str) -> Effect:
         raise SpecError(f"{label}.marker is required for section effects")
     required_text = _strings(raw.get("required_text"), f"{label}.required_text")
     if kind is EffectKind.SECTION and source is None and not required_text:
-        raise SpecError(
-            f"{label} section effects require source or required_text"
-        )
+        raise SpecError(f"{label} section effects require source or required_text")
     if kind is EffectKind.JSON and not entries:
         raise SpecError(f"{label}.entries is required for JSON effects")
     preserves_backup = raw.get("preserves_backup", False)
     if not isinstance(preserves_backup, bool):
         raise SpecError(f"{label}.preserves_backup must be a boolean")
     if preserves_backup and kind is not EffectKind.JSON:
-        raise SpecError(
-            f"{label}.preserves_backup is only valid for JSON effects"
-        )
+        raise SpecError(f"{label}.preserves_backup is only valid for JSON effects")
     return Effect(
         kind=kind,
         root=root,
@@ -165,15 +159,15 @@ def _effect(value: Any, label: str) -> Effect:
         marker=marker,
         entries=entries,
         required_text=required_text,
-        forbidden_text=_strings(
-            raw.get("forbidden_text"), f"{label}.forbidden_text"
-        ),
+        forbidden_text=_strings(raw.get("forbidden_text"), f"{label}.forbidden_text"),
         reference_bundle=reference_bundle,
         preserves_backup=preserves_backup,
     )
 
 
-def load_target(path: Path) -> TargetSpec:
+def load_target(  # noqa: C901, PLR0915 - approved legacy disposition; retire in Slice 11
+    path: Path,
+) -> TargetSpec:
     try:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
@@ -186,9 +180,7 @@ def load_target(path: Path) -> TargetSpec:
         try:
             scope = Scope(scope_name)
         except ValueError as exc:
-            raise SpecError(
-                f"{path.name}.scopes has invalid scope {scope_name!r}"
-            ) from exc
+            raise SpecError(f"{path.name}.scopes has invalid scope {scope_name!r}") from exc
         scope_raw = _mapping(scope_value, f"{path.name}.{scope.value}")
         _unknown(scope_raw, _SCOPE_KEYS, f"{path.name}.{scope.value}")
         effects_raw = scope_raw.get("effects")
@@ -211,25 +203,17 @@ def load_target(path: Path) -> TargetSpec:
             ),
         )
 
-    unsupported_raw = _mapping(
-        raw.get("unsupported", {}), f"{path.name}.unsupported"
-    )
+    unsupported_raw = _mapping(raw.get("unsupported", {}), f"{path.name}.unsupported")
     unsupported: dict[Scope, str] = {}
     for scope_name, reason in unsupported_raw.items():
         try:
             scope = Scope(scope_name)
         except ValueError as exc:
-            raise SpecError(
-                f"{path.name}.unsupported has invalid scope {scope_name!r}"
-            ) from exc
+            raise SpecError(f"{path.name}.unsupported has invalid scope {scope_name!r}") from exc
         if not isinstance(reason, str) or not reason.strip():
-            raise SpecError(
-                f"{path.name}.unsupported.{scope.value} must explain why"
-            )
+            raise SpecError(f"{path.name}.unsupported.{scope.value} must explain why")
         if scope in scopes:
-            raise SpecError(
-                f"{path.name}.{scope.value} cannot be supported and unsupported"
-            )
+            raise SpecError(f"{path.name}.{scope.value} cannot be supported and unsupported")
         unsupported[scope] = reason
 
     covered = set(scopes) | set(unsupported)
@@ -242,12 +226,8 @@ def load_target(path: Path) -> TargetSpec:
     )
     unavailable_universal_scopes = universal_uninstall_scopes - set(scopes)
     if unavailable_universal_scopes:
-        names = ", ".join(
-            sorted(scope.value for scope in unavailable_universal_scopes)
-        )
-        raise SpecError(
-            f"{path.name}.universal_uninstall_scopes are not supported: {names}"
-        )
+        names = ", ".join(sorted(scope.value for scope in unavailable_universal_scopes))
+        raise SpecError(f"{path.name}.universal_uninstall_scopes are not supported: {names}")
     return TargetSpec(
         name=path.stem,
         scopes=scopes,
@@ -259,10 +239,7 @@ def load_target(path: Path) -> TargetSpec:
 
 def catalog_names(spec_dir: Path) -> tuple[str, ...]:
     """Return the target catalog declared by the YAML filenames."""
-    return tuple(
-        path.stem
-        for path in sorted(spec_dir.glob("*.yaml"), key=lambda item: item.stem)
-    )
+    return tuple(path.stem for path in sorted(spec_dir.glob("*.yaml"), key=lambda item: item.stem))
 
 
 def load_catalog(spec_dir: Path) -> dict[str, TargetSpec]:

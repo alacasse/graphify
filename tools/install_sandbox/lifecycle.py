@@ -7,9 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Mapping
 
 from .effects import (
     USER_JSON_SEED,
@@ -33,7 +33,6 @@ from .models import (
     ValidationResult,
 )
 
-
 COMMAND_TIMEOUT_SECONDS = 180
 PACKAGE_TIMEOUT_SECONDS = 900
 USER_SENTINEL = "graphify sandbox unrelated user content\n"
@@ -46,9 +45,7 @@ class Seed:
     kind: str
 
 
-CommandExecutor = Callable[
-    [tuple[str, ...], Path, Mapping[str, str], Path, str], CommandResult
-]
+CommandExecutor = Callable[[tuple[str, ...], Path, Mapping[str, str], Path, str], CommandResult]
 
 
 def _timeout_output_text(value: str | bytes | None) -> str:
@@ -178,7 +175,7 @@ def reset_scenario_roots(roots: SandboxRoots) -> None:
 
 def seed_user_content(scenario: Scenario, roots: Mapping[Root, Path]) -> list[Seed]:
     seeds: list[Seed] = []
-    for root, base in roots.items():
+    for _root, base in roots.items():
         base.mkdir(parents=True, exist_ok=True)
         sentinel = base / "user-owned.txt"
         sentinel.write_text(USER_SENTINEL, encoding="utf-8")
@@ -219,10 +216,7 @@ def validate_user_content(seeds: Iterable[Seed]) -> list[ValidationResult]:
             detail = f"{seed.path} retains unrelated content"
         elif passed and seed.kind == "section":
             text = seed.path.read_text(encoding="utf-8")
-            passed = (
-                "keep this section" in text
-                and STALE_SECTION_SENTINEL not in text
-            )
+            passed = "keep this section" in text and STALE_SECTION_SENTINEL not in text
             detail = (
                 f"{seed.path} retains the user's Markdown section and replaces "
                 "stale Graphify-owned content"
@@ -286,7 +280,7 @@ def _write_snapshot(
     return value
 
 
-def run_scenario(
+def run_scenario(  # noqa: PLR0915 - approved legacy disposition; retire in Slice 11
     scenario: Scenario,
     roots: SandboxRoots,
     *,
@@ -303,9 +297,7 @@ def run_scenario(
     cwd = roots.user_cwd if scenario.scope is Scope.USER else roots.project
     phases: list[PhaseResult] = []
 
-    install = executor(
-        install_command(scenario), cwd, env, artifact_dir, "install"
-    )
+    install = executor(install_command(scenario), cwd, env, artifact_dir, "install")
     installed_checks = validate_installed(
         scenario.contract.effects,
         effect_roots,
@@ -313,9 +305,7 @@ def run_scenario(
         expected_version,
     )
     installed_checks.extend(validate_user_content(seeds))
-    installed_snapshot = _write_snapshot(
-        artifact_dir / "after-install.json", effect_roots
-    )
+    installed_snapshot = _write_snapshot(artifact_dir / "after-install.json", effect_roots)
     installed_checks.append(
         validate_no_unexpected_changes(
             scenario.contract.effects,
@@ -339,9 +329,7 @@ def run_scenario(
             roots=roots,
         )
 
-    reinstall = executor(
-        install_command(scenario), cwd, env, artifact_dir, "reinstall"
-    )
+    reinstall = executor(install_command(scenario), cwd, env, artifact_dir, "reinstall")
     reinstall_checks = validate_installed(
         scenario.contract.effects,
         effect_roots,
@@ -349,14 +337,11 @@ def run_scenario(
         expected_version,
     )
     reinstall_checks.extend(validate_user_content(seeds))
-    reinstalled_snapshot = _write_snapshot(
-        artifact_dir / "after-reinstall.json", effect_roots
-    )
+    reinstalled_snapshot = _write_snapshot(artifact_dir / "after-reinstall.json", effect_roots)
     reinstall_checks.append(
         ValidationResult(
             check="idempotent filesystem state",
-            passed=snapshot_digest(installed_snapshot)
-            == snapshot_digest(reinstalled_snapshot),
+            passed=snapshot_digest(installed_snapshot) == snapshot_digest(reinstalled_snapshot),
             detail="second install leaves the same filesystem snapshot",
         )
     )
@@ -378,9 +363,7 @@ def run_scenario(
 
     sidecar_count = seed_stale_sidecars(scenario, effect_roots)
     if sidecar_count:
-        repair = executor(
-            install_command(scenario), cwd, env, artifact_dir, "repair-sidecars"
-        )
+        repair = executor(install_command(scenario), cwd, env, artifact_dir, "repair-sidecars")
         repair_checks = validate_installed(
             scenario.contract.effects,
             effect_roots,
@@ -388,14 +371,11 @@ def run_scenario(
             expected_version,
         )
         repair_checks.extend(validate_user_content(seeds))
-        repaired_snapshot = _write_snapshot(
-            artifact_dir / "after-repair.json", effect_roots
-        )
+        repaired_snapshot = _write_snapshot(artifact_dir / "after-repair.json", effect_roots)
         repair_checks.append(
             ValidationResult(
                 check="repaired stable filesystem state",
-                passed=snapshot_digest(installed_snapshot)
-                == snapshot_digest(repaired_snapshot),
+                passed=snapshot_digest(installed_snapshot) == snapshot_digest(repaired_snapshot),
                 detail="repair removes stale references and restores installed state",
             )
         )
@@ -427,9 +407,7 @@ def run_scenario(
         )
         _write_snapshot(artifact_dir / "after-uninstall-not-applicable.json", effect_roots)
     else:
-        uninstall = executor(
-            uninstall_argv, cwd, env, artifact_dir, "uninstall"
-        )
+        uninstall = executor(uninstall_argv, cwd, env, artifact_dir, "uninstall")
         uninstall_checks = validate_removed(
             scenario.contract.effects,
             effect_roots,
@@ -471,9 +449,9 @@ def _finish_scenario(
     artifact_dir: Path,
     roots: SandboxRoots,
 ) -> ScenarioResult:
-    status = "PASS" if all(
-        phase.status in {"PASS", "NOT_APPLICABLE"} for phase in phases
-    ) else "FAIL"
+    status = (
+        "PASS" if all(phase.status in {"PASS", "NOT_APPLICABLE"} for phase in phases) else "FAIL"
+    )
     result = ScenarioResult(
         scenario=scenario.name,
         target=scenario.target.name,
@@ -490,7 +468,7 @@ def _finish_scenario(
     return result
 
 
-def run_universal_uninstall_scenario(
+def run_universal_uninstall_scenario(  # noqa: PLR0915 - approved legacy disposition
     scenarios: Iterable[Scenario],
     roots: SandboxRoots,
     *,
@@ -515,8 +493,7 @@ def run_universal_uninstall_scenario(
     reset_scenario_roots(roots)
     effect_roots = roots.effect_roots()
     seed_groups = [
-        (item, seed_user_content(item, effect_roots))
-        for item in (*preserved, *selected)
+        (item, seed_user_content(item, effect_roots)) for item in (*preserved, *selected)
     ]
     active_seeds: dict[tuple[Path, str], Seed] = {}
     graph = roots.project / "graphify-out" / "graph.json"
@@ -527,9 +504,7 @@ def run_universal_uninstall_scenario(
     prepared: list[Scenario] = []
 
     for item in preserved:
-        item_seeds = next(
-            seeds for candidate, seeds in seed_groups if candidate is item
-        )
+        item_seeds = next(seeds for candidate, seeds in seed_groups if candidate is item)
         command = executor(
             install_command(item),
             roots.user_cwd if item.scope is Scope.USER else roots.project,
@@ -553,9 +528,7 @@ def run_universal_uninstall_scenario(
         phases.append(phase)
         if phase.status == "PASS":
             prepared.append(item)
-            active_seeds.update(
-                {(seed.path, seed.kind): seed for seed in item_seeds}
-            )
+            active_seeds.update({(seed.path, seed.kind): seed for seed in item_seeds})
 
     before_snapshot = _write_snapshot(
         artifact_dir / "before.json",
@@ -565,12 +538,8 @@ def run_universal_uninstall_scenario(
     previous_snapshot = before_snapshot
     cwd = roots.user_cwd if scope is Scope.USER else roots.project
     for item in selected:
-        item_seeds = next(
-            seeds for candidate, seeds in seed_groups if candidate is item
-        )
-        active_seeds.update(
-            {(seed.path, seed.kind): seed for seed in item_seeds}
-        )
+        item_seeds = next(seeds for candidate, seeds in seed_groups if candidate is item)
+        active_seeds.update({(seed.path, seed.kind): seed for seed in item_seeds})
         command = executor(
             install_command(item),
             cwd,
@@ -608,9 +577,7 @@ def run_universal_uninstall_scenario(
         previous_snapshot = current_snapshot
 
     uninstall_argv = (
-        ("graphify", "uninstall")
-        if scope is Scope.USER
-        else ("graphify", "uninstall", "--project")
+        ("graphify", "uninstall") if scope is Scope.USER else ("graphify", "uninstall", "--project")
     )
     uninstall = executor(
         uninstall_argv,
@@ -663,9 +630,7 @@ def run_universal_uninstall_scenario(
 
     limitations = tuple(
         dict.fromkeys(
-            limitation
-            for item in (*selected, *preserved)
-            for limitation in item.target.limitations
+            limitation for item in (*selected, *preserved) for limitation in item.target.limitations
         )
     )
     result = ScenarioResult(
@@ -755,9 +720,7 @@ def parse_public_install_targets(help_text: str) -> set[str]:
     for line in help_text.splitlines():
         if line.startswith("Platforms: "):
             generic = {
-                item.strip()
-                for item in line.removeprefix("Platforms: ").split(",")
-                if item.strip()
+                item.strip() for item in line.removeprefix("Platforms: ").split(",") if item.strip()
             }
             return generic | {"vscode"}
     raise RuntimeError("graphify install help did not publish a Platforms line")

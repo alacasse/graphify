@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from .models import ScenarioResult
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def summarize(results: Iterable[ScenarioResult]) -> dict[str, int]:
@@ -63,9 +64,7 @@ def render_report(manifest: Mapping[str, Any]) -> str:
             ),
             "N/A",
         )
-        lines.append(
-            f"| {scenario['scenario']} | {scenario['status']} | {uninstall} |"
-        )
+        lines.append(f"| {scenario['scenario']} | {scenario['status']} | {uninstall} |")
         for limitation in scenario.get("limitations", []):
             if limitation not in limitations:
                 limitations.append(limitation)
@@ -73,9 +72,7 @@ def render_report(manifest: Mapping[str, Any]) -> str:
         lines.extend(["", "## Runtime limitations", ""])
         lines.extend(f"- {item}" for item in limitations)
     failures = [
-        scenario
-        for scenario in manifest.get("scenarios", [])
-        if scenario.get("status") == "FAIL"
+        scenario for scenario in manifest.get("scenarios", []) if scenario.get("status") == "FAIL"
     ]
     if failures:
         lines.extend(["", "## Failed scenarios", ""])

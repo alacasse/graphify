@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-
 Annotation = Literal["notice", "warning", "error"]
 
 
@@ -26,7 +25,7 @@ def _invalid(message: str) -> CIResult:
     return CIResult("error", f"Invalid install-sandbox result: {message}", 2)
 
 
-def classify_ci_result(
+def classify_ci_result(  # noqa: C901 - approved legacy disposition; retire in Slice 11
     metadata: Mapping[str, object],
     runner_exit_code: int,
 ) -> CIResult:

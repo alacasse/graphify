@@ -22,7 +22,6 @@ from tools.install_sandbox.run_artifacts import (
 )
 from tools.install_sandbox.specs import SpecError, catalog_names, load_catalog
 
-
 HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
 
 

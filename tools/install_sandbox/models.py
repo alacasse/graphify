@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
-class Scope(str, Enum):
+class Scope(str, Enum):  # noqa: UP042 - approved legacy disposition; retire in Slice 11
     USER = "user"
     PROJECT = "project"
 
 
-class Root(str, Enum):
+class Root(str, Enum):  # noqa: UP042 - approved legacy disposition; retire in Slice 11
     HOME = "home"
     XDG = "xdg"
     PROJECT = "project"
     USER_CWD = "user_cwd"
 
 
-class EffectKind(str, Enum):
+class EffectKind(str, Enum):  # noqa: UP042 - approved legacy disposition; retire in Slice 11
     SKILL = "skill"
     FILE = "file"
     SECTION = "section"
@@ -29,7 +30,7 @@ class EffectKind(str, Enum):
     REMINDER_PLUGIN = "reminder_plugin"
 
 
-class CommandMode(str, Enum):
+class CommandMode(str, Enum):  # noqa: UP042 - approved legacy disposition; retire in Slice 11
     DIRECT = "direct"
 
 

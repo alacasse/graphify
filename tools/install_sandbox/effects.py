@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from .models import Effect, EffectKind, Observation, Root, ValidationResult
-
 
 REFERENCE_NAMES = frozenset(
     {
@@ -106,16 +106,12 @@ def contains_json(actual: Any, expected: Any) -> bool:
     """Return whether *actual* contains the expected JSON subset."""
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(
-            key in actual and contains_json(actual[key], value)
-            for key, value in expected.items()
+            key in actual and contains_json(actual[key], value) for key, value in expected.items()
         )
     if isinstance(expected, list):
         if not isinstance(actual, list):
             return False
-        return all(
-            any(contains_json(candidate, item) for candidate in actual)
-            for item in expected
-        )
+        return all(any(contains_json(candidate, item) for candidate in actual) for item in expected)
     return actual == expected
 
 
@@ -139,8 +135,7 @@ def _validate_payload(
         "prefix": actual.startswith(expected),
         "suffix": actual.endswith(expected),
         "contains": expected in actual,
-        "frontmatter-body": _frontmatter_body(actual)
-        == _frontmatter_body(expected),
+        "frontmatter-body": _frontmatter_body(actual) == _frontmatter_body(expected),
     }
     passed = comparisons[effect.payload_mode]
     return [
@@ -179,15 +174,9 @@ def _validate_sidecars(
 ) -> list[ValidationResult]:
     results: list[ValidationResult] = []
     version = path.parent / ".graphify_version"
-    actual_version = (
-        version.read_text(encoding="utf-8").strip()
-        if version.is_file()
-        else None
-    )
+    actual_version = version.read_text(encoding="utf-8").strip() if version.is_file() else None
     version_matches = (
-        actual_version == expected_version
-        if expected_version is not None
-        else bool(actual_version)
+        actual_version == expected_version if expected_version is not None else bool(actual_version)
     )
     results.append(
         _result(
@@ -231,9 +220,7 @@ def _validate_sidecars(
             f"{staged} does not exist",
         )
     )
-    source_refs = (
-        source_root / "graphify" / "skills" / effect.reference_bundle / "references"
-    )
+    source_refs = source_root / "graphify" / "skills" / effect.reference_bundle / "references"
     equal = actual_names == REFERENCE_NAMES
     for name in REFERENCE_NAMES:
         actual_file = refs / name
@@ -263,9 +250,7 @@ def _validate_sidecars(
     return results
 
 
-def _validate_reminder(
-    effect: Effect, observation: Observation
-) -> list[ValidationResult]:
+def _validate_reminder(effect: Effect, observation: Observation) -> list[ValidationResult]:
     text = observation.text or ""
     matches = _REMINDER_RE.findall(text)
     if len(matches) != 1:
@@ -292,13 +277,13 @@ def _validate_reminder(
         ),
         _result(
             "captured reminder semicolon join",
-            '" ; \' +' in text and '" && \' +' not in text,
+            "\" ; ' +" in text and "\" && ' +" not in text,
             "reminder uses the cross-shell semicolon join, not the old && join",
         ),
     ]
 
 
-def validate_installed(
+def validate_installed(  # noqa: C901, PLR0912, PLR0915 - approved legacy disposition
     effects: Iterable[Effect],
     roots: Mapping[Root, Path],
     source_root: Path,
@@ -322,9 +307,7 @@ def validate_installed(
         fragment_text = text
         if effect.kind is EffectKind.SECTION:
             section = _owned_section(text, effect.marker or "")
-            marker_count = sum(
-                line.strip() == effect.marker for line in text.splitlines()
-            )
+            marker_count = sum(line.strip() == effect.marker for line in text.splitlines())
             results.append(
                 _result(
                     f"{label} owned section",
@@ -392,7 +375,7 @@ def validate_installed(
     return results
 
 
-def _json_owned_entries_bind_required_text(
+def _json_owned_entries_bind_required_text(  # noqa: C901 - approved legacy disposition
     actual: Any,
     expected: Any,
     required_text: tuple[str, ...],
@@ -416,11 +399,7 @@ def _json_owned_entries_bind_required_text(
         for expected_item in expected:
             if not isinstance(expected_item, dict):
                 continue
-            matches = [
-                candidate
-                for candidate in actual
-                if contains_json(candidate, expected_item)
-            ]
+            matches = [candidate for candidate in actual if contains_json(candidate, expected_item)]
             if len(matches) != 1:
                 return False
             serialized = json.dumps(matches[0], sort_keys=True)
@@ -443,13 +422,12 @@ def json_owned_entries_absent(actual: Any, expected: Any) -> bool:
         if not isinstance(actual, list):
             return True
         return all(
-            not any(contains_json(candidate, item) for candidate in actual)
-            for item in expected
+            not any(contains_json(candidate, item) for candidate in actual) for item in expected
         )
     return actual != expected
 
 
-def validate_removed(
+def validate_removed(  # noqa: C901, PLR0915 - approved legacy disposition
     effects: Iterable[Effect],
     roots: Mapping[Root, Path],
     source_root: Path | None = None,
@@ -465,9 +443,7 @@ def validate_removed(
             residual_body = False
             if effect.source and source_root is not None:
                 try:
-                    expected = (source_root / effect.source).read_text(
-                        encoding="utf-8"
-                    )
+                    expected = (source_root / effect.source).read_text(encoding="utf-8")
                 except OSError:
                     residual_body = True
                 else:
@@ -475,13 +451,9 @@ def validate_removed(
                     body = "\n".join(expected_lines[1:]).strip()
                     residual_body = bool(body) and body in text
             elif effect.required_text:
-                residual_body = all(
-                    fragment in text for fragment in effect.required_text
-                )
+                residual_body = all(fragment in text for fragment in effect.required_text)
             absent = absent and not residual_body
-            detail = (
-                f"owned marker {effect.marker!r} and owned section body are absent"
-            )
+            detail = f"owned marker {effect.marker!r} and owned section body are absent"
         elif effect.kind is EffectKind.JSON:
             expected = _expanded(dict(effect.entries), roots)
             absent = json_owned_entries_absent(observation.json_value, expected)
@@ -499,9 +471,7 @@ def validate_removed(
             results.append(
                 _result(
                     f"{label} sidecars removed",
-                    not refs.exists()
-                    and not staged.exists()
-                    and not version.exists(),
+                    not refs.exists() and not staged.exists() and not version.exists(),
                     "references, references.tmp, and version stamp are absent",
                 )
             )
@@ -549,7 +519,7 @@ def snapshot_digest(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def validate_no_unexpected_changes(
+def validate_no_unexpected_changes(  # noqa: C901 - approved legacy disposition
     effects: Iterable[Effect],
     before: Mapping[str, Sequence[Mapping[str, object]]],
     after: Mapping[str, Sequence[Mapping[str, object]]],
@@ -561,34 +531,22 @@ def validate_no_unexpected_changes(
         effect_path = PurePosixPath(effect.path)
         paths.add(effect_path.as_posix())
         if effect.preserves_backup:
-            paths.add(
-                effect_path.with_name(
-                    effect_path.name + ".graphify-bak"
-                ).as_posix()
-            )
+            paths.add(effect_path.with_name(effect_path.name + ".graphify-bak").as_posix())
         if effect.kind is not EffectKind.SKILL:
             continue
         paths.add((effect_path.parent / ".graphify_version").as_posix())
         if effect.reference_bundle:
             paths.update(
-                (effect_path.parent / "references" / name).as_posix()
-                for name in REFERENCE_NAMES
+                (effect_path.parent / "references" / name).as_posix() for name in REFERENCE_NAMES
             )
 
     unexpected: list[str] = []
     for root_name in sorted(set(before) | set(after)):
-        before_files = {
-            str(item["path"]): dict(item)
-            for item in before.get(root_name, [])
-        }
-        after_files = {
-            str(item["path"]): dict(item)
-            for item in after.get(root_name, [])
-        }
+        before_files = {str(item["path"]): dict(item) for item in before.get(root_name, [])}
+        after_files = {str(item["path"]): dict(item) for item in after.get(root_name, [])}
         for path in sorted(set(before_files) | set(after_files)):
-            if (
-                before_files.get(path) != after_files.get(path)
-                and path not in allowed.get(root_name, set())
+            if before_files.get(path) != after_files.get(path) and path not in allowed.get(
+                root_name, set()
             ):
                 unexpected.append(f"{root_name}:{path}")
 

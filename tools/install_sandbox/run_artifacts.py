@@ -11,11 +11,11 @@ import sys
 import threading
 import uuid
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
-
 
 SCHEMA_VERSION = 1
 MANAGED_ROOT = Path(__file__).resolve().parent / "out"
@@ -40,13 +40,13 @@ class ArtifactError(ValueError):
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ArtifactError("artifact timestamps must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _timestamp(value: datetime) -> str:
@@ -59,7 +59,7 @@ def _parse_timestamp(value: object) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError("timestamp has no timezone")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -75,10 +75,8 @@ def _atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
-        try:
+        with suppress(FileNotFoundError):
             temporary.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def _resolved(path: Path) -> Path:
@@ -161,7 +159,9 @@ def _allocate_managed_output(
         return run_id, output
 
 
-def _allocate_external_output(output: Path, managed_root: Path) -> Path:
+def _allocate_external_output(  # noqa: C901, PLR0912, PLR0915 - approved legacy disposition
+    output: Path, managed_root: Path
+) -> Path:
     requested = output.expanduser()
     if requested.is_symlink():
         raise ArtifactError(f"external output must not be a symlink: {requested}")
@@ -420,8 +420,7 @@ def complete_outputs(output: Path, started_at: datetime) -> bool:
     """Check the complete, fresh container-owned top-level output contract."""
 
     return all(
-        fresh_regular_file(output / name, started_at)
-        for name in ("manifest.json", "report.md")
+        fresh_regular_file(output / name, started_at) for name in ("manifest.json", "report.md")
     )
 
 
@@ -436,7 +435,9 @@ def _warn_to_stderr(message: str) -> None:
     print(f"warning: {message}", file=sys.stderr)
 
 
-def _prune_candidate(path: Path, warn: WarningSink) -> _PruneCandidate | None:
+def _prune_candidate(  # noqa: C901, PLR0912, PLR0915 - approved legacy disposition
+    path: Path, warn: WarningSink
+) -> _PruneCandidate | None:
     try:
         if path.is_symlink():
             warn(f"preserving symlinked managed-root entry: {path}")
@@ -498,8 +499,7 @@ def _prune_candidate(path: Path, warn: WarningSink) -> _PruneCandidate | None:
         not isinstance(selection, dict)
         or selection.get("scope") != match.group("scope")
         or selection.get("all") is not (expected_selection == "all")
-        or selection.get("target")
-        != (None if expected_selection == "all" else expected_selection)
+        or selection.get("target") != (None if expected_selection == "all" else expected_selection)
     ):
         warn(f"preserving run with malformed selection metadata at {path}")
         return None
@@ -530,7 +530,7 @@ def _prune_candidate(path: Path, warn: WarningSink) -> _PruneCandidate | None:
     return _PruneCandidate(path=path, started_at=started_at, collision=collision)
 
 
-def prune_managed_runs(
+def prune_managed_runs(  # noqa: C901 - approved legacy disposition; retire in Slice 11
     root: Path = MANAGED_ROOT,
     *,
     keep: int = 5,
@@ -552,9 +552,7 @@ def prune_managed_runs(
         return ()
 
     candidates = [
-        candidate
-        for entry in entries
-        if (candidate := _prune_candidate(entry, warn)) is not None
+        candidate for entry in entries if (candidate := _prune_candidate(entry, warn)) is not None
     ]
     candidates.sort(
         key=lambda candidate: (

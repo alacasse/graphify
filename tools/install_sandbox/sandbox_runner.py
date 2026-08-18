@@ -18,7 +18,6 @@ from .models import SandboxRoots, Scenario, ScenarioResult, Scope
 from .reporting import build_manifest, write_run_outputs
 from .specs import SpecError, catalog_names, load_catalog
 
-
 HARNESS_SPEC_DIR = Path(__file__).resolve().parent / "specs"
 
 
@@ -70,7 +69,7 @@ def _unsupported(target, scope: Scope, output: Path) -> ScenarioResult:
     )
 
 
-def main(
+def main(  # noqa: C901, PLR0915 - approved legacy disposition; retire in Slice 11
     argv: list[str] | None = None,
     *,
     spec_dir: Path = HARNESS_SPEC_DIR,
@@ -87,11 +86,7 @@ def main(
         raise RuntimeError("repository mount is writable; refusing unsafe sandbox run")
 
     names = list(catalog) if args.all_targets else [args.target]
-    scopes = (
-        list(Scope)
-        if args.scope == "both"
-        else [Scope(args.scope)]
-    )
+    scopes = list(Scope) if args.scope == "both" else [Scope(args.scope)]
     results: list[ScenarioResult] = []
     for name in names:
         target = catalog[name]

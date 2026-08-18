@@ -669,12 +669,14 @@ def copy_and_install_package(
     package_dir = roots.output / "package"
     package_dir.mkdir(parents=True, exist_ok=True)
     argv = (sys.executable, "-m", "pip", "install", "--user", str(roots.source))
-    result = execute_command(argv, Path("/tmp"), env, package_dir, "pip-install")
+    # B108: these are neutral in-container working directories, not host temp allocation.
+    # Approved by alacasse in issue #40 on 2026-08-01; retire with lifecycle.py in Slice 11.
+    result = execute_command(argv, Path("/tmp"), env, package_dir, "pip-install")  # nosec B108
     if not result.passed:
         raise RuntimeError("package installation failed; see package logs")
     probe = execute_command(
         ("graphify", "--version"),
-        Path("/tmp"),
+        Path("/tmp"),  # nosec B108
         env,
         package_dir,
         "version",
@@ -688,7 +690,7 @@ def copy_and_install_package(
     package_version = version_text.removeprefix(prefix)
     help_probe = execute_command(
         ("graphify", "install", "--help"),
-        Path("/tmp"),
+        Path("/tmp"),  # nosec B108
         env,
         package_dir,
         "install-help",

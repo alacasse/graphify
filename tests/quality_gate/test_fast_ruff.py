@@ -5,10 +5,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 QUALITY_SCRIPT = PROJECT_ROOT / "scripts" / "install_sandbox_quality.py"
 RUFF_CONFIG = PROJECT_ROOT / "ruff.install-sandbox.toml"
+PYRIGHT_CONFIG = PROJECT_ROOT / "pyrightconfig.install-sandbox.json"
 
 
 def _run_fast_gate(
@@ -20,12 +20,13 @@ def _run_fast_gate(
     fixture_root = tmp_path / "repository"
     production = fixture_root / "tools" / "install_sandbox"
     production.mkdir(parents=True)
-    (production / "fixture.py").write_text(source, encoding="utf-8")
+    (production / "reporting.py").write_text(source, encoding="utf-8")
     fixture_config = fixture_root / RUFF_CONFIG.name
     if config is None:
         shutil.copyfile(RUFF_CONFIG, fixture_config)
     else:
         fixture_config.write_text(config, encoding="utf-8")
+    shutil.copyfile(PYRIGHT_CONFIG, fixture_root / PYRIGHT_CONFIG.name)
 
     environment = os.environ.copy()
     environment["UV_PROJECT"] = str(PROJECT_ROOT)

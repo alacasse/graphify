@@ -18,11 +18,13 @@ RUN_TIMEOUT_SECONDS = 7200
 
 CONTAINER_REPO = "/mnt/graphify-repo"
 CONTAINER_OUTPUT = "/sandbox-out"
-CONTAINER_HOME = "/tmp/graphify-home"
-CONTAINER_XDG = "/tmp/graphify-xdg"
-CONTAINER_PROJECT = "/tmp/graphify-project"
-CONTAINER_USER_CWD = "/tmp/graphify-user-cwd"
-CONTAINER_SOURCE = "/tmp/graphify-source"
+# B108: these are container-internal roots, not host temporary-file allocation.
+# Approved by alacasse in issue #40 on 2026-08-01; retire with docker.py in Slice 11.
+CONTAINER_HOME = "/tmp/graphify-home"  # nosec B108
+CONTAINER_XDG = "/tmp/graphify-xdg"  # nosec B108
+CONTAINER_PROJECT = "/tmp/graphify-project"  # nosec B108
+CONTAINER_USER_CWD = "/tmp/graphify-user-cwd"  # nosec B108
+CONTAINER_SOURCE = "/tmp/graphify-source"  # nosec B108
 
 PhaseHandler = Callable[[str], None]
 OutputHandler = Callable[[str, str, str], None]

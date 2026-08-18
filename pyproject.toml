@@ -116,6 +116,7 @@ dev = [
     "tree-sitter-hcl>=1.2.0",
     "tree-sitter-ocaml>=0.25.0",
     "tree-sitter-commonlisp>=0.4.1",
+    "types-pyyaml>=6.0.12.20260518",
 ]
 
 [tool.uv]

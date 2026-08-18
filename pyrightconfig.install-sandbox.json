@@ -1,0 +1,18 @@
+{
+  "include": [
+    "tools/install_sandbox",
+    "tests/install_sandbox/unit",
+    "tests/install_sandbox/component",
+    "tests/install_sandbox/behavioral"
+  ],
+  "strict": [
+    "tools/install_sandbox/__init__.py",
+    "tools/install_sandbox/docker.py",
+    "tools/install_sandbox/reporting.py",
+    "tests/install_sandbox/unit",
+    "tests/install_sandbox/component",
+    "tests/install_sandbox/behavioral"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}

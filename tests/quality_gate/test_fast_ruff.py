@@ -110,7 +110,7 @@ def test_fast_gate_reports_every_child_before_configuration_exit(tmp_path: Path)
     result = run_fast_gate(
         tmp_path,
         'MESSAGE = "hello"\n',
-        config='target-version = "not-a-python-version"\n',
+        ruff_config='target-version = "not-a-python-version"\n',
     )
 
     assert result.returncode == 2, result.stdout + result.stderr

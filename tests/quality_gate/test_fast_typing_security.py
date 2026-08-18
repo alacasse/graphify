@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import tomllib
 from pathlib import Path
 
@@ -9,7 +8,7 @@ from tests.quality_gate_support import (
     LOCKFILE,
     PROJECT_ROOT,
     PYRIGHT_CONFIG,
-    RUFF_CONFIG,
+    copy_install_sandbox_gate_fixture,
     run_fast_gate,
     run_quality_gate,
 )
@@ -175,11 +174,8 @@ def test_fast_gate_rejects_pyright_runtime_drift(tmp_path: Path) -> None:
 
 
 def test_fast_gate_requires_changed_legacy_file_to_enter_strict_scope(tmp_path: Path) -> None:
-    fixture_root = tmp_path / "repository"
+    fixture_root = copy_install_sandbox_gate_fixture(tmp_path)
     production = fixture_root / "tools" / "install_sandbox"
-    shutil.copytree(PROJECT_ROOT / "tools" / "install_sandbox", production)
-    shutil.copyfile(RUFF_CONFIG, fixture_root / RUFF_CONFIG.name)
-    shutil.copyfile(PYRIGHT_CONFIG, fixture_root / PYRIGHT_CONFIG.name)
     legacy = production / "ci_result.py"
     legacy.write_text(
         legacy.read_text(encoding="utf-8") + '\nMATERIAL_CHANGE: str = "changed"\n',
@@ -194,6 +190,26 @@ def test_fast_gate_requires_changed_legacy_file_to_enter_strict_scope(tmp_path: 
     )
     assert "[FAIL] pyright (exit 2)" in result.stdout
     assert "[PASS] bandit (exit 0)" in result.stdout
+
+
+def test_fast_gate_treats_legacy_typing_directive_as_material_change(
+    tmp_path: Path,
+) -> None:
+    fixture_root = copy_install_sandbox_gate_fixture(tmp_path)
+    production = fixture_root / "tools" / "install_sandbox"
+    legacy = production / "ci_result.py"
+    legacy.write_text(
+        legacy.read_text(encoding="utf-8") + "\n# pyright: reportAssignmentType=false\n",
+        encoding="utf-8",
+    )
+
+    result = run_quality_gate(fixture_root)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "changed legacy typing file is not strict: tools/install_sandbox/ci_result.py" in (
+        result.stderr
+    )
+    assert "[FAIL] pyright (exit 2)" in result.stdout
 
 
 def test_fast_gate_applies_strict_typing_to_replacement_tests(tmp_path: Path) -> None:
@@ -237,6 +253,21 @@ def test_fast_gate_rejects_compact_nosec_spelling(tmp_path: Path) -> None:
     result = run_fast_gate(
         tmp_path,
         'TEMP_ROOT = "/tmp/replacement"  #nosec B108\n',
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "unapproved Bandit disposition" in result.stderr
+    assert "[FAIL] bandit (exit 2)" in result.stdout
+
+
+def test_fast_gate_rejects_nosec_without_separator(tmp_path: Path) -> None:
+    result = run_fast_gate(
+        tmp_path,
+        """
+# fmt: off
+TEMP_ROOT = "/tmp/replacement"  #nosecB108
+# fmt: on
+""".lstrip(),
     )
 
     assert result.returncode == 2, result.stdout + result.stderr

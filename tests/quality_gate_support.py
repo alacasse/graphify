@@ -7,11 +7,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from scripts.install_sandbox_quality_policy import PYTHON_VERSION
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 QUALITY_SCRIPT = PROJECT_ROOT / "scripts" / "install_sandbox_quality.py"
 RUFF_CONFIG = PROJECT_ROOT / "ruff.install-sandbox.toml"
 PYRIGHT_CONFIG = PROJECT_ROOT / "pyrightconfig.install-sandbox.json"
 LOCKFILE = PROJECT_ROOT / "uv.lock"
+FROZEN_PYTHON_RUN = ("uv", "run", "--frozen", "--python", PYTHON_VERSION)
 
 
 def run_quality_gate(
@@ -23,11 +26,7 @@ def run_quality_gate(
     environment["UV_PROJECT"] = str(PROJECT_ROOT)
     return subprocess.run(
         [
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
+            *FROZEN_PYTHON_RUN,
             "python",
             str(QUALITY_SCRIPT),
             *arguments,
@@ -40,11 +39,22 @@ def run_quality_gate(
     )
 
 
+def copy_install_sandbox_gate_fixture(tmp_path: Path) -> Path:
+    fixture_root = tmp_path / "repository"
+    shutil.copytree(
+        PROJECT_ROOT / "tools" / "install_sandbox",
+        fixture_root / "tools" / "install_sandbox",
+    )
+    shutil.copyfile(RUFF_CONFIG, fixture_root / RUFF_CONFIG.name)
+    shutil.copyfile(PYRIGHT_CONFIG, fixture_root / PYRIGHT_CONFIG.name)
+    return fixture_root
+
+
 def run_fast_gate(
     tmp_path: Path,
     source: str,
     *,
-    config: str | None = None,
+    ruff_config: str | None = None,
     filename: str = "reporting.py",
     replacement_source: str | None = None,
     pyright_config: str | None = None,
@@ -63,10 +73,10 @@ def run_fast_gate(
         (production / ".bandit").write_text(bandit_config, encoding="utf-8")
 
     fixture_ruff_config = fixture_root / RUFF_CONFIG.name
-    if config is None:
+    if ruff_config is None:
         shutil.copyfile(RUFF_CONFIG, fixture_ruff_config)
     else:
-        fixture_ruff_config.write_text(config, encoding="utf-8")
+        fixture_ruff_config.write_text(ruff_config, encoding="utf-8")
     fixture_pyright_config = fixture_root / PYRIGHT_CONFIG.name
     if pyright_config is None:
         shutil.copyfile(PYRIGHT_CONFIG, fixture_pyright_config)

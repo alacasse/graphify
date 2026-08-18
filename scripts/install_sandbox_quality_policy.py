@@ -14,6 +14,7 @@ from pathlib import Path
 
 PYRIGHT_CONFIG = "pyrightconfig.install-sandbox.json"
 INSTALL_SANDBOX = "tools/install_sandbox"
+PYTHON_VERSION = "3.12"
 REPLACEMENT_TEST_PATHS = (
     "tests/install_sandbox/unit",
     "tests/install_sandbox/component",
@@ -43,7 +44,8 @@ LEGACY_TYPING_AST_FINGERPRINTS = {
 }
 PYRIGHT_CONFIG_KEYS = frozenset({"include", "strict", "pythonVersion", "typeCheckingMode"})
 PYRIGHT_DIRECTIVE = re.compile(r"#\s*pyright\s*:", re.IGNORECASE)
-NOSEC_DIRECTIVE = re.compile(r"#\s*nosec\b", re.IGNORECASE)
+TYPING_AFFECTING_COMMENT = re.compile(r"#\s*(?:pyright\s*:|type\s*:)", re.IGNORECASE)
+NOSEC_DIRECTIVE = re.compile(r"#\s*nosec", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -91,26 +93,37 @@ def _path_is_covered(relative: Path, configured_paths: tuple[Path, ...]) -> bool
     return any(relative == path or path in relative.parents for path in configured_paths)
 
 
-def _ast_fingerprint(source: Path) -> str:
-    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+def _typing_fingerprint(source: Path) -> str:
+    text = source.read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=str(source))
     serialized = ast.dump(tree, include_attributes=False)
+    typing_comments = tuple(
+        comment.strip()
+        for _, comment in _comment_tokens_from_text(text)
+        if TYPING_AFFECTING_COMMENT.match(comment)
+    )
+    if typing_comments:
+        serialized += repr(typing_comments)
     return hashlib.sha256(serialized.encode()).hexdigest()
 
 
-def _comment_tokens(source: Path) -> tuple[tuple[int, str], ...]:
-    text = source.read_text(encoding="utf-8")
+def _comment_tokens_from_text(text: str) -> tuple[tuple[int, str], ...]:
     tokens = tokenize.generate_tokens(io.StringIO(text).readline)
     return tuple(
         (token.start[0], token.string) for token in tokens if token.type == tokenize.COMMENT
     )
 
 
+def _comment_tokens(source: Path) -> tuple[tuple[int, str], ...]:
+    return _comment_tokens_from_text(source.read_text(encoding="utf-8"))
+
+
 def _pyright_settings_error(config: dict[str, object]) -> str | None:
     unexpected = sorted(set(config) - PYRIGHT_CONFIG_KEYS)
     if unexpected:
         return f"{PYRIGHT_CONFIG}: unapproved settings: {', '.join(unexpected)}"
-    if config.get("pythonVersion") != "3.12":
-        return f"{PYRIGHT_CONFIG}: Pyright runtime must remain Python 3.12"
+    if config.get("pythonVersion") != PYTHON_VERSION:
+        return f"{PYRIGHT_CONFIG}: Pyright runtime must remain Python {PYTHON_VERSION}"
     if config.get("typeCheckingMode") != "basic":
         return f"{PYRIGHT_CONFIG}: default typing mode must remain basic"
     return None
@@ -152,8 +165,8 @@ def _legacy_typing_scope_error(
         return None
     relative_text = relative.as_posix()
     try:
-        current = _ast_fingerprint(source)
-    except (OSError, SyntaxError) as error:
+        current = _typing_fingerprint(source)
+    except (OSError, SyntaxError, tokenize.TokenError) as error:
         return f"unable to verify legacy typing scope for {relative_text}: {error}"
     if current != LEGACY_TYPING_AST_FINGERPRINTS[relative.name]:
         return f"changed legacy typing file is not strict: {relative_text}"

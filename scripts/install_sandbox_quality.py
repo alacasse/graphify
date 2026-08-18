@@ -11,6 +11,7 @@ from pathlib import Path
 from install_sandbox_quality_checks import (
     CONFIGURATION_EXIT,
     CheckResult,
+    FastCheckConfigurationError,
     run_fast_checks,
 )
 
@@ -33,8 +34,8 @@ def _report(result: CheckResult) -> None:
 
 def _fast(repository: Path) -> int:
     run = run_fast_checks(repository)
-    if run.configuration_error is not None:
-        print(f"fast: CONFIGURATION ERROR: {run.configuration_error}", file=sys.stderr)
+    if isinstance(run, FastCheckConfigurationError):
+        print(f"fast: CONFIGURATION ERROR: {run.message}", file=sys.stderr)
         return CONFIGURATION_EXIT
 
     for result in run.results:

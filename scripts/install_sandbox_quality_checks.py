@@ -10,12 +10,14 @@ from pathlib import Path
 from install_sandbox_quality_policy import (
     INSTALL_SANDBOX,
     PYRIGHT_CONFIG,
+    PYTHON_VERSION,
     security_configuration_error,
     typing_configuration_error,
 )
 
 CONFIGURATION_EXIT = 2
 RUFF_CONFIG = "ruff.install-sandbox.toml"
+FROZEN_PYTHON_RUN = ("uv", "run", "--frozen", "--python", PYTHON_VERSION)
 ConfigurationCheck = Callable[[Path], str | None]
 
 
@@ -35,20 +37,23 @@ class CheckResult:
 
 
 @dataclass(frozen=True)
-class FastCheckRun:
+class FastCheckResults:
     results: tuple[CheckResult, ...]
-    configuration_error: str | None = None
+
+
+@dataclass(frozen=True)
+class FastCheckConfigurationError:
+    message: str
+
+
+type FastCheckRun = FastCheckResults | FastCheckConfigurationError
 
 
 FAST_CHECKS = (
     Check(
         name="ruff-format",
         command=(
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
+            *FROZEN_PYTHON_RUN,
             "ruff",
             "format",
             "--config",
@@ -60,11 +65,7 @@ FAST_CHECKS = (
     Check(
         name="ruff-lint",
         command=(
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
+            *FROZEN_PYTHON_RUN,
             "ruff",
             "check",
             "--config",
@@ -75,11 +76,7 @@ FAST_CHECKS = (
     Check(
         name="pyright",
         command=(
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
+            *FROZEN_PYTHON_RUN,
             "pyright",
             "--project",
             PYRIGHT_CONFIG,
@@ -90,11 +87,7 @@ FAST_CHECKS = (
     Check(
         name="bandit",
         command=(
-            "uv",
-            "run",
-            "--frozen",
-            "--python",
-            "3.12",
+            *FROZEN_PYTHON_RUN,
             "bandit",
             "-r",
             INSTALL_SANDBOX,
@@ -143,10 +136,7 @@ def run_fast_checks(repository: Path) -> FastCheckRun:
     required_paths = (RUFF_CONFIG, PYRIGHT_CONFIG, INSTALL_SANDBOX)
     missing = [path for path in required_paths if not (repository / path).exists()]
     if missing:
-        return FastCheckRun(
-            results=(),
-            configuration_error="missing " + ", ".join(missing),
-        )
-    return FastCheckRun(
+        return FastCheckConfigurationError(message="missing " + ", ".join(missing))
+    return FastCheckResults(
         results=tuple(_run_check(check, repository) for check in FAST_CHECKS),
     )

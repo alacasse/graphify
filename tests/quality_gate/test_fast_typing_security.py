@@ -275,6 +275,21 @@ TEMP_ROOT = "/tmp/replacement"  #nosecB108
     assert "[FAIL] bandit (exit 2)" in result.stdout
 
 
+def test_fast_gate_rejects_embedded_nosec_marker(tmp_path: Path) -> None:
+    result = run_fast_gate(
+        tmp_path,
+        """
+# fmt: off
+TEMP_ROOT = "/tmp/replacement"  # explanation #nosecB108
+# fmt: on
+""".lstrip(),
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "unapproved Bandit disposition" in result.stderr
+    assert "[FAIL] bandit (exit 2)" in result.stdout
+
+
 def test_fast_gate_reports_typing_and_security_failures_independently(tmp_path: Path) -> None:
     result = run_fast_gate(
         tmp_path,

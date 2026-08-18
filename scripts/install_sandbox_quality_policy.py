@@ -277,7 +277,7 @@ def security_configuration_error(repository: Path) -> str | None:
         except (OSError, IndentationError, tokenize.TokenError) as error:
             return f"unable to verify Bandit dispositions for {relative}: {error}"
         for line_number, comment in comments:
-            if NOSEC_DIRECTIVE.match(comment):
+            if NOSEC_DIRECTIVE.search(comment):
                 actual[(relative, lines[line_number - 1].strip())] += 1
 
     for disposition, occurrences in actual.items():

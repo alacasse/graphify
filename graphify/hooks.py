@@ -5,6 +5,8 @@ import re
 import sys
 from pathlib import Path
 
+from graphify.vcs import find_git_root
+
 _HOOK_MARKER = "# graphify-hook-start"
 _HOOK_MARKER_END = "# graphify-hook-end"
 _CHECKOUT_MARKER = "# graphify-checkout-hook-start"
@@ -421,15 +423,6 @@ def _load_graphifyrc(root: Path) -> dict[str, str | int]:
     return cfg
 
 
-def _git_root(path: Path) -> Path | None:
-    """Walk up to find .git directory."""
-    current = path.resolve()
-    for parent in [current, *current.parents]:
-        if (parent / ".git").exists():
-            return parent
-    return None
-
-
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
@@ -716,7 +709,7 @@ def _user_hooks_dir(hooks_dir: Path) -> Path:
 
 def install(path: Path = Path(".")) -> str:
     """Install graphify post-commit and post-checkout hooks in the nearest git repo."""
-    root = _git_root(path)
+    root = find_git_root(path)
     if root is None:
         raise RuntimeError(f"No git repository found at or above {path.resolve()}")
 
@@ -746,7 +739,7 @@ def install(path: Path = Path(".")) -> str:
 
 def uninstall(path: Path = Path(".")) -> str:
     """Remove graphify post-commit and post-checkout hooks."""
-    root = _git_root(path)
+    root = find_git_root(path)
     if root is None:
         raise RuntimeError(f"No git repository found at or above {path.resolve()}")
 
@@ -760,7 +753,7 @@ def uninstall(path: Path = Path(".")) -> str:
 
 def status(path: Path = Path(".")) -> str:
     """Check if graphify hooks are installed."""
-    root = _git_root(path)
+    root = find_git_root(path)
     if root is None:
         return "Not in a git repository."
     hooks_dir = _user_hooks_dir(_hooks_dir(root))

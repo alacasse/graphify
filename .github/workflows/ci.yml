@@ -84,6 +84,30 @@ jobs:
           uv run --frozen graphify --help
           uv run --frozen graphify install
 
+  vcs-root-hermetic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras --frozen --python 3.12
+
+      - name: Reject an incomplete ancestor .git marker
+        run: |
+          hostile_root="$RUNNER_TEMP/graphify-hostile-vcs-root"
+          mkdir -p "$hostile_root/.git" "$hostile_root/tmp"
+          TMPDIR="$hostile_root/tmp" uv run --frozen --python 3.12 pytest \
+            tests/test_detect.py::test_graphifyignore_hermetic_without_vcs \
+            tests/test_detect.py::test_incomplete_git_marker_does_not_expand_graphifyignore_ceiling \
+            tests/test_hooks.py::test_no_git_repo_raises \
+            tests/test_hooks.py::test_install_rejects_incomplete_git_marker \
+            -q --tb=short
+
   security-scan:
     # Keep the repository-wide Graphify source scan as advisory feedback. The
     # install-sandbox command owner runs its blocking Bandit scope in `fast`

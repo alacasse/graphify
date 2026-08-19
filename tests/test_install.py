@@ -86,6 +86,70 @@ def test_install_claude_md_defaults_to_home_when_config_dir_unset(tmp_path, monk
     assert "~/.claude/skills/graphify/SKILL.md" in md.read_text()
 
 
+def test_install_claude_replaces_duplicate_h1_registration_byte_exactly(tmp_path):
+    from graphify.install import _skill_registration
+
+    claude_md = tmp_path / ".claude" / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True)
+    user_prefix = b"# User preferences\r\nKeep CRLF bytes.\r\n\r\n"
+    user_middle = b"# User workflow\nKeep middle content.\n\n"
+    user_suffix = b"# Final notes\nKeep trailing spaces.  \n"
+    claude_md.write_bytes(
+        user_prefix
+        + b"# graphify\nold registration one\n\n"
+        + user_middle
+        + b"# graphify\nstale duplicate\n\n"
+        + user_suffix
+    )
+
+    _install(tmp_path, "claude")
+
+    registration = _skill_registration().lstrip().encode("utf-8")
+    assert claude_md.read_bytes() == (
+        user_prefix + registration + b"\n" + user_middle + user_suffix
+    )
+
+
+def test_install_codebuddy_adds_owned_h2_despite_user_graphify_mention(tmp_path):
+    codebuddy_md = tmp_path / ".codebuddy" / "CODEBUDDY.md"
+    codebuddy_md.parent.mkdir(parents=True)
+    original = b"# User notes\nI use graphify manually. Keep this byte-exact.\n"
+    codebuddy_md.write_bytes(original)
+
+    _install(tmp_path, "codebuddy")
+
+    content = codebuddy_md.read_text(encoding="utf-8")
+    assert "I use graphify manually. Keep this byte-exact." in content
+    assert content.count("## graphify") == 1
+    assert "graphify-out/GRAPH_REPORT.md" in content
+
+
+def test_claude_user_uninstall_cleans_config_registration_only(tmp_path, monkeypatch):
+    from graphify.install import claude_uninstall
+
+    config_dir = tmp_path / "claude-config"
+    config_md = config_dir / "CLAUDE.md"
+    config_md.parent.mkdir(parents=True)
+    user_prefix = b"# User notes\r\nKeep these bytes.  \r\n\r\n"
+    user_suffix = b"# User workflow\nKeep project-independent notes.\n"
+    config_md.write_bytes(
+        user_prefix + b"# graphify\nstale registration\n\n" + user_suffix
+    )
+
+    project_dir = tmp_path / "project"
+    project_registration = project_dir / ".claude" / "CLAUDE.md"
+    project_registration.parent.mkdir(parents=True)
+    project_bytes = b"# graphify\nproject-owned registration\n"
+    project_registration.write_bytes(project_bytes)
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    monkeypatch.chdir(project_dir)
+    claude_uninstall()
+
+    assert config_md.read_bytes() == user_prefix + user_suffix
+    assert project_registration.read_bytes() == project_bytes
+
+
 def test_install_codebuddy(tmp_path):
     _install(tmp_path, "codebuddy")
     assert (tmp_path / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()
@@ -919,11 +983,16 @@ def test_kilo_uninstall_removes_plugin_registration_and_command(tmp_path):
     project_dir.mkdir()
     home_dir.mkdir()
     _kilo_install(project_dir, home_dir)
+    skill_dir = home_dir / ".config" / "kilo" / "skills" / "graphify"
+    staged = skill_dir / "references.tmp"
+    staged.mkdir()
+    (staged / "interrupted.md").write_text("stale\n", encoding="utf-8")
     _kilo_uninstall(project_dir, home_dir)
     assert not (home_dir / ".config" / "kilo" / "command" / "graphify.md").exists()
     assert not (
         home_dir / ".config" / "kilo" / "skills" / "graphify" / "SKILL.md"
     ).exists()
+    assert not skill_dir.exists()
     assert not (project_dir / ".kilo" / "plugins" / "graphify.js").exists()
     config_file = project_dir / ".kilo" / "kilo.json"
     if config_file.exists():

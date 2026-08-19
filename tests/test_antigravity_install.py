@@ -17,7 +17,42 @@ def test_antigravity_project_install_writes_rules_and_workflows(tmp_path):
     assert rules.exists(), "antigravity rules (always-on) must be written"
     assert workflow.exists(), "antigravity workflow must be written"
     # native tool-discovery frontmatter is injected into the skill
-    assert skill.read_text(encoding="utf-8").startswith("---\n")
+    installed = skill.read_text(encoding="utf-8")
+    assert installed.startswith("---\n")
+    assert "name: graphify-manager" in installed
+    assert (
+        "description: Rebuild the code graph or perform manual CLI queries when MCP "
+        "server is offline."
+    ) in installed
+
+
+def test_antigravity_rewrites_only_owned_frontmatter_fields(tmp_path):
+    skill = tmp_path / "SKILL.md"
+    body = b"\r\n# User-preserved body\r\nKeep trailing spaces.  \r\n"
+    skill.write_bytes(
+        b"---\r\n"
+        b"name: old-name\r\n"
+        b"description: old description\r\n"
+        b"license: MIT\r\n"
+        b"metadata:\r\n"
+        b"  owner: user\r\n"
+        b"---\r\n"
+        + body
+    )
+
+    m._antigravity_finalize(skill, tmp_path)
+
+    assert skill.read_bytes() == (
+        b"---\r\n"
+        b"name: graphify-manager\r\n"
+        b"description: Rebuild the code graph or perform manual CLI queries when MCP "
+        b"server is offline.\r\n"
+        b"license: MIT\r\n"
+        b"metadata:\r\n"
+        b"  owner: user\r\n"
+        b"---\r\n"
+        + body
+    )
 
 
 def test_antigravity_workflow_names_no_skill_path(tmp_path):

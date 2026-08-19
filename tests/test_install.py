@@ -86,6 +86,46 @@ def test_install_claude_md_defaults_to_home_when_config_dir_unset(tmp_path, monk
     assert "~/.claude/skills/graphify/SKILL.md" in md.read_text()
 
 
+def test_install_claude_replaces_duplicate_h1_registration_byte_exactly(tmp_path):
+    from graphify.install import _skill_registration
+
+    claude_md = tmp_path / ".claude" / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True)
+    user_prefix = b"# User preferences\r\nKeep CRLF bytes.\r\n\r\n"
+    user_middle = b"# User workflow\nKeep middle content.\n\n"
+    user_suffix = b"# Final notes\nKeep trailing spaces.  \n"
+    claude_md.write_bytes(
+        user_prefix
+        + b"# graphify\nold registration one\n\n"
+        + user_middle
+        + b"# graphify\nstale duplicate\n\n"
+        + user_suffix
+    )
+
+    _install(tmp_path, "claude")
+
+    registration = _skill_registration().lstrip().encode("utf-8")
+    assert claude_md.read_bytes() == (
+        user_prefix + registration + b"\n" + user_middle + user_suffix
+    )
+
+
+def test_install_codebuddy_adds_h1_despite_user_graphify_mention(tmp_path):
+    from graphify.install import _skill_registration
+
+    codebuddy_md = tmp_path / ".codebuddy" / "CODEBUDDY.md"
+    codebuddy_md.parent.mkdir(parents=True)
+    original = b"# User notes\nI use graphify manually. Keep this byte-exact.\n"
+    codebuddy_md.write_bytes(original)
+
+    _install(tmp_path, "codebuddy")
+
+    registration = _skill_registration(
+        "~/.codebuddy/skills/graphify/SKILL.md"
+    ).lstrip().encode("utf-8")
+    assert codebuddy_md.read_bytes() == original + b"\n" + registration
+
+
 def test_install_codebuddy(tmp_path):
     _install(tmp_path, "codebuddy")
     assert (tmp_path / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()

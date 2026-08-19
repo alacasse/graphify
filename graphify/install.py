@@ -30,6 +30,7 @@ except Exception:
     __version__ = "unknown"
 
 from graphify.paths import GRAPHIFY_OUT as _GRAPHIFY_OUT
+from graphify.markdown_sections import replace_h1_sections
 
 
 @functools.lru_cache(maxsize=None)
@@ -319,6 +320,25 @@ def _skill_registration(skill_path: str = "~/.claude/skills/graphify/SKILL.md") 
         "When the user types `/graphify`, use the installed graphify skill "
         "or instructions before doing anything else.\n"
     )
+
+
+def _write_skill_registration(path: Path, skill_path: str) -> str:
+    """Write one canonical H1 registration while preserving user-owned bytes."""
+    existed = path.exists()
+    content = path.read_bytes() if existed else b""
+    registration = _skill_registration(skill_path).lstrip().encode("utf-8")
+    updated = replace_h1_sections(
+        content,
+        heading=b"# graphify",
+        replacement=registration,
+    )
+    if updated == content:
+        return "unchanged"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(updated)
+    return "updated" if existed else "created"
+
+
 _PLATFORM_CONFIG: dict[str, dict] = {
     "claude": {
         "skill_file": "skill.md",
@@ -636,33 +656,25 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
         else:
             claude_md = Path.home() / ".claude" / "CLAUDE.md"
             skill_ref = "~/.claude/skills/graphify/SKILL.md"
-        registration = _skill_registration(skill_ref)
-        if claude_md.exists():
-            content = claude_md.read_text(encoding="utf-8")
-            if "graphify" in content:
-                print(f"  CLAUDE.md        ->  already registered (no change)")
-            else:
-                claude_md.write_text(content.rstrip() + registration, encoding="utf-8")
-                print(f"  CLAUDE.md        ->  skill registered in {claude_md}")
+        registration_status = _write_skill_registration(claude_md, skill_ref)
+        if registration_status == "unchanged":
+            print("  CLAUDE.md        ->  already registered (no change)")
+        elif registration_status == "updated":
+            print(f"  CLAUDE.md        ->  skill registered in {claude_md}")
         else:
-            claude_md.parent.mkdir(parents=True, exist_ok=True)
-            claude_md.write_text(registration.lstrip(), encoding="utf-8")
             print(f"  CLAUDE.md        ->  created at {claude_md}")
 
     if platform == "codebuddy":
         # Register in ~/.codebuddy/CODEBUDDY.md (CodeBuddy only)
         codebuddy_md = Path.home() / ".codebuddy" / "CODEBUDDY.md"
-        registration = _skill_registration("~/.codebuddy/skills/graphify/SKILL.md")
-        if codebuddy_md.exists():
-            content = codebuddy_md.read_text(encoding="utf-8")
-            if "graphify" in content:
-                print(f"  CODEBUDDY.md     ->  already registered (no change)")
-            else:
-                codebuddy_md.write_text(content.rstrip() + registration, encoding="utf-8")
-                print(f"  CODEBUDDY.md     ->  skill registered in {codebuddy_md}")
+        registration_status = _write_skill_registration(
+            codebuddy_md, "~/.codebuddy/skills/graphify/SKILL.md"
+        )
+        if registration_status == "unchanged":
+            print("  CODEBUDDY.md     ->  already registered (no change)")
+        elif registration_status == "updated":
+            print(f"  CODEBUDDY.md     ->  skill registered in {codebuddy_md}")
         else:
-            codebuddy_md.parent.mkdir(parents=True, exist_ok=True)
-            codebuddy_md.write_text(registration.lstrip(), encoding="utf-8")
             print(f"  CODEBUDDY.md     ->  created at {codebuddy_md}")
 
     if platform == "opencode":

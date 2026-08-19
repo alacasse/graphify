@@ -88,8 +88,29 @@ The harness oracle must remain independent of the product being tested. Never
 derive expected effects or target membership from product output, discovery,
 or behavior observed during the run.
 
-Report product defects exposed by the sandbox. Do not change production
-behavior unless the request explicitly includes that fix.
+## Finding disposition
+
+Classify every nonzero sandbox or quality-gate outcome before deciding whether
+it belongs to the current work:
+
+- A failure introduced by the current change is a current-change regression.
+  Resolve it before handoff.
+- A harness, infrastructure, observation, serialization, or coherence problem
+  is a Diagnostic Failure. Restore trustworthy evidence before drawing a
+  product conclusion.
+- A failed repository check or Product Finding that reproduces against the
+  unchanged Graphify baseline is a Baseline Finding. Preserve its raw child
+  exit, exact commit, classification, and evidence.
+
+During gate-installation operational proof, a Baseline Finding is evidence that
+the gate detects an existing defect. The child gate remains nonzero while the
+operational proof can succeed. Keep remediation and upstream issue creation as
+separately authorized work; a sandbox task does not acquire production-fix
+scope from the finding.
+
+At a Cutover Candidate, apply the stricter Pre-Cutover Proof Set: a Product
+Finding or failed required check blocks cutover. Never suppress, normalize, or
+reclassify a Baseline Finding to make its child gate green.
 
 ## Code quality is part of correctness
 

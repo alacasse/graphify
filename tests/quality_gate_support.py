@@ -30,6 +30,15 @@ APPROVED_TEMPORARY_COVERAGE_EXCLUSIONS = (
     "tools/install_sandbox/sandbox_runner.py",
     "tools/install_sandbox/specs.py",
 )
+PROOF_MODULES = (
+    "test_ci_configuration.py",
+    "test_complete_gate.py",
+    "test_docker_evidence.py",
+    "test_docker_gate.py",
+    "test_evidence_applicability.py",
+    "test_fast_ruff.py",
+    "test_fast_typing_security.py",
+)
 
 
 def run_quality_gate(
@@ -432,6 +441,16 @@ def copy_complete_gate_fixture(tmp_path: Path) -> Path:
     return fixture_root
 
 
+def copy_prove_gate_fixture(tmp_path: Path) -> Path:
+    fixture_root = tmp_path / "repository"
+    proof_root = fixture_root / "tests" / "quality_gate"
+    proof_root.mkdir(parents=True)
+    for name in PROOF_MODULES:
+        shutil.copyfile(PROJECT_ROOT / "tests/quality_gate" / name, proof_root / name)
+    (fixture_root / "uv.lock").write_text("fixture lock\n", encoding="utf-8")
+    return fixture_root
+
+
 def install_fake_uv(tmp_path: Path) -> tuple[Path, Path]:
     """Install a command-recording uv boundary that executes only Python children."""
 
@@ -514,6 +533,33 @@ def run_complete_gate(
     )
     commands = tuple(
         tuple(json.loads(line)) for line in command_log.read_text(encoding="utf-8").splitlines()
+    )
+    return result, commands
+
+
+def run_prove_gate(
+    tmp_path: Path,
+    repository: Path,
+    *,
+    command_rules: dict[str, dict[str, object]] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], tuple[tuple[str, ...], ...]]:
+    bin_dir, command_log = install_fake_uv(tmp_path)
+    result = run_quality_gate(
+        repository,
+        arguments=("prove",),
+        environment={
+            "PATH": os.pathsep.join((str(bin_dir), os.environ["PATH"])),
+            "QUALITY_COMMAND_LOG": str(command_log),
+            "QUALITY_FAKE_COMMAND_RULES": json.dumps(command_rules or {}),
+        },
+    )
+    commands = (
+        tuple(
+            tuple(json.loads(line))
+            for line in command_log.read_text(encoding="utf-8").splitlines()
+        )
+        if command_log.exists()
+        else ()
     )
     return result, commands
 

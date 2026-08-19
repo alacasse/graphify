@@ -48,12 +48,27 @@ cutover candidate, or merge:
 uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py complete
 ```
 
+Prove the command owner's positive and negative paths after changing the gate
+or when accepting the quality foundation:
+
+```bash
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py prove
+```
+
 `fast` owns scoped formatting, lint and complexity, strict typing, security,
 and applicable Unit and Component Evidence. `complete` owns those checks plus
 applicable branch coverage and Behavioral Evidence, dependency audit, the
 warning-clean Python 3.12 repository suite, and a full official Docker
 diagnostic. Each Docker invocation builds the harness image, so full-catalog
 evidence takes longer than a targeted run.
+
+`prove` runs the declared warning-clean quality proof suite against temporary
+repositories. That suite demonstrates formatting, lint, complexity, typing,
+security, warnings, tests, coverage, evidence applicability, configuration and
+CI drift, dependency-audit and Docker outcome propagation, timeouts, and
+`uv.lock` immutability. It is an operational self-test of the gate, not a
+replacement for `fast`, `complete`, or official Docker evidence at the exact
+commit being accepted.
 
 Evidence applicability comes from repository facts, not a flag or marker:
 
@@ -70,13 +85,14 @@ independent child outcome before aggregating the result.
 
 ## Choose what to run
 
-The quality owner exposes four contributor-facing modes. Exactly one of
+The quality owner exposes five contributor-facing modes. Exactly one of
 `--target` and `--all` is required for `docker`.
 
 | Mode | Meaning |
 | --- | --- |
 | `fast` | Run every inexpensive blocking check. |
 | `complete` | Run every complete-tier check, including dependency and full Docker evidence. |
+| `prove` | Exercise the quality owner's declared positive and negative proof suite. |
 | `docker --target NAME` | Run one catalog-derived Install Target in both scopes. |
 | `docker --all` | Run every target, both scopes, and catalog-wide checks. |
 

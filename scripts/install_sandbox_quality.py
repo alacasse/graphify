@@ -34,6 +34,7 @@ from scripts.install_sandbox_quality_evidence import (
     FullDockerSelection,
     TargetedDockerSelection,
 )
+from scripts.install_sandbox_quality_prove import ProveCheckResults, run_prove_checks
 
 
 def _target(value: str) -> str:
@@ -47,6 +48,7 @@ def _parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("fast", help="run the inexpensive install-sandbox checks")
     subcommands.add_parser("complete", help="run the complete install-sandbox gate")
+    subcommands.add_parser("prove", help="prove the quality gate detects violations")
     docker = subcommands.add_parser("docker", help="run the official Docker diagnostic")
     selection = docker.add_mutually_exclusive_group(required=True)
     selection.add_argument(
@@ -150,12 +152,36 @@ def _complete(repository: Path) -> int:
     return 0
 
 
+def _prove(repository: Path) -> int:
+    run = run_prove_checks(repository)
+    if not isinstance(run, ProveCheckResults):
+        raise AssertionError(f"unhandled prove gate result: {type(run).__name__}")
+
+    results = (run.configuration, run.proof, run.lock)
+    for result in results:
+        _report(result)
+
+    if any(result.configuration_error for result in results):
+        print("prove: CONFIGURATION ERROR")
+        return CONFIGURATION_EXIT
+    if any(result.exit_code == 124 for result in results):
+        print("prove: TIMEOUT")
+        return 124
+    if any(result.status is CheckStatus.FAIL for result in results):
+        print("prove: FAIL")
+        return 1
+    print("prove: PASS")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "fast":
         return _fast(Path.cwd().resolve())
     if arguments.command == "complete":
         return _complete(Path.cwd().resolve())
+    if arguments.command == "prove":
+        return _prove(Path.cwd().resolve())
     if arguments.command == "docker":
         selection: DockerSelection
         if arguments.all_targets:

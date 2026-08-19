@@ -188,7 +188,12 @@ def not_run(name: str, status: CheckStatus) -> CheckResult:
     )
 
 
-def pytest_check(name: str, *selectors: str, collect_only: bool = False) -> Check:
+def pytest_check(
+    name: str,
+    *selectors: str,
+    collect_only: bool = False,
+    exit_two_is_configuration: bool = False,
+) -> Check:
     collection_arguments = ("--collect-only",) if collect_only else ()
     return Check(
         name=name,
@@ -204,7 +209,7 @@ def pytest_check(name: str, *selectors: str, collect_only: bool = False) -> Chec
             "-W",
             "error",
         ),
-        exit_two_is_configuration=False,
+        exit_two_is_configuration=exit_two_is_configuration,
     )
 
 

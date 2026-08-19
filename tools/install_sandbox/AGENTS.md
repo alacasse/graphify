@@ -25,6 +25,7 @@ or CI.
 ```bash
 uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py fast
 uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py complete
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py prove
 uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py docker --target <target>
 uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py docker --all
 ```
@@ -41,6 +42,14 @@ architecture completion, cutover candidates, and merge. CI runs it on pushes to
 `v8` or `main`, on manual dispatch for those review events, and nightly at
 `05:27 UTC`. A nightly result is informational unless it covers the exact
 commit being accepted.
+
+`prove` is the operational self-test of that command owner. It constructs
+temporary repositories and exercises the positive and negative paths for
+static analysis, evidence applicability, dependency audit, Docker
+classification, timeouts, configuration drift, and `uv.lock` immutability.
+Run it after changing the quality owner and when accepting the gate itself.
+Its child failures remain visible as proof observations; it does not allowlist
+or normalize a Baseline Finding.
 
 The command owner derives evidence applicability from repository facts:
 

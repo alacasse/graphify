@@ -86,6 +86,17 @@ def test_no_git_repo_raises(tmp_path):
         install(tmp_path / "not_a_repo")
 
 
+def test_install_rejects_incomplete_git_marker(tmp_path):
+    (tmp_path / ".git").mkdir()
+    subject = tmp_path / "workspace" / "subject"
+    subject.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="No git repository"):
+        install(subject)
+
+    assert not (tmp_path / ".git" / "hooks").exists()
+
+
 def test_install_creates_post_checkout_hook(tmp_path):
     repo = _make_git_repo(tmp_path)
     install(repo)

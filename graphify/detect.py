@@ -21,6 +21,7 @@ from graphify.google_workspace import (
     google_workspace_enabled,
 )
 from graphify.paths import GRAPHIFY_OUT, out_path
+from graphify.vcs import find_vcs_root
 
 
 class FileType(str, Enum):
@@ -964,7 +965,6 @@ def _is_noise_dir(part: str, parent: "Path | None" = None) -> bool:
     return False
 
 
-_VCS_MARKERS = (".git", ".hg", ".svn", "_darcs", ".fossil")
 
 
 def _nfc(text: str) -> str:
@@ -1008,19 +1008,6 @@ def _parse_gitignore_line(raw: str) -> str:
     return _nfc(line)
 
 
-def _find_vcs_root(start: Path) -> Path | None:
-    """Walk upward from start; return the first directory containing a VCS marker."""
-    current = start.resolve()
-    home = Path.home()
-    while True:
-        if any((current / m).exists() for m in _VCS_MARKERS):
-            return current
-        parent = current.parent
-        if parent == current or current == home:
-            return None
-        current = parent
-
-
 def _path_identity(path: Path) -> str:
     """Portable comparison key for an existing filesystem path."""
     return _nfc(os.path.normcase(os.path.abspath(os.fspath(path))))
@@ -1036,7 +1023,7 @@ def _git_tracked_path_keys(root: Path) -> tuple[set[str], set[str]]:
     behavior rather than making discovery fail (#2759).
     """
     root = root.resolve()
-    vcs_root = _find_vcs_root(root)
+    vcs_root = find_vcs_root(root)
     if vcs_root is None or not (vcs_root / ".git").exists():
         return set(), set()
     try:
@@ -1219,7 +1206,7 @@ def _load_graphifyignore(root: Path, *, gitignore: bool = True) -> list[tuple[Pa
     since they aren't known until the walk reaches them (#1206).
     """
     root = root.resolve()
-    ceiling = _find_vcs_root(root) or root
+    ceiling = find_vcs_root(root) or root
 
     # Collect ancestor dirs from ceiling down to root (outer → inner)
     dirs: list[Path] = []

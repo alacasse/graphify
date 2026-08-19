@@ -304,7 +304,7 @@ def test_nested_gitignore_utf8_bom(tmp_path):
 def test_git_info_exclude_utf8_bom(tmp_path):
     """A BOM at the start of $GIT_DIR/info/exclude must not corrupt the first
     pattern either (#2163) — second read site in _load_graphifyignore."""
-    (tmp_path / ".git" / "info").mkdir(parents=True)
+    _git(tmp_path, "init")
     (tmp_path / ".git" / "info" / "exclude").write_bytes(b"\xef\xbb\xbfsecrets/\n")
     secrets = tmp_path / "secrets"
     secrets.mkdir()
@@ -359,9 +359,25 @@ def test_graphifyignore_hermetic_without_vcs(tmp_path):
     assert result["graphifyignore_patterns"] == 0
 
 
+def test_incomplete_git_marker_does_not_expand_graphifyignore_ceiling(tmp_path):
+    """An unrelated ancestor named .git is not a repository boundary."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".graphifyignore").write_text("vendor/\n", encoding="utf-8")
+    subject = tmp_path / "workspace" / "subject"
+    vendor = subject / "vendor"
+    vendor.mkdir(parents=True)
+    (subject / "main.py").write_text("x = 1\n", encoding="utf-8")
+    (vendor / "dependency.py").write_text("y = 2\n", encoding="utf-8")
+
+    result = detect(subject)
+
+    assert any("vendor" in path for path in result["files"]["code"])
+    assert result["graphifyignore_patterns"] == 0
+
+
 def test_graphifyignore_discovered_from_parent_in_vcs(tmp_path):
     """Inside a VCS repo, parent .graphifyignore applies to subdirectory scans."""
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
     (tmp_path / ".graphifyignore").write_text("vendor/\n")
     sub = tmp_path / "packages" / "mylib"
     sub.mkdir(parents=True)
@@ -382,7 +398,7 @@ def test_graphifyignore_stops_at_git_boundary(tmp_path):
     (tmp_path / ".graphifyignore").write_text("main.py\n")
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / ".git").mkdir()
+    _git(repo, "init")
     sub = repo / "sub"
     sub.mkdir()
     (sub / "main.py").write_text("x = 1")
@@ -397,7 +413,7 @@ def test_graphifyignore_at_git_root_is_included(tmp_path):
     """A .graphifyignore at the git repo root is included when scanning a subdir."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / ".git").mkdir()
+    _git(repo, "init")
     (repo / ".graphifyignore").write_text("vendor/\n")
     sub = repo / "packages" / "mylib"
     sub.mkdir(parents=True)
@@ -609,7 +625,7 @@ def test_nested_ignore_overrides_git_info_exclude_and_root(tmp_path):
     """Precedence across all three sources: a nested `.gitignore` `!` re-include
     outranks both a root `.gitignore` and `.git/info/exclude` (lowest, from
     #1810), while an info/exclude-only file with no re-include stays out."""
-    (tmp_path / ".git" / "info").mkdir(parents=True)
+    _git(tmp_path, "init")
     (tmp_path / ".git" / "info" / "exclude").write_text("*.py\n")
     (tmp_path / ".gitignore").write_text("keep.py\n")           # root also excludes it
     sub = tmp_path / "a" / "b"
@@ -1090,7 +1106,7 @@ def test_detect_honors_git_info_exclude(tmp_path):
     """.git/info/exclude (where `git worktree add` records nested worktree paths,
     and where local-only excludes live) must be honored, not just .gitignore /
     .graphifyignore — otherwise nested worktree copies get fully indexed (#1810)."""
-    (tmp_path / ".git" / "info").mkdir(parents=True)
+    _git(tmp_path, "init")
     (tmp_path / ".git" / "info" / "exclude").write_text("worktrees/\n")
     wt = tmp_path / "worktrees" / "foo"
     wt.mkdir(parents=True)
@@ -1106,7 +1122,7 @@ def test_git_info_exclude_ranks_below_gitignore_negation(tmp_path):
     """info/exclude is loaded at lowest priority, so a later .gitignore `!` negation
     of the same (non-directory) pattern still wins under last-match-wins (#1810)."""
     from graphify.detect import _load_graphifyignore, _is_ignored
-    (tmp_path / ".git" / "info").mkdir(parents=True)
+    _git(tmp_path, "init")
     (tmp_path / ".git" / "info" / "exclude").write_text("secret*.txt\n")
     (tmp_path / ".gitignore").write_text("!secret-ok.txt\n")
     (tmp_path / "secret-bad.txt").write_text("x")
@@ -1373,7 +1389,7 @@ def test_anchored_multi_segment_pattern(tmp_path):
 def test_detect_does_not_ignore_scan_root_itself_via_parent_gitignore(tmp_path):
     """If a parent `.gitignore` (at the repo root) ignores the directory being scanned
     (the scan root itself), files inside the scan root must not be ignored (#2468)."""
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
 
     corpus_dir = tmp_path / "graphify-corpus"
     corpus_dir.mkdir()
@@ -1399,7 +1415,7 @@ def test_detect_does_not_ignore_scan_root_itself_via_parent_gitignore(tmp_path):
 def test_detect_preserves_unrelated_parent_ignores_inside_scan_root(tmp_path):
     """A parent `.gitignore` should still ignore unrelated directories (like `node_modules/`)
     inside the scan root, even while the scan root itself is not ignored (#2468)."""
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
 
     corpus_dir = tmp_path / "graphify-corpus"
     corpus_dir.mkdir()
@@ -1806,7 +1822,7 @@ def test_save_manifest_without_filter_unchanged_for_code(tmp_path):
 
 def test_gitignore_fallback_when_no_graphifyignore(tmp_path):
     """When no .graphifyignore exists, .gitignore patterns are honored (#945)."""
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
     (tmp_path / ".gitignore").write_text("vendor/\n*.generated.py\n")
     vendor = tmp_path / "vendor"
     vendor.mkdir()
@@ -1826,7 +1842,7 @@ def test_graphifyignore_and_gitignore_are_merged(tmp_path):
     .gitignore stays excluded even though .graphifyignore says nothing about it
     (#1363). Previously the presence of a .graphifyignore silently disabled the
     dir's .gitignore, leaking gitignore-only secrets into the graph."""
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
     (tmp_path / ".gitignore").write_text("main.py\n")        # gitignore-only exclusion
     (tmp_path / ".graphifyignore").write_text("other.py\n")  # says nothing about main.py
     (tmp_path / "main.py").write_text("x = 1")
@@ -1843,7 +1859,7 @@ def test_graphifyignore_and_gitignore_are_merged(tmp_path):
 def test_graphifyignore_negation_overrides_gitignore(tmp_path):
     """.graphifyignore is evaluated after .gitignore, so a `!` negation in it can
     re-include a file the .gitignore excluded (last-match-wins, #1363)."""
-    (tmp_path / ".git").mkdir()
+    _git(tmp_path, "init")
     (tmp_path / ".gitignore").write_text("*.py\n")           # exclude all .py
     (tmp_path / ".graphifyignore").write_text("!keep.py\n")  # but rescue keep.py
     (tmp_path / "main.py").write_text("x = 1")

@@ -17,10 +17,17 @@ from pathlib import Path
 import pytest
 
 from graphify.install import (
+    _PLATFORM_CONFIG,
+    _cursor_install,
+    _kiro_install,
+    _kilo_install,
+    _platform_skill_destination,
     _project_uninstall,
     claude_uninstall,
+    codebuddy_install,
     codebuddy_uninstall,
     gemini_uninstall,
+    uninstall_all,
 )
 
 PLATFORMS = [
@@ -111,3 +118,92 @@ def test_project_uninstall_codebuddy_spares_global(tmp_path):
     assert (global_tree / ".graphify_version").exists()
     assert not (project_tree / "SKILL.md").exists()
     assert not project_tree.exists()
+
+
+def test_uninstall_all_sweeps_user_destinations_and_preserves_project(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+
+    monkeypatch.setattr("graphify.install.Path.home", lambda: home)
+    user_skills = {
+        _platform_skill_destination(platform_name, project=False)
+        for platform_name in _PLATFORM_CONFIG
+    }
+    project_skills = {
+        _platform_skill_destination(
+            platform_name, project=True, project_dir=project
+        )
+        for platform_name in _PLATFORM_CONFIG
+    }
+
+    for skill in user_skills:
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        skill.write_text("user skill\n", encoding="utf-8")
+        (skill.parent / ".graphify_version").write_text("old\n", encoding="utf-8")
+        (skill.parent / "references").mkdir(exist_ok=True)
+        (skill.parent / "references" / "x.md").write_text("ref\n", encoding="utf-8")
+        (skill.parent / "references.tmp").mkdir(exist_ok=True)
+        (skill.parent / "references.tmp" / "x.md").write_text(
+            "staged\n", encoding="utf-8"
+        )
+        (skill.parent / "unrelated.txt").write_text("keep\n", encoding="utf-8")
+
+    for skill in project_skills:
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        skill.write_text("project skill\n", encoding="utf-8")
+        (skill.parent / ".graphify_version").write_text("project\n", encoding="utf-8")
+        (skill.parent / "references").mkdir(exist_ok=True)
+        (skill.parent / "references" / "x.md").write_text(
+            "project ref\n", encoding="utf-8"
+        )
+
+    project_sentinel = project / "user-owned.txt"
+    project_sentinel.write_text("keep project\n", encoding="utf-8")
+    codebuddy_install(project, project=True)
+    _cursor_install(project)
+    _kiro_install(project)
+    _kilo_install(project)
+
+    uninstall_all(project)
+
+    for skill in user_skills:
+        assert not skill.exists()
+        assert not (skill.parent / ".graphify_version").exists()
+        assert not (skill.parent / "references").exists()
+        assert not (skill.parent / "references.tmp").exists()
+        assert (skill.parent / "unrelated.txt").read_text(encoding="utf-8") == "keep\n"
+
+    specialized_project_skills = {
+        _platform_skill_destination(
+            platform_name, project=True, project_dir=project
+        )
+        for platform_name in ("codebuddy", "kiro")
+    }
+    for skill in project_skills - specialized_project_skills:
+        assert skill.read_text(encoding="utf-8") == "project skill\n"
+        assert (skill.parent / ".graphify_version").read_text(encoding="utf-8") == (
+            "project\n"
+        )
+        assert (skill.parent / "references" / "x.md").read_text(
+            encoding="utf-8"
+        ) == "project ref\n"
+
+    for skill in specialized_project_skills:
+        assert not skill.exists()
+    assert not (project / "CODEBUDDY.md").exists()
+    assert not (project / ".codebuddy" / "settings.json").exists() or (
+        "graphify"
+        not in (project / ".codebuddy" / "settings.json").read_text(encoding="utf-8")
+    )
+    assert not (project / ".cursor" / "rules" / "graphify.mdc").exists()
+    assert not (project / ".kiro" / "steering" / "graphify.md").exists()
+    assert not (project / ".kilo" / "plugins" / "graphify.js").exists()
+    kilo_config = project / ".kilo" / "kilo.json"
+    assert not kilo_config.exists() or "graphify.js" not in kilo_config.read_text(
+        encoding="utf-8"
+    )
+    assert project_sentinel.read_text(encoding="utf-8") == "keep project\n"

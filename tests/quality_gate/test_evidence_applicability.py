@@ -250,15 +250,35 @@ def test_fast_gate_rejects_partial_legacy_deletion(tmp_path: Path) -> None:
     assert "legacy implementation paths remain" in result.stderr
 
 
+def test_fast_gate_accepts_the_canonical_complete_workflow_owner(tmp_path: Path) -> None:
+    repository = copy_install_sandbox_gate_fixture(tmp_path)
+    workflow = repository / ".github/workflows/install-sandbox.yml"
+    workflow.write_text(
+        "name: Install sandbox complete\n"
+        "jobs:\n"
+        "  complete:\n"
+        "    steps:\n"
+        "      - run: uv run --frozen --python 3.12 python "
+        "scripts/install_sandbox_quality.py complete\n",
+        encoding="utf-8",
+    )
+
+    result = run_quality_gate(repository)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "repository state: gate installation" in result.stdout
+
+
 def test_fast_gate_rejects_partial_caller_switch(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
     workflow = repository / ".github/workflows/install-sandbox.yml"
     workflow.write_text(
-        workflow.read_text(encoding="utf-8").replace(
-            "tools.install_sandbox.ci_result",
-            "tools.install_sandbox.ci",
-        ),
+        "name: partial caller switch\n"
+        "jobs:\n"
+        "  result:\n"
+        "    steps:\n"
+        "      - run: python -m tools.install_sandbox.ci\n",
         encoding="utf-8",
     )
 
@@ -266,14 +286,15 @@ def test_fast_gate_rejects_partial_caller_switch(tmp_path: Path) -> None:
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "mixed repository state" in result.stderr
-    assert "workflow result caller does not point to the legacy classifier" in result.stderr
+    assert "workflow does not invoke the canonical complete quality command" in result.stderr
+    assert "workflow bypasses the canonical quality command owner" in result.stderr
 
 
 def test_fast_gate_rejects_changed_supported_workflow_arguments(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     workflow = repository / ".github/workflows/install-sandbox.yml"
     workflow.write_text(
-        workflow.read_text(encoding="utf-8").replace("--scope both", "--scope user"),
+        workflow.read_text(encoding="utf-8").replace(" complete", " complete --scope user"),
         encoding="utf-8",
     )
 
@@ -281,15 +302,14 @@ def test_fast_gate_rejects_changed_supported_workflow_arguments(tmp_path: Path) 
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "mixed repository state" in result.stderr
-    assert "workflow sandbox caller does not use the supported arguments" in result.stderr
+    assert "workflow does not invoke the canonical complete quality command" in result.stderr
 
 
 def test_fast_gate_rejects_comment_only_workflow_callers(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     workflow = repository / ".github/workflows/install-sandbox.yml"
     workflow.write_text(
-        "# python tools/install_sandbox/run.py --all --scope both --output out\n"
-        "# python -m tools.install_sandbox.ci_result\n"
+        "# uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py complete\n"
         "name: inert fixture\n",
         encoding="utf-8",
     )
@@ -297,10 +317,7 @@ def test_fast_gate_rejects_comment_only_workflow_callers(tmp_path: Path) -> None
     result = run_quality_gate(repository)
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert (
-        "workflow sandbox caller does not point to the supported host entrypoint" in result.stderr
-    )
-    assert "workflow result caller does not point to the legacy classifier" in result.stderr
+    assert "workflow does not invoke the canonical complete quality command" in result.stderr
 
 
 def test_fast_gate_rejects_workflow_callers_hidden_in_non_run_scalars(
@@ -309,8 +326,8 @@ def test_fast_gate_rejects_workflow_callers_hidden_in_non_run_scalars(
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     workflow = repository / ".github/workflows/install-sandbox.yml"
     workflow.write_text(
-        "name: inert # python tools/install_sandbox/run.py --all --scope both --output out\n"
-        "description: inert # python -m tools.install_sandbox.ci_result\n"
+        "name: inert # uv run --frozen --python 3.12 python "
+        "scripts/install_sandbox_quality.py complete\n"
         "jobs:\n"
         "  proof:\n"
         "    steps:\n"
@@ -321,10 +338,7 @@ def test_fast_gate_rejects_workflow_callers_hidden_in_non_run_scalars(
     result = run_quality_gate(repository)
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert (
-        "workflow sandbox caller does not point to the supported host entrypoint" in result.stderr
-    )
-    assert "workflow result caller does not point to the legacy classifier" in result.stderr
+    assert "workflow does not invoke the canonical complete quality command" in result.stderr
 
 
 def test_fast_gate_rejects_comment_only_container_caller(tmp_path: Path) -> None:

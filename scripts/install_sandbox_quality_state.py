@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
@@ -17,6 +18,17 @@ from scripts.install_sandbox_quality_phase import GatePhase
 
 INSTALL_SANDBOX = Path("tools/install_sandbox")
 WORKFLOW = Path(".github/workflows/install-sandbox.yml")
+QUALITY_SCRIPT = "scripts/install_sandbox_quality.py"
+CANONICAL_COMPLETE_COMMAND = (
+    "uv",
+    "run",
+    "--frozen",
+    "--python",
+    "3.12",
+    "python",
+    QUALITY_SCRIPT,
+    "complete",
+)
 
 FIXED_BASELINE_PRODUCTION_PATHS = frozenset(
     INSTALL_SANDBOX / name
@@ -233,12 +245,24 @@ def _workflow_invokes_module(workflow: str | None, module: str) -> bool:
     return any(_command_invokes_module(command, module) for command in _workflow_commands(workflow))
 
 
-def _uses_supported_host_arguments(command: str) -> bool:
-    return (
-        re.search(r"(?<!\w)--all(?![\w-])", command) is not None
-        and re.search(r"(?<!\w)--scope\s+both(?!\w)", command) is not None
-        and re.search(r"(?<!\w)--output(?![\w-])", command) is not None
-    )
+def _is_canonical_complete_command(command: str) -> bool:
+    try:
+        return tuple(shlex.split(command)) == CANONICAL_COMPLETE_COMMAND
+    except ValueError:
+        return False
+
+
+def _workflow_quality_owner_problems(workflow: str | None) -> tuple[str, ...]:
+    commands = _workflow_commands(workflow)
+    problems: list[str] = []
+    if not any(_is_canonical_complete_command(command) for command in commands):
+        problems.append("workflow does not invoke the canonical complete quality command")
+    if _workflow_host_commands(workflow) or any(
+        _workflow_invokes_module(workflow, module)
+        for module in ("tools.install_sandbox.ci_result", "tools.install_sandbox.ci")
+    ):
+        problems.append("workflow bypasses the canonical quality command owner")
+    return tuple(problems)
 
 
 def _legacy_caller_problems(repository: Path) -> tuple[str, ...]:
@@ -259,13 +283,7 @@ def _legacy_caller_problems(repository: Path) -> tuple[str, ...]:
         problems.append("harness-image caller does not point to the legacy container entrypoint")
 
     workflow = _read_text(repository, WORKFLOW)
-    host_commands = _workflow_host_commands(workflow)
-    if not host_commands:
-        problems.append("workflow sandbox caller does not point to the supported host entrypoint")
-    elif not any(_uses_supported_host_arguments(command) for command in host_commands):
-        problems.append("workflow sandbox caller does not use the supported arguments")
-    if not _workflow_invokes_module(workflow, "tools.install_sandbox.ci_result"):
-        problems.append("workflow result caller does not point to the legacy classifier")
+    problems.extend(_workflow_quality_owner_problems(workflow))
     return tuple(problems)
 
 
@@ -284,15 +302,7 @@ def _replacement_caller_problems(repository: Path) -> tuple[str, ...]:
         problems.append("harness-image caller does not point only to the replacement entrypoint")
 
     workflow = _read_text(repository, WORKFLOW)
-    host_commands = _workflow_host_commands(workflow)
-    if not host_commands:
-        problems.append("workflow sandbox caller does not point to the supported host entrypoint")
-    elif not any(_uses_supported_host_arguments(command) for command in host_commands):
-        problems.append("workflow sandbox caller does not use the supported arguments")
-    if not _workflow_invokes_module(workflow, "tools.install_sandbox.ci") or (
-        _workflow_invokes_module(workflow, "tools.install_sandbox.ci_result")
-    ):
-        problems.append("workflow result caller does not point only to the replacement classifier")
+    problems.extend(_workflow_quality_owner_problems(workflow))
     return tuple(problems)
 
 

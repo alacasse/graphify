@@ -1,0 +1,34 @@
+name: Install sandbox fast
+
+on:
+  pull_request: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-sandbox-fast-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  install-sandbox-fast:
+    name: Install sandbox fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install frozen dependencies
+        run: uv sync --frozen
+
+      - name: Run the canonical fast gate
+        run: uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py fast

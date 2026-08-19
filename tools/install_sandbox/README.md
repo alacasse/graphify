@@ -19,48 +19,69 @@ removed user content, and undeclared filesystem changes.
 
 Run the commands from a Graphify source checkout with:
 
-- the repository development environment installed (`uv sync --all-extras`);
+- the frozen Python 3.12 development environment installed
+  (`uv sync --all-extras --frozen --python 3.12`);
 - a running Docker daemon available to the current user.
 
-The examples use the repository's locked environment. If the project
-environment is already active, `python` can replace `uv run --frozen python`.
+The committed `uv.lock` is the version authority. Do not replace these commands
+with hand-assembled tool invocations.
 
 ## Quick start
 
-Start with one target and one scope while developing:
+Run the inexpensive gate while developing:
 
 ```bash
-uv run --frozen python tools/install_sandbox/run.py \
-  --repo . \
-  --target codex \
-  --scope project
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py fast
 ```
 
-Run the complete catalog before finalizing a catalog-wide installer change:
+Use the command owner's Docker tier for proportional diagnostic evidence:
 
 ```bash
-uv run --frozen python tools/install_sandbox/run.py \
-  --repo . \
-  --all \
-  --scope both
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py docker --target <target>
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py docker --all
 ```
 
-Each invocation builds the harness image before starting the container, so a
-full-catalog run takes longer than a single-target run.
+Run the complete tier for a behavioral milestone, architecture completion,
+cutover candidate, or merge:
+
+```bash
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py complete
+```
+
+`fast` owns scoped formatting, lint and complexity, strict typing, security,
+and applicable Unit and Component Evidence. `complete` owns those checks plus
+applicable branch coverage and Behavioral Evidence, dependency audit, the
+warning-clean Python 3.12 repository suite, and a full official Docker
+diagnostic. Each Docker invocation builds the harness image, so full-catalog
+evidence takes longer than a targeted run.
+
+Evidence applicability comes from repository facts, not a flag or marker:
+
+| Repository state | Required replacement evidence |
+| --- | --- |
+| Gate installation | Unit, Component, Behavioral, and replacement coverage report `NOT APPLICABLE`; no replacement behavior exists. |
+| Replacement construction | Unit, Component, and replacement branch coverage are required; early Behavioral Evidence is prohibited. |
+| Atomic cutover | Unit, Component, Behavioral, and full remaining-tree coverage are required. |
+
+The command owner returns exit `0` for complete success or valid
+non-applicability, exit `1` for failed or missing evidence, exit `2` for invalid
+usage or configuration, and exit `124` for a Docker timeout. It reports every
+independent child outcome before aggregating the result.
 
 ## Choose what to run
 
-Exactly one of `--target` and `--all` is required.
+The quality owner exposes four contributor-facing modes. Exactly one of
+`--target` and `--all` is required for `docker`.
 
-| Argument | Meaning |
+| Mode | Meaning |
 | --- | --- |
-| `--repo PATH` | Graphify source checkout to install and test. |
-| `--target NAME` | Run one target. Use `--help` to list names from the current catalog. |
-| `--all` | Run every target plus catalog-wide installer checks. |
-| `--scope user\|project\|both` | Select install roots; defaults to `both`. |
-| `--output DIR` | Use an absent or empty caller-owned directory instead of managed local output. |
+| `fast` | Run every inexpensive blocking check. |
+| `complete` | Run every complete-tier check, including dependency and full Docker evidence. |
+| `docker --target NAME` | Run one catalog-derived Install Target in both scopes. |
+| `docker --all` | Run every target, both scopes, and catalog-wide checks. |
 
-Without `--output`, the runner creates a managed run beneath the ignored
+The quality owner prints the external diagnostic-bundle path it allocated. The
+underlying host runner also supports managed runs beneath the ignored
 `tools/install_sandbox/out/` root. For example:
 
 ```text
@@ -69,17 +90,9 @@ tools/install_sandbox/out/20260726T143012Z-codex-project-02/
 tools/install_sandbox/out/20260726T143012Z-all-both/
 ```
 
-The numeric suffix resolves same-second collisions. For example, give an agent
-or CI job an empty external artifact directory:
-
-```bash
-sandbox_output_dir="$(mktemp -d /tmp/graphify-install-sandbox-codex.XXXXXX)"
-uv run --frozen python tools/install_sandbox/run.py \
-  --repo . \
-  --target codex \
-  --scope both \
-  --output "$sandbox_output_dir"
-```
+The numeric suffix resolves same-second collisions. The quality command owner
+uses an absent external temporary leaf so it can publish the bundle path for a
+person, agent, or CI artifact step without entering managed retention.
 
 Set `GRAPHIFY_SANDBOX_RUNTIME` only when a different Docker-compatible runtime
 executable should replace the default `docker` command.
@@ -198,35 +211,27 @@ failure from an image-build or container-runtime error.
 
 ## Continuous integration
 
-Normal pytest provides the fast contract: it strictly loads the checked-in
-YAML catalog and compares its filename-derived targets with the current
-checkout's public `graphify install --help` targets. The Docker workflow adds
-the slower filesystem-effect oracle.
+`.github/workflows/install-sandbox-fast.yml` invokes the canonical `fast`
+command as an unconditional check on every pull request, with no path filter.
+An older in-progress fast run for the same pull request is cancelled.
 
-The advisory `.github/workflows/install-sandbox.yml` workflow runs one Ubuntu,
-Python 3.12 full-catalog invocation with `--all --scope both`. It is independent
-of the normal pytest matrix and runs:
+`.github/workflows/install-sandbox.yml` invokes the canonical `complete`
+command after a push to `v8` or `main`, nightly at `05:27 UTC`, and on manual
+`workflow_dispatch`. Use that manual event for a behavioral milestone,
+architecture completion, or cutover review. The complete run owns its
+dependency audit and full Docker diagnostic; the workflow does not duplicate
+their tool commands.
 
-- for pull requests into, and pushes to, `v8` or `main` when installer code,
-  packaged skills or commands, sandbox code/tests, packaging metadata, the lock
-  file, or the workflow changes;
-- nightly at `05:27 UTC`;
-- on manual `workflow_dispatch`.
+Complete, Docker, and acceptance evidence binds to the exact commit that ran.
+A later source, test, lock, configuration, workflow, scope, or documentation
+change requires fresh evidence. A scheduled result is informational unless it
+covers the exact commit under acceptance. The workflow uploads the complete
+diagnostic bundle after success or failure and writes `report.md` (or
+`run.json`) to the job summary.
 
-Scheduled and manual runs always execute the full catalog. Pull-request runs
-cancel an older in-progress sandbox run for the same pull request. The workflow
-uses a fresh external leaf at
-`$RUNNER_TEMP/graphify-install-sandbox`, uploads the complete directory after
-success or failure as
-`install-sandbox-<run-id>-<run-attempt>`, writes `report.md` (or `run.json`
-when the report is unavailable) to the job summary, and only then evaluates
-the host lifecycle metadata. A `passed` run succeeds. A complete `failed` run
-also succeeds after emitting a warning because it represents behavioral
-findings, not a broken diagnostic. An `incomplete` or `interrupted` run, missing
-metadata, malformed metadata, or an exit-code mismatch fails the workflow. The
-runner's original exit code remains recorded in `run.json` and the job summary.
-This workflow is advisory for completed findings; it is not a required-check
-gate.
+The general Python-version matrix remains separate. Python 3.10 continues to
+exercise unrelated Graphify behavior while excluding `tests/install_sandbox`
+and `tests/quality_gate`, which require the Python 3.12 gate runtime.
 
 Two commented settings near the top of the workflow are the storage-cost
 controls:

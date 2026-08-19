@@ -29,11 +29,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # --frozen keeps uv from re-resolving and rewriting uv.lock as a side
-      # effect of `uv run`; the lock is committed and must not churn in CI.
-      - name: Type-check install-sandbox tools
-        run: uv run --frozen pyright --warnings tools/install_sandbox
-
       - name: Check generated skill artifacts are up to date
         run: uv run --frozen python -m tools.skillgen --check
 
@@ -73,8 +68,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --frozen
 
-      - name: Run tests
-        run: uv run --frozen pytest tests/ -q --tb=short
+      - name: Run tests on Python 3.10
+        if: matrix.python-version == '3.10'
+        run: >-
+          uv run --frozen --python 3.10 pytest tests/
+          -q --tb=short --ignore=tests/install_sandbox
+          --ignore=tests/quality_gate
+
+      - name: Run tests on Python 3.12
+        if: matrix.python-version == '3.12'
+        run: uv run --frozen --python 3.12 pytest tests/ -q --tb=short
 
       - name: Verify install works end-to-end
         run: |
@@ -82,9 +85,9 @@ jobs:
           uv run --frozen graphify install
 
   security-scan:
-    # The dev deps include bandit and pip-audit. Run them in CI so a new
-    # HIGH-severity finding or vulnerable dependency is caught on the PR that
-    # introduces it, rather than at the next manual audit.
+    # Keep the repository-wide Graphify source scan as advisory feedback. The
+    # install-sandbox command owner runs its blocking Bandit scope in `fast`
+    # and owns dependency audit in `complete`.
     # Non-blocking for now (continue-on-error) to avoid breaking CI on
     # pre-existing findings; remove continue-on-error after the initial
     # cleanup pass.
@@ -103,7 +106,3 @@ jobs:
       - name: bandit (static security analysis)
         continue-on-error: true
         run: uv run --frozen bandit -r graphify -ll
-
-      - name: pip-audit (dependency vulnerabilities)
-        continue-on-error: true
-        run: uv run --frozen pip-audit --strict

@@ -15,6 +15,54 @@ Before a non-trivial architecture, refactor, or replacement change:
    let its current topology, private names, or call structure define the new
    design without an explicit design review.
 
+## Required quality gate
+
+Run quality work from the repository root through the single Python 3.12
+command owner. Do not reconstruct Ruff, Pyright, Bandit, pytest, coverage,
+dependency-audit, Docker-runner, or classifier command lists in agent guidance
+or CI.
+
+```bash
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py fast
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py complete
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py docker --target <target>
+uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py docker --all
+```
+
+`fast` owns scoped formatting, lint and complexity, strict typing, security,
+and applicable Unit and Component Evidence. Run it during implementation and
+before handoff; CI runs it as an unconditional required check on every pull
+request without path filtering.
+
+`complete` owns the fast responsibilities plus applicable branch coverage and
+Behavioral Evidence, dependency audit, the warning-clean Python 3.12 repository
+suite, and a full official Docker diagnostic. Run it for behavioral milestones,
+architecture completion, cutover candidates, and merge. CI runs it on pushes to
+`v8` or `main`, on manual dispatch for those review events, and nightly at
+`05:27 UTC`. A nightly result is informational unless it covers the exact
+commit being accepted.
+
+The command owner derives evidence applicability from repository facts:
+
+- Gate installation: Unit, Component, Behavioral, and replacement coverage are
+  `NOT APPLICABLE`; do not add placeholder tests.
+- Replacement construction: Unit, Component, and replacement branch coverage
+  are required; Behavioral Evidence is prohibited before a supported boundary
+  exists.
+- Atomic cutover: Unit, Component, Behavioral, and full remaining-tree coverage
+  are required.
+
+Interpret exits consistently: exit `0` is complete success or valid
+non-applicability; exit `1` is a failed check, missing evidence, or invalid mixed
+state; exit `2` is invalid usage or configuration; exit `124` is a Docker
+timeout. Report all child outcomes, the diagnostic-bundle path, and the exact
+commit. Any later source, test, lock, configuration, workflow, exception,
+scope, or documentation change invalidates the applicable result.
+
+The Python 3.10 CI lane is general Graphify feedback only. It excludes
+`tests/install_sandbox` and `tests/quality_gate` and does not establish sandbox
+gate evidence.
+
 ## Catalog and oracle authority
 
 Classify each new piece of data before deciding where it belongs:

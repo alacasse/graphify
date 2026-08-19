@@ -343,13 +343,8 @@ def copy_install_sandbox_gate_fixture(tmp_path: Path) -> Path:
         "jobs:\n"
         "  proof:\n"
         "    steps:\n"
-        "      - run: |\n"
-        "          python tools/install_sandbox/run.py \\\n"
-        "            --repo . \\\n"
-        "            --all \\\n"
-        "            --scope both \\\n"
-        "            --output out\n"
-        "      - run: python -m tools.install_sandbox.ci_result\n",
+        "      - run: uv run --frozen --python 3.12 python "
+        "scripts/install_sandbox_quality.py complete\n",
         encoding="utf-8",
     )
     (fixture_root / RUFF_CONFIG.name).write_text(

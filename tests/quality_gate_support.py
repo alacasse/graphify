@@ -30,15 +30,6 @@ APPROVED_TEMPORARY_COVERAGE_EXCLUSIONS = (
     "tools/install_sandbox/sandbox_runner.py",
     "tools/install_sandbox/specs.py",
 )
-PROOF_MODULES = (
-    "test_ci_configuration.py",
-    "test_complete_gate.py",
-    "test_docker_evidence.py",
-    "test_docker_gate.py",
-    "test_evidence_applicability.py",
-    "test_fast_ruff.py",
-    "test_fast_typing_security.py",
-)
 
 
 def run_quality_gate(
@@ -445,8 +436,9 @@ def copy_prove_gate_fixture(tmp_path: Path) -> Path:
     fixture_root = tmp_path / "repository"
     proof_root = fixture_root / "tests" / "quality_gate"
     proof_root.mkdir(parents=True)
-    for name in PROOF_MODULES:
-        shutil.copyfile(PROJECT_ROOT / "tests/quality_gate" / name, proof_root / name)
+    for source in sorted((PROJECT_ROOT / "tests" / "quality_gate").glob("test_*.py")):
+        if source.name != "test_prove_gate.py":
+            shutil.copyfile(source, proof_root / source.name)
     (fixture_root / "uv.lock").write_text("fixture lock\n", encoding="utf-8")
     return fixture_root
 
@@ -555,8 +547,7 @@ def run_prove_gate(
     )
     commands = (
         tuple(
-            tuple(json.loads(line))
-            for line in command_log.read_text(encoding="utf-8").splitlines()
+            tuple(json.loads(line)) for line in command_log.read_text(encoding="utf-8").splitlines()
         )
         if command_log.exists()
         else ()

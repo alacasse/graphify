@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.quality_gate_support import PROJECT_ROOT, run_fast_gate, run_quality_gate
 
 
+@pytest.mark.install_sandbox_proof("corrected-static-analysis")
 def test_fast_gate_accepts_corrected_ruff_fixture(tmp_path: Path) -> None:
     result = run_fast_gate(tmp_path, 'MESSAGE = "hello"\n')
 
@@ -14,6 +17,7 @@ def test_fast_gate_accepts_corrected_ruff_fixture(tmp_path: Path) -> None:
     assert result.stdout.rstrip().endswith("fast: PASS")
 
 
+@pytest.mark.install_sandbox_proof("formatting-violation")
 def test_fast_gate_reports_format_failure_after_running_lint(tmp_path: Path) -> None:
     result = run_fast_gate(tmp_path, "MESSAGE = 'hello'\n")
 
@@ -23,6 +27,7 @@ def test_fast_gate_reports_format_failure_after_running_lint(tmp_path: Path) -> 
     assert result.stdout.index("[PASS] ruff-lint") < result.stdout.index("fast: FAIL")
 
 
+@pytest.mark.install_sandbox_proof("lint-violation")
 def test_fast_gate_rejects_lint_violation(tmp_path: Path) -> None:
     result = run_fast_gate(tmp_path, "import os\n")
 
@@ -32,6 +37,7 @@ def test_fast_gate_rejects_lint_violation(tmp_path: Path) -> None:
     assert "[FAIL] ruff-lint (exit 1)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("complexity-violation")
 def test_fast_gate_enforces_all_approved_complexity_limits(tmp_path: Path) -> None:
     result = run_fast_gate(
         tmp_path,
@@ -106,6 +112,7 @@ class NewMode(str, Enum):
     assert "[FAIL] ruff-lint (exit 1)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("fast-configuration-failure-independence")
 def test_fast_gate_reports_every_child_before_configuration_exit(tmp_path: Path) -> None:
     result = run_fast_gate(
         tmp_path,

@@ -4,6 +4,8 @@ import json
 import tomllib
 from pathlib import Path
 
+import pytest
+
 from tests.quality_gate_support import (
     LOCKFILE,
     PROJECT_ROOT,
@@ -16,6 +18,7 @@ from tests.quality_gate_support import (
 )
 
 
+@pytest.mark.install_sandbox_proof("typing-violation")
 def test_fast_gate_rejects_strict_type_error(tmp_path: Path) -> None:
     result = run_fast_gate(tmp_path, "VALUE: str = 1\n")
 
@@ -42,6 +45,7 @@ def identity(value):
     assert "[FAIL] pyright (exit 2)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("bandit-violation")
 def test_fast_gate_rejects_blocking_security_finding(tmp_path: Path) -> None:
     result = run_fast_gate(
         tmp_path,
@@ -74,6 +78,7 @@ hashlib.md5(b"secret").hexdigest()
     assert "[FAIL] bandit (exit 2)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("static-analysis-baseline-lock")
 def test_fast_gate_accepts_approved_baseline_without_changing_lock() -> None:
     before = LOCKFILE.read_bytes()
 
@@ -86,6 +91,7 @@ def test_fast_gate_accepts_approved_baseline_without_changing_lock() -> None:
     assert LOCKFILE.read_bytes() == before
 
 
+@pytest.mark.install_sandbox_proof("declared-path-static-analysis")
 def test_fast_gate_rejects_new_production_file_outside_strict_scope(tmp_path: Path) -> None:
     result = run_fast_gate(
         tmp_path,
@@ -100,6 +106,7 @@ def test_fast_gate_rejects_new_production_file_outside_strict_scope(tmp_path: Pa
     assert result.stdout.index("[PASS] bandit") < result.stdout.index("fast: CONFIGURATION ERROR")
 
 
+@pytest.mark.install_sandbox_proof("replacement-test-strict-typing")
 def test_fast_gate_rejects_relaxed_replacement_test_typing_scope(tmp_path: Path) -> None:
     config = json.loads(PYRIGHT_CONFIG.read_text(encoding="utf-8"))
     config["strict"].remove("tests/install_sandbox/unit")
@@ -112,6 +119,28 @@ def test_fast_gate_rejects_relaxed_replacement_test_typing_scope(tmp_path: Path)
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "strict scope does not cover tests/install_sandbox/unit" in result.stderr
+    assert "[FAIL] pyright (exit 2)" in result.stdout
+
+
+@pytest.mark.install_sandbox_proof("escaped-static-analysis-path")
+@pytest.mark.parametrize("configuration_key", ["include", "strict"])
+@pytest.mark.parametrize("escaped_path", ["../outside", "/tmp/outside"])
+def test_fast_gate_rejects_configuration_paths_that_escape_the_repository(
+    tmp_path: Path,
+    configuration_key: str,
+    escaped_path: str,
+) -> None:
+    config = json.loads(PYRIGHT_CONFIG.read_text(encoding="utf-8"))
+    config[configuration_key].append(escaped_path)
+
+    result = run_fast_gate(
+        tmp_path,
+        'MESSAGE: str = "hello"\n',
+        pyright_config=json.dumps(config),
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"{configuration_key} path escapes repository: {escaped_path}" in result.stderr
     assert "[FAIL] pyright (exit 2)" in result.stdout
 
 
@@ -160,6 +189,7 @@ def test_fast_gate_rejects_removed_production_analysis_scope(tmp_path: Path) -> 
     assert "[FAIL] pyright (exit 2)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("typing-configuration-drift")
 def test_fast_gate_rejects_pyright_runtime_drift(tmp_path: Path) -> None:
     config = json.loads(PYRIGHT_CONFIG.read_text(encoding="utf-8"))
     config["pythonVersion"] = "3.10"

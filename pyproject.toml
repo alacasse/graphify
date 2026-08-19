@@ -138,6 +138,9 @@ graphify = ["skill.md", "skill-codex.md", "skill-opencode.md", "skill-kilo.md", 
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "install_sandbox_proof(requirement): stable operational proof requirement",
+]
 norecursedirs = [
     "graphify-benchmark", "graphify_eval", "graphify_test",
     "worked", "llm-stack-corpus", "llm-stack-demo", "product-site",

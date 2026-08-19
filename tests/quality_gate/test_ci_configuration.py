@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -63,11 +64,7 @@ def _command_owner_alignment_problems(repository: Path) -> tuple[str, ...]:
     }
     for relative_path, expected in workflow_commands.items():
         jobs = _mapping(_workflow(repository / relative_path)["jobs"])
-        commands = tuple(
-            command
-            for job in jobs.values()
-            for command in _run_blocks(_mapping(job))
-        )
+        commands = tuple(command for job in jobs.values() for command in _run_blocks(_mapping(job)))
         if expected not in commands:
             problems.append(f"{relative_path} does not invoke {expected}")
 
@@ -80,6 +77,7 @@ def _command_owner_alignment_problems(repository: Path) -> tuple[str, ...]:
     return tuple(problems)
 
 
+@pytest.mark.install_sandbox_proof("live-ci-command-ownership")
 def test_every_pull_request_runs_the_canonical_fast_gate() -> None:
     workflow = _workflow(FAST_WORKFLOW)
     assert workflow["name"] == "Install sandbox fast"
@@ -167,15 +165,11 @@ def test_complete_gate_defers_runner_context_until_a_step_runs() -> None:
 
     job_environment = _mapping(complete.get("env", {}))
     assert not any(
-        "${{ runner." in value
-        for value in job_environment.values()
-        if isinstance(value, str)
+        "${{ runner." in value for value in job_environment.values() if isinstance(value, str)
     )
 
     gate_step = next(
-        step
-        for step in _steps(complete)
-        if step.get("run") == f"{QUALITY_COMMAND} complete"
+        step for step in _steps(complete) if step.get("run") == f"{QUALITY_COMMAND} complete"
     )
     gate_environment = _mapping(gate_step["env"])
     assert gate_environment["TMPDIR"] == "${{ runner.temp }}"
@@ -207,6 +201,7 @@ def test_python_310_feedback_excludes_python_312_install_sandbox_tests() -> None
     assert "pip-audit" not in all_commands
 
 
+@pytest.mark.install_sandbox_proof("contributor-guidance-alignment")
 def test_contributor_guidance_describes_the_same_quality_gate_contract() -> None:
     assert not _command_owner_alignment_problems(PROJECT_ROOT)
     required_fragments = (
@@ -234,6 +229,7 @@ def test_contributor_guidance_describes_the_same_quality_gate_contract() -> None
     assert "(#48)" in changelog
 
 
+@pytest.mark.install_sandbox_proof("ci-local-command-owner-drift")
 def test_temporary_ci_and_local_command_owner_drift_is_detected(tmp_path: Path) -> None:
     repository = tmp_path / "repository"
     for source in (FAST_WORKFLOW, COMPLETE_WORKFLOW, SANDBOX_README, SANDBOX_AGENTS):

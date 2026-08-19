@@ -92,6 +92,7 @@ def _convert_to_atomic_cutover(repository: Path) -> None:
     )
 
 
+@pytest.mark.install_sandbox_proof("complete-gate-installation-responsibilities")
 def test_complete_gate_runs_every_gate_installation_responsibility(tmp_path: Path) -> None:
     repository = copy_complete_gate_fixture(tmp_path)
     original_lock = (repository / "uv.lock").read_bytes()
@@ -147,6 +148,7 @@ def test_complete_gate_runs_every_gate_installation_responsibility(tmp_path: Pat
     assert (repository / "uv.lock").read_bytes() == original_lock
 
 
+@pytest.mark.install_sandbox_proof("construction-branch-coverage")
 def test_complete_gate_replaces_fast_evidence_with_branch_coverage_during_construction(
     tmp_path: Path,
 ) -> None:
@@ -199,6 +201,7 @@ def test_complete_gate_replaces_fast_evidence_with_branch_coverage_during_constr
     )
 
 
+@pytest.mark.install_sandbox_proof("repository-warning-rejection")
 def test_complete_gate_rejects_repository_suite_warnings(tmp_path: Path) -> None:
     repository = copy_complete_gate_fixture(tmp_path)
 
@@ -231,6 +234,7 @@ def test_complete_gate_preserves_repository_suite_environment_skips(tmp_path: Pa
     assert "[PASS] repository-suite (exit 0)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("cutover-evidence-remaining-tree-coverage")
 def test_complete_gate_runs_all_evidence_and_remaining_tree_coverage_at_cutover(
     tmp_path: Path,
 ) -> None:
@@ -273,6 +277,7 @@ def test_complete_gate_runs_all_evidence_and_remaining_tree_coverage_at_cutover(
     )
 
 
+@pytest.mark.install_sandbox_proof("replacement-coverage-exclusion-rejection")
 def test_complete_gate_rejects_a_replacement_path_in_legacy_coverage_exclusions(
     tmp_path: Path,
 ) -> None:
@@ -305,6 +310,7 @@ def test_complete_gate_rejects_a_replacement_path_in_legacy_coverage_exclusions(
     assert result.stdout.rstrip().endswith("complete: CONFIGURATION ERROR")
 
 
+@pytest.mark.install_sandbox_proof("cutover-legacy-coverage-exclusion-rejection")
 def test_complete_gate_rejects_legacy_coverage_exclusions_at_cutover(tmp_path: Path) -> None:
     repository = copy_complete_gate_fixture(tmp_path)
     legacy_pyproject = (repository / "pyproject.toml").read_text(encoding="utf-8")
@@ -328,6 +334,7 @@ def test_complete_gate_rejects_legacy_coverage_exclusions_at_cutover(tmp_path: P
     assert any(command[:3] == ("python", "-m", "tools.install_sandbox.ci") for command in commands)
 
 
+@pytest.mark.install_sandbox_proof("dependency-audit-failure-propagation")
 def test_complete_gate_preserves_independent_failures_before_aggregation(tmp_path: Path) -> None:
     repository = copy_complete_gate_fixture(tmp_path)
 
@@ -358,6 +365,7 @@ def test_complete_gate_preserves_independent_failures_before_aggregation(tmp_pat
     assert result.stdout.rstrip().endswith("complete: FAIL")
 
 
+@pytest.mark.install_sandbox_proof("configuration-preflight-independence")
 def test_complete_gate_runs_independent_checks_after_configuration_preflight_failure(
     tmp_path: Path,
 ) -> None:
@@ -430,6 +438,7 @@ def test_complete_gate_does_not_invoke_empty_pre_cutover_behavioral_evidence(
     )
 
 
+@pytest.mark.install_sandbox_proof("dependency-lock-mutation-detection")
 def test_complete_gate_fails_if_a_child_changes_the_dependency_lock(tmp_path: Path) -> None:
     repository = copy_complete_gate_fixture(tmp_path)
 
@@ -445,6 +454,7 @@ def test_complete_gate_fails_if_a_child_changes_the_dependency_lock(tmp_path: Pa
     assert "uv.lock changed during complete gate" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("dependency-lock-restore-detection")
 def test_complete_gate_fails_if_a_later_child_restores_the_dependency_lock(
     tmp_path: Path,
 ) -> None:
@@ -466,6 +476,7 @@ def test_complete_gate_fails_if_a_later_child_restores_the_dependency_lock(
     assert "uv.lock changed during complete gate" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("complete-aggregate-exits")
 @pytest.mark.parametrize(
     ("docker_scenario", "exit_code", "terminal"),
     [
@@ -509,6 +520,7 @@ def test_complete_gate_preserves_approved_aggregate_exits(
         ("--cov-fail-under=90", "[FAIL] replacement-coverage (exit 1)"),
     ],
 )
+@pytest.mark.install_sandbox_proof("missing-evidence-coverage-threshold")
 def test_complete_gate_blocks_missing_evidence_or_insufficient_branch_coverage(
     tmp_path: Path,
     command_rule: str,

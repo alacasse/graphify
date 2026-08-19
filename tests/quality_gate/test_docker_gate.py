@@ -57,6 +57,7 @@ def _run_docker_gate(
         (("docker", "--all"), "target=None all=True scope=both"),
     ],
 )
+@pytest.mark.install_sandbox_proof("docker-selection-positive")
 def test_docker_gate_uses_approved_targeted_and_full_selection(
     tmp_path: Path,
     arguments: tuple[str, ...],
@@ -91,6 +92,7 @@ def test_docker_gate_rejects_invalid_selection_usage(
     assert message in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("docker-finding-propagation")
 def test_docker_gate_preserves_raw_findings_but_blocks_unapproved_findings(
     tmp_path: Path,
 ) -> None:
@@ -141,6 +143,7 @@ def test_docker_gate_blocks_incomplete_and_interrupted_results(
     assert result.stdout.rstrip().endswith("docker: FAIL")
 
 
+@pytest.mark.install_sandbox_proof("docker-timeout")
 def test_docker_gate_preserves_the_approved_timeout_exit(tmp_path: Path) -> None:
     result = _run_docker_gate(
         tmp_path,
@@ -223,6 +226,7 @@ def test_docker_gate_rejects_recorded_and_observed_exit_mismatch(tmp_path: Path)
     assert "[FAIL] docker-classifier (exit 2)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("docker-classifier-publication-failure")
 def test_docker_gate_blocks_classifier_or_publication_failure(tmp_path: Path) -> None:
     result = _run_docker_gate(
         tmp_path,
@@ -238,6 +242,7 @@ def test_docker_gate_blocks_classifier_or_publication_failure(tmp_path: Path) ->
     assert result.stdout.rstrip().endswith("docker: FAIL")
 
 
+@pytest.mark.install_sandbox_proof("docker-configuration-exit")
 def test_docker_gate_distinguishes_runner_usage_failure(tmp_path: Path) -> None:
     result = _run_docker_gate(
         tmp_path,

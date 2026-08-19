@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Protocol
 
+import pytest
+
 from tests.quality_gate_support import (
     PYRIGHT_CONFIG,
     copy_install_sandbox_gate_fixture,
@@ -96,6 +98,7 @@ def _convert_to_atomic_cutover(repository: Path) -> None:
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
 
+@pytest.mark.install_sandbox_proof("gate-installation-non-applicability")
 def test_fast_gate_reports_replacement_evidence_not_applicable_during_gate_installation(
     tmp_path: Path,
 ) -> None:
@@ -123,6 +126,7 @@ def test_fast_gate_rejects_behavioral_evidence_during_gate_installation(
     assert "Behavioral Evidence is prohibited before Atomic Cutover" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("complete-construction-evidence")
 def test_fast_gate_requires_and_runs_construction_evidence(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
@@ -159,6 +163,7 @@ def test_fast_gate_rejects_skipped_construction_evidence(tmp_path: Path) -> None
     assert "required evidence produced a non-passing pytest outcome" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("one-missing-construction-evidence-class")
 def test_fast_gate_rejects_empty_component_evidence(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
@@ -172,6 +177,7 @@ def test_fast_gate_rejects_empty_component_evidence(tmp_path: Path) -> None:
     assert "[FAIL] component-evidence-collection (exit 5)" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("missing-construction-evidence")
 def test_fast_gate_reports_missing_construction_evidence_as_check_failure(
     tmp_path: Path,
 ) -> None:
@@ -207,6 +213,7 @@ def test_fast_gate_reports_evidence_collection_errors_as_check_failure(
     assert result.stdout.rstrip().endswith("fast: FAIL")
 
 
+@pytest.mark.install_sandbox_proof("premature-behavioral-evidence")
 def test_fast_gate_rejects_behavioral_evidence_before_cutover(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
@@ -221,6 +228,7 @@ def test_fast_gate_rejects_behavioral_evidence_before_cutover(tmp_path: Path) ->
     assert "Behavioral Evidence is prohibited before Atomic Cutover" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("complete-atomic-cutover-evidence")
 def test_fast_gate_recognizes_complete_atomic_cutover(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
@@ -238,6 +246,7 @@ def test_fast_gate_recognizes_complete_atomic_cutover(tmp_path: Path) -> None:
     assert "[APPLICABLE] replacement-coverage" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("partial-legacy-deletion")
 def test_fast_gate_rejects_partial_legacy_deletion(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     (repository / "tools/install_sandbox/effects.py").unlink()
@@ -269,6 +278,7 @@ def test_fast_gate_accepts_the_canonical_complete_workflow_owner(tmp_path: Path)
     assert "repository state: gate installation" in result.stdout
 
 
+@pytest.mark.install_sandbox_proof("partial-caller-switch")
 def test_fast_gate_rejects_partial_caller_switch(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
@@ -355,6 +365,7 @@ def test_fast_gate_rejects_comment_only_container_caller(tmp_path: Path) -> None
     assert "harness-image caller does not point to the legacy container entrypoint" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("cutover-missing-behavioral")
 def test_fast_gate_rejects_cutover_without_behavioral_evidence(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)
@@ -589,6 +600,7 @@ def test_fast_gate_does_not_treat_import_names_in_text_as_caller_relationships(
     assert "operator caller does not point to the complete legacy host entrypoint" in result.stderr
 
 
+@pytest.mark.install_sandbox_proof("applicable-replacement-test-lint-paths")
 def test_fast_gate_lints_applicable_evidence_paths(tmp_path: Path) -> None:
     repository = copy_install_sandbox_gate_fixture(tmp_path)
     _add_replacement_production(repository)

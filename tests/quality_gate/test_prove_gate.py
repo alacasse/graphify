@@ -2,11 +2,12 @@ from pathlib import Path
 
 from tests.quality_gate_support import (
     PROJECT_ROOT,
-    PROOF_MODULES,
     copy_prove_gate_fixture,
     run_prove_gate,
     run_quality_gate,
 )
+
+PROOF_MARKER = "install_sandbox_proof"
 
 
 def _proof_commands(commands: tuple[tuple[str, ...], ...]) -> tuple[tuple[str, ...], ...]:
@@ -44,7 +45,7 @@ def test_prove_detects_lock_drift_after_the_proof_child(tmp_path: Path) -> None:
     assert result.stdout.rstrip().endswith("prove: FAIL")
 
 
-def test_prove_invokes_exactly_the_declared_proof_modules(tmp_path: Path) -> None:
+def test_prove_invokes_only_marked_operational_proofs(tmp_path: Path) -> None:
     repository = copy_prove_gate_fixture(tmp_path)
 
     result, commands = run_prove_gate(tmp_path, repository)
@@ -53,7 +54,9 @@ def test_prove_invokes_exactly_the_declared_proof_modules(tmp_path: Path) -> Non
     assert _proof_commands(commands) == (
         (
             "pytest",
-            *(f"tests/quality_gate/{module}" for module in PROOF_MODULES),
+            "tests/quality_gate",
+            "-m",
+            PROOF_MARKER,
             "-q",
             "--tb=short",
             "--strict-config",
@@ -66,20 +69,30 @@ def test_prove_invokes_exactly_the_declared_proof_modules(tmp_path: Path) -> Non
 
 def test_prove_reports_an_incomplete_inventory_without_suppressing_proof(tmp_path: Path) -> None:
     repository = copy_prove_gate_fixture(tmp_path)
-    (repository / "tests/quality_gate" / PROOF_MODULES[0]).unlink()
+    proof_module = repository / "tests/quality_gate/test_fast_ruff.py"
+    proof_module.write_text(
+        proof_module.read_text(encoding="utf-8").replace(
+            '@pytest.mark.install_sandbox_proof("formatting-violation")\n',
+            "",
+        ),
+        encoding="utf-8",
+    )
 
     result, commands = run_prove_gate(tmp_path, repository)
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert _proof_commands(commands)
-    assert "missing proof modules" in result.stderr
+    assert "missing required proof scenarios" in result.stderr
+    assert "formatting violation" in result.stderr
     assert "[PASS] operational-proof (exit 0)" in result.stdout
     assert result.stdout.rstrip().endswith("prove: CONFIGURATION ERROR")
 
 
-def test_prove_reports_an_undeclared_module_without_suppressing_proof(tmp_path: Path) -> None:
+def test_prove_reports_an_unknown_requirement_without_suppressing_proof(tmp_path: Path) -> None:
     repository = copy_prove_gate_fixture(tmp_path)
     (repository / "tests/quality_gate/test_unreviewed_proof.py").write_text(
+        "import pytest\n\n"
+        '@pytest.mark.install_sandbox_proof("unreviewed-requirement")\n'
         "def test_unreviewed() -> None:\n    assert True\n",
         encoding="utf-8",
     )
@@ -88,7 +101,7 @@ def test_prove_reports_an_undeclared_module_without_suppressing_proof(tmp_path: 
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert _proof_commands(commands)
-    assert "undeclared proof modules" in result.stderr
+    assert "unknown proof requirements: unreviewed-requirement" in result.stderr
     assert "[PASS] operational-proof (exit 0)" in result.stdout
     assert result.stdout.rstrip().endswith("prove: CONFIGURATION ERROR")
 
@@ -106,7 +119,7 @@ def test_prove_reports_a_missing_lock_without_suppressing_proof(tmp_path: Path) 
     assert result.stdout.rstrip().endswith("prove: CONFIGURATION ERROR")
 
 
-def test_prove_requires_each_declared_proof_scenario(tmp_path: Path) -> None:
+def test_prove_does_not_treat_test_names_as_contract(tmp_path: Path) -> None:
     repository = copy_prove_gate_fixture(tmp_path)
     proof_module = repository / "tests/quality_gate/test_fast_ruff.py"
     proof_module.write_text(
@@ -119,11 +132,10 @@ def test_prove_requires_each_declared_proof_scenario(tmp_path: Path) -> None:
 
     result, commands = run_prove_gate(tmp_path, repository)
 
-    assert result.returncode == 2, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert _proof_commands(commands)
-    assert "missing required proof scenarios" in result.stderr
-    assert "formatting violation" in result.stderr
-    assert result.stdout.rstrip().endswith("prove: CONFIGURATION ERROR")
+    assert "missing required proof scenarios" not in result.stderr
+    assert result.stdout.rstrip().endswith("prove: PASS")
 
 
 def test_prove_preserves_a_proof_failure(tmp_path: Path) -> None:

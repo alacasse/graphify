@@ -172,6 +172,7 @@ def _write_bundle(tmp_path: Path, mode: str = "valid") -> tuple[Path, Path]:
     return repository, bundle
 
 
+@pytest.mark.install_sandbox_proof("typed-docker-evidence")
 def test_evidence_consumer_returns_a_typed_passed_variant(tmp_path: Path) -> None:
     repository, bundle = _write_bundle(tmp_path)
 

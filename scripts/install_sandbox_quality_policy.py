@@ -151,11 +151,21 @@ def _pyright_settings_error(config: dict[str, object]) -> str | None:
     return None
 
 
-def _configuration_paths(config: dict[str, object], key: str) -> tuple[Path, ...]:
+def _configuration_paths(
+    repository: Path,
+    config: dict[str, object],
+    key: str,
+) -> tuple[Path, ...]:
     values = config.get(key)
     if not isinstance(values, list) or not all(isinstance(path, str) for path in values):
         raise ValueError(f"{PYRIGHT_CONFIG}: {key} must be a list of paths")
-    return tuple(Path(path) for path in values)
+    repository_root = repository.resolve()
+    configured_paths = tuple(Path(path) for path in values)
+    for raw_path, configured_path in zip(values, configured_paths, strict=True):
+        resolved = (repository_root / configured_path).resolve()
+        if configured_path.is_absolute() or not resolved.is_relative_to(repository_root):
+            raise ValueError(f"{PYRIGHT_CONFIG}: {key} path escapes repository: {raw_path}")
+    return configured_paths
 
 
 def _required_scope_error(
@@ -247,8 +257,8 @@ def typing_configuration_error(repository: Path) -> str | None:
     if error is not None:
         return error
     try:
-        include_paths = _configuration_paths(config, "include")
-        strict_paths = _configuration_paths(config, "strict")
+        include_paths = _configuration_paths(repository, config, "include")
+        strict_paths = _configuration_paths(repository, config, "strict")
     except ValueError as error:
         return str(error)
     error = _required_scope_error(

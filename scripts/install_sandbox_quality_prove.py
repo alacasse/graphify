@@ -15,241 +15,194 @@ from scripts.install_sandbox_quality_checks import (
 )
 from scripts.install_sandbox_quality_lock import capture_dependency_lock
 
-PROOF_SELF_TEST = "tests/quality_gate/test_prove_gate.py"
+PROOF_MARKER = "install_sandbox_proof"
+PROOF_TEST_ROOT = "tests/quality_gate"
 
 
 @dataclass(frozen=True)
 class ProofRequirement:
+    identifier: str
     description: str
-    module: str
-    test_name: str
-
-    @property
-    def selector(self) -> str:
-        return f"{self.module}::{self.test_name}"
 
 
-def _requirement(description: str, module: str, test_name: str) -> ProofRequirement:
-    return ProofRequirement(
-        description=description,
-        module=f"tests/quality_gate/{module}",
-        test_name=test_name,
-    )
+def _requirement(identifier: str, description: str) -> ProofRequirement:
+    return ProofRequirement(identifier=identifier, description=description)
 
 
 PROOF_REQUIREMENTS = (
     _requirement(
+        "live-ci-command-ownership",
         "live CI command ownership",
-        "test_ci_configuration.py",
-        "test_every_pull_request_runs_the_canonical_fast_gate",
     ),
     _requirement(
+        "ci-local-command-owner-drift",
         "CI and local command-owner drift",
-        "test_ci_configuration.py",
-        "test_temporary_ci_and_local_command_owner_drift_is_detected",
     ),
     _requirement(
+        "contributor-guidance-alignment",
         "contributor guidance alignment",
-        "test_ci_configuration.py",
-        "test_contributor_guidance_describes_the_same_quality_gate_contract",
     ),
     _requirement(
+        "complete-gate-installation-responsibilities",
         "complete gate installation responsibilities",
-        "test_complete_gate.py",
-        "test_complete_gate_runs_every_gate_installation_responsibility",
     ),
     _requirement(
+        "construction-branch-coverage",
         "construction branch coverage",
-        "test_complete_gate.py",
-        "test_complete_gate_replaces_fast_evidence_with_branch_coverage_during_construction",
     ),
     _requirement(
+        "cutover-evidence-remaining-tree-coverage",
         "cutover evidence and remaining-tree coverage",
-        "test_complete_gate.py",
-        "test_complete_gate_runs_all_evidence_and_remaining_tree_coverage_at_cutover",
     ),
     _requirement(
+        "repository-warning-rejection",
         "repository warning rejection",
-        "test_complete_gate.py",
-        "test_complete_gate_rejects_repository_suite_warnings",
     ),
     _requirement(
+        "dependency-audit-failure-propagation",
         "pip-audit and independent failure propagation",
-        "test_complete_gate.py",
-        "test_complete_gate_preserves_independent_failures_before_aggregation",
     ),
     _requirement(
+        "configuration-preflight-independence",
         "configuration preflight independence",
-        "test_complete_gate.py",
-        "test_complete_gate_runs_independent_checks_after_configuration_preflight_failure",
     ),
     _requirement(
+        "dependency-lock-mutation-detection",
         "dependency-lock mutation detection",
-        "test_complete_gate.py",
-        "test_complete_gate_fails_if_a_child_changes_the_dependency_lock",
     ),
     _requirement(
+        "dependency-lock-restore-detection",
         "dependency-lock restore detection",
-        "test_complete_gate.py",
-        "test_complete_gate_fails_if_a_later_child_restores_the_dependency_lock",
     ),
     _requirement(
+        "complete-aggregate-exits",
         "complete timeout and configuration exits",
-        "test_complete_gate.py",
-        "test_complete_gate_preserves_approved_aggregate_exits",
     ),
     _requirement(
+        "missing-evidence-coverage-threshold",
         "missing evidence and coverage threshold",
-        "test_complete_gate.py",
-        "test_complete_gate_blocks_missing_evidence_or_insufficient_branch_coverage",
     ),
     _requirement(
+        "replacement-coverage-exclusion-rejection",
         "replacement coverage exclusion rejection",
-        "test_complete_gate.py",
-        "test_complete_gate_rejects_a_replacement_path_in_legacy_coverage_exclusions",
     ),
     _requirement(
+        "cutover-legacy-coverage-exclusion-rejection",
         "cutover legacy coverage exclusion rejection",
-        "test_complete_gate.py",
-        "test_complete_gate_rejects_legacy_coverage_exclusions_at_cutover",
     ),
     _requirement(
+        "typed-docker-evidence",
         "typed Docker evidence boundary",
-        "test_docker_evidence.py",
-        "test_evidence_consumer_returns_a_typed_passed_variant",
     ),
     _requirement(
+        "docker-selection-positive",
         "Docker selection positive path",
-        "test_docker_gate.py",
-        "test_docker_gate_uses_approved_targeted_and_full_selection",
     ),
     _requirement(
+        "docker-finding-propagation",
         "raw Docker finding propagation",
-        "test_docker_gate.py",
-        "test_docker_gate_preserves_raw_findings_but_blocks_unapproved_findings",
     ),
     _requirement(
+        "docker-timeout",
         "Docker timeout propagation",
-        "test_docker_gate.py",
-        "test_docker_gate_preserves_the_approved_timeout_exit",
     ),
     _requirement(
+        "docker-classifier-publication-failure",
         "Docker classifier and publication failure propagation",
-        "test_docker_gate.py",
-        "test_docker_gate_blocks_classifier_or_publication_failure",
     ),
     _requirement(
+        "docker-configuration-exit",
         "Docker configuration exit",
-        "test_docker_gate.py",
-        "test_docker_gate_distinguishes_runner_usage_failure",
     ),
     _requirement(
+        "gate-installation-non-applicability",
         "gate-installation non-applicability",
-        "test_evidence_applicability.py",
-        "test_fast_gate_reports_replacement_evidence_not_applicable_during_gate_installation",
     ),
     _requirement(
+        "missing-construction-evidence",
         "missing construction evidence",
-        "test_evidence_applicability.py",
-        "test_fast_gate_reports_missing_construction_evidence_as_check_failure",
     ),
     _requirement(
+        "one-missing-construction-evidence-class",
         "one missing construction evidence class",
-        "test_evidence_applicability.py",
-        "test_fast_gate_rejects_empty_component_evidence",
     ),
     _requirement(
+        "complete-construction-evidence",
         "complete construction evidence",
-        "test_evidence_applicability.py",
-        "test_fast_gate_requires_and_runs_construction_evidence",
     ),
     _requirement(
+        "premature-behavioral-evidence",
         "premature Behavioral Evidence rejection",
-        "test_evidence_applicability.py",
-        "test_fast_gate_rejects_behavioral_evidence_before_cutover",
     ),
     _requirement(
+        "partial-legacy-deletion",
         "partial legacy deletion rejection",
-        "test_evidence_applicability.py",
-        "test_fast_gate_rejects_partial_legacy_deletion",
     ),
     _requirement(
+        "partial-caller-switch",
         "partial caller switch rejection",
-        "test_evidence_applicability.py",
-        "test_fast_gate_rejects_partial_caller_switch",
     ),
     _requirement(
+        "cutover-missing-behavioral",
         "cutover missing Behavioral Evidence",
-        "test_evidence_applicability.py",
-        "test_fast_gate_rejects_cutover_without_behavioral_evidence",
     ),
     _requirement(
+        "complete-atomic-cutover-evidence",
         "complete atomic cutover evidence",
-        "test_evidence_applicability.py",
-        "test_fast_gate_recognizes_complete_atomic_cutover",
     ),
     _requirement(
+        "applicable-replacement-test-lint-paths",
         "applicable replacement-test lint paths",
-        "test_evidence_applicability.py",
-        "test_fast_gate_lints_applicable_evidence_paths",
     ),
     _requirement(
+        "declared-path-static-analysis",
         "declared path static-analysis coverage",
-        "test_fast_typing_security.py",
-        "test_fast_gate_rejects_new_production_file_outside_strict_scope",
     ),
     _requirement(
+        "escaped-static-analysis-path",
+        "escaped static-analysis configuration path rejection",
+    ),
+    _requirement(
+        "replacement-test-strict-typing",
         "replacement-test strict typing scope",
-        "test_fast_typing_security.py",
-        "test_fast_gate_rejects_relaxed_replacement_test_typing_scope",
     ),
     _requirement(
+        "typing-violation",
         "typing violation",
-        "test_fast_typing_security.py",
-        "test_fast_gate_rejects_strict_type_error",
     ),
     _requirement(
+        "bandit-violation",
         "Bandit violation",
-        "test_fast_typing_security.py",
-        "test_fast_gate_rejects_blocking_security_finding",
     ),
     _requirement(
+        "typing-configuration-drift",
         "typing configuration drift",
-        "test_fast_typing_security.py",
-        "test_fast_gate_rejects_pyright_runtime_drift",
     ),
     _requirement(
+        "static-analysis-baseline-lock",
         "accepted static-analysis baseline and lock",
-        "test_fast_typing_security.py",
-        "test_fast_gate_accepts_approved_baseline_without_changing_lock",
     ),
     _requirement(
+        "corrected-static-analysis",
         "corrected static-analysis fixture",
-        "test_fast_ruff.py",
-        "test_fast_gate_accepts_corrected_ruff_fixture",
     ),
     _requirement(
+        "formatting-violation",
         "formatting violation",
-        "test_fast_ruff.py",
-        "test_fast_gate_reports_format_failure_after_running_lint",
     ),
     _requirement(
+        "lint-violation",
         "lint violation",
-        "test_fast_ruff.py",
-        "test_fast_gate_rejects_lint_violation",
     ),
     _requirement(
+        "complexity-violation",
         "complexity violation",
-        "test_fast_ruff.py",
-        "test_fast_gate_enforces_all_approved_complexity_limits",
     ),
     _requirement(
+        "fast-configuration-failure-independence",
         "fast configuration failure independence",
-        "test_fast_ruff.py",
-        "test_fast_gate_reports_every_child_before_configuration_exit",
     ),
 )
-PROOF_TEST_MODULES = tuple(sorted({item.module for item in PROOF_REQUIREMENTS}))
 
 
 @dataclass(frozen=True)
@@ -259,57 +212,90 @@ class ProveCheckResults:
     lock: CheckResult
 
 
-def _proof_configuration(repository: Path) -> CheckResult:
-    proof_root = repository / "tests" / "quality_gate"
-    declared = set(PROOF_TEST_MODULES)
-    discovered = {
-        path.relative_to(repository).as_posix()
-        for path in proof_root.glob("test_*.py")
-        if path.relative_to(repository).as_posix() != PROOF_SELF_TEST
-    }
-    missing = sorted(declared - discovered)
-    undeclared = sorted(discovered - declared)
-    problems = []
-    if missing:
-        problems.append("missing proof modules: " + ", ".join(missing))
-    if undeclared:
-        problems.append("undeclared proof modules: " + ", ".join(undeclared))
-    required_by_module = {
-        module: tuple(
-            requirement
-            for requirement in PROOF_REQUIREMENTS
-            if requirement.module == module
-        )
-        for module in PROOF_TEST_MODULES
-    }
-    missing_scenarios = []
-    for module, requirements in required_by_module.items():
-        path = repository / module
-        if not path.is_file():
-            continue
+def _proof_marker_identifier(decorator: ast.expr) -> str | None:
+    if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
+        return None
+    marker = decorator.func
+    namespace = marker.value
+    if (
+        marker.attr != PROOF_MARKER
+        or not isinstance(namespace, ast.Attribute)
+        or namespace.attr != "mark"
+        or not isinstance(namespace.value, ast.Name)
+        or namespace.value.id != "pytest"
+    ):
+        return None
+    if (
+        len(decorator.args) != 1
+        or decorator.keywords
+        or not isinstance(decorator.args[0], ast.Constant)
+        or not isinstance(decorator.args[0].value, str)
+        or not decorator.args[0].value
+    ):
+        raise ValueError(f"{PROOF_MARKER} requires one non-empty string identifier")
+    return decorator.args[0].value
+
+
+def _proof_declarations(repository: Path) -> tuple[dict[str, list[str]], list[str]]:
+    discovered: dict[str, list[str]] = {}
+    problems: list[str] = []
+    for path in sorted((repository / PROOF_TEST_ROOT).glob("test_*.py")):
+        relative = path.relative_to(repository).as_posix()
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=module)
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
         except (OSError, SyntaxError, UnicodeError) as error:
-            problems.append(f"unable to inspect proof module {module}: {error}")
+            problems.append(f"unable to inspect proof declarations in {relative}: {error}")
             continue
-        functions = {
-            node.name
-            for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        missing_scenarios.extend(
-            requirement
-            for requirement in requirements
-            if requirement.test_name not in functions
-        )
-    if missing_scenarios:
+        for node in tree.body:
+            if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ) or not node.name.startswith("test_"):
+                continue
+            for decorator in node.decorator_list:
+                try:
+                    identifier = _proof_marker_identifier(decorator)
+                except ValueError as error:
+                    problems.append(
+                        f"invalid proof declaration at {relative}:{node.lineno}: {error}"
+                    )
+                    continue
+                if identifier is not None:
+                    discovered.setdefault(identifier, []).append(f"{relative}:{node.lineno}")
+    return discovered, problems
+
+
+def _proof_inventory_problems(
+    declared: dict[str, ProofRequirement],
+    discovered: dict[str, list[str]],
+) -> list[str]:
+    problems = []
+
+    missing = sorted(set(declared) - set(discovered))
+    unknown = sorted(set(discovered) - set(declared))
+    duplicate = sorted(
+        identifier for identifier, locations in discovered.items() if len(locations) > 1
+    )
+    if missing:
         problems.append(
             "missing required proof scenarios: "
+            + ", ".join(declared[identifier].description for identifier in missing)
+        )
+    if unknown:
+        problems.append("unknown proof requirements: " + ", ".join(unknown))
+    if duplicate:
+        problems.append(
+            "duplicate proof requirements: "
             + ", ".join(
-                f"{requirement.description} ({requirement.selector})"
-                for requirement in missing_scenarios
+                f"{identifier} ({', '.join(discovered[identifier])})" for identifier in duplicate
             )
         )
+    return problems
+
+
+def _proof_configuration(repository: Path) -> CheckResult:
+    declared = {requirement.identifier: requirement for requirement in PROOF_REQUIREMENTS}
+    discovered, problems = _proof_declarations(repository)
+    problems.extend(_proof_inventory_problems(declared, discovered))
     error = "; ".join(problems)
     return CheckResult(
         name="prove-configuration",
@@ -329,7 +315,9 @@ def run_prove_checks(repository: Path) -> ProveCheckResults:
     proof = run_required_pytest(
         pytest_check(
             "operational-proof",
-            *PROOF_TEST_MODULES,
+            PROOF_TEST_ROOT,
+            "-m",
+            PROOF_MARKER,
             exit_two_is_configuration=True,
         ),
         repository,

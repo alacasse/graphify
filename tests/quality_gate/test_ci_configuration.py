@@ -52,9 +52,9 @@ def test_every_pull_request_runs_the_canonical_fast_gate() -> None:
     assert workflow["name"] == "Install sandbox fast"
 
     triggers = _mapping(workflow["on"])
+    assert set(triggers) == {"pull_request"}
     pull_request = _mapping(triggers["pull_request"])
-    assert "paths" not in pull_request
-    assert "paths-ignore" not in pull_request
+    assert not pull_request
 
     jobs = _mapping(workflow["jobs"])
     fast = _mapping(jobs["install-sandbox-fast"])
@@ -64,6 +64,12 @@ def test_every_pull_request_runs_the_canonical_fast_gate() -> None:
 
     commands = _run_blocks(fast)
     assert f"{QUALITY_COMMAND} fast" in commands
+    fast_steps = tuple(
+        step for step in _steps(fast) if step.get("run") == f"{QUALITY_COMMAND} fast"
+    )
+    assert len(fast_steps) == 1
+    assert "if" not in fast_steps[0]
+    assert "continue-on-error" not in fast_steps[0]
     assert not any(
         duplicate in "\n".join(commands)
         for duplicate in (

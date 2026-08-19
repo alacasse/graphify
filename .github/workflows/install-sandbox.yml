@@ -25,8 +25,6 @@ jobs:
     name: Install sandbox complete
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
-      TMPDIR: ${{ runner.temp }}
 
     steps:
       - name: Check out source
@@ -43,6 +41,8 @@ jobs:
         run: uv sync --all-extras --frozen
 
       - name: Run the canonical complete gate
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: uv run --frozen --python 3.12 python scripts/install_sandbox_quality.py complete
 
       - name: Upload install-sandbox evidence

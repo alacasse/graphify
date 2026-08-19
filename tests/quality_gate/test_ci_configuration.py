@@ -127,6 +127,27 @@ def test_complete_gate_owns_merge_manual_and_nightly_evidence() -> None:
     assert artifact_steps[0]["if"] == "always()"
 
 
+def test_complete_gate_defers_runner_context_until_a_step_runs() -> None:
+    workflow = _workflow(COMPLETE_WORKFLOW)
+    jobs = _mapping(workflow["jobs"])
+    complete = _mapping(jobs["install-sandbox-complete"])
+
+    job_environment = _mapping(complete.get("env", {}))
+    assert not any(
+        "${{ runner." in value
+        for value in job_environment.values()
+        if isinstance(value, str)
+    )
+
+    gate_step = next(
+        step
+        for step in _steps(complete)
+        if step.get("run") == f"{QUALITY_COMMAND} complete"
+    )
+    gate_environment = _mapping(gate_step["env"])
+    assert gate_environment["TMPDIR"] == "${{ runner.temp }}"
+
+
 def test_python_310_feedback_excludes_python_312_install_sandbox_tests() -> None:
     workflow = _workflow(CI_WORKFLOW)
     jobs = _mapping(workflow["jobs"])

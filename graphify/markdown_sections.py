@@ -77,3 +77,52 @@ def remove_h1_sections(content: bytes, *, heading: bytes) -> bytes:
         cursor = end
     cleaned.extend(content[cursor:])
     return bytes(cleaned)
+
+
+def rewrite_frontmatter_fields(
+    content: bytes, *, fields: tuple[tuple[bytes, bytes], ...]
+) -> bytes:
+    """Rewrite only selected root YAML fields, preserving all other bytes."""
+    for key, value in fields:
+        if not key or any(token in key for token in (b":", b"\r", b"\n")):
+            raise ValueError("frontmatter field keys must be plain single-line names")
+        if b"\r" in value or b"\n" in value:
+            raise ValueError("frontmatter field values must be single-line bytes")
+
+    lines = content.splitlines(keepends=True)
+    has_opening = bool(lines) and lines[0].rstrip(b"\r\n") == b"---"
+    closing_index = next(
+        (
+            index
+            for index, line in enumerate(lines[1:], start=1)
+            if line.rstrip(b"\r\n") == b"---"
+        ),
+        None,
+    )
+    if not has_opening or closing_index is None:
+        frontmatter = b"---\n" + b"".join(
+            key + b": " + value + b"\n" for key, value in fields
+        )
+        return frontmatter + b"---\n\n" + content
+
+    default_ending = lines[0][len(lines[0].rstrip(b"\r\n")) :] or b"\n"
+    rewritten = list(lines)
+    seen: set[bytes] = set()
+    for index in range(1, closing_index):
+        line = lines[index]
+        body = line.rstrip(b"\r\n")
+        ending = line[len(body) :]
+        for key, value in fields:
+            if body.startswith(key + b":"):
+                rewritten[index] = key + b": " + value + ending
+                seen.add(key)
+                break
+
+    missing = [
+        key + b": " + value + default_ending
+        for key, value in fields
+        if key not in seen
+    ]
+    if missing:
+        rewritten[closing_index:closing_index] = missing
+    return b"".join(rewritten)

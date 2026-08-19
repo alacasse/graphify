@@ -30,7 +30,11 @@ except Exception:
     __version__ = "unknown"
 
 from graphify.paths import GRAPHIFY_OUT as _GRAPHIFY_OUT
-from graphify.markdown_sections import remove_h1_sections, replace_h1_sections
+from graphify.markdown_sections import (
+    remove_h1_sections,
+    replace_h1_sections,
+    rewrite_frontmatter_fields,
+)
 
 
 @functools.lru_cache(maxsize=None)
@@ -1006,10 +1010,20 @@ def _antigravity_finalize(skill_dst: Path, project_dir: Path) -> None:
     """
     # Inject YAML frontmatter for native Antigravity tool discovery.
     if skill_dst.exists():
-        content = skill_dst.read_text(encoding="utf-8")
-        if not content.startswith("---\n"):
-            frontmatter = "---\nname: graphify-manager\ndescription: Rebuild the code graph or perform manual CLI queries when MCP server is offline.\n---\n\n"
-            skill_dst.write_text(frontmatter + content, encoding="utf-8")
+        content = skill_dst.read_bytes()
+        rewritten = rewrite_frontmatter_fields(
+            content,
+            fields=(
+                (b"name", b"graphify-manager"),
+                (
+                    b"description",
+                    b"Rebuild the code graph or perform manual CLI queries when MCP "
+                    b"server is offline.",
+                ),
+            ),
+        )
+        if rewritten != content:
+            skill_dst.write_bytes(rewritten)
 
     # .agents/rules/graphify.md
     rules_path = project_dir / _ANTIGRAVITY_RULES_PATH

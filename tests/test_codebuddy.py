@@ -66,6 +66,83 @@ def test_codebuddy_skill_file_references_graphify_query(tmp_path):
     assert "graphify query" in content or "/graphify query" in content
 
 
+def test_generic_user_entrypoint_aligns_all_codebuddy_artifacts(tmp_path, monkeypatch):
+    from graphify.__main__ import install
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    md = home / ".codebuddy" / "CODEBUDDY.md"
+    md.parent.mkdir(parents=True)
+    md.write_text("# User notes\n\n## graphify\nstale instructions\n", encoding="utf-8")
+    settings = home / ".codebuddy" / "settings.json"
+    original_settings = {"user_owned": {"keep": True}}
+    settings.write_text(json.dumps(original_settings), encoding="utf-8")
+
+    monkeypatch.chdir(project)
+    with patch("graphify.__main__.Path.home", return_value=home):
+        install(platform="codebuddy")
+
+    assert _skill_path_user(home).is_file()
+    assert md.read_text(encoding="utf-8").count("## graphify") == 1
+    assert "stale instructions" not in md.read_text(encoding="utf-8")
+    value = json.loads(settings.read_text(encoding="utf-8"))
+    assert value["user_owned"] == {"keep": True}
+    assert len(value["hooks"]["PreToolUse"]) == 2
+    backup = settings.with_name("settings.json.graphify-bak")
+    assert json.loads(backup.read_text(encoding="utf-8")) == original_settings
+    assert not (project / "CODEBUDDY.md").exists()
+    assert not (project / ".codebuddy").exists()
+
+
+def test_generic_project_entrypoint_keeps_codebuddy_artifacts_project_scoped(
+    tmp_path, monkeypatch
+):
+    from graphify.__main__ import install
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        install(platform="codebuddy", project=True, project_dir=project)
+
+    assert _skill_path_project(project).is_file()
+    assert "## graphify" in (project / "CODEBUDDY.md").read_text(encoding="utf-8")
+    assert (project / ".codebuddy" / "settings.json").is_file()
+    assert not (home / ".codebuddy").exists()
+
+
+def test_generic_user_uninstall_platform_codebuddy_is_targeted(tmp_path, monkeypatch):
+    from graphify.__main__ import main
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    with patch("graphify.__main__.Path.home", return_value=home):
+        monkeypatch.setattr(
+            sys, "argv", ["graphify", "install", "--platform", "codebuddy"]
+        )
+        main()
+        unrelated_skill = home / ".codex" / "skills" / "graphify" / "SKILL.md"
+        unrelated_skill.parent.mkdir(parents=True)
+        unrelated_skill.write_text("keep codex\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            sys, "argv", ["graphify", "uninstall", "--platform", "codebuddy"]
+        )
+        main()
+
+    assert not _skill_path_user(home).exists()
+    assert not (home / ".codebuddy" / "CODEBUDDY.md").exists()
+    assert unrelated_skill.read_text(encoding="utf-8") == "keep codex\n"
+
+
 # ---------------------------------------------------------------------------
 # Project-scope install (graphify codebuddy install)
 # ---------------------------------------------------------------------------
@@ -158,7 +235,7 @@ def test_codebuddy_install_prints_no_change_on_second_run(tmp_path, capsys):
 
 
 def test_codebuddy_install_hint_git_add(tmp_path, capsys):
-    """Project-scoped install via CLI prints a git add hint."""
+    """The direct CLI entrypoint accepts an explicit project scope."""
     from graphify.__main__ import main
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -168,13 +245,15 @@ def test_codebuddy_install_hint_git_add(tmp_path, capsys):
         import os
         os.chdir(project)
         with patch("graphify.__main__.Path.home", return_value=home):
-            sys.argv = ["graphify", "codebuddy", "install"]
+            sys.argv = ["graphify", "codebuddy", "install", "--project"]
             main()
     finally:
         import os
         os.chdir(old_cwd)
-    # codebuddy_install calls print() directly, no git add hint printed there
-    # so this test checks that no errors occur
+    assert _skill_path_project(project).is_file()
+    assert (project / "CODEBUDDY.md").is_file()
+    assert (project / ".codebuddy" / "settings.json").is_file()
+    assert not (home / ".codebuddy").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +323,7 @@ def test_uninstall_all_removes_codebuddy_md(tmp_path, monkeypatch):
     with patch("graphify.__main__.Path.home", return_value=home):
         monkeypatch.setattr(sys, "argv", ["graphify", "codebuddy", "install"])
         main()
-        md = _codebuddy_md_path(project)
+        md = home / ".codebuddy" / "CODEBUDDY.md"
         assert md.exists()
         monkeypatch.setattr(sys, "argv", ["graphify", "uninstall"])
         main()
@@ -263,7 +342,7 @@ def test_uninstall_all_removes_codebuddy_hook(tmp_path, monkeypatch):
         main()
         monkeypatch.setattr(sys, "argv", ["graphify", "uninstall"])
         main()
-    settings_path = _settings_path(project)
+    settings_path = _settings_path(home)
     if settings_path.exists():
         settings = json.loads(settings_path.read_text())
         hooks = settings.get("hooks", {}).get("PreToolUse", [])

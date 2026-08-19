@@ -622,6 +622,9 @@ def _print_banner() -> None:
 def install(platform: str = "claude", *, project: bool = False, project_dir: Path | None = None) -> None:
     _print_banner()
     platform = _canonical_platform(platform)
+    if platform == "codebuddy":
+        codebuddy_install(project_dir if project else None, project=project)
+        return
     if platform == "gemini":
         gemini_install(project_dir=project_dir, project=project)
         return
@@ -676,19 +679,6 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
             print(f"  CLAUDE.md        ->  skill registered in {claude_md}")
         else:
             print(f"  CLAUDE.md        ->  created at {claude_md}")
-
-    if platform == "codebuddy":
-        # Register in ~/.codebuddy/CODEBUDDY.md (CodeBuddy only)
-        codebuddy_md = Path.home() / ".codebuddy" / "CODEBUDDY.md"
-        registration_status = _write_skill_registration(
-            codebuddy_md, "~/.codebuddy/skills/graphify/SKILL.md"
-        )
-        if registration_status == "unchanged":
-            print("  CODEBUDDY.md     ->  already registered (no change)")
-        elif registration_status == "updated":
-            print(f"  CODEBUDDY.md     ->  skill registered in {codebuddy_md}")
-        else:
-            print(f"  CODEBUDDY.md     ->  created at {codebuddy_md}")
 
     if platform == "opencode":
         _install_opencode_plugin(project_dir if project else Path("."))
@@ -1801,7 +1791,8 @@ def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
     # historical `graphify uninstall` behavior: global skill delete plus md/hook
     # cleanup at the project dir (#2215).
     claude_uninstall(pd, remove_user_skill=True)
-    codebuddy_uninstall(pd, remove_user_skill=True)
+    codebuddy_uninstall(pd, project=True)
+    codebuddy_uninstall(remove_user_skill=True)
     gemini_uninstall(pd, remove_user_skill=True)
     vscode_uninstall(pd)
     _cursor_uninstall(pd)
@@ -1906,10 +1897,30 @@ def _strip_graphify_md_section(target: Path) -> bool:
         target.unlink()
         print(f"{target.name} was empty after removal - deleted {target.resolve()}")
     return True
-def codebuddy_install(project_dir: Path | None = None) -> None:
-    """Install the graphify skill and CODEBUDDY.md section for CodeBuddy."""
-    _copy_skill_file("codebuddy", project=bool(project_dir), project_dir=project_dir)
-    target = (project_dir or Path(".")) / "CODEBUDDY.md"
+def _codebuddy_scope_root(project_dir: Path | None, *, project: bool) -> Path:
+    """Return the filesystem root owning every CodeBuddy scope artifact."""
+    return (project_dir or Path(".")) if project else Path.home()
+
+
+def _codebuddy_md_path(scope_root: Path, *, project: bool) -> Path:
+    return (
+        scope_root / "CODEBUDDY.md"
+        if project
+        else scope_root / ".codebuddy" / "CODEBUDDY.md"
+    )
+
+
+def codebuddy_install(
+    project_dir: Path | None = None, *, project: bool | None = None
+) -> None:
+    """Install every CodeBuddy artifact into one explicit scope."""
+    project_scope = project if project is not None else project_dir is not None
+    scope_root = _codebuddy_scope_root(project_dir, project=project_scope)
+    skill_dst = _copy_skill_file(
+        "codebuddy", project=project_scope, project_dir=scope_root
+    )
+    target = _codebuddy_md_path(scope_root, project=project_scope)
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     if target.exists():
         content = target.read_text(encoding="utf-8")
@@ -1926,7 +1937,12 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
         print(f"graphify section written to {target.resolve()}")
 
     # Also write CodeBuddy PreToolUse hook to .codebuddy/settings.json
-    _install_codebuddy_hook(project_dir or Path("."))
+    _install_codebuddy_hook(scope_root)
+
+    if project_scope:
+        _print_project_git_add_hint(
+            [_project_scope_root(skill_dst, scope_root), target, scope_root / ".codebuddy"]
+        )
 
     print()
     print("CodeBuddy will now check the knowledge graph before answering")
@@ -1974,33 +1990,28 @@ def codebuddy_uninstall(project_dir: Path | None = None, *, project: bool = Fals
     explicitly opts back into the global delete (as ``uninstall_all`` does).
     """
     explicit_dir = project_dir is not None
-    project_dir = project_dir or Path(".")
-    if remove_user_skill is None:
-        remove_user_skill = not project and not explicit_dir
-    if project or (explicit_dir and not remove_user_skill):
-        _remove_skill_file("codebuddy", project=True, project_dir=project_dir)
-    if remove_user_skill:
-        _remove_skill_file("codebuddy", project=False)
-    target = project_dir / "CODEBUDDY.md"
+    project_scope = project or (explicit_dir and remove_user_skill is not True)
+    scope_root = _codebuddy_scope_root(project_dir, project=project_scope)
+    _remove_skill_file(
+        "codebuddy", project=project_scope, project_dir=scope_root
+    )
+    target = _codebuddy_md_path(scope_root, project=project_scope)
 
     if not target.exists():
         print("No CODEBUDDY.md found in current directory - nothing to do")
-        return
-
-    content = target.read_text(encoding="utf-8")
-    cleaned = _remove_marker_section(content, _CODEBUDDY_MD_MARKER)
-    if cleaned is None:
-        print("graphify section not found in CODEBUDDY.md - nothing to do")
-        return
-
-    if cleaned:
-        target.write_text(cleaned + "\n", encoding="utf-8")
-        print(f"graphify section removed from {target.resolve()}")
     else:
-        target.unlink()
-        print(f"CODEBUDDY.md was empty after removal - deleted {target.resolve()}")
+        content = target.read_text(encoding="utf-8")
+        cleaned = _remove_marker_section(content, _CODEBUDDY_MD_MARKER)
+        if cleaned is None:
+            print("graphify section not found in CODEBUDDY.md - nothing to do")
+        elif cleaned:
+            target.write_text(cleaned + "\n", encoding="utf-8")
+            print(f"graphify section removed from {target.resolve()}")
+        else:
+            target.unlink()
+            print(f"CODEBUDDY.md was empty after removal - deleted {target.resolve()}")
 
-    _uninstall_codebuddy_hook(project_dir or Path("."))
+    _uninstall_codebuddy_hook(scope_root)
 
 
 _CLI_INSTALL_COMMANDS = frozenset({
@@ -2125,6 +2136,11 @@ def dispatch_install_cli(cmd: str) -> bool:
                 _project_uninstall(selected_platform, Path("."))
             else:
                 _project_uninstall_all(Path("."))
+        elif (
+            selected_platform
+            and _canonical_platform(selected_platform) == "codebuddy"
+        ):
+            codebuddy_uninstall()
         else:
             uninstall_all(purge=purge)
     elif cmd == "claude":
@@ -2145,10 +2161,15 @@ def dispatch_install_cli(cmd: str) -> bool:
             sys.exit(1)
     elif cmd == "codebuddy":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
+        project_scope = "--project" in sys.argv[3:]
         if subcmd == "install":
-            codebuddy_install()
+            codebuddy_install(
+                Path(".") if project_scope else None, project=project_scope
+            )
         elif subcmd == "uninstall":
-            codebuddy_uninstall()
+            codebuddy_uninstall(
+                Path(".") if project_scope else None, project=project_scope
+            )
         else:
             print("Usage: graphify codebuddy [install|uninstall]", file=sys.stderr)
             sys.exit(1)

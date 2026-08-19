@@ -110,9 +110,7 @@ def test_install_claude_replaces_duplicate_h1_registration_byte_exactly(tmp_path
     )
 
 
-def test_install_codebuddy_adds_h1_despite_user_graphify_mention(tmp_path):
-    from graphify.install import _skill_registration
-
+def test_install_codebuddy_adds_owned_h2_despite_user_graphify_mention(tmp_path):
     codebuddy_md = tmp_path / ".codebuddy" / "CODEBUDDY.md"
     codebuddy_md.parent.mkdir(parents=True)
     original = b"# User notes\nI use graphify manually. Keep this byte-exact.\n"
@@ -120,10 +118,10 @@ def test_install_codebuddy_adds_h1_despite_user_graphify_mention(tmp_path):
 
     _install(tmp_path, "codebuddy")
 
-    registration = _skill_registration(
-        "~/.codebuddy/skills/graphify/SKILL.md"
-    ).lstrip().encode("utf-8")
-    assert codebuddy_md.read_bytes() == original + b"\n" + registration
+    content = codebuddy_md.read_text(encoding="utf-8")
+    assert "I use graphify manually. Keep this byte-exact." in content
+    assert content.count("## graphify") == 1
+    assert "graphify-out/GRAPH_REPORT.md" in content
 
 
 def test_claude_user_uninstall_cleans_config_registration_only(tmp_path, monkeypatch):

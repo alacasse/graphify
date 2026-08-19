@@ -145,6 +145,20 @@ norecursedirs = [
     ".hypothesis",
 ]
 
+[tool.coverage.run]
+omit = [
+    "tools/install_sandbox/ci_result.py",
+    "tools/install_sandbox/docker.py",
+    "tools/install_sandbox/effects.py",
+    "tools/install_sandbox/lifecycle.py",
+    "tools/install_sandbox/models.py",
+    "tools/install_sandbox/reporting.py",
+    "tools/install_sandbox/run.py",
+    "tools/install_sandbox/run_artifacts.py",
+    "tools/install_sandbox/sandbox_runner.py",
+    "tools/install_sandbox/specs.py",
+]
+
 [tool.bandit]
 skips = ["B404"]
 

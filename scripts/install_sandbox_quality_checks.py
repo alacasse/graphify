@@ -1,4 +1,4 @@
-"""Construction and execution of independent install-sandbox fast checks."""
+"""Construction and execution of independent install-sandbox quality checks."""
 
 from __future__ import annotations
 
@@ -27,7 +27,11 @@ CONFIGURATION_EXIT = 2
 RUFF_CONFIG = "ruff.install-sandbox.toml"
 FROZEN_PYTHON_RUN = ("uv", "run", "--frozen", "--python", PYTHON_VERSION)
 ConfigurationCheck = Callable[[Path], str | None]
-NONPASSING_PYTEST_OUTCOME = re.compile(r"\b(?:skipped|xfailed|xpassed)\b", re.IGNORECASE)
+PYTEST_WARNING_OUTCOME = re.compile(r"\b\d+\s+warnings?\b", re.IGNORECASE)
+NONPASSING_EVIDENCE_OUTCOME = re.compile(
+    rf"(?:{PYTEST_WARNING_OUTCOME.pattern}|\b(?:skipped|xfailed|xpassed)\b)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +72,7 @@ class FastCheckConfigurationError:
 type FastCheckRun = FastCheckResults | FastCheckConfigurationError
 
 
-def _fast_checks(state: RepositoryState, repository: Path) -> tuple[Check, ...]:
+def static_checks(state: RepositoryState, repository: Path) -> tuple[Check, ...]:
     existing_paths = tuple(
         path for path in state.static_analysis_paths if (repository / path).exists()
     )
@@ -122,7 +126,7 @@ def _fast_checks(state: RepositoryState, repository: Path) -> tuple[Check, ...]:
     )
 
 
-def _run_check(check: Check, repository: Path) -> CheckResult:
+def run_check(check: Check, repository: Path) -> CheckResult:
     if check.configuration_check is not None:
         error = check.configuration_check(repository)
         if error is not None:
@@ -162,7 +166,7 @@ def _run_check(check: Check, repository: Path) -> CheckResult:
     )
 
 
-def _not_run(name: str, status: CheckStatus) -> CheckResult:
+def not_run(name: str, status: CheckStatus) -> CheckResult:
     return CheckResult(
         name=name,
         status=status,
@@ -172,7 +176,7 @@ def _not_run(name: str, status: CheckStatus) -> CheckResult:
     )
 
 
-def _pytest_check(name: str, *selectors: str, collect_only: bool = False) -> Check:
+def pytest_check(name: str, *selectors: str, collect_only: bool = False) -> Check:
     collection_arguments = ("--collect-only",) if collect_only else ()
     return Check(
         name=name,
@@ -192,21 +196,40 @@ def _pytest_check(name: str, *selectors: str, collect_only: bool = False) -> Che
     )
 
 
-def _run_required_evidence(check: Check, repository: Path) -> CheckResult:
-    result = _run_check(check, repository)
+def run_required_pytest(
+    check: Check,
+    repository: Path,
+    *,
+    failure_message: str = "required evidence produced a non-passing pytest outcome",
+) -> CheckResult:
+    result = run_check(check, repository)
     output = result.stdout + result.stderr
-    if result.status is not CheckStatus.PASS or not NONPASSING_PYTEST_OUTCOME.search(output):
+    if result.status is not CheckStatus.PASS or not NONPASSING_EVIDENCE_OUTCOME.search(output):
         return result
     return CheckResult(
         name=result.name,
         status=CheckStatus.FAIL,
         exit_code=1,
         stdout=result.stdout,
-        stderr=result.stderr + "required evidence produced a non-passing pytest outcome\n",
+        stderr=result.stderr + failure_message + "\n",
     )
 
 
-def _behavioral_result(state: RepositoryState, repository: Path) -> CheckResult:
+def run_warning_clean_pytest(check: Check, repository: Path) -> CheckResult:
+    result = run_check(check, repository)
+    output = result.stdout + result.stderr
+    if result.status is not CheckStatus.PASS or not PYTEST_WARNING_OUTCOME.search(output):
+        return result
+    return CheckResult(
+        name=result.name,
+        status=CheckStatus.FAIL,
+        exit_code=1,
+        stdout=result.stdout,
+        stderr=result.stderr + "repository suite produced warnings\n",
+    )
+
+
+def assess_behavioral_evidence(state: RepositoryState, repository: Path) -> CheckResult:
     behavioral = repository / "tests/install_sandbox/behavioral"
     candidates = sorted(
         {
@@ -216,7 +239,7 @@ def _behavioral_result(state: RepositoryState, repository: Path) -> CheckResult:
     )
     if not candidates:
         if state.phase is not GatePhase.ATOMIC_CUTOVER:
-            return _not_run("behavioral-evidence", CheckStatus.NOT_APPLICABLE)
+            return not_run("behavioral-evidence", CheckStatus.NOT_APPLICABLE)
         return CheckResult(
             name="behavioral-evidence",
             status=CheckStatus.FAIL,
@@ -224,13 +247,13 @@ def _behavioral_result(state: RepositoryState, repository: Path) -> CheckResult:
             stdout="",
             stderr="Atomic Cutover requires non-empty Behavioral Evidence\n",
         )
-    collection = _run_check(
-        _pytest_check("behavioral-evidence", behavioral.as_posix(), collect_only=True),
+    collection = run_check(
+        pytest_check("behavioral-evidence", behavioral.as_posix(), collect_only=True),
         repository,
     )
     if collection.exit_code == 5:
         if state.phase is not GatePhase.ATOMIC_CUTOVER:
-            return _not_run("behavioral-evidence", CheckStatus.NOT_APPLICABLE)
+            return not_run("behavioral-evidence", CheckStatus.NOT_APPLICABLE)
         return CheckResult(
             name=collection.name,
             status=CheckStatus.FAIL,
@@ -260,23 +283,21 @@ def _behavioral_result(state: RepositoryState, repository: Path) -> CheckResult:
 def _evidence_results(state: RepositoryState, repository: Path) -> tuple[CheckResult, ...]:
     if state.phase is GatePhase.GATE_INSTALLATION:
         return (
-            _not_run("unit-evidence", CheckStatus.NOT_APPLICABLE),
-            _not_run("component-evidence", CheckStatus.NOT_APPLICABLE),
-            _behavioral_result(state, repository),
-            _not_run("replacement-coverage", CheckStatus.NOT_APPLICABLE),
+            not_run("unit-evidence", CheckStatus.NOT_APPLICABLE),
+            not_run("component-evidence", CheckStatus.NOT_APPLICABLE),
+            assess_behavioral_evidence(state, repository),
+            not_run("replacement-coverage", CheckStatus.NOT_APPLICABLE),
         )
     unit = "tests/install_sandbox/unit"
     component = "tests/install_sandbox/component"
     return (
-        _run_check(_pytest_check("unit-evidence-collection", unit, collect_only=True), repository),
-        _run_check(
-            _pytest_check("component-evidence-collection", component, collect_only=True), repository
+        run_check(pytest_check("unit-evidence-collection", unit, collect_only=True), repository),
+        run_check(
+            pytest_check("component-evidence-collection", component, collect_only=True), repository
         ),
-        _run_required_evidence(
-            _pytest_check("unit-component-evidence", unit, component), repository
-        ),
-        _behavioral_result(state, repository),
-        _not_run("replacement-coverage", CheckStatus.APPLICABLE),
+        run_required_pytest(pytest_check("unit-component-evidence", unit, component), repository),
+        assess_behavioral_evidence(state, repository),
+        not_run("replacement-coverage", CheckStatus.APPLICABLE),
     )
 
 
@@ -308,7 +329,7 @@ def run_fast_checks(repository: Path) -> FastCheckRun:
     return FastCheckResults(
         results=(
             state_result,
-            *(_run_check(check, repository) for check in _fast_checks(state, repository)),
+            *(run_check(check, repository) for check in static_checks(state, repository)),
             *_evidence_results(state, repository),
         ),
     )

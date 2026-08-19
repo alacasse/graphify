@@ -8,9 +8,12 @@ import io
 import json
 import re
 import tokenize
+import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+
+from install_sandbox_quality_state import GatePhase
 
 PYRIGHT_CONFIG = "pyrightconfig.install-sandbox.json"
 INSTALL_SANDBOX = "tools/install_sandbox"
@@ -19,6 +22,19 @@ REPLACEMENT_TEST_PATHS = (
     "tests/install_sandbox/unit",
     "tests/install_sandbox/component",
     "tests/install_sandbox/behavioral",
+)
+PYPROJECT_CONFIG = "pyproject.toml"
+TEMPORARY_COVERAGE_EXCLUSIONS = (
+    f"{INSTALL_SANDBOX}/ci_result.py",
+    f"{INSTALL_SANDBOX}/docker.py",
+    f"{INSTALL_SANDBOX}/effects.py",
+    f"{INSTALL_SANDBOX}/lifecycle.py",
+    f"{INSTALL_SANDBOX}/models.py",
+    f"{INSTALL_SANDBOX}/reporting.py",
+    f"{INSTALL_SANDBOX}/run.py",
+    f"{INSTALL_SANDBOX}/run_artifacts.py",
+    f"{INSTALL_SANDBOX}/sandbox_runner.py",
+    f"{INSTALL_SANDBOX}/specs.py",
 )
 LEGACY_TYPING_FILES = frozenset(
     {
@@ -289,4 +305,73 @@ def security_configuration_error(repository: Path) -> str | None:
     for disposition, occurrences in actual.items():
         if occurrences > approved[disposition]:
             return f"unapproved Bandit disposition: {disposition[0]}"
+    return None
+
+
+def _configuration_table(
+    value: object,
+    label: str,
+    *,
+    optional: bool,
+) -> tuple[dict[str, object] | None, str | None]:
+    if value is None and optional:
+        return None, None
+    if not isinstance(value, dict):
+        return None, f"{PYPROJECT_CONFIG}: missing {label} policy"
+    return value, None
+
+
+def _unexpected_settings_error(
+    config: dict[str, object],
+    allowed: set[str],
+    label: str,
+) -> str | None:
+    unexpected = sorted(set(config) - allowed)
+    if not unexpected:
+        return None
+    return f"{PYPROJECT_CONFIG}: unapproved {label} settings: {', '.join(unexpected)}"
+
+
+def coverage_configuration_error(repository: Path, phase: GatePhase) -> str | None:
+    """Reject coverage configuration that can hide replacement production paths."""
+
+    config_path = repository / PYPROJECT_CONFIG
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        return f"unable to read {PYPROJECT_CONFIG}: {error}"
+
+    optional = phase is GatePhase.ATOMIC_CUTOVER
+    tool = config.get("tool")
+    coverage_value = tool.get("coverage") if isinstance(tool, dict) else None
+    coverage, error = _configuration_table(
+        coverage_value,
+        "tool.coverage",
+        optional=optional,
+    )
+    if error is not None or coverage is None:
+        return error
+    error = _unexpected_settings_error(coverage, {"run"}, "tool.coverage")
+    if error is not None:
+        return error
+
+    run, error = _configuration_table(
+        coverage.get("run"),
+        "tool.coverage.run",
+        optional=optional,
+    )
+    if error is not None or run is None:
+        return error
+    error = _unexpected_settings_error(run, {"omit"}, "tool.coverage.run")
+    if error is not None:
+        return error
+
+    raw_omit = run.get("omit", [])
+    if not isinstance(raw_omit, list) or not all(isinstance(path, str) for path in raw_omit):
+        return f"{PYPROJECT_CONFIG}: tool.coverage.run.omit must be a list of paths"
+    actual = tuple(raw_omit)
+    expected = () if phase is GatePhase.ATOMIC_CUTOVER else TEMPORARY_COVERAGE_EXCLUSIONS
+    if actual != expected:
+        state = "empty at Atomic Cutover" if not expected else "the exact legacy retirement list"
+        return f"{PYPROJECT_CONFIG}: coverage exclusions must be {state}"
     return None

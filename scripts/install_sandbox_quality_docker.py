@@ -33,7 +33,8 @@ from install_sandbox_quality_state import (
 )
 
 RUNNER = "tools/install_sandbox/run.py"
-CLASSIFIER_MODULE = "tools.install_sandbox.ci_result"
+LEGACY_CLASSIFIER_MODULE = "tools.install_sandbox.ci_result"
+REPLACEMENT_CLASSIFIER_MODULE = "tools.install_sandbox.ci"
 
 
 @dataclass(frozen=True)
@@ -130,12 +131,21 @@ def _runner_command(
     )
 
 
-def _classifier_command(bundle: Path, runner_exit: int) -> tuple[str, ...]:
+def _classifier_command(
+    bundle: Path,
+    runner_exit: int,
+    phase: GatePhase | None,
+) -> tuple[str, ...]:
+    module = (
+        REPLACEMENT_CLASSIFIER_MODULE
+        if phase is GatePhase.ATOMIC_CUTOVER
+        else LEGACY_CLASSIFIER_MODULE
+    )
     return (
         *FROZEN_PYTHON_RUN,
         "python",
         "-m",
-        CLASSIFIER_MODULE,
+        module,
         "--run-json",
         str(bundle / RUN_RECORD),
         "--runner-exit-code",
@@ -233,6 +243,7 @@ def run_docker_gate(
 ) -> DockerGateRun:
     """Run the supported host and classifier interfaces, then apply gate policy."""
 
+    phase = _repository_phase(repository)
     bundle = Path(tempfile.mkdtemp(prefix="graphify-install-sandbox-quality-"))
     runner = _run_child(
         "docker-runner",
@@ -242,7 +253,7 @@ def run_docker_gate(
     runner_exit = runner.exit_code if runner.exit_code is not None else CONFIGURATION_EXIT
     classifier = _run_child(
         "docker-classifier",
-        _classifier_command(bundle, runner_exit),
+        _classifier_command(bundle, runner_exit, phase),
         repository,
     )
     context = DockerGateContext(bundle=bundle, results=(runner, classifier))

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -17,6 +18,18 @@ RUFF_CONFIG = PROJECT_ROOT / "ruff.install-sandbox.toml"
 PYRIGHT_CONFIG = PROJECT_ROOT / "pyrightconfig.install-sandbox.json"
 LOCKFILE = PROJECT_ROOT / "uv.lock"
 FROZEN_PYTHON_RUN = ("uv", "run", "--frozen", "--python", PYTHON_VERSION)
+APPROVED_TEMPORARY_COVERAGE_EXCLUSIONS = (
+    "tools/install_sandbox/ci_result.py",
+    "tools/install_sandbox/docker.py",
+    "tools/install_sandbox/effects.py",
+    "tools/install_sandbox/lifecycle.py",
+    "tools/install_sandbox/models.py",
+    "tools/install_sandbox/reporting.py",
+    "tools/install_sandbox/run.py",
+    "tools/install_sandbox/run_artifacts.py",
+    "tools/install_sandbox/sandbox_runner.py",
+    "tools/install_sandbox/specs.py",
+)
 
 
 def run_quality_gate(
@@ -374,6 +387,131 @@ def copy_install_sandbox_gate_fixture(tmp_path: Path) -> Path:
     )
     (fixture_root / ".venv").symlink_to(PROJECT_ROOT / ".venv", target_is_directory=True)
     return fixture_root
+
+
+def copy_complete_gate_fixture(tmp_path: Path) -> Path:
+    """Compose a valid gate-installation repository with real Docker evidence adapters."""
+
+    fixture_root = copy_install_sandbox_gate_fixture(tmp_path)
+    docker_fixture = copy_docker_gate_fixture(tmp_path / "docker-adapters")
+    production = fixture_root / "tools/install_sandbox"
+
+    docker_runner = (docker_fixture / "tools/install_sandbox/run.py").read_text(encoding="utf-8")
+    state_only_calls = textwrap.dedent(
+        """
+        if False:
+            from tools.install_sandbox import docker, run_artifacts, specs
+
+            docker.run_sandbox()
+            run_artifacts.write_run()
+            specs.load_specs()
+
+        """
+    )
+    (production / "run.py").write_text(
+        docker_runner.replace(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n\n" + state_only_calls,
+            1,
+        ),
+        encoding="utf-8",
+    )
+    shutil.copyfile(
+        docker_fixture / "tools/install_sandbox/ci_result.py",
+        production / "ci_result.py",
+    )
+    shutil.rmtree(production / "specs")
+    shutil.copytree(docker_fixture / "tools/install_sandbox/specs", production / "specs")
+    shutil.copytree(docker_fixture / "graphify", fixture_root / "graphify")
+
+    exclusions = "\n".join(f'    "{path}",' for path in APPROVED_TEMPORARY_COVERAGE_EXCLUSIONS)
+    (fixture_root / "pyproject.toml").write_text(
+        '[project]\nname = "complete-gate-fixture"\nversion = "0"\n\n'
+        "[tool.coverage.run]\n"
+        "omit = [\n"
+        f"{exclusions}\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    (fixture_root / "uv.lock").write_text("fixture lock\n", encoding="utf-8")
+    return fixture_root
+
+
+def install_fake_uv(tmp_path: Path) -> tuple[Path, Path]:
+    """Install a command-recording uv boundary that executes only Python children."""
+
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    command_log = tmp_path / "quality-commands.jsonl"
+    fake_uv = bin_dir / "uv"
+    fake_uv.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{sys.executable}
+            from __future__ import annotations
+
+            import json
+            import os
+            import sys
+            from pathlib import Path
+
+
+            arguments = sys.argv[1:]
+            prefix = ["run", "--frozen", "--python", "{PYTHON_VERSION}"]
+            if arguments[: len(prefix)] != prefix:
+                print("unexpected uv arguments: " + repr(arguments), file=sys.stderr)
+                raise SystemExit(2)
+            command = arguments[len(prefix) :]
+            log = Path(os.environ["QUALITY_COMMAND_LOG"])
+            with log.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(command) + "\\n")
+
+            if command and command[0] == "python":
+                os.execv(sys.executable, [sys.executable, *command[1:]])
+
+            rules = json.loads(os.environ.get("QUALITY_FAKE_COMMAND_RULES", "{{}}"))
+            rendered = " ".join(command)
+            matches = [key for key in rules if key in rendered]
+            rule = rules[max(matches, key=len)] if matches else {{}}
+            if stdout := rule.get("stdout"):
+                print(stdout)
+            if stderr := rule.get("stderr"):
+                print(stderr, file=sys.stderr)
+            if replacement := rule.get("lock_contents"):
+                Path("uv.lock").write_text(replacement, encoding="utf-8")
+            raise SystemExit(int(rule.get("exit", 0)))
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+    return bin_dir, command_log
+
+
+def run_complete_gate(
+    tmp_path: Path,
+    repository: Path,
+    *,
+    command_rules: dict[str, dict[str, object]] | None = None,
+    environment: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], tuple[tuple[str, ...], ...]]:
+    bin_dir, command_log = install_fake_uv(tmp_path)
+    child_environment = {
+        "PATH": os.pathsep.join((str(bin_dir), os.environ["PATH"])),
+        "QUALITY_COMMAND_LOG": str(command_log),
+        "QUALITY_FAKE_COMMAND_RULES": json.dumps(command_rules or {}),
+    }
+    if environment is not None:
+        child_environment.update(environment)
+    result = run_quality_gate(
+        repository,
+        arguments=("complete",),
+        environment=child_environment,
+    )
+    commands = tuple(
+        tuple(json.loads(line)) for line in command_log.read_text(encoding="utf-8").splitlines()
+    )
+    return result, commands
 
 
 def run_fast_gate(

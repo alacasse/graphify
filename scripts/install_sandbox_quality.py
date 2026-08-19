@@ -18,6 +18,11 @@ from install_sandbox_quality_checks import (
     FastCheckConfigurationError,
     run_fast_checks,
 )
+from install_sandbox_quality_complete import (
+    CompleteCheckConfigurationError,
+    CompleteCheckResults,
+    run_complete_checks,
+)
 from install_sandbox_quality_docker import (
     DockerConfigurationError,
     DockerFailed,
@@ -42,6 +47,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("fast", help="run the inexpensive install-sandbox checks")
+    subcommands.add_parser("complete", help="run the complete install-sandbox gate")
     docker = subcommands.add_parser("docker", help="run the official Docker diagnostic")
     selection = docker.add_mutually_exclusive_group(required=True)
     selection.add_argument(
@@ -81,11 +87,24 @@ def _fast(repository: Path) -> int:
     return 0
 
 
-def _docker(repository: Path, selection: DockerSelection) -> int:
-    run = run_docker_gate(repository, selection)
+def _report_docker_run(
+    run: DockerConfigurationError | DockerFailed | DockerPassed | DockerTimedOut,
+) -> None:
     print(f"diagnostic bundle: {run.context.bundle}")
     for result in run.context.results:
         _report(result)
+    if isinstance(run, DockerFailed):
+        print(run.reason, file=sys.stderr)
+    if isinstance(run, DockerPassed) and run.advisory_findings:
+        print(
+            f"docker: advisory legacy Product Findings={len(run.advisory_findings)}",
+            file=sys.stderr,
+        )
+
+
+def _docker(repository: Path, selection: DockerSelection) -> int:
+    run = run_docker_gate(repository, selection)
+    _report_docker_run(run)
 
     if isinstance(run, DockerConfigurationError):
         print("docker: CONFIGURATION ERROR")
@@ -94,17 +113,44 @@ def _docker(repository: Path, selection: DockerSelection) -> int:
         print("docker: TIMEOUT")
         return 124
     if isinstance(run, DockerFailed):
-        print(run.reason, file=sys.stderr)
         print("docker: FAIL")
         return 1
     if not isinstance(run, DockerPassed):
         raise AssertionError(f"unhandled Docker gate result: {type(run).__name__}")
-    if run.advisory_findings:
-        print(
-            f"docker: advisory legacy Product Findings={len(run.advisory_findings)}",
-            file=sys.stderr,
-        )
     print("docker: PASS")
+    return 0
+
+
+def _complete(repository: Path) -> int:
+    run = run_complete_checks(repository)
+    if isinstance(run, CompleteCheckConfigurationError):
+        print(f"complete: CONFIGURATION ERROR: {run.message}", file=sys.stderr)
+        return CONFIGURATION_EXIT
+    if not isinstance(run, CompleteCheckResults):
+        raise AssertionError(f"unhandled complete gate result: {type(run).__name__}")
+
+    for result in run.checks:
+        _report(result)
+    _report_docker_run(run.docker)
+    _report(run.lock)
+
+    results = (*run.checks, run.lock)
+    if any(result.configuration_error for result in results) or isinstance(
+        run.docker, DockerConfigurationError
+    ):
+        print("complete: CONFIGURATION ERROR")
+        return CONFIGURATION_EXIT
+    if isinstance(run.docker, DockerTimedOut):
+        print("complete: TIMEOUT")
+        return 124
+    if any(result.status is CheckStatus.FAIL for result in results) or isinstance(
+        run.docker, DockerFailed
+    ):
+        print("complete: FAIL")
+        return 1
+    if not isinstance(run.docker, DockerPassed):
+        raise AssertionError(f"unhandled Docker gate result: {type(run.docker).__name__}")
+    print("complete: PASS")
     return 0
 
 
@@ -112,6 +158,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "fast":
         return _fast(Path.cwd().resolve())
+    if arguments.command == "complete":
+        return _complete(Path.cwd().resolve())
     if arguments.command == "docker":
         selection: DockerSelection
         if arguments.all_targets:

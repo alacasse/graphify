@@ -6,6 +6,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Callable
 
+from tools.install_sandbox.models import Scope
 from tools.install_sandbox.specs import load_catalog
 
 
@@ -65,3 +66,16 @@ def test_checked_in_catalog_matches_current_checkout_install_help(
             + ", ".join(stale_specs)
         )
     assert not diagnostics, "\n".join(diagnostics)
+
+
+def test_antigravity_workflows_forbid_the_legacy_global_skill_path() -> None:
+    catalog = load_catalog(SPEC_DIRECTORY)
+    legacy_path = "~/.gemini/config/skills/graphify/SKILL.md"
+
+    for scope in (Scope.USER, Scope.PROJECT):
+        workflow = next(
+            effect
+            for effect in catalog["antigravity"].scopes[scope].effects
+            if effect.path == ".agents/workflows/graphify.md"
+        )
+        assert legacy_path in workflow.forbidden_text

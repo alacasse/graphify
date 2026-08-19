@@ -20,6 +20,7 @@ scopes:
         root: user_cwd
         path: .agents/workflows/graphify.md
         required_text: ["name: graphify", "Workflow: graphify"]
+        forbidden_text: ["~/.gemini/config/skills/graphify/SKILL.md"]
   project:
     effects:
       - kind: skill
@@ -38,3 +39,4 @@ scopes:
         root: project
         path: .agents/workflows/graphify.md
         required_text: ["name: graphify", "Workflow: graphify"]
+        forbidden_text: ["~/.gemini/config/skills/graphify/SKILL.md"]

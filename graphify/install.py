@@ -239,10 +239,14 @@ def _remove_skill_file(platform_name: str, *, project: bool = False, project_dir
     if version_file.exists():
         version_file.unlink()
         removed = True
-    refs_dir = skill_dst.parent / "references"
-    if refs_dir.exists():
-        shutil.rmtree(refs_dir)
-        removed = True
+    for sidecar_name in ("references", "references.tmp"):
+        sidecar = skill_dst.parent / sidecar_name
+        if sidecar.is_dir() and not sidecar.is_symlink():
+            shutil.rmtree(sidecar)
+            removed = True
+        elif sidecar.exists() or sidecar.is_symlink():
+            sidecar.unlink()
+            removed = True
     for d in (skill_dst.parent, skill_dst.parent.parent, skill_dst.parent.parent.parent):
         try:
             d.rmdir()
@@ -1702,22 +1706,9 @@ def _kilo_uninstall_global() -> list[str]:
     except OSError:
         pass
 
-    skill_dst = Path.home() / _PLATFORM_CONFIG["kilo"]["skill_dst"]
-    if skill_dst.exists():
-        skill_dst.unlink()
+    skill_dst = _platform_skill_destination("kilo")
+    if _remove_skill_file("kilo"):
         removed.append(f"skill removed: {skill_dst}")
-    version_file = skill_dst.parent / ".graphify_version"
-    if version_file.exists():
-        version_file.unlink()
-    for d in (
-        skill_dst.parent,
-        skill_dst.parent.parent,
-        skill_dst.parent.parent.parent,
-    ):
-        try:
-            d.rmdir()
-        except OSError:
-            break
 
     return removed
 def _kilo_install(project_dir: Path) -> None:

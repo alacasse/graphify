@@ -124,6 +124,9 @@ def test_uninstall_removes_references_then_walks_dirs(tmp_path, fake_bundle):
     _install(tmp_path, platform)
     skill_dir = tmp_path / ".claude" / "skills" / "graphify"
     assert (skill_dir / "references").is_dir()
+    staged = skill_dir / "references.tmp"
+    staged.mkdir()
+    (staged / "interrupted.md").write_text("stale\n", encoding="utf-8")
 
     with patch("graphify.__main__.Path.home", return_value=tmp_path):
         removed = mainmod._remove_skill_file(platform)

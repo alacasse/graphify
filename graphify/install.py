@@ -231,9 +231,8 @@ def _copy_skill_file(platform_name: str, *, project: bool = False, project_dir: 
     (skill_dst.parent / ".graphify_version").write_text(__version__, encoding="utf-8")
     print(f"  skill installed  ->  {skill_dst}")
     return skill_dst
-def _remove_skill_file(platform_name: str, *, project: bool = False, project_dir: Path | None = None) -> bool:
-    """Remove a platform skill file and its version stamp without touching other scopes."""
-    skill_dst = _platform_skill_destination(platform_name, project=project, project_dir=project_dir)
+def _remove_skill_destination(skill_dst: Path) -> bool:
+    """Remove one resolved skill payload without touching sibling user content."""
     removed = False
     if skill_dst.exists():
         skill_dst.unlink()
@@ -257,6 +256,26 @@ def _remove_skill_file(platform_name: str, *, project: bool = False, project_dir
         except OSError:
             break
     return removed
+
+
+def _remove_skill_file(platform_name: str, *, project: bool = False, project_dir: Path | None = None) -> bool:
+    """Remove a platform skill file and its version stamp without touching other scopes."""
+    skill_dst = _platform_skill_destination(
+        platform_name, project=project, project_dir=project_dir
+    )
+    return _remove_skill_destination(skill_dst)
+
+
+def _unique_user_skill_destinations() -> tuple[Path, ...]:
+    """Resolve every public user skill destination exactly once."""
+    destinations: list[Path] = []
+    seen: set[Path] = set()
+    for platform_name in (*_PLATFORM_CONFIG, "gemini"):
+        destination = _platform_skill_destination(platform_name, project=False)
+        if destination not in seen:
+            seen.add(destination)
+            destinations.append(destination)
+    return tuple(destinations)
 def _project_scope_root(path: Path, project_dir: Path) -> Path:
     """Return the top-level project artifact for a project-scoped skill path."""
     try:
@@ -1812,16 +1831,18 @@ def uninstall_all(project_dir: Path | None = None, purge: bool = False) -> None:
     _cursor_uninstall(pd)
     _kiro_uninstall(pd)
     _antigravity_uninstall(pd)
+    _kilo_uninstall(pd)
     # AGENTS.md covers: codex, aider, opencode, claw, droid, trae, trae-cn, hermes, copilot
     _agents_uninstall(pd)
-    # Amp also drops a user-scope skill at ~/.config/agents/skills, which the
-    # AGENTS.md cleanup above does not touch.
-    _remove_skill_file("amp")
-    # The generic agents platform's user-scope skill lives at ~/.agents/skills,
-    # which neither the AGENTS.md cleanup nor amp's removal reaches.
-    _remove_skill_file("agents")
     _uninstall_opencode_plugin(pd)
     _uninstall_codex_hook(pd)
+
+    # Specialized uninstallers own registrations, hooks, commands, and other
+    # platform-specific files. Sweep the resolved user skill destinations only
+    # after those cleanups, deduplicating aliases/shared locations and never
+    # resolving a project-scoped path.
+    for skill_dst in _unique_user_skill_destinations():
+        _remove_skill_destination(skill_dst)
 
     # Git hook
     try:

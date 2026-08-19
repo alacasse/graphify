@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from install_sandbox_quality_state import GatePhase
+from scripts.install_sandbox_quality_phase import CoveragePolicy, GatePhasePolicy
 
 PYRIGHT_CONFIG = "pyrightconfig.install-sandbox.json"
 INSTALL_SANDBOX = "tools/install_sandbox"
@@ -332,7 +332,7 @@ def _unexpected_settings_error(
     return f"{PYPROJECT_CONFIG}: unapproved {label} settings: {', '.join(unexpected)}"
 
 
-def coverage_configuration_error(repository: Path, phase: GatePhase) -> str | None:
+def coverage_configuration_error(repository: Path, policy: GatePhasePolicy) -> str | None:
     """Reject coverage configuration that can hide replacement production paths."""
 
     config_path = repository / PYPROJECT_CONFIG
@@ -341,7 +341,7 @@ def coverage_configuration_error(repository: Path, phase: GatePhase) -> str | No
     except (OSError, tomllib.TOMLDecodeError) as error:
         return f"unable to read {PYPROJECT_CONFIG}: {error}"
 
-    optional = phase is GatePhase.ATOMIC_CUTOVER
+    optional = policy.coverage is CoveragePolicy.NO_EXCLUSIONS
     tool = config.get("tool")
     coverage_value = tool.get("coverage") if isinstance(tool, dict) else None
     coverage, error = _configuration_table(
@@ -370,7 +370,9 @@ def coverage_configuration_error(repository: Path, phase: GatePhase) -> str | No
     if not isinstance(raw_omit, list) or not all(isinstance(path, str) for path in raw_omit):
         return f"{PYPROJECT_CONFIG}: tool.coverage.run.omit must be a list of paths"
     actual = tuple(raw_omit)
-    expected = () if phase is GatePhase.ATOMIC_CUTOVER else TEMPORARY_COVERAGE_EXCLUSIONS
+    expected = (
+        () if policy.coverage is CoveragePolicy.NO_EXCLUSIONS else TEMPORARY_COVERAGE_EXCLUSIONS
+    )
     if actual != expected:
         state = "empty at Atomic Cutover" if not expected else "the exact legacy retirement list"
         return f"{PYPROJECT_CONFIG}: coverage exclusions must be {state}"

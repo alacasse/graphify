@@ -9,15 +9,19 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from install_sandbox_quality_policy import (
+from scripts.install_sandbox_quality_phase import (
+    EvidencePolicy,
+    GatePhasePolicy,
+    policy_for_state,
+)
+from scripts.install_sandbox_quality_policy import (
     INSTALL_SANDBOX,
     PYRIGHT_CONFIG,
     PYTHON_VERSION,
     security_configuration_error,
     typing_configuration_error,
 )
-from install_sandbox_quality_state import (
-    GatePhase,
+from scripts.install_sandbox_quality_state import (
     RepositoryState,
     RepositoryStateFailure,
     assess_repository_state,
@@ -126,7 +130,12 @@ def static_checks(state: RepositoryState, repository: Path) -> tuple[Check, ...]
     )
 
 
-def run_check(check: Check, repository: Path) -> CheckResult:
+def run_check(
+    check: Check,
+    repository: Path,
+    *,
+    child_completed: Callable[[], None] | None = None,
+) -> CheckResult:
     if check.configuration_check is not None:
         error = check.configuration_check(repository)
         if error is not None:
@@ -155,6 +164,9 @@ def run_check(check: Check, repository: Path) -> CheckResult:
             stderr=f"unable to start child command: {error}\n",
             configuration_error=True,
         )
+    finally:
+        if child_completed is not None:
+            child_completed()
     return CheckResult(
         name=check.name,
         status=CheckStatus.PASS if completed.returncode == 0 else CheckStatus.FAIL,
@@ -201,8 +213,9 @@ def run_required_pytest(
     repository: Path,
     *,
     failure_message: str = "required evidence produced a non-passing pytest outcome",
+    child_completed: Callable[[], None] | None = None,
 ) -> CheckResult:
-    result = run_check(check, repository)
+    result = run_check(check, repository, child_completed=child_completed)
     output = result.stdout + result.stderr
     if result.status is not CheckStatus.PASS or not NONPASSING_EVIDENCE_OUTCOME.search(output):
         return result
@@ -215,8 +228,13 @@ def run_required_pytest(
     )
 
 
-def run_warning_clean_pytest(check: Check, repository: Path) -> CheckResult:
-    result = run_check(check, repository)
+def run_warning_clean_pytest(
+    check: Check,
+    repository: Path,
+    *,
+    child_completed: Callable[[], None] | None = None,
+) -> CheckResult:
+    result = run_check(check, repository, child_completed=child_completed)
     output = result.stdout + result.stderr
     if result.status is not CheckStatus.PASS or not PYTEST_WARNING_OUTCOME.search(output):
         return result
@@ -229,16 +247,29 @@ def run_warning_clean_pytest(check: Check, repository: Path) -> CheckResult:
     )
 
 
-def assess_behavioral_evidence(state: RepositoryState, repository: Path) -> CheckResult:
-    behavioral = repository / "tests/install_sandbox/behavioral"
-    candidates = sorted(
-        {
-            *behavioral.rglob("test_*.py"),
-            *behavioral.rglob("*_test.py"),
-        }
-    )
-    if not candidates:
-        if state.phase is not GatePhase.ATOMIC_CUTOVER:
+def assess_behavioral_evidence(
+    policy: GatePhasePolicy,
+    repository: Path,
+    *,
+    child_completed: Callable[[], None] | None = None,
+) -> CheckResult:
+    behavioral = "tests/install_sandbox/behavioral"
+    behavioral_path = repository / behavioral
+    try:
+        has_content = behavioral_path.exists() and any(
+            candidate.is_file() for candidate in behavioral_path.rglob("*")
+        )
+    except OSError as error:
+        return CheckResult(
+            name="behavioral-evidence",
+            status=CheckStatus.FAIL,
+            exit_code=CONFIGURATION_EXIT,
+            stdout="",
+            stderr=f"unable to inspect Behavioral Evidence: {error}\n",
+            configuration_error=True,
+        )
+    if not has_content:
+        if policy.behavioral_evidence is EvidencePolicy.PROHIBITED:
             return not_run("behavioral-evidence", CheckStatus.NOT_APPLICABLE)
         return CheckResult(
             name="behavioral-evidence",
@@ -248,11 +279,12 @@ def assess_behavioral_evidence(state: RepositoryState, repository: Path) -> Chec
             stderr="Atomic Cutover requires non-empty Behavioral Evidence\n",
         )
     collection = run_check(
-        pytest_check("behavioral-evidence", behavioral.as_posix(), collect_only=True),
+        pytest_check("behavioral-evidence", behavioral, collect_only=True),
         repository,
+        child_completed=child_completed,
     )
     if collection.exit_code == 5:
-        if state.phase is not GatePhase.ATOMIC_CUTOVER:
+        if policy.behavioral_evidence is EvidencePolicy.PROHIBITED:
             return not_run("behavioral-evidence", CheckStatus.NOT_APPLICABLE)
         return CheckResult(
             name=collection.name,
@@ -263,7 +295,7 @@ def assess_behavioral_evidence(state: RepositoryState, repository: Path) -> Chec
         )
     if collection.status is CheckStatus.FAIL:
         return collection
-    if state.phase is GatePhase.ATOMIC_CUTOVER:
+    if policy.behavioral_evidence is EvidencePolicy.REQUIRED:
         return CheckResult(
             name=collection.name,
             status=CheckStatus.APPLICABLE,
@@ -281,11 +313,12 @@ def assess_behavioral_evidence(state: RepositoryState, repository: Path) -> Chec
 
 
 def _evidence_results(state: RepositoryState, repository: Path) -> tuple[CheckResult, ...]:
-    if state.phase is GatePhase.GATE_INSTALLATION:
+    policy = policy_for_state(state)
+    if policy.replacement_evidence is EvidencePolicy.NOT_APPLICABLE:
         return (
             not_run("unit-evidence", CheckStatus.NOT_APPLICABLE),
             not_run("component-evidence", CheckStatus.NOT_APPLICABLE),
-            assess_behavioral_evidence(state, repository),
+            assess_behavioral_evidence(policy, repository),
             not_run("replacement-coverage", CheckStatus.NOT_APPLICABLE),
         )
     unit = "tests/install_sandbox/unit"
@@ -296,7 +329,7 @@ def _evidence_results(state: RepositoryState, repository: Path) -> tuple[CheckRe
             pytest_check("component-evidence-collection", component, collect_only=True), repository
         ),
         run_required_pytest(pytest_check("unit-component-evidence", unit, component), repository),
-        assess_behavioral_evidence(state, repository),
+        assess_behavioral_evidence(policy, repository),
         not_run("replacement-coverage", CheckStatus.APPLICABLE),
     )
 

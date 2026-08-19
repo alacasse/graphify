@@ -11,26 +11,25 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from install_sandbox_quality_checks import (
+from scripts.install_sandbox_quality_checks import (
     CONFIGURATION_EXIT,
     CheckResult,
     CheckStatus,
     FastCheckConfigurationError,
     run_fast_checks,
 )
-from install_sandbox_quality_complete import (
-    CompleteCheckConfigurationError,
+from scripts.install_sandbox_quality_complete import (
     CompleteCheckResults,
     run_complete_checks,
 )
-from install_sandbox_quality_docker import (
+from scripts.install_sandbox_quality_docker import (
     DockerConfigurationError,
     DockerFailed,
     DockerPassed,
     DockerTimedOut,
     run_docker_gate,
 )
-from install_sandbox_quality_evidence import (
+from scripts.install_sandbox_quality_evidence import (
     DockerSelection,
     FullDockerSelection,
     TargetedDockerSelection,
@@ -123,9 +122,6 @@ def _docker(repository: Path, selection: DockerSelection) -> int:
 
 def _complete(repository: Path) -> int:
     run = run_complete_checks(repository)
-    if isinstance(run, CompleteCheckConfigurationError):
-        print(f"complete: CONFIGURATION ERROR: {run.message}", file=sys.stderr)
-        return CONFIGURATION_EXIT
     if not isinstance(run, CompleteCheckResults):
         raise AssertionError(f"unhandled complete gate result: {type(run).__name__}")
 

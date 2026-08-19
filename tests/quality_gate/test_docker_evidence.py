@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from scripts.install_sandbox_quality_docker import (
-    GatePhase,
     LegacyFindingException,
     ProductFinding,
     approved_advisory_findings,
@@ -18,6 +17,7 @@ from scripts.install_sandbox_quality_evidence import (
     TargetedDockerSelection,
     consume_terminal_evidence,
 )
+from scripts.install_sandbox_quality_phase import GatePhase, policy_for_phase
 
 
 def _command() -> dict[str, object]:
@@ -242,25 +242,25 @@ def test_advisory_policy_requires_exact_current_construction_approval() -> None:
     )
 
     assert approved_advisory_findings(
-        GatePhase.REPLACEMENT_CONSTRUCTION,
+        policy_for_phase(GatePhase.REPLACEMENT_CONSTRUCTION),
         (finding,),
         (exception,),
         date(2026, 8, 18),
     ) == (finding,)
     assert not approved_advisory_findings(
-        GatePhase.GATE_INSTALLATION,
+        policy_for_phase(GatePhase.GATE_INSTALLATION),
         (finding,),
         (exception,),
         date(2026, 8, 18),
     )
     assert not approved_advisory_findings(
-        GatePhase.REPLACEMENT_CONSTRUCTION,
+        policy_for_phase(GatePhase.REPLACEMENT_CONSTRUCTION),
         (finding,),
         (exception,),
         date(2026, 9, 1),
     )
     assert not approved_advisory_findings(
-        GatePhase.REPLACEMENT_CONSTRUCTION,
+        policy_for_phase(GatePhase.REPLACEMENT_CONSTRUCTION),
         (ProductFinding("scenario:fixture", "b" * 64),),
         (exception,),
         date(2026, 8, 18),

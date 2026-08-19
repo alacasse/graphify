@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from install_sandbox_quality_checks import (
+from scripts.install_sandbox_quality_checks import (
     CONFIGURATION_EXIT,
     FROZEN_PYTHON_RUN,
     CheckResult,
     CheckStatus,
 )
-from install_sandbox_quality_evidence import (
+from scripts.install_sandbox_quality_evidence import (
     RUN_RECORD,
     DockerSelection,
     FailedEvidence,
@@ -25,9 +25,14 @@ from install_sandbox_quality_evidence import (
     TerminalEvidence,
     consume_terminal_evidence,
 )
-from install_sandbox_quality_manifest import ProductFinding
-from install_sandbox_quality_state import (
-    GatePhase,
+from scripts.install_sandbox_quality_manifest import ProductFinding
+from scripts.install_sandbox_quality_phase import (
+    DockerClassifier,
+    GatePhasePolicy,
+    ProductFindingPolicy,
+    policy_for_state,
+)
+from scripts.install_sandbox_quality_state import (
     RepositoryStateFailure,
     assess_repository_state,
 )
@@ -85,7 +90,12 @@ class DockerConfigurationError:
 type DockerGateRun = DockerPassed | DockerFailed | DockerTimedOut | DockerConfigurationError
 
 
-def _run_child(name: str, command: Sequence[str], repository: Path) -> CheckResult:
+def _run_child(
+    name: str,
+    command: Sequence[str],
+    repository: Path,
+    child_completed: Callable[[], None] | None,
+) -> CheckResult:
     try:
         completed = subprocess.run(
             command,
@@ -103,6 +113,9 @@ def _run_child(name: str, command: Sequence[str], repository: Path) -> CheckResu
             stderr=f"unable to start child command: {error}\n",
             configuration_error=True,
         )
+    finally:
+        if child_completed is not None:
+            child_completed()
     return CheckResult(
         name=name,
         status=CheckStatus.PASS if completed.returncode == 0 else CheckStatus.FAIL,
@@ -134,18 +147,17 @@ def _runner_command(
 def _classifier_command(
     bundle: Path,
     runner_exit: int,
-    phase: GatePhase | None,
+    classifier: DockerClassifier,
 ) -> tuple[str, ...]:
-    module = (
-        REPLACEMENT_CLASSIFIER_MODULE
-        if phase is GatePhase.ATOMIC_CUTOVER
-        else LEGACY_CLASSIFIER_MODULE
-    )
+    modules = {
+        DockerClassifier.LEGACY: LEGACY_CLASSIFIER_MODULE,
+        DockerClassifier.REPLACEMENT: REPLACEMENT_CLASSIFIER_MODULE,
+    }
     return (
         *FROZEN_PYTHON_RUN,
         "python",
         "-m",
-        module,
+        modules[classifier],
         "--run-json",
         str(bundle / RUN_RECORD),
         "--runner-exit-code",
@@ -154,22 +166,22 @@ def _classifier_command(
 
 
 def approved_advisory_findings(
-    phase: GatePhase | None,
+    policy: GatePhasePolicy | None,
     findings: tuple[ProductFinding, ...],
     exceptions: tuple[LegacyFindingException, ...],
     on_date: date,
 ) -> tuple[ProductFinding, ...]:
     """Return only an exact, current, construction-phase advisory set."""
 
-    if phase is not GatePhase.REPLACEMENT_CONSTRUCTION:
+    if policy is None or policy.product_findings is not ProductFindingPolicy.EXACT_LEGACY_ADVISORY:
         return ()
     approved = {item.finding: item for item in exceptions if item.expires_on >= on_date}
     return findings if findings and all(finding in approved for finding in findings) else ()
 
 
-def _repository_phase(repository: Path) -> GatePhase | None:
+def _repository_policy(repository: Path) -> GatePhasePolicy | None:
     state = assess_repository_state(repository)
-    return None if isinstance(state, RepositoryStateFailure) else state.phase
+    return None if isinstance(state, RepositoryStateFailure) else policy_for_state(state)
 
 
 def _utc_today() -> date:
@@ -190,7 +202,7 @@ def _has_configuration_failure(
 
 
 def _classify_terminal_evidence(
-    repository: Path,
+    policy: GatePhasePolicy | None,
     context: DockerGateContext,
     evidence: TerminalEvidence,
     on_date: date,
@@ -199,7 +211,7 @@ def _classify_terminal_evidence(
         return DockerPassed(context)
     if isinstance(evidence, FailedEvidence):
         advisory = approved_advisory_findings(
-            _repository_phase(repository),
+            policy,
             evidence.findings,
             APPROVED_LEGACY_FINDINGS,
             on_date,
@@ -213,7 +225,7 @@ def _classify_terminal_evidence(
 
 
 def _classify_gate_run(
-    repository: Path,
+    policy: GatePhasePolicy | None,
     context: DockerGateContext,
     runner: CheckResult,
     classifier: CheckResult,
@@ -232,7 +244,7 @@ def _classify_gate_run(
         return DockerFailed(context, "diagnostic classification or publication failed")
     if evidence is None:
         return DockerFailed(context, "Diagnostic Bundle evidence is unavailable")
-    return _classify_terminal_evidence(repository, context, evidence, on_date)
+    return _classify_terminal_evidence(policy, context, evidence, on_date)
 
 
 def run_docker_gate(
@@ -240,21 +252,25 @@ def run_docker_gate(
     selection: DockerSelection,
     *,
     clock: Callable[[], date] = _utc_today,
+    child_completed: Callable[[], None] | None = None,
 ) -> DockerGateRun:
     """Run the supported host and classifier interfaces, then apply gate policy."""
 
-    phase = _repository_phase(repository)
+    policy = _repository_policy(repository)
+    classifier_authority = DockerClassifier.LEGACY if policy is None else policy.docker_classifier
     bundle = Path(tempfile.mkdtemp(prefix="graphify-install-sandbox-quality-"))
     runner = _run_child(
         "docker-runner",
         _runner_command(repository, bundle, selection),
         repository,
+        child_completed,
     )
     runner_exit = runner.exit_code if runner.exit_code is not None else CONFIGURATION_EXIT
     classifier = _run_child(
         "docker-classifier",
-        _classifier_command(bundle, runner_exit, phase),
+        _classifier_command(bundle, runner_exit, classifier_authority),
         repository,
+        child_completed,
     )
     context = DockerGateContext(bundle=bundle, results=(runner, classifier))
     evidence: TerminalEvidence | None = None
@@ -264,7 +280,7 @@ def run_docker_gate(
     except ValueError as error:
         diagnostic_error = str(error)
     return _classify_gate_run(
-        repository,
+        policy,
         context,
         runner,
         classifier,

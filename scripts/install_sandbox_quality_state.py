@@ -7,12 +7,13 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum
 from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
 import yaml
+
+from scripts.install_sandbox_quality_phase import GatePhase
 
 INSTALL_SANDBOX = Path("tools/install_sandbox")
 WORKFLOW = Path(".github/workflows/install-sandbox.yml")
@@ -46,12 +47,6 @@ FINAL_REQUIRED_PATHS = frozenset(
         INSTALL_SANDBOX / "container/entrypoint.py",
     }
 )
-
-
-class GatePhase(Enum):
-    GATE_INSTALLATION = "gate installation"
-    REPLACEMENT_CONSTRUCTION = "replacement construction"
-    ATOMIC_CUTOVER = "atomic cutover"
 
 
 @dataclass(frozen=True)

@@ -358,6 +358,78 @@ def test_complete_gate_preserves_independent_failures_before_aggregation(tmp_pat
     assert result.stdout.rstrip().endswith("complete: FAIL")
 
 
+def test_complete_gate_runs_independent_checks_after_configuration_preflight_failure(
+    tmp_path: Path,
+) -> None:
+    repository = copy_complete_gate_fixture(tmp_path)
+    (repository / "ruff.install-sandbox.toml").unlink()
+
+    result, commands = run_complete_gate(
+        tmp_path,
+        repository,
+        environment={"QUALITY_DOCKER_FIXTURE": json.dumps({})},
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "missing ruff.install-sandbox.toml" in result.stderr
+    assert _commands_with_executable(commands, "pip-audit")
+    assert any(command[:2] == ("pytest", "tests/") for command in commands)
+    assert any("tools/install_sandbox/run.py" in command for command in commands)
+    assert "[PASS] dependency-lock" in result.stdout
+    assert result.stdout.rstrip().endswith("complete: CONFIGURATION ERROR")
+
+
+def test_complete_gate_rejects_nonstandard_collected_behavioral_evidence(
+    tmp_path: Path,
+) -> None:
+    repository = copy_complete_gate_fixture(tmp_path)
+    behavioral = repository / "tests/install_sandbox/behavioral"
+    behavioral.mkdir(parents=True)
+    (behavioral / "behavior_spec.py").write_text(
+        "def test_behavior() -> None:\n    assert True\n",
+        encoding="utf-8",
+    )
+    pyproject = repository / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + '\n[tool.pytest.ini_options]\npython_files = ["*_spec.py"]\n',
+        encoding="utf-8",
+    )
+
+    result, commands = run_complete_gate(
+        tmp_path,
+        repository,
+        environment={"QUALITY_DOCKER_FIXTURE": json.dumps({})},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Behavioral Evidence is prohibited before Atomic Cutover" in result.stderr
+    assert any(
+        command[:2] == ("pytest", "tests/install_sandbox/behavioral")
+        and "--collect-only" in command
+        for command in commands
+    )
+
+
+def test_complete_gate_does_not_invoke_empty_pre_cutover_behavioral_evidence(
+    tmp_path: Path,
+) -> None:
+    repository = copy_complete_gate_fixture(tmp_path)
+    (repository / "tests/install_sandbox/behavioral").mkdir(parents=True)
+
+    result, commands = run_complete_gate(
+        tmp_path,
+        repository,
+        environment={"QUALITY_DOCKER_FIXTURE": json.dumps({})},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[NOT APPLICABLE] behavioral-evidence" in result.stdout
+    assert not any(
+        command[:2] == ("pytest", "tests/install_sandbox/behavioral") for command in commands
+    )
+
+
 def test_complete_gate_fails_if_a_child_changes_the_dependency_lock(tmp_path: Path) -> None:
     repository = copy_complete_gate_fixture(tmp_path)
 
@@ -369,6 +441,27 @@ def test_complete_gate_fails_if_a_child_changes_the_dependency_lock(tmp_path: Pa
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
+    assert "[FAIL] dependency-lock (exit 1)" in result.stdout
+    assert "uv.lock changed during complete gate" in result.stderr
+
+
+def test_complete_gate_fails_if_a_later_child_restores_the_dependency_lock(
+    tmp_path: Path,
+) -> None:
+    repository = copy_complete_gate_fixture(tmp_path)
+
+    result, _ = run_complete_gate(
+        tmp_path,
+        repository,
+        command_rules={
+            "pip-audit": {"lock_contents": "changed lock\n"},
+            "pytest tests/": {"lock_contents": "fixture lock\n"},
+        },
+        environment={"QUALITY_DOCKER_FIXTURE": json.dumps({})},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (repository / "uv.lock").read_text(encoding="utf-8") == "fixture lock\n"
     assert "[FAIL] dependency-lock (exit 1)" in result.stdout
     assert "uv.lock changed during complete gate" in result.stderr
 

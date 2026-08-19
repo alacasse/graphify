@@ -479,6 +479,15 @@ def install_fake_uv(tmp_path: Path) -> tuple[Path, Path]:
                 print(stderr, file=sys.stderr)
             if replacement := rule.get("lock_contents"):
                 Path("uv.lock").write_text(replacement, encoding="utf-8")
+            if (
+                command[:2] == ["pytest", "tests/install_sandbox/behavioral"]
+                and "--collect-only" in command
+                and not any(
+                    candidate.is_file()
+                    for candidate in Path(command[1]).rglob("*")
+                )
+            ):
+                raise SystemExit(5)
             raise SystemExit(int(rule.get("exit", 0)))
             """
         ),

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from install_sandbox_quality_manifest import (
+from scripts.install_sandbox_quality_manifest import (
     ProductFinding,
     ScenarioExpectation,
     ScenarioIdentity,
@@ -16,7 +16,6 @@ from install_sandbox_quality_manifest import (
     validate_manifest_findings,
     validated_package_targets,
 )
-
 from tools.install_sandbox.models import Scope, TargetSpec
 from tools.install_sandbox.specs import SpecError, load_catalog
 

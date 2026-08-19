@@ -42,7 +42,9 @@ LEGACY_TYPING_AST_FINGERPRINTS = {
     "sandbox_runner.py": "60892e468253bb4235ffc52ff4d12928538ef988db4d62ac10f7313d83d7ab5a",
     "specs.py": "13d21c1ded61b625887ee795aafc8c8b3edf7fd512ae89b70c65904f3d521b3c",
 }
-PYRIGHT_CONFIG_KEYS = frozenset({"include", "strict", "pythonVersion", "typeCheckingMode"})
+PYRIGHT_CONFIG_KEYS = frozenset(
+    {"include", "strict", "pythonVersion", "typeCheckingMode", "venvPath", "venv"}
+)
 PYRIGHT_DIRECTIVE = re.compile(r"#\s*pyright\s*:", re.IGNORECASE)
 TYPING_AFFECTING_COMMENT = re.compile(r"#\s*(?:pyright\s*:|type\s*:)", re.IGNORECASE)
 NOSEC_DIRECTIVE = re.compile(r"#\s*nosec", re.IGNORECASE)
@@ -126,6 +128,10 @@ def _pyright_settings_error(config: dict[str, object]) -> str | None:
         return f"{PYRIGHT_CONFIG}: Pyright runtime must remain Python {PYTHON_VERSION}"
     if config.get("typeCheckingMode") != "basic":
         return f"{PYRIGHT_CONFIG}: default typing mode must remain basic"
+    if config.get("venvPath") != ".":
+        return f"{PYRIGHT_CONFIG}: Pyright environment root must remain ."
+    if config.get("venv") != ".venv":
+        return f"{PYRIGHT_CONFIG}: Pyright environment must remain .venv"
     return None
 
 

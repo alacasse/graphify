@@ -8,9 +8,11 @@ from tests.quality_gate_support import (
     LOCKFILE,
     PROJECT_ROOT,
     PYRIGHT_CONFIG,
-    copy_install_sandbox_gate_fixture,
     run_fast_gate,
     run_quality_gate,
+)
+from tests.quality_gate_support import (
+    copy_live_install_sandbox_gate_fixture as copy_install_sandbox_gate_fixture,
 )
 
 
@@ -170,6 +172,38 @@ def test_fast_gate_rejects_pyright_runtime_drift(tmp_path: Path) -> None:
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "Pyright runtime must remain Python 3.12" in result.stderr
+    assert "[FAIL] pyright (exit 2)" in result.stdout
+
+
+def test_fast_gate_rejects_pyright_environment_root_drift(tmp_path: Path) -> None:
+    config = json.loads(PYRIGHT_CONFIG.read_text(encoding="utf-8"))
+    config["venvPath"] = "elsewhere"
+    config["venv"] = ".venv"
+
+    result = run_fast_gate(
+        tmp_path,
+        'MESSAGE: str = "hello"\n',
+        pyright_config=json.dumps(config),
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Pyright environment root must remain ." in result.stderr
+    assert "[FAIL] pyright (exit 2)" in result.stdout
+
+
+def test_fast_gate_requires_project_virtual_environment(tmp_path: Path) -> None:
+    config = json.loads(PYRIGHT_CONFIG.read_text(encoding="utf-8"))
+    config["venvPath"] = "."
+    config.pop("venv", None)
+
+    result = run_fast_gate(
+        tmp_path,
+        'MESSAGE: str = "hello"\n',
+        pyright_config=json.dumps(config),
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "Pyright environment must remain .venv" in result.stderr
     assert "[FAIL] pyright (exit 2)" in result.stdout
 
 

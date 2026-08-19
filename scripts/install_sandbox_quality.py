@@ -11,6 +11,7 @@ from pathlib import Path
 from install_sandbox_quality_checks import (
     CONFIGURATION_EXIT,
     CheckResult,
+    CheckStatus,
     FastCheckConfigurationError,
     run_fast_checks,
 )
@@ -28,8 +29,8 @@ def _report(result: CheckResult) -> None:
         print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
     if result.stderr:
         print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
-    status = "PASS" if result.exit_code == 0 else "FAIL"
-    print(f"[{status}] {result.name} (exit {result.exit_code})")
+    suffix = "" if result.exit_code is None else f" (exit {result.exit_code})"
+    print(f"[{result.status.value}] {result.name}{suffix}")
 
 
 def _fast(repository: Path) -> int:
@@ -41,10 +42,10 @@ def _fast(repository: Path) -> int:
     for result in run.results:
         _report(result)
 
-    if any(result.exit_code == CONFIGURATION_EXIT for result in run.results):
+    if any(result.configuration_error for result in run.results):
         print("fast: CONFIGURATION ERROR")
         return CONFIGURATION_EXIT
-    if any(result.exit_code != 0 for result in run.results):
+    if any(result.status is CheckStatus.FAIL for result in run.results):
         print("fast: FAIL")
         return 1
     print("fast: PASS")

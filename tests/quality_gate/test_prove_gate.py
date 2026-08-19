@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from scripts import install_sandbox_quality_prove as prove
 from tests.quality_gate_support import (
     PROJECT_ROOT,
     copy_prove_gate_fixture,
@@ -104,6 +105,27 @@ def test_prove_reports_an_unknown_requirement_without_suppressing_proof(tmp_path
     assert "unknown proof requirements: unreviewed-requirement" in result.stderr
     assert "[PASS] operational-proof (exit 0)" in result.stdout
     assert result.stdout.rstrip().endswith("prove: CONFIGURATION ERROR")
+
+
+def test_prove_rejects_duplicate_declared_requirement_identifiers(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repository = copy_prove_gate_fixture(tmp_path)
+    monkeypatch.setattr(
+        prove,
+        "PROOF_REQUIREMENTS",
+        (
+            *prove.PROOF_REQUIREMENTS,
+            prove.ProofRequirement("formatting-violation", "duplicate formatting proof"),
+        ),
+    )
+
+    result = prove._proof_configuration(repository)
+
+    assert result.exit_code == 2
+    assert result.configuration_error
+    assert "duplicate declared proof requirements: formatting-violation" in result.stderr
 
 
 def test_prove_reports_a_missing_lock_without_suppressing_proof(tmp_path: Path) -> None:

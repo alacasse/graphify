@@ -25,180 +25,176 @@ class ProofRequirement:
     description: str
 
 
-def _requirement(identifier: str, description: str) -> ProofRequirement:
-    return ProofRequirement(identifier=identifier, description=description)
-
-
 PROOF_REQUIREMENTS = (
-    _requirement(
+    ProofRequirement(
         "live-ci-command-ownership",
         "live CI command ownership",
     ),
-    _requirement(
+    ProofRequirement(
         "ci-local-command-owner-drift",
         "CI and local command-owner drift",
     ),
-    _requirement(
+    ProofRequirement(
         "contributor-guidance-alignment",
         "contributor guidance alignment",
     ),
-    _requirement(
+    ProofRequirement(
         "complete-gate-installation-responsibilities",
         "complete gate installation responsibilities",
     ),
-    _requirement(
+    ProofRequirement(
         "construction-branch-coverage",
         "construction branch coverage",
     ),
-    _requirement(
+    ProofRequirement(
         "cutover-evidence-remaining-tree-coverage",
         "cutover evidence and remaining-tree coverage",
     ),
-    _requirement(
+    ProofRequirement(
         "repository-warning-rejection",
         "repository warning rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "dependency-audit-failure-propagation",
         "pip-audit and independent failure propagation",
     ),
-    _requirement(
+    ProofRequirement(
         "configuration-preflight-independence",
         "configuration preflight independence",
     ),
-    _requirement(
+    ProofRequirement(
         "dependency-lock-mutation-detection",
         "dependency-lock mutation detection",
     ),
-    _requirement(
+    ProofRequirement(
         "dependency-lock-restore-detection",
         "dependency-lock restore detection",
     ),
-    _requirement(
+    ProofRequirement(
         "complete-aggregate-exits",
         "complete timeout and configuration exits",
     ),
-    _requirement(
+    ProofRequirement(
         "missing-evidence-coverage-threshold",
         "missing evidence and coverage threshold",
     ),
-    _requirement(
+    ProofRequirement(
         "replacement-coverage-exclusion-rejection",
         "replacement coverage exclusion rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "cutover-legacy-coverage-exclusion-rejection",
         "cutover legacy coverage exclusion rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "typed-docker-evidence",
         "typed Docker evidence boundary",
     ),
-    _requirement(
+    ProofRequirement(
         "docker-selection-positive",
         "Docker selection positive path",
     ),
-    _requirement(
+    ProofRequirement(
         "docker-finding-propagation",
         "raw Docker finding propagation",
     ),
-    _requirement(
+    ProofRequirement(
         "docker-timeout",
         "Docker timeout propagation",
     ),
-    _requirement(
+    ProofRequirement(
         "docker-classifier-publication-failure",
         "Docker classifier and publication failure propagation",
     ),
-    _requirement(
+    ProofRequirement(
         "docker-configuration-exit",
         "Docker configuration exit",
     ),
-    _requirement(
+    ProofRequirement(
         "gate-installation-non-applicability",
         "gate-installation non-applicability",
     ),
-    _requirement(
+    ProofRequirement(
         "missing-construction-evidence",
         "missing construction evidence",
     ),
-    _requirement(
+    ProofRequirement(
         "one-missing-construction-evidence-class",
         "one missing construction evidence class",
     ),
-    _requirement(
+    ProofRequirement(
         "complete-construction-evidence",
         "complete construction evidence",
     ),
-    _requirement(
+    ProofRequirement(
         "premature-behavioral-evidence",
         "premature Behavioral Evidence rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "partial-legacy-deletion",
         "partial legacy deletion rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "partial-caller-switch",
         "partial caller switch rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "cutover-missing-behavioral",
         "cutover missing Behavioral Evidence",
     ),
-    _requirement(
+    ProofRequirement(
         "complete-atomic-cutover-evidence",
         "complete atomic cutover evidence",
     ),
-    _requirement(
+    ProofRequirement(
         "applicable-replacement-test-lint-paths",
         "applicable replacement-test lint paths",
     ),
-    _requirement(
+    ProofRequirement(
         "declared-path-static-analysis",
         "declared path static-analysis coverage",
     ),
-    _requirement(
+    ProofRequirement(
         "escaped-static-analysis-path",
         "escaped static-analysis configuration path rejection",
     ),
-    _requirement(
+    ProofRequirement(
         "replacement-test-strict-typing",
         "replacement-test strict typing scope",
     ),
-    _requirement(
+    ProofRequirement(
         "typing-violation",
         "typing violation",
     ),
-    _requirement(
+    ProofRequirement(
         "bandit-violation",
         "Bandit violation",
     ),
-    _requirement(
+    ProofRequirement(
         "typing-configuration-drift",
         "typing configuration drift",
     ),
-    _requirement(
+    ProofRequirement(
         "static-analysis-baseline-lock",
         "accepted static-analysis baseline and lock",
     ),
-    _requirement(
+    ProofRequirement(
         "corrected-static-analysis",
         "corrected static-analysis fixture",
     ),
-    _requirement(
+    ProofRequirement(
         "formatting-violation",
         "formatting violation",
     ),
-    _requirement(
+    ProofRequirement(
         "lint-violation",
         "lint violation",
     ),
-    _requirement(
+    ProofRequirement(
         "complexity-violation",
         "complexity violation",
     ),
-    _requirement(
+    ProofRequirement(
         "fast-configuration-failure-independence",
         "fast configuration failure independence",
     ),
@@ -292,9 +288,24 @@ def _proof_inventory_problems(
     return problems
 
 
+def _declared_proof_requirements() -> tuple[dict[str, ProofRequirement], list[str]]:
+    declared: dict[str, ProofRequirement] = {}
+    duplicate: set[str] = set()
+    for requirement in PROOF_REQUIREMENTS:
+        if requirement.identifier in declared:
+            duplicate.add(requirement.identifier)
+        else:
+            declared[requirement.identifier] = requirement
+    problems = []
+    if duplicate:
+        problems.append("duplicate declared proof requirements: " + ", ".join(sorted(duplicate)))
+    return declared, problems
+
+
 def _proof_configuration(repository: Path) -> CheckResult:
-    declared = {requirement.identifier: requirement for requirement in PROOF_REQUIREMENTS}
-    discovered, problems = _proof_declarations(repository)
+    declared, problems = _declared_proof_requirements()
+    discovered, declaration_problems = _proof_declarations(repository)
+    problems.extend(declaration_problems)
     problems.extend(_proof_inventory_problems(declared, discovered))
     error = "; ".join(problems)
     return CheckResult(

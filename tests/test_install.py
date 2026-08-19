@@ -126,6 +126,32 @@ def test_install_codebuddy_adds_h1_despite_user_graphify_mention(tmp_path):
     assert codebuddy_md.read_bytes() == original + b"\n" + registration
 
 
+def test_claude_user_uninstall_cleans_config_registration_only(tmp_path, monkeypatch):
+    from graphify.install import claude_uninstall
+
+    config_dir = tmp_path / "claude-config"
+    config_md = config_dir / "CLAUDE.md"
+    config_md.parent.mkdir(parents=True)
+    user_prefix = b"# User notes\r\nKeep these bytes.  \r\n\r\n"
+    user_suffix = b"# User workflow\nKeep project-independent notes.\n"
+    config_md.write_bytes(
+        user_prefix + b"# graphify\nstale registration\n\n" + user_suffix
+    )
+
+    project_dir = tmp_path / "project"
+    project_registration = project_dir / ".claude" / "CLAUDE.md"
+    project_registration.parent.mkdir(parents=True)
+    project_bytes = b"# graphify\nproject-owned registration\n"
+    project_registration.write_bytes(project_bytes)
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    monkeypatch.chdir(project_dir)
+    claude_uninstall()
+
+    assert config_md.read_bytes() == user_prefix + user_suffix
+    assert project_registration.read_bytes() == project_bytes
+
+
 def test_install_codebuddy(tmp_path):
     _install(tmp_path, "codebuddy")
     assert (tmp_path / ".codebuddy" / "skills" / "graphify" / "SKILL.md").exists()

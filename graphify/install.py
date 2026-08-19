@@ -30,7 +30,7 @@ except Exception:
     __version__ = "unknown"
 
 from graphify.paths import GRAPHIFY_OUT as _GRAPHIFY_OUT
-from graphify.markdown_sections import replace_h1_sections
+from graphify.markdown_sections import remove_h1_sections, replace_h1_sections
 
 
 @functools.lru_cache(maxsize=None)
@@ -256,19 +256,30 @@ def _project_scope_root(path: Path, project_dir: Path) -> Path:
     except ValueError:
         return path
     return project_dir / rel.parts[0] if rel.parts else path
-def _remove_claude_skill_registration(project_dir: Path) -> None:
-    """Remove the project-scoped Claude skill registration file/section."""
-    claude_md = project_dir / ".claude" / "CLAUDE.md"
+def _claude_registration_path(
+    project_dir: Path | None = None, *, project: bool = False
+) -> Path:
+    """Return the exact user- or project-scope Claude registration path."""
+    if project:
+        return (project_dir or Path(".")) / ".claude" / "CLAUDE.md"
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        return Path(os.environ["CLAUDE_CONFIG_DIR"]) / "CLAUDE.md"
+    return Path.home() / ".claude" / "CLAUDE.md"
+
+
+def _remove_claude_skill_registration(
+    project_dir: Path | None = None, *, project: bool = False
+) -> None:
+    """Remove exact Claude H1 registrations from only the requested scope."""
+    claude_md = _claude_registration_path(project_dir, project=project)
     if not claude_md.exists():
         return
-    content = claude_md.read_text(encoding="utf-8")
-    # Match the exact H1 `# graphify` registration heading, never a substring of a
-    # user's `## graphify`/`### graphify` (#2062). Section runs to the next H1.
-    cleaned = _remove_marker_section(content, "# graphify", boundary_prefix="# ")
-    if cleaned is None:
+    content = claude_md.read_bytes()
+    cleaned = remove_h1_sections(content, heading=b"# graphify")
+    if cleaned == content:
         return
     if cleaned:
-        claude_md.write_text(cleaned + "\n", encoding="utf-8")
+        claude_md.write_bytes(cleaned)
         print(f"  CLAUDE.md        ->  graphify skill registration removed from {claude_md}")
     else:
         claude_md.unlink()
@@ -647,15 +658,13 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
         # does for the skill copy path (#527) -- this always-on registration
         # path was missed by that fix (#2694).
         if project:
-            claude_md = project_dir / ".claude" / "CLAUDE.md"
             skill_ref = ".claude/skills/graphify/SKILL.md"
         elif os.environ.get("CLAUDE_CONFIG_DIR"):
             config_dir = Path(os.environ["CLAUDE_CONFIG_DIR"])
-            claude_md = config_dir / "CLAUDE.md"
             skill_ref = str(config_dir / "skills" / "graphify" / "SKILL.md")
         else:
-            claude_md = Path.home() / ".claude" / "CLAUDE.md"
             skill_ref = "~/.claude/skills/graphify/SKILL.md"
+        claude_md = _claude_registration_path(project_dir, project=project)
         registration_status = _write_skill_registration(claude_md, skill_ref)
         if registration_status == "unchanged":
             print("  CLAUDE.md        ->  already registered (no change)")
@@ -1610,7 +1619,7 @@ def _project_uninstall(platform_name: str, project_dir: Path | None = None) -> N
     platform_name = _canonical_platform(platform_name)
     if platform_name in ("claude", "windows"):
         _remove_skill_file(platform_name, project=True, project_dir=project_dir)
-        _remove_claude_skill_registration(project_dir)
+        _remove_claude_skill_registration(project_dir, project=True)
         claude_uninstall(project_dir, project=True)
     elif platform_name == "gemini":
         gemini_uninstall(project_dir, project=True)
@@ -1862,6 +1871,7 @@ def claude_uninstall(project_dir: Path | None = None, *, project: bool = False, 
         _remove_skill_file("claude", project=True, project_dir=project_dir)
     if remove_user_skill:
         _remove_skill_file("claude", project=False)
+        _remove_claude_skill_registration(project=False)
 
     md_targets = [
         project_dir / "CLAUDE.md",

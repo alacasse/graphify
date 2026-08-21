@@ -32,6 +32,7 @@ from .protocol import (
     ActionFailureFact,
     ActionRequest,
     CommandFact,
+    CommandFailureFact,
     Fulfil,
     RawFact,
 )
@@ -81,7 +82,7 @@ def _fulfil_phase(
     if chronology_rejection is not None:
         return False, chronology_rejection
     facts.append(command)
-    if isinstance(command, ActionFailureFact):
+    if isinstance(command, (ActionFailureFact, CommandFailureFact)):
         return True, None
     assert isinstance(command, CommandFact)
     observation = _fulfil_action(phase.observation, fulfil)

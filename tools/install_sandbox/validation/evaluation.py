@@ -17,6 +17,7 @@ from .protocol import (
     ActionFailureFact,
     ActionId,
     CommandFact,
+    CommandFailureFact,
     ObservationFact,
     PhaseKind,
     RawFact,
@@ -33,11 +34,10 @@ from .results import (
 )
 
 
-def evaluate_phase(phase: PhasePlan, facts: dict[ActionId, RawFact]) -> PhaseResult:
-    """Derive one closed phase result from already validated correlated facts."""
-
-    command = facts.get(phase.command.action_id)
-    observation = facts.get(phase.observation.action_id)
+def _incomplete_command_result(
+    phase: PhasePlan,
+    command: ActionFailureFact | CommandFailureFact,
+) -> PhaseResult:
     if isinstance(command, ActionFailureFact):
         return PhaseResult(
             phase.kind,
@@ -47,6 +47,22 @@ def evaluate_phase(phase: PhasePlan, facts: dict[ActionId, RawFact]) -> PhaseRes
             reason=command.detail,
             failure=command,
         )
+    return PhaseResult(
+        phase.kind,
+        PhaseStatus.INCOMPLETE,
+        command,
+        None,
+        reason=command.detail,
+    )
+
+
+def evaluate_phase(phase: PhasePlan, facts: dict[ActionId, RawFact]) -> PhaseResult:
+    """Derive one closed phase result from already validated correlated facts."""
+
+    command = facts.get(phase.command.action_id)
+    observation = facts.get(phase.observation.action_id)
+    if isinstance(command, (ActionFailureFact, CommandFailureFact)):
+        return _incomplete_command_result(phase, command)
     if not isinstance(command, CommandFact):
         return PhaseResult(
             phase.kind,

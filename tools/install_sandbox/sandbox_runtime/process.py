@@ -19,6 +19,10 @@ from tools.install_sandbox.validation.protocol import (
     StreamCapture,
 )
 
+from .supervisor_status import SupervisorStatus
+
+MINIMUM_TERMINATION_GRACE_SECONDS = 0.25
+
 
 @dataclass(frozen=True, slots=True)
 class ProcessExecution:
@@ -37,6 +41,20 @@ class ProcessFailure:
     operation: str
     detail: str
     chronology: tuple[OperationEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IncompleteProcessExecution:
+    exit_code: int | None
+    signal: int | None
+    timed_out: bool
+    stdout: StreamCapture
+    stderr: StreamCapture
+    started_ns: int
+    finished_ns: int
+    chronology: tuple[OperationEvent, ...]
+    operation: str
+    detail: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +110,8 @@ class LocalProcessRunner:
         termination_grace_seconds: float,
         capture_limit_bytes: int,
     ) -> None:
+        if termination_grace_seconds < MINIMUM_TERMINATION_GRACE_SECONDS:
+            raise ValueError("termination grace must cover the trusted supervisor shutdown budget")
         self._timeout_seconds = timeout_seconds
         self._termination_grace_seconds = termination_grace_seconds
         self._capture_limit_bytes = capture_limit_bytes
@@ -190,12 +210,6 @@ class LocalProcessRunner:
             return (f"STATUS_ERROR:{error}",)
         return tuple(line.decode(errors="replace") for line in payload.splitlines())
 
-    def _status_detail(self, status: tuple[str, ...], prefix: str) -> str | None:
-        return next(
-            (line.removeprefix(prefix) for line in status if line.startswith(prefix)),
-            None,
-        )
-
     def _start_pumps(
         self,
         process: subprocess.Popen[bytes],
@@ -285,7 +299,7 @@ class LocalProcessRunner:
         cwd: Path,
         environment: dict[str, str],
         event: Callable[[OperationKind], OperationEvent],
-    ) -> ProcessExecution | ProcessFailure:
+    ) -> ProcessExecution | IncompleteProcessExecution | ProcessFailure:
         """Run one command with bounded process-group and stream ownership."""
 
         spawned = self._spawn(argv, cwd, environment, event)
@@ -312,30 +326,50 @@ class LocalProcessRunner:
             event,
             timed_out=timed_out,
         )
-        status = self._read_status(spawned.status_fd)
-        spawn_error = self._status_detail(status, "SPAWN_ERROR:")
-        custody_error = self._status_detail(status, "CUSTODY_ERROR:")
-        status_error = self._status_detail(status, "STATUS_ERROR:")
-        if spawn_error is not None or custody_error is not None or "SPAWNED" not in status:
+        status = SupervisorStatus.parse(self._read_status(spawned.status_fd))
+        if status.spawn_error is not None or not status.spawned:
             chronology.append(event(OperationKind.COMMAND_FAILED))
-            detail = spawn_error or custody_error or status_error
             return ProcessFailure(
-                "spawn_command" if spawn_error is not None else "establish_process_custody",
-                detail or "supervisor did not confirm custody",
+                "spawn_command" if status.spawn_error is not None else "establish_process_custody",
+                status.spawn_error
+                or status.custody_error
+                or status.status_error
+                or "supervisor did not confirm spawn",
                 tuple(chronology),
             )
-        if "KILL_ESCALATED" in status and not any(
+        if status.descendants_terminated and not any(
+            item.kind is OperationKind.COMMAND_TERMINATED for item in chronology
+        ):
+            chronology.append(event(OperationKind.COMMAND_TERMINATED))
+        if status.kill_escalated and not any(
             item.kind is OperationKind.COMMAND_KILL_ESCALATED for item in chronology
         ):
             chronology.append(event(OperationKind.COMMAND_KILL_ESCALATED))
-        exit_code = process.returncode
-        if exit_code is None:
+        if status.custody_error is not None or not status.quiescent or status.target_exit is None:
+            detail = status.custody_error or status.status_error
+            if detail is None:
+                detail = (
+                    "supervisor did not confirm quiescence"
+                    if not status.quiescent
+                    else "supervisor did not report a target exit"
+                )
+            self._record_capture_error(captures, detail)
             chronology.append(event(OperationKind.COMMAND_FAILED))
-            return ProcessFailure(
-                "reap_process",
-                "process has no terminal return code",
+            return IncompleteProcessExecution(
+                status.target_exit,
+                -status.target_exit
+                if status.target_exit is not None and status.target_exit < 0
+                else None,
+                timed_out,
+                captures[0].finish(process_complete=False),
+                captures[1].finish(process_complete=False),
+                started.occurred_ns,
+                chronology[-1].occurred_ns,
                 tuple(chronology),
+                "complete_process_custody",
+                detail,
             )
+        exit_code = status.target_exit
         finished = event(OperationKind.COMMAND_FINISHED)
         chronology.append(finished)
         return ProcessExecution(

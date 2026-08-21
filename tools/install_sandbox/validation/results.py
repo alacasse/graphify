@@ -7,7 +7,13 @@ from enum import StrEnum
 from typing import cast
 
 from .catalog import Scope
-from .protocol import ActionFailureFact, CommandFact, ObservationFact, PhaseKind
+from .protocol import (
+    ActionFailureFact,
+    CommandFact,
+    CommandFailureFact,
+    ObservationFact,
+    PhaseKind,
+)
 
 
 class PhaseStatus(StrEnum):
@@ -39,7 +45,7 @@ class ProductFinding:
 class PhaseResult:
     kind: PhaseKind
     status: PhaseStatus
-    command: CommandFact | None
+    command: CommandFact | CommandFailureFact | None
     observation: ObservationFact | None
     findings: tuple[ProductFinding, ...] = ()
     reason: str | None = None
@@ -52,7 +58,7 @@ class PhaseResult:
             or type(cast(object, self.status)) is not PhaseStatus
         ):
             raise ValueError("phase result kind and status must be closed variants")
-        has_command = self.command is not None
+        has_command = isinstance(self.command, CommandFact)
         has_observation = self.observation is not None
         if self.status is PhaseStatus.PASS and not (
             has_command

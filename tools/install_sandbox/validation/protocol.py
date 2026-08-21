@@ -193,6 +193,27 @@ class CommandFact:
 
 
 @dataclass(frozen=True, slots=True)
+class CommandFailureFact:
+    """Available command mechanics when post-spawn custody could not complete."""
+
+    action_id: ActionId
+    exit_code: int | None
+    argv: tuple[str, ...]
+    working_directory: SurfaceRoot
+    signal: int | None
+    timed_out: bool
+    stdout: StreamCapture
+    stderr: StreamCapture
+    started_ns: int
+    finished_ns: int
+    chronology: tuple[OperationEvent, ...]
+    before_snapshot: FilesystemSnapshot
+    after_snapshot: FilesystemSnapshot
+    operation: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
 class ObservationFact:
     """Raw filesystem mechanics without semantic classification."""
 
@@ -214,5 +235,5 @@ class ActionFailureFact:
     chronology: tuple[OperationEvent, ...]
 
 
-type RawFact = CommandFact | ObservationFact | ActionFailureFact
+type RawFact = CommandFact | CommandFailureFact | ObservationFact | ActionFailureFact
 type Fulfil = Callable[[ActionRequest], RawFact]

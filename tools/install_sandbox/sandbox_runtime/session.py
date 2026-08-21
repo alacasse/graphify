@@ -20,6 +20,7 @@ from tools.install_sandbox.validation.protocol import (
     ActionRequest,
     ByteCapture,
     CommandFact,
+    CommandFailureFact,
     EntryFact,
     EntryKind,
     FilesystemSnapshot,
@@ -34,7 +35,12 @@ from tools.install_sandbox.validation.protocol import (
     SurfaceFact,
 )
 
-from .process import LocalProcessRunner, ProcessFailure
+from .process import (
+    MINIMUM_TERMINATION_GRACE_SECONDS,
+    IncompleteProcessExecution,
+    LocalProcessRunner,
+    ProcessFailure,
+)
 from .types import SandboxCleanupFact, SandboxFinishReason, SandboxRuntimeFailure
 
 
@@ -59,6 +65,7 @@ class SandboxRuntime:
         self._capture_limit_bytes = capture_limit_bytes
         self._next_sequence = 0
         self._finished = False
+        self._custody_intact = True
 
     @classmethod
     def open(
@@ -67,7 +74,7 @@ class SandboxRuntime:
         prepared_source: Path,
         *,
         command_timeout_seconds: float = 30.0,
-        termination_grace_seconds: float = 0.2,
+        termination_grace_seconds: float = MINIMUM_TERMINATION_GRACE_SECONDS,
         capture_limit_bytes: int = 1_000_000,
     ) -> SandboxRuntime:
         """Allocate one fresh session whose logical roots never alias."""
@@ -88,11 +95,12 @@ class SandboxRuntime:
             )
         if (
             command_timeout_seconds <= 0
-            or termination_grace_seconds <= 0
+            or termination_grace_seconds < MINIMUM_TERMINATION_GRACE_SECONDS
             or capture_limit_bytes <= 0
         ):
             raise SandboxConfigurationError(
-                "sandbox timeout, termination grace, and capture limit must be positive"
+                "sandbox timeout and capture limit must be positive, and termination grace "
+                f"must be at least {MINIMUM_TERMINATION_GRACE_SECONDS} seconds"
             )
         session_root.mkdir(parents=True)
         runtime = cls(
@@ -318,6 +326,25 @@ class SandboxRuntime:
                 process.chronology,
             )
         after_snapshot = self._snapshot()
+        if isinstance(process, IncompleteProcessExecution):
+            self._custody_intact = False
+            return CommandFailureFact(
+                action_id=request.action_id,
+                exit_code=process.exit_code,
+                argv=request.argv,
+                working_directory=logical_cwd,
+                signal=process.signal,
+                timed_out=process.timed_out,
+                stdout=process.stdout,
+                stderr=process.stderr,
+                started_ns=process.started_ns,
+                finished_ns=process.finished_ns,
+                chronology=process.chronology,
+                before_snapshot=before_snapshot,
+                after_snapshot=after_snapshot,
+                operation=process.operation,
+                detail=process.detail,
+            )
         return CommandFact(
             action_id=request.action_id,
             exit_code=process.exit_code,
@@ -339,15 +366,26 @@ class SandboxRuntime:
 
         started = self._event(OperationKind.CLEANUP_STARTED)
         failures: list[SandboxRuntimeFailure] = []
-        try:
-            shutil.rmtree(self._session_root)
-        except OSError as error:
-            failures.append(SandboxRuntimeFailure("remove_session_root", str(error)))
+        if not self._custody_intact:
+            failures.append(
+                SandboxRuntimeFailure(
+                    "remove_session_root",
+                    "cleanup refused because subprocess custody was not proven complete",
+                )
+            )
+        else:
+            try:
+                if self._session_root.is_symlink():
+                    self._session_root.unlink()
+                else:
+                    shutil.rmtree(self._session_root)
+            except OSError as error:
+                failures.append(SandboxRuntimeFailure("remove_session_root", str(error)))
         self._finished = True
         finished = self._event(OperationKind.CLEANUP_FINISHED)
         return SandboxCleanupFact(
             reason=reason,
-            removed=not self._session_root.exists(),
+            removed=not os.path.lexists(self._session_root),
             failures=tuple(failures),
             chronology=(started, finished),
         )

@@ -111,14 +111,16 @@ def _reap_adopted_children(target_pid: int | None) -> None:
             return
 
 
-def _terminate_tree(process: subprocess.Popen[bytes]) -> tuple[bool, bool]:
-    _signal_all(_descendants(), signal.SIGTERM)
+def _terminate_tree(process: subprocess.Popen[bytes]) -> tuple[bool, bool, bool]:
+    descendants = _descendants()
+    terminated = bool(descendants)
+    _signal_all(descendants, signal.SIGTERM)
     term_deadline = time.monotonic() + _TERM_GRACE_SECONDS
     while time.monotonic() < term_deadline:
         process.poll()
         _reap_adopted_children(process.pid)
         if not _descendants():
-            return False, True
+            return terminated, False, True
         time.sleep(0.005)
 
     escalated = bool(_descendants())
@@ -134,9 +136,9 @@ def _terminate_tree(process: subprocess.Popen[bytes]) -> tuple[bool, bool]:
     try:
         process.wait(timeout=max(0.0, kill_deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
-        return True, False
+        return terminated, True, False
     _reap_adopted_children(None)
-    return escalated, _wait_for_no_descendants(kill_deadline)
+    return terminated, escalated, _wait_for_no_descendants(kill_deadline)
 
 
 def _write_status(status_fd: int, value: str) -> None:
@@ -151,7 +153,8 @@ def _exit_like(returncode: int) -> None:
     if returncode >= 0:
         raise SystemExit(returncode)
     exit_signal = -returncode
-    signal.signal(exit_signal, signal.SIG_DFL)
+    if exit_signal not in {signal.SIGKILL, signal.SIGSTOP}:
+        signal.signal(exit_signal, signal.SIG_DFL)
     os.kill(os.getpid(), exit_signal)
     raise AssertionError("signal did not terminate supervisor")
 
@@ -177,13 +180,18 @@ def _supervise(process: subprocess.Popen[bytes], status_fd: int) -> int:
     while process.poll() is None and _requested_signal is None:
         time.sleep(0.005)
     returncode = process.returncode
-    escalated, quiescent = _terminate_tree(process)
+    terminated, escalated, quiescent = _terminate_tree(process)
+    if terminated:
+        _write_status(status_fd, "DESCENDANTS_TERMINATED")
     if escalated:
         _write_status(status_fd, "KILL_ESCALATED")
     if not quiescent:
         _write_status(status_fd, "CUSTODY_ERROR:descendants did not reach quiescence")
     if returncode is None:
         returncode = process.wait()
+    _write_status(status_fd, f"TARGET_EXIT:{returncode}")
+    if quiescent:
+        _write_status(status_fd, "QUIESCENT")
     if _requested_signal is not None and returncode >= 0:
         return -_requested_signal
     return returncode

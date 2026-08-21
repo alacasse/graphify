@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 from tools.install_sandbox.sandbox_runtime.session import SandboxRuntime
 from tools.install_sandbox.sandbox_runtime.types import SandboxFinishReason
@@ -20,6 +23,7 @@ from tools.install_sandbox.validation.protocol import (
     ActionId,
     ActionKind,
     CommandFact,
+    CommandFailureFact,
     CommandRequest,
     EntryKind,
     ObservationFact,
@@ -371,6 +375,157 @@ else:
     assert tuple(event.sequence for event in events) == tuple(range(len(events)))
     assert cleanup.removed is True
     assert cleanup.failures == ()
+
+
+def _fictional_documents() -> CatalogDocuments:
+    return CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                json.dumps(
+                    {
+                        "scopes": {
+                            "user": {
+                                "supported": False,
+                                "reason": "User scope is unavailable.",
+                                "runtime_limitations": [],
+                            },
+                            "project": {
+                                "supported": True,
+                                "runtime_limitations": [],
+                                "surfaces": [
+                                    {
+                                        "kind": "owned_file",
+                                        "root": "project",
+                                        "path": ".fictional/config.txt",
+                                        "source": "fixtures/config.txt",
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                ),
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize("ignore_term", (False, True), ids=("graceful", "escalated"))
+def test_validation_accepts_observable_non_timeout_descendant_cleanup(
+    tmp_path: Path,
+    ignore_term: bool,
+) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    source = prepared_source / "fixtures" / "config.txt"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"expected payload\n")
+    product = tmp_path / "background_product.py"
+    child = (
+        "import signal, sys, time; from pathlib import Path; "
+        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if ignore_term else "")
+        + "Path(sys.argv[1]).write_text('ready'); time.sleep(5)"
+    )
+    product.write_text(
+        f"""
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+destination = Path(".fictional/config.txt")
+if sys.argv[1] == "install":
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(b"expected payload\\n")
+    marker = Path(".child-ready")
+    subprocess.Popen(
+        [sys.executable, "-c", {child!r}, str(marker)],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    while not marker.exists():
+        time.sleep(0.005)
+    marker.unlink()
+else:
+    destination.unlink(missing_ok=True)
+""".lstrip(),
+        encoding="utf-8",
+    )
+    runtime = SandboxRuntime.open(tmp_path / "session", prepared_source)
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        _fictional_documents(),
+        HarnessPolicy(
+            install_argv=(sys.executable, str(product), "install"),
+            uninstall_argv=(sys.executable, str(product), "uninstall"),
+        ),
+        runtime.fulfil,
+    )
+    cleanup = runtime.finish(SandboxFinishReason.COMPLETED)
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.PASS
+    install = lifecycle.phases[0]
+    assert isinstance(install.command, CommandFact)
+    kinds = tuple(event.kind.value for event in install.command.chronology)
+    assert kinds[:2] == ("command_started", "command_terminated")
+    assert kinds[-1] == "command_finished"
+    assert ("command_kill_escalated" in kinds) is ignore_term
+    assert cleanup.removed
+    assert cleanup.failures == ()
+
+
+def test_lost_supervisor_preserves_command_evidence_and_refuses_cleanup(
+    tmp_path: Path,
+) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    source = prepared_source / "fixtures" / "config.txt"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"expected payload\n")
+    session_root = tmp_path / "session"
+    late_path = session_root / "project" / "late.txt"
+    child = (
+        "import sys, time; from pathlib import Path; time.sleep(0.3); "
+        "path=Path(sys.argv[1]); path.parent.mkdir(parents=True, exist_ok=True); "
+        "path.write_text('late')"
+    )
+    command = (
+        "import os, signal, subprocess, sys, time; "
+        "print('evidence before custody loss', flush=True); "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}, {str(late_path)!r}], "
+        "start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "os.kill(os.getppid(), signal.SIGKILL); time.sleep(0.05)"
+    )
+    runtime = SandboxRuntime.open(session_root, prepared_source)
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        _fictional_documents(),
+        HarnessPolicy(
+            install_argv=(sys.executable, "-c", command),
+            uninstall_argv=(sys.executable, "-c", "raise SystemExit(0)"),
+        ),
+        runtime.fulfil,
+    )
+    cleanup = runtime.finish(SandboxFinishReason.ABORTED)
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.INCOMPLETE
+    fact = result.raw_facts[0]
+    assert isinstance(fact, CommandFailureFact)
+    assert fact.exit_code is None
+    assert fact.stdout.data == b"evidence before custody loss\n"
+    assert fact.stdout.error == "supervisor did not confirm quiescence"
+    assert fact.operation == "complete_process_custody"
+    assert not cleanup.removed
+    assert cleanup.failures
+    time.sleep(0.4)
+    assert late_path.read_text(encoding="utf-8") == "late"
 
 
 def test_sandbox_runtime_returns_a_typed_raw_spawn_failure(tmp_path: Path) -> None:

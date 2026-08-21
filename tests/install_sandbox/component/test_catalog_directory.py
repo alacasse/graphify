@@ -44,7 +44,7 @@ scopes:
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         if isinstance(request, CommandRequest):
             return CommandFact(request.action_id, 0)
-        return ObservationFact(request.action_id, True)
+        return ObservationFact(request.action_id, ())
 
     result = validate(
         ValidationRequest(targets=("first", "second"), scopes=(Scope.PROJECT,)),

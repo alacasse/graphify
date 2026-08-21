@@ -13,6 +13,8 @@ from .catalog import (
     InstallTargetCatalog,
     compile_catalog,
 )
+from .evaluation import derive_results, evaluate_phase
+from .fact_validation import validate_raw_fact, validate_session_chronology
 from .plan import build_validation_plan
 from .plan_types import (
     AggregatePlan,
@@ -27,15 +29,14 @@ from .plan_types import (
     ValidationRequest,
 )
 from .protocol import (
-    ActionId,
+    ActionFailureFact,
     ActionRequest,
     CommandFact,
-    CommandRequest,
+    CommandFailureFact,
     Fulfil,
-    ObservationFact,
-    ObservationRequest,
     RawFact,
 )
+from .results import DetailedScenarioResult, PhaseStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,7 @@ class ValidationCompleted:
     catalog: InstallTargetCatalog
     plan: ValidationPlan
     raw_facts: tuple[RawFact, ...]
+    scenario_results: tuple[DetailedScenarioResult, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,61 +59,86 @@ class ValidationRejected:
 type ValidationResult = ValidationCompleted | ValidationRejected
 
 
-def _matches(request: ActionRequest, fact: RawFact) -> bool:
-    if request.action_id != fact.action_id:
-        return False
-    return (isinstance(request, CommandRequest) and isinstance(fact, CommandFact)) or (
-        isinstance(request, ObservationRequest) and isinstance(fact, ObservationFact)
+def _fulfil_action(
+    action: ActionRequest,
+    fulfil: Callable[[ActionRequest], object],
+) -> RawFact | str:
+    try:
+        value = fulfil(action)
+    except Exception as error:
+        return f"Raw Fact fulfilment raised {type(error).__name__}: {error}"
+    return validate_raw_fact(action, value)
+
+
+def _fulfil_phase(
+    phase: PhasePlan,
+    fulfil: Callable[[ActionRequest], object],
+    facts: list[RawFact],
+) -> tuple[bool, str | None]:
+    command = _fulfil_action(phase.command, fulfil)
+    if isinstance(command, str):
+        return False, command
+    chronology_rejection = validate_session_chronology((*facts, command))
+    if chronology_rejection is not None:
+        return False, chronology_rejection
+    facts.append(command)
+    if isinstance(command, (ActionFailureFact, CommandFailureFact)):
+        return True, None
+    assert isinstance(command, CommandFact)
+    observation = _fulfil_action(phase.observation, fulfil)
+    if isinstance(observation, str):
+        return False, observation
+    chronology_rejection = validate_session_chronology((*facts, observation))
+    if chronology_rejection is not None:
+        return False, chronology_rejection
+    facts.append(observation)
+    result = evaluate_phase(
+        phase,
+        {fact.action_id: fact for fact in (command, observation)},
     )
+    blocked = command.timed_out or command.exit_code != 0 or result.status is PhaseStatus.INCOMPLETE
+    return blocked, None
 
 
-def _validated_fact(value: object) -> RawFact | str:
-    if not isinstance(value, (CommandFact, ObservationFact)):
-        return "fulfil returned an unknown Raw Fact variant"
-    action_id = cast(object, value.action_id)
-    if not isinstance(action_id, ActionId):
-        return "Raw Fact action_id is invalid"
-    plan_id = cast(object, action_id.plan_id)
-    ordinal = cast(object, action_id.ordinal)
-    if not isinstance(plan_id, str) or not plan_id or type(ordinal) is not int or ordinal < 0:
-        return "Raw Fact action_id is invalid"
-    if isinstance(value, CommandFact) and type(cast(object, value.exit_code)) is not int:
-        return "Command Fact exit_code must be an integer"
-    if isinstance(value, ObservationFact) and type(cast(object, value.matched)) is not bool:
-        return "Observation Fact matched must be a boolean"
-    return value
-
-
-def _lifecycle_requests(scenario: LifecyclePlan) -> tuple[ActionRequest, ...] | str:
-    requests: list[ActionRequest] = []
-    for phase in cast(tuple[object, ...], scenario.phases):
-        if isinstance(phase, NotApplicablePhasePlan):
+def _fulfil_phases(
+    phases: tuple[object, ...],
+    fulfil: Callable[[ActionRequest], object],
+    facts: list[RawFact],
+) -> str | None:
+    blocked = False
+    for value in phases:
+        if isinstance(value, NotApplicablePhasePlan):
             continue
-        if not isinstance(phase, PhasePlan):
+        if not isinstance(value, PhasePlan):
             return "validation plan contains an unknown lifecycle phase variant"
-        requests.extend((phase.command, phase.observation))
-    return tuple(requests)
+        if blocked:
+            continue
+        blocked, rejection = _fulfil_phase(value, fulfil, facts)
+        if rejection is not None:
+            return rejection
+    return None
 
 
-def _scenario_requests(scenario: object) -> tuple[ActionRequest, ...] | str:
-    if isinstance(scenario, LifecyclePlan):
-        return _lifecycle_requests(scenario)
-    if isinstance(scenario, AggregatePlan):
-        phases = (*scenario.preparations, scenario.uninstall)
-        return tuple(request for phase in phases for request in (phase.command, phase.observation))
-    if isinstance(scenario, UnsupportedPlan):
-        return ()
-    return "validation plan contains an unknown scenario variant"
-
-
-def _requests(plan: ValidationPlan) -> tuple[ActionRequest, ...] | str:
-    requests: list[ActionRequest] = []
+def _fulfil_plan(
+    plan: ValidationPlan,
+    fulfil: Callable[[ActionRequest], object],
+) -> tuple[RawFact, ...] | str:
+    facts: list[RawFact] = []
     for scenario in cast(tuple[object, ...], plan.scenarios):
-        scenario_requests = _scenario_requests(scenario)
-        if isinstance(scenario_requests, str):
-            return scenario_requests
-        requests.extend(scenario_requests)
-    return tuple(requests)
+        if isinstance(scenario, LifecyclePlan):
+            phases = cast(tuple[object, ...], scenario.phases)
+        elif isinstance(scenario, AggregatePlan):
+            phases = (*scenario.preparations, scenario.uninstall)
+        elif isinstance(scenario, UnsupportedPlan):
+            continue
+        else:
+            return "validation plan contains an unknown scenario variant"
+        rejection = _fulfil_phases(phases, fulfil, facts)
+        if rejection is not None:
+            return rejection
+        if facts and isinstance(facts[-1], CommandFailureFact):
+            return tuple(facts)
+    return tuple(facts)
 
 
 def validate(
@@ -130,19 +157,14 @@ def validate(
     if isinstance(plan_result, PlanRejected):
         return ValidationRejected(plan_result.reasons)
     assert isinstance(plan_result, PlanAccepted)
-    facts: list[RawFact] = []
     untrusted_fulfil = cast(Callable[[ActionRequest], object], fulfil)
-    action_requests = _requests(plan_result.plan)
-    if isinstance(action_requests, str):
-        return ValidationRejected((action_requests,))
-    for action in action_requests:
-        fact_result = _validated_fact(untrusted_fulfil(action))
-        if isinstance(fact_result, str):
-            return ValidationRejected((fact_result,))
-        fact = fact_result
-        if not _matches(action, fact):
-            return ValidationRejected(
-                (f"Raw Fact does not match planned action {action.action_id!r}",)
-            )
-        facts.append(fact)
-    return ValidationCompleted(catalog_result.catalog, plan_result.plan, tuple(facts))
+    fulfilled = _fulfil_plan(plan_result.plan, untrusted_fulfil)
+    if isinstance(fulfilled, str):
+        return ValidationRejected((fulfilled,))
+    raw_facts = fulfilled
+    return ValidationCompleted(
+        catalog_result.catalog,
+        plan_result.plan,
+        raw_facts,
+        derive_results(plan_result.plan, raw_facts),
+    )

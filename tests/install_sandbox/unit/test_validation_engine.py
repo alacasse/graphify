@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
-from dataclasses import FrozenInstanceError
+from collections.abc import Callable
+from dataclasses import FrozenInstanceError, replace
 from typing import cast
 
 import pytest
@@ -17,12 +19,14 @@ from tools.install_sandbox.validation.catalog import (
     Scope,
     SupportedScopeFacts,
     SurfaceRoot,
+    TextEntrySurface,
 )
 from tools.install_sandbox.validation.engine import (
     ValidationCompleted,
     ValidationRejected,
     validate,
 )
+from tools.install_sandbox.validation.fact_validation import validate_raw_fact
 from tools.install_sandbox.validation.plan_types import (
     AggregatePlan,
     HarnessPolicy,
@@ -33,21 +37,194 @@ from tools.install_sandbox.validation.plan_types import (
     ValidationRequest,
 )
 from tools.install_sandbox.validation.protocol import (
+    ActionFailureFact,
     ActionId,
+    ActionKind,
     AggregateSubject,
+    ByteCapture,
     CommandFact,
     CommandRequest,
+    EntryFact,
+    EntryKind,
+    FilesystemSnapshot,
     ObservationFact,
     ObservationRequest,
+    OperationEvent,
+    OperationKind,
     PhaseKind,
+    PreparedSourcePath,
     RawFact,
+    SandboxPath,
+    SnapshotEntry,
+    StreamCapture,
+    SurfaceExpectation,
+    SurfaceFact,
+    TargetSubject,
 )
+from tools.install_sandbox.validation.results import (
+    LifecycleResult,
+    PhaseResult,
+    PhaseStatus,
+    ProductFinding,
+    ScenarioStatus,
+    UnsupportedResult,
+)
+
+
+def _root_snapshot() -> FilesystemSnapshot:
+    return FilesystemSnapshot(
+        tuple(SnapshotEntry(root, ".", EntryKind.DIRECTORY) for root in SurfaceRoot)
+    )
+
+
+def _chronology(
+    action_id: ActionId,
+    started: OperationKind,
+    finished: OperationKind,
+) -> tuple[OperationEvent, ...]:
+    first_sequence = action_id.ordinal * 2
+    first_time = action_id.ordinal * 10 + 1
+    return (
+        OperationEvent(first_sequence, started, first_time),
+        OperationEvent(first_sequence + 1, finished, first_time + 1),
+    )
+
+
+def _passing_observation(request: ObservationRequest) -> ObservationFact:
+    surfaces: list[SurfaceFact] = []
+    for surface in request.surfaces:
+        if isinstance(surface, TextEntrySurface):
+            payload = f"{surface.entry}\n{surface.required_text}\n".encode()
+            source = None
+        else:
+            payload = b"expected payload\n"
+            source = EntryFact(
+                PreparedSourcePath(surface.source),
+                EntryKind.FILE,
+                size=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+                content=ByteCapture(payload, True),
+            )
+        installed = request.expectation is not SurfaceExpectation.ABSENT
+        destination = EntryFact(
+            SandboxPath(surface.root, surface.path),
+            EntryKind.FILE if installed else EntryKind.MISSING,
+            size=len(payload) if installed else None,
+            sha256=hashlib.sha256(payload).hexdigest() if installed else None,
+            content=ByteCapture(payload, True) if installed else None,
+        )
+        surfaces.append(SurfaceFact(surface, destination, source))
+    chronology = _chronology(
+        request.action_id,
+        OperationKind.OBSERVATION_STARTED,
+        OperationKind.OBSERVATION_FINISHED,
+    )
+    return ObservationFact(
+        request.action_id,
+        tuple(surfaces),
+        chronology[0].occurred_ns,
+        chronology[-1].occurred_ns,
+        chronology,
+    )
+
+
+def _passing_command(request: CommandRequest) -> CommandFact:
+    working_directory = SurfaceRoot.USER_CWD if request.scope is Scope.USER else SurfaceRoot.PROJECT
+    chronology = _chronology(
+        request.action_id,
+        OperationKind.COMMAND_STARTED,
+        OperationKind.COMMAND_FINISHED,
+    )
+    snapshot = _root_snapshot()
+    return CommandFact(
+        request.action_id,
+        0,
+        request.argv,
+        working_directory,
+        None,
+        False,
+        StreamCapture(b"", True),
+        StreamCapture(b"", True),
+        chronology[0].occurred_ns,
+        chronology[-1].occurred_ns,
+        chronology,
+        snapshot,
+        snapshot,
+    )
+
+
+def _timed_out_command(
+    request: CommandRequest,
+    *,
+    stdout: StreamCapture,
+    stderr: StreamCapture,
+) -> CommandFact:
+    first_sequence = request.action_id.ordinal * 4
+    first_time = request.action_id.ordinal * 10 + 1
+    chronology = tuple(
+        OperationEvent(first_sequence + offset, kind, first_time + offset)
+        for offset, kind in enumerate(
+            (
+                OperationKind.COMMAND_STARTED,
+                OperationKind.COMMAND_TIMED_OUT,
+                OperationKind.COMMAND_TERMINATED,
+                OperationKind.COMMAND_FINISHED,
+            )
+        )
+    )
+    return replace(
+        _passing_command(request),
+        exit_code=-9,
+        signal=9,
+        timed_out=True,
+        stdout=stdout,
+        stderr=stderr,
+        started_ns=chronology[0].occurred_ns,
+        finished_ns=chronology[-1].occurred_ns,
+        chronology=chronology,
+    )
 
 
 def _passing_fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
     if isinstance(request, CommandRequest):
-        return CommandFact(request.action_id, 0)
-    return ObservationFact(request.action_id, True)
+        return _passing_command(request)
+    return _passing_observation(request)
+
+
+class _SessionFacts:
+    def __init__(self) -> None:
+        self._next_sequence = 0
+        self._next_time = 0
+
+    def bind(self, fact: RawFact) -> RawFact:
+        chronology = tuple(
+            replace(
+                event,
+                sequence=self._next_sequence + offset,
+                occurred_ns=self._next_time + offset,
+            )
+            for offset, event in enumerate(fact.chronology)
+        )
+        self._next_sequence += len(chronology)
+        self._next_time += len(chronology)
+        if isinstance(fact, CommandFact):
+            return replace(
+                fact,
+                started_ns=chronology[0].occurred_ns,
+                finished_ns=chronology[-1].occurred_ns,
+                chronology=chronology,
+            )
+        if isinstance(fact, ObservationFact):
+            return replace(
+                fact,
+                started_ns=chronology[0].occurred_ns,
+                finished_ns=chronology[-1].occurred_ns,
+                chronology=chronology,
+            )
+        return replace(fact, chronology=chronology)
+
+    def passing(self, request: CommandRequest | ObservationRequest) -> RawFact:
+        return self.bind(_passing_fulfil(request))
 
 
 def _catalog_text(project: object, user: object | None = None) -> str:
@@ -110,9 +287,7 @@ scopes:
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         requests.append(request)
-        if isinstance(request, CommandRequest):
-            return CommandFact(request.action_id, exit_code=0)
-        return ObservationFact(request.action_id, matched=True)
+        return _passing_fulfil(request)
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT, Scope.USER)),
@@ -145,6 +320,14 @@ scopes:
     )
     assert isinstance(unsupported, UnsupportedPlan)
     assert unsupported.reason == "Fictional user installs are unavailable."
+    unsupported_result = result.scenario_results[1]
+    assert unsupported_result == UnsupportedResult(
+        "fictional",
+        Scope.USER,
+        ScenarioStatus.UNSUPPORTED,
+        unsupported.reason,
+        (),
+    )
     assert isinstance(aggregate, AggregatePlan)
     assert aggregate.preparation_targets == ("fictional",)
     install_phase = lifecycle.phases[0]
@@ -172,11 +355,723 @@ scopes:
     )
     assert aggregate.uninstall.command.argv == ("graphify", "uninstall", "--project")
     assert len(requests) == 10
-    assert result.raw_facts == tuple(
-        CommandFact(request.action_id, 0)
-        if isinstance(request, CommandRequest)
-        else ObservationFact(request.action_id, True)
-        for request in requests
+    assert result.raw_facts == tuple(_passing_fulfil(request) for request in requests)
+
+
+def test_validation_engine_derives_semantic_lifecycle_results_from_raw_facts() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        if isinstance(request, CommandRequest):
+            return _passing_command(request)
+        return _passing_observation(request)
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.PASS
+    assert tuple(phase.status for phase in lifecycle.phases) == (
+        PhaseStatus.PASS,
+        PhaseStatus.PASS,
+        PhaseStatus.PASS,
+    )
+    assert all(phase.findings == () for phase in lifecycle.phases)
+
+
+def test_failed_setup_command_blocks_dependent_lifecycle_phases() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+    requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        requests.append(request)
+        if isinstance(request, ObservationRequest):
+            return session.bind(_passing_observation(request))
+        return session.bind(
+            replace(
+                _passing_command(request),
+                exit_code=17 if len(requests) == 1 else 0,
+                stdout=StreamCapture(b"partial product output", True),
+                stderr=StreamCapture(b"product error", True),
+            )
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.FINDING
+    install, reinstall, uninstall = lifecycle.phases
+    assert install.status is PhaseStatus.FINDING
+    assert install.command is not None
+    assert install.command.exit_code == 17
+    assert install.observation is not None
+    assert reinstall.status is PhaseStatus.BLOCKED
+    assert reinstall.blocked_by is PhaseKind.INSTALL
+    assert reinstall.command is None
+    assert uninstall.status is PhaseStatus.BLOCKED
+    assert uninstall.blocked_by is PhaseKind.INSTALL
+    assert uninstall.command is None
+    assert requests[0].phase is PhaseKind.INSTALL
+    assert not any(
+        request.phase in {PhaseKind.REINSTALL, PhaseKind.TARGET_UNINSTALL} for request in requests
+    )
+
+
+def test_validation_engine_rejects_changes_outside_planned_install_surfaces() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        if isinstance(request, ObservationRequest):
+            return _passing_observation(request)
+        after_entries = _root_snapshot().entries
+        if request.phase is PhaseKind.INSTALL:
+            after_entries = (
+                *_root_snapshot().entries,
+                SnapshotEntry(SurfaceRoot.PROJECT, ".fictional", EntryKind.DIRECTORY),
+                SnapshotEntry(
+                    SurfaceRoot.PROJECT,
+                    ".fictional/config.txt",
+                    EntryKind.FILE,
+                    size=8,
+                    sha256="a" * 64,
+                ),
+                SnapshotEntry(
+                    SurfaceRoot.PROJECT,
+                    ".fictional/undeclared.txt",
+                    EntryKind.FILE,
+                    size=5,
+                    sha256="b" * 64,
+                ),
+            )
+        return replace(
+            _passing_command(request),
+            after_snapshot=FilesystemSnapshot(after_entries),
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    install = lifecycle.phases[0]
+    assert install.status is PhaseStatus.FINDING
+    assert install.findings == (
+        ProductFinding(
+            "filesystem changes stay within declared surfaces",
+            "undeclared changed paths: project:.fictional/undeclared.txt",
+        ),
+    )
+
+
+def test_reinstall_state_must_equal_the_stable_installed_snapshot() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        if isinstance(request, ObservationRequest):
+            return _passing_observation(request)
+        content_identity = "b" * 64 if request.phase is PhaseKind.REINSTALL else "a" * 64
+        entries = (
+            *_root_snapshot().entries,
+            SnapshotEntry(SurfaceRoot.PROJECT, ".fictional", EntryKind.DIRECTORY),
+            SnapshotEntry(
+                SurfaceRoot.PROJECT,
+                ".fictional/config.txt",
+                EntryKind.FILE,
+                size=8,
+                sha256=content_identity,
+            ),
+        )
+        return replace(
+            _passing_command(request),
+            before_snapshot=FilesystemSnapshot(entries),
+            after_snapshot=FilesystemSnapshot(entries),
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    install, reinstall, uninstall = lifecycle.phases
+    assert install.status is PhaseStatus.PASS
+    assert reinstall.status is PhaseStatus.FINDING
+    assert reinstall.findings == (
+        ProductFinding(
+            "idempotent filesystem state",
+            "reinstall post-state differs from the stable installed state",
+        ),
+    )
+    assert uninstall.status is PhaseStatus.PASS
+
+
+def test_runtime_failure_makes_the_scenario_and_dependents_incomplete() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+    requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        requests.append(request)
+        if len(requests) == 1:
+            chronology = _chronology(
+                request.action_id,
+                OperationKind.COMMAND_STARTED,
+                OperationKind.COMMAND_FAILED,
+            )
+            return session.bind(
+                ActionFailureFact(
+                    request.action_id,
+                    ActionKind.COMMAND,
+                    "spawn_command",
+                    "fixture executable is unavailable",
+                    chronology,
+                )
+            )
+        return session.passing(request)
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.INCOMPLETE
+    install, reinstall, uninstall = lifecycle.phases
+    assert install.status is PhaseStatus.INCOMPLETE
+    assert install.failure is not None
+    assert install.failure.operation == "spawn_command"
+    assert install.reason == "fixture executable is unavailable"
+    assert reinstall.status is PhaseStatus.INCOMPLETE
+    assert reinstall.blocked_by is PhaseKind.INSTALL
+    assert reinstall.reason == "install diagnostic evidence is incomplete"
+    assert uninstall.status is PhaseStatus.INCOMPLETE
+    assert uninstall.blocked_by is PhaseKind.INSTALL
+    assert uninstall.reason == "install diagnostic evidence is incomplete"
+    assert not any(
+        request.phase in {PhaseKind.REINSTALL, PhaseKind.TARGET_UNINSTALL} for request in requests
+    )
+
+
+@pytest.mark.parametrize("failure_kind", ("entry", "capture", "snapshot"))
+def test_untrustworthy_filesystem_evidence_prevents_dependent_phases(
+    failure_kind: str,
+) -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+    requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        requests.append(request)
+        if request.action_id.ordinal not in {0, 1}:
+            return session.passing(request)
+        if isinstance(request, CommandRequest):
+            command = _passing_command(request)
+            if failure_kind != "snapshot":
+                return session.bind(command)
+            entries = tuple(
+                replace(entry, error="root scan failed")
+                if entry.root is SurfaceRoot.PROJECT
+                else entry
+                for entry in command.after_snapshot.entries
+            )
+            return session.bind(replace(command, after_snapshot=FilesystemSnapshot(entries)))
+        observation = _passing_observation(request)
+        first = observation.surfaces[0]
+        if failure_kind == "entry":
+            destination = replace(
+                first.destination,
+                kind=EntryKind.OTHER,
+                content=None,
+                error="surface read failed",
+            )
+        else:
+            destination = replace(
+                first.destination,
+                content=ByteCapture(b"partial", False, 10),
+            )
+        return session.bind(
+            replace(
+                observation,
+                surfaces=(replace(first, destination=destination),),
+            )
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.INCOMPLETE
+    assert lifecycle.phases[0].status is PhaseStatus.INCOMPLETE
+    assert tuple(phase.status for phase in lifecycle.phases[1:]) == (
+        PhaseStatus.INCOMPLETE,
+        PhaseStatus.INCOMPLETE,
+    )
+    assert not any(
+        request.phase in {PhaseKind.REINSTALL, PhaseKind.TARGET_UNINSTALL} for request in requests
+    )
+
+
+def test_timeout_is_a_product_finding_with_partial_capture_preserved() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    session = _SessionFacts()
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        if isinstance(request, CommandRequest) and request.phase is PhaseKind.INSTALL:
+            return session.bind(
+                _timed_out_command(
+                    request,
+                    stdout=StreamCapture(b"output before timeout", False, 7),
+                    stderr=StreamCapture(b"error before timeout", False, 5),
+                )
+            )
+        return session.passing(request)
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    install = lifecycle.phases[0]
+    assert install.status is PhaseStatus.FINDING
+    assert install.findings == (ProductFinding("product command", "command timed out"),)
+    assert install.command is not None
+    assert install.command.timed_out
+    assert install.command.signal == 9
+    assert install.command.stdout == StreamCapture(b"output before timeout", False, 7)
+    assert install.command.stderr == StreamCapture(b"error before timeout", False, 5)
+
+
+def test_phase_result_statuses_reject_incoherent_evidence() -> None:
+    with pytest.raises(ValueError, match="PASS"):
+        PhaseResult(PhaseKind.INSTALL, PhaseStatus.PASS, None, None)
+    with pytest.raises(ValueError, match="FINDING"):
+        PhaseResult(PhaseKind.INSTALL, PhaseStatus.FINDING, None, None)
+    with pytest.raises(ValueError, match="BLOCKED"):
+        PhaseResult(PhaseKind.INSTALL, PhaseStatus.BLOCKED, None, None)
+    with pytest.raises(ValueError, match="NOT_APPLICABLE"):
+        PhaseResult(PhaseKind.INSTALL, PhaseStatus.NOT_APPLICABLE, None, None)
+    with pytest.raises(ValueError, match="INCOMPLETE"):
+        PhaseResult(PhaseKind.INSTALL, PhaseStatus.INCOMPLETE, None, None)
+
+
+def _wrong_working_directory(fact: CommandFact) -> CommandFact:
+    return replace(fact, working_directory=SurfaceRoot.HOME)
+
+
+def _missing_chronology(fact: CommandFact) -> CommandFact:
+    return replace(fact, chronology=())
+
+
+def _missing_snapshots(fact: CommandFact) -> CommandFact:
+    return replace(
+        fact,
+        before_snapshot=FilesystemSnapshot(()),
+        after_snapshot=FilesystemSnapshot(()),
+    )
+
+
+def _incoherent_signal(fact: CommandFact) -> CommandFact:
+    return replace(fact, signal=9)
+
+
+def _incoherent_timing(fact: CommandFact) -> CommandFact:
+    return replace(fact, finished_ns=fact.finished_ns + 1)
+
+
+def _incomplete_capture(fact: CommandFact) -> CommandFact:
+    return replace(fact, stdout=StreamCapture(b"", False))
+
+
+@pytest.mark.parametrize(
+    "malform",
+    (
+        _wrong_working_directory,
+        _missing_chronology,
+        _missing_snapshots,
+        _incoherent_signal,
+        _incoherent_timing,
+        _incomplete_capture,
+    ),
+)
+def test_raw_fact_protocol_rejects_incoherent_command_evidence(
+    malform: Callable[[CommandFact], CommandFact],
+) -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        assert isinstance(request, CommandRequest)
+        return malform(_passing_command(request))
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert "Raw Fact" in result.reasons[0]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ("terminate_process_group", "complete_process_custody"),
+)
+def test_raw_fact_protocol_rejects_lossy_post_spawn_action_failure(operation: str) -> None:
+    request = CommandRequest(
+        action_id=ActionId("plan-fixture", 0),
+        subject=TargetSubject("fictional"),
+        scope=Scope.PROJECT,
+        phase=PhaseKind.INSTALL,
+        argv=("fictional", "install"),
+    )
+    chronology = tuple(
+        OperationEvent(sequence, kind, sequence)
+        for sequence, kind in enumerate(
+            (
+                OperationKind.COMMAND_STARTED,
+                OperationKind.COMMAND_FAILED,
+            )
+        )
+    )
+
+    result = validate_raw_fact(
+        request,
+        ActionFailureFact(
+            request.action_id,
+            ActionKind.COMMAND,
+            operation,
+            "post-spawn evidence was discarded",
+            chronology,
+        ),
+    )
+
+    assert result == "Raw Fact failure evidence is invalid"
+
+
+def test_raw_fact_protocol_rejects_an_unknown_surface_member() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        if isinstance(fact, ObservationFact):
+            return replace(fact, surfaces=(cast(SurfaceFact, object()),))
+        return fact
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Fact observation evidence is invalid",)
+
+
+def test_raw_fact_protocol_rejects_a_restarted_session_chronology() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        chronology = tuple(
+            replace(event, sequence=offset, occurred_ns=offset)
+            for offset, event in enumerate(fact.chronology)
+        )
+        if isinstance(fact, CommandFact):
+            return replace(
+                fact,
+                started_ns=chronology[0].occurred_ns,
+                finished_ns=chronology[-1].occurred_ns,
+                chronology=chronology,
+            )
+        assert isinstance(fact, ObservationFact)
+        return replace(
+            fact,
+            started_ns=chronology[0].occurred_ns,
+            finished_ns=chronology[-1].occurred_ns,
+            chronology=chronology,
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Facts do not form one total session chronology",)
+
+
+def _wrong_file_size(entry: EntryFact) -> EntryFact:
+    assert entry.size is not None
+    return replace(entry, size=entry.size + 1)
+
+
+def _non_hex_file_digest(entry: EntryFact) -> EntryFact:
+    return replace(entry, sha256="z" * 64)
+
+
+def _contradictory_file_digest(entry: EntryFact) -> EntryFact:
+    return replace(entry, sha256="0" * 64)
+
+
+def _wrong_omitted_byte_count(entry: EntryFact) -> EntryFact:
+    return replace(entry, content=ByteCapture(b"expected", False, 2))
+
+
+@pytest.mark.parametrize(
+    "malform",
+    (
+        _wrong_file_size,
+        _non_hex_file_digest,
+        _contradictory_file_digest,
+        _wrong_omitted_byte_count,
+    ),
+)
+def test_raw_fact_protocol_rejects_incoherent_entry_file_evidence(
+    malform: Callable[[EntryFact], EntryFact],
+) -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        if isinstance(fact, CommandFact) or request.action_id.ordinal != 1:
+            return fact
+        assert isinstance(fact, ObservationFact)
+        surface = fact.surfaces[0]
+        return replace(
+            fact,
+            surfaces=(replace(surface, destination=malform(surface.destination)),),
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Fact observation evidence is invalid",)
+
+
+def test_raw_fact_protocol_rejects_a_non_sha256_snapshot_digest() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        if isinstance(fact, ObservationFact):
+            return fact
+        assert isinstance(fact, CommandFact)
+        invalid_entry = SnapshotEntry(
+            SurfaceRoot.PROJECT,
+            "invalid.txt",
+            EntryKind.FILE,
+            size=1,
+            sha256="z" * 64,
+        )
+        return replace(
+            fact,
+            after_snapshot=FilesystemSnapshot((*fact.after_snapshot.entries, invalid_entry)),
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Fact command evidence is invalid",)
+
+
+def test_observation_failure_takes_precedence_over_a_product_timeout() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+    requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        requests.append(request)
+        if isinstance(request, CommandRequest) and request.action_id.ordinal == 0:
+            return session.bind(
+                _timed_out_command(
+                    request,
+                    stdout=StreamCapture(b"partial", False),
+                    stderr=StreamCapture(b"", False),
+                )
+            )
+        if isinstance(request, ObservationRequest) and request.action_id.ordinal == 1:
+            chronology = _chronology(
+                request.action_id,
+                OperationKind.OBSERVATION_STARTED,
+                OperationKind.OBSERVATION_FAILED,
+            )
+            return session.bind(
+                ActionFailureFact(
+                    request.action_id,
+                    ActionKind.OBSERVATION,
+                    "observe_surface",
+                    "filesystem became unreadable",
+                    chronology,
+                )
+            )
+        return session.passing(request)
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.INCOMPLETE
+    install = lifecycle.phases[0]
+    assert install.status is PhaseStatus.INCOMPLETE
+    assert install.reason == "filesystem became unreadable"
+    assert install.failure is not None
+    assert install.failure.operation == "observe_surface"
+    assert tuple(type(request) for request in requests[:2]) == (
+        CommandRequest,
+        ObservationRequest,
+    )
+    assert not any(
+        request.phase in {PhaseKind.REINSTALL, PhaseKind.TARGET_UNINSTALL} for request in requests
     )
 
 
@@ -258,7 +1153,7 @@ scopes:
     )
 
     assert isinstance(result, ValidationRejected)
-    assert result.reasons == ("fulfil returned an unknown Raw Fact variant",)
+    assert result.reasons == ("Raw Fact has an unknown variant",)
 
 
 def test_malformed_raw_fact_payload_fails_closed() -> None:
@@ -286,7 +1181,8 @@ scopes:
     )
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
-        return CommandFact(request.action_id, cast(int, object()))
+        assert isinstance(request, CommandRequest)
+        return replace(_passing_command(request), exit_code=cast(int, object()))
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
@@ -296,7 +1192,7 @@ scopes:
     )
 
     assert isinstance(result, ValidationRejected)
-    assert result.reasons == ("Command Fact exit_code must be an integer",)
+    assert result.reasons == ("Raw Fact command evidence is invalid",)
 
 
 @given(control=st.sampled_from(("\n", "\r", "\t", "\x00")))
@@ -849,8 +1745,23 @@ def test_raw_facts_must_match_the_planned_action(mismatch: str) -> None:
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         if mismatch == "action-id":
-            return CommandFact(ActionId("different-plan", 0), 0)
-        return ObservationFact(request.action_id, True)
+            assert isinstance(request, CommandRequest)
+            return replace(
+                _passing_command(request),
+                action_id=ActionId("different-plan", 0),
+            )
+        chronology = _chronology(
+            request.action_id,
+            OperationKind.OBSERVATION_STARTED,
+            OperationKind.OBSERVATION_FINISHED,
+        )
+        return ObservationFact(
+            request.action_id,
+            (),
+            chronology[0].occurred_ns,
+            chronology[-1].occurred_ns,
+            chronology,
+        )
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
@@ -860,7 +1771,7 @@ def test_raw_facts_must_match_the_planned_action(mismatch: str) -> None:
     )
 
     assert isinstance(result, ValidationRejected)
-    assert "Raw Fact does not match planned action" in result.reasons[0]
+    assert "Raw Fact" in result.reasons[0]
 
 
 def test_malformed_observation_fact_fails_closed() -> None:
@@ -875,8 +1786,9 @@ def test_malformed_observation_fact_fails_closed() -> None:
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         if isinstance(request, CommandRequest):
-            return CommandFact(request.action_id, 0)
-        return ObservationFact(request.action_id, cast(bool, object()))
+            return _passing_command(request)
+        observation = _passing_observation(request)
+        return replace(observation, surfaces=cast(tuple[SurfaceFact, ...], object()))
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
@@ -886,7 +1798,7 @@ def test_malformed_observation_fact_fails_closed() -> None:
     )
 
     assert isinstance(result, ValidationRejected)
-    assert result.reasons == ("Observation Fact matched must be a boolean",)
+    assert result.reasons == ("Raw Fact observation evidence is invalid",)
 
 
 def test_aggregate_plan_derives_a_minimal_surface_cover_with_bound_action_ids() -> None:
@@ -932,8 +1844,8 @@ def test_aggregate_plan_derives_a_minimal_surface_cover_with_bound_action_ids() 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         requests.append(request)
         if isinstance(request, CommandRequest):
-            return CommandFact(request.action_id, 0)
-        return ObservationFact(request.action_id, True)
+            return _passing_command(request)
+        return _passing_observation(request)
 
     result = validate(
         ValidationRequest(targets=("alpha", "beta", "gamma"), scopes=(Scope.PROJECT,)),
@@ -1093,11 +2005,12 @@ scopes:
         )
     )
 
+    session = _SessionFacts()
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.USER,)),
         documents,
         HarnessPolicy(),
-        _passing_fulfil,
+        session.passing,
     )
 
     assert isinstance(result, ValidationCompleted)
@@ -1112,6 +2025,11 @@ scopes:
     facts = result.catalog.targets[0].facts_for(Scope.USER)
     assert isinstance(facts, SupportedScopeFacts)
     assert isinstance(facts.surfaces[0], RepairableBundleSurface)
+    lifecycle_result = result.scenario_results[0]
+    assert isinstance(lifecycle_result, LifecycleResult)
+    assert lifecycle_result.status is ScenarioStatus.INCOMPLETE
+    assert lifecycle_result.phases[0].status is PhaseStatus.INCOMPLETE
+    assert "repairable bundle" in (lifecycle_result.phases[0].reason or "")
 
 
 @pytest.mark.parametrize("unsafe_bundle", (".", "../../outside", "nested/name"))
@@ -1165,9 +2083,7 @@ scopes:
     )
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
-        if isinstance(request, CommandRequest):
-            return CommandFact(request.action_id, 0)
-        return ObservationFact(request.action_id, True)
+        return _passing_fulfil(request)
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.USER,)),
@@ -1189,6 +2105,14 @@ scopes:
     assert isinstance(uninstall, NotApplicablePhasePlan)
     assert uninstall.kind is PhaseKind.TARGET_UNINSTALL
     assert uninstall.cleanup_scope is Scope.USER
+    lifecycle_result = result.scenario_results[0]
+    assert isinstance(lifecycle_result, LifecycleResult)
+    assert lifecycle_result.status is ScenarioStatus.PASS
+    target_uninstall = lifecycle_result.phases[2]
+    assert target_uninstall.status is PhaseStatus.NOT_APPLICABLE
+    assert target_uninstall.reason == "the public user-scope uninstall is aggregate-only"
+    assert target_uninstall.command is None
+    assert target_uninstall.observation is None
     assert isinstance(aggregate, AggregatePlan)
     assert aggregate.scope is uninstall.cleanup_scope
     assert aggregate.uninstall.observation.surfaces == install.observation.surfaces

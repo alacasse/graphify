@@ -4,101 +4,26 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
 
-from tools.install_sandbox.validation.protocol import (
-    OperationEvent,
-    OperationKind,
-    StreamCapture,
+from tools.install_sandbox.validation.protocol import OperationEvent, OperationKind
+
+from .process_capture import BoundedCapture, pump_stream
+from .process_types import (
+    IncompleteProcessExecution,
+    ProcessExecution,
+    ProcessFailure,
+    SpawnedProcess,
 )
-
 from .supervisor_status import SupervisorStatus
 
 MINIMUM_TERMINATION_GRACE_SECONDS = 0.25
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessExecution:
-    exit_code: int
-    signal: int | None
-    timed_out: bool
-    stdout: StreamCapture
-    stderr: StreamCapture
-    started_ns: int
-    finished_ns: int
-    chronology: tuple[OperationEvent, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessFailure:
-    operation: str
-    detail: str
-    chronology: tuple[OperationEvent, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class IncompleteProcessExecution:
-    exit_code: int | None
-    signal: int | None
-    timed_out: bool
-    stdout: StreamCapture
-    stderr: StreamCapture
-    started_ns: int
-    finished_ns: int
-    chronology: tuple[OperationEvent, ...]
-    operation: str
-    detail: str
-
-
-@dataclass(frozen=True, slots=True)
-class _SpawnedProcess:
-    process: subprocess.Popen[bytes]
-    status_fd: int
-    started: OperationEvent
-
-
-@dataclass(slots=True)
-class _BoundedCapture:
-    limit: int
-    data: bytearray
-    total_bytes: int = 0
-    error: str | None = None
-
-    @classmethod
-    def open(cls, limit: int) -> _BoundedCapture:
-        return cls(limit, bytearray())
-
-    def append(self, chunk: bytes) -> None:
-        self.total_bytes += len(chunk)
-        remaining = self.limit - len(self.data)
-        if remaining > 0:
-            self.data.extend(chunk[:remaining])
-
-    def finish(self, *, process_complete: bool) -> StreamCapture:
-        omitted = self.total_bytes - len(self.data)
-        return StreamCapture(
-            bytes(self.data),
-            process_complete and omitted == 0 and self.error is None,
-            omitted,
-            self.error,
-        )
-
-
-def _pump(stream: BinaryIO, capture: _BoundedCapture) -> None:
-    try:
-        while chunk := stream.read(64 * 1024):
-            capture.append(chunk)
-    except OSError as error:
-        capture.error = str(error)
-    finally:
-        stream.close()
 
 
 class LocalProcessRunner:
@@ -177,11 +102,15 @@ class LocalProcessRunner:
         cwd: Path,
         environment: dict[str, str],
         event: Callable[[OperationKind], OperationEvent],
-    ) -> _SpawnedProcess | ProcessFailure:
+    ) -> SpawnedProcess | ProcessFailure:
         started = event(OperationKind.COMMAND_STARTED)
-        status_read_fd, status_write_fd = os.pipe()
+        status_parent, status_supervisor = socket.socketpair(
+            socket.AF_UNIX,
+            socket.SOCK_SEQPACKET,
+        )
+        status_fd = status_supervisor.fileno()
         supervisor_environment = dict(environment)
-        supervisor_environment["GRAPHIFY_SANDBOX_SUPERVISOR_STATUS_FD"] = str(status_write_fd)
+        supervisor_environment["GRAPHIFY_SANDBOX_SUPERVISOR_STATUS_FD"] = str(status_fd)
         supervisor = str(Path(__file__).with_name("supervisor.py"))
         try:
             process = subprocess.Popen(
@@ -192,40 +121,42 @@ class LocalProcessRunner:
                 stderr=subprocess.PIPE,
                 shell=False,
                 start_new_session=True,
-                pass_fds=(status_write_fd,),
+                pass_fds=(status_fd,),
             )
         except OSError as error:
-            os.close(status_read_fd)
-            os.close(status_write_fd)
+            status_parent.close()
+            status_supervisor.close()
             failed = event(OperationKind.COMMAND_FAILED)
             return ProcessFailure("spawn_command", str(error), (started, failed))
-        os.close(status_write_fd)
-        return _SpawnedProcess(process, status_read_fd, started)
+        status_supervisor.close()
+        return SpawnedProcess(process, status_parent, started)
 
-    def _read_status(self, status_fd: int) -> tuple[str, ...]:
+    def _read_status(self, status_socket: socket.socket) -> tuple[str, ...]:
+        frames: list[str] = []
         try:
-            with os.fdopen(status_fd, "rb") as status_stream:
-                payload = status_stream.read(16 * 1024)
+            with status_socket:
+                while payload := status_socket.recv(16 * 1024):
+                    frames.append(payload.decode(errors="replace"))
         except OSError as error:
-            return (f"STATUS_ERROR:{error}",)
-        return tuple(line.decode(errors="replace") for line in payload.splitlines())
+            frames.append(f"STATUS_ERROR:{error}")
+        return tuple(frames)
 
     def _start_pumps(
         self,
         process: subprocess.Popen[bytes],
     ) -> tuple[
         tuple[threading.Thread, threading.Thread],
-        tuple[_BoundedCapture, _BoundedCapture],
+        tuple[BoundedCapture, BoundedCapture],
     ]:
         assert process.stdout is not None
         assert process.stderr is not None
         captures = (
-            _BoundedCapture.open(self._capture_limit_bytes),
-            _BoundedCapture.open(self._capture_limit_bytes),
+            BoundedCapture.open(self._capture_limit_bytes),
+            BoundedCapture.open(self._capture_limit_bytes),
         )
         threads = (
-            threading.Thread(target=_pump, args=(process.stdout, captures[0]), daemon=True),
-            threading.Thread(target=_pump, args=(process.stderr, captures[1]), daemon=True),
+            threading.Thread(target=pump_stream, args=(process.stdout, captures[0]), daemon=True),
+            threading.Thread(target=pump_stream, args=(process.stderr, captures[1]), daemon=True),
         )
         for thread in threads:
             thread.start()
@@ -248,7 +179,7 @@ class LocalProcessRunner:
         self,
         process: subprocess.Popen[bytes],
         threads: tuple[threading.Thread, threading.Thread],
-        captures: tuple[_BoundedCapture, _BoundedCapture],
+        captures: tuple[BoundedCapture, BoundedCapture],
         chronology: list[OperationEvent],
         event: Callable[[OperationKind], OperationEvent],
         *,
@@ -271,7 +202,7 @@ class LocalProcessRunner:
 
     def _record_capture_error(
         self,
-        captures: tuple[_BoundedCapture, _BoundedCapture],
+        captures: tuple[BoundedCapture, BoundedCapture],
         detail: str,
     ) -> None:
         for capture in captures:
@@ -281,7 +212,7 @@ class LocalProcessRunner:
         self,
         process: subprocess.Popen[bytes],
         threads: tuple[threading.Thread, threading.Thread],
-        captures: tuple[_BoundedCapture, _BoundedCapture],
+        captures: tuple[BoundedCapture, BoundedCapture],
         chronology: list[OperationEvent],
         event: Callable[[OperationKind], OperationEvent],
     ) -> None:
@@ -290,8 +221,120 @@ class LocalProcessRunner:
         kill_error = self._signal_group(process, signal.SIGKILL)
         if kill_error is not None:
             self._record_capture_error(captures, kill_error)
+        else:
+            try:
+                process.wait(timeout=self._termination_grace_seconds)
+            except subprocess.TimeoutExpired:
+                self._record_capture_error(captures, "process did not exit after SIGKILL")
         if not self._join_pumps(threads):
             self._record_capture_error(captures, "stream capture did not seal after SIGKILL")
+
+    def _incomplete_execution(
+        self,
+        captures: tuple[BoundedCapture, BoundedCapture],
+        chronology: list[OperationEvent],
+        event: Callable[[OperationKind], OperationEvent],
+        *,
+        exit_code: int | None,
+        timed_out: bool,
+        operation: str,
+        detail: str,
+    ) -> IncompleteProcessExecution:
+        self._record_capture_error(captures, detail)
+        chronology.append(event(OperationKind.COMMAND_FAILED))
+        return IncompleteProcessExecution(
+            exit_code,
+            -exit_code if exit_code is not None and exit_code < 0 else None,
+            timed_out,
+            captures[0].finish(process_complete=False),
+            captures[1].finish(process_complete=False),
+            chronology[0].occurred_ns,
+            chronology[-1].occurred_ns,
+            tuple(chronology),
+            operation,
+            detail,
+        )
+
+    def _unspawned_status_result(
+        self,
+        status: SupervisorStatus,
+        captures: tuple[BoundedCapture, BoundedCapture],
+        chronology: list[OperationEvent],
+        event: Callable[[OperationKind], OperationEvent],
+        *,
+        timed_out: bool,
+    ) -> IncompleteProcessExecution | ProcessFailure:
+        detail = (
+            status.spawn_error
+            or status.custody_error
+            or status.status_error
+            or "supervisor did not prove whether the target spawned"
+        )
+        if status.transcript_valid:
+            chronology.append(event(OperationKind.COMMAND_FAILED))
+            operation = (
+                "spawn_command" if status.spawn_error is not None else "establish_process_custody"
+            )
+            return ProcessFailure(operation, detail, tuple(chronology))
+        return self._incomplete_execution(
+            captures,
+            chronology,
+            event,
+            exit_code=None,
+            timed_out=timed_out,
+            operation="establish_process_custody",
+            detail=detail,
+        )
+
+    def _execution_from_status(
+        self,
+        status: SupervisorStatus,
+        captures: tuple[BoundedCapture, BoundedCapture],
+        chronology: list[OperationEvent],
+        event: Callable[[OperationKind], OperationEvent],
+        *,
+        timed_out: bool,
+    ) -> ProcessExecution | IncompleteProcessExecution:
+        if status.descendants_terminated and not any(
+            item.kind is OperationKind.COMMAND_TERMINATED for item in chronology
+        ):
+            chronology.append(event(OperationKind.COMMAND_TERMINATED))
+        if status.kill_escalated and not any(
+            item.kind is OperationKind.COMMAND_KILL_ESCALATED for item in chronology
+        ):
+            chronology.append(event(OperationKind.COMMAND_KILL_ESCALATED))
+        if not status.transcript_valid or status.custody_error is not None:
+            detail = (
+                status.custody_error
+                or status.status_error
+                or (
+                    "supervisor did not confirm quiescence"
+                    if not status.quiescent
+                    else "supervisor status transcript is invalid"
+                )
+            )
+            return self._incomplete_execution(
+                captures,
+                chronology,
+                event,
+                exit_code=status.target_exit,
+                timed_out=timed_out,
+                operation="complete_process_custody",
+                detail=detail,
+            )
+        assert status.quiescent and status.target_exit is not None
+        finished = event(OperationKind.COMMAND_FINISHED)
+        chronology.append(finished)
+        return ProcessExecution(
+            status.target_exit,
+            -status.target_exit if status.target_exit < 0 else None,
+            timed_out,
+            captures[0].finish(process_complete=not timed_out),
+            captures[1].finish(process_complete=not timed_out),
+            chronology[0].occurred_ns,
+            finished.occurred_ns,
+            tuple(chronology),
+        )
 
     def run(
         self,
@@ -311,12 +354,17 @@ class LocalProcessRunner:
         chronology = [started]
         timed_out, termination_error = self._await_process(process, chronology, event)
         if termination_error is not None:
-            os.close(spawned.status_fd)
-            chronology.append(event(OperationKind.COMMAND_FAILED))
-            return ProcessFailure(
-                "terminate_process_group",
-                termination_error,
-                tuple(chronology),
+            self._record_capture_error(captures, termination_error)
+            self._kill_open_pumps(process, threads, captures, chronology, event)
+            spawned.status_socket.close()
+            return self._incomplete_execution(
+                captures,
+                chronology,
+                event,
+                exit_code=None,
+                timed_out=timed_out,
+                operation="terminate_process_group",
+                detail=termination_error,
             )
         self._seal_pumps(
             process,
@@ -326,59 +374,19 @@ class LocalProcessRunner:
             event,
             timed_out=timed_out,
         )
-        status = SupervisorStatus.parse(self._read_status(spawned.status_fd))
-        if status.spawn_error is not None or not status.spawned:
-            chronology.append(event(OperationKind.COMMAND_FAILED))
-            return ProcessFailure(
-                "spawn_command" if status.spawn_error is not None else "establish_process_custody",
-                status.spawn_error
-                or status.custody_error
-                or status.status_error
-                or "supervisor did not confirm spawn",
-                tuple(chronology),
+        status = SupervisorStatus.parse(self._read_status(spawned.status_socket))
+        if not status.spawned:
+            return self._unspawned_status_result(
+                status,
+                captures,
+                chronology,
+                event,
+                timed_out=timed_out,
             )
-        if status.descendants_terminated and not any(
-            item.kind is OperationKind.COMMAND_TERMINATED for item in chronology
-        ):
-            chronology.append(event(OperationKind.COMMAND_TERMINATED))
-        if status.kill_escalated and not any(
-            item.kind is OperationKind.COMMAND_KILL_ESCALATED for item in chronology
-        ):
-            chronology.append(event(OperationKind.COMMAND_KILL_ESCALATED))
-        if status.custody_error is not None or not status.quiescent or status.target_exit is None:
-            detail = status.custody_error or status.status_error
-            if detail is None:
-                detail = (
-                    "supervisor did not confirm quiescence"
-                    if not status.quiescent
-                    else "supervisor did not report a target exit"
-                )
-            self._record_capture_error(captures, detail)
-            chronology.append(event(OperationKind.COMMAND_FAILED))
-            return IncompleteProcessExecution(
-                status.target_exit,
-                -status.target_exit
-                if status.target_exit is not None and status.target_exit < 0
-                else None,
-                timed_out,
-                captures[0].finish(process_complete=False),
-                captures[1].finish(process_complete=False),
-                started.occurred_ns,
-                chronology[-1].occurred_ns,
-                tuple(chronology),
-                "complete_process_custody",
-                detail,
-            )
-        exit_code = status.target_exit
-        finished = event(OperationKind.COMMAND_FINISHED)
-        chronology.append(finished)
-        return ProcessExecution(
-            exit_code,
-            -exit_code if exit_code < 0 else None,
-            timed_out,
-            captures[0].finish(process_complete=not timed_out),
-            captures[1].finish(process_complete=not timed_out),
-            started.occurred_ns,
-            finished.occurred_ns,
-            tuple(chronology),
+        return self._execution_from_status(
+            status,
+            captures,
+            chronology,
+            event,
+            timed_out=timed_out,
         )

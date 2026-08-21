@@ -14,6 +14,12 @@ class SandboxFinishReason(StrEnum):
     ABORTED = "aborted"
 
 
+class SandboxRuntimeState(StrEnum):
+    ACTIVE = "active"
+    CUSTODY_LOST = "custody_lost"
+    FINISHED = "finished"
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxRuntimeFailure:
     operation: str
@@ -22,6 +28,13 @@ class SandboxRuntimeFailure:
 
 @dataclass(frozen=True, slots=True)
 class SandboxCleanupFact:
+    """Raw evidence of performed or deliberately refused session-root cleanup.
+
+    ``removed`` records whether the root was absent when cleanup finished.
+    ``failures`` distinguishes deliberate refusal after custody loss from a
+    failed removal attempt, even if the target independently removed the root.
+    """
+
     reason: SandboxFinishReason
     removed: bool
     failures: tuple[SandboxRuntimeFailure, ...]

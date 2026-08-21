@@ -136,6 +136,8 @@ def _fulfil_plan(
         rejection = _fulfil_phases(phases, fulfil, facts)
         if rejection is not None:
             return rejection
+        if facts and isinstance(facts[-1], CommandFailureFact):
+            return tuple(facts)
     return tuple(facts)
 
 

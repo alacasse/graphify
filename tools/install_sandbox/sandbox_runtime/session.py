@@ -37,11 +37,15 @@ from tools.install_sandbox.validation.protocol import (
 
 from .process import (
     MINIMUM_TERMINATION_GRACE_SECONDS,
-    IncompleteProcessExecution,
     LocalProcessRunner,
-    ProcessFailure,
 )
-from .types import SandboxCleanupFact, SandboxFinishReason, SandboxRuntimeFailure
+from .process_types import IncompleteProcessExecution, ProcessFailure
+from .types import (
+    SandboxCleanupFact,
+    SandboxFinishReason,
+    SandboxRuntimeFailure,
+    SandboxRuntimeState,
+)
 
 
 class SandboxConfigurationError(ValueError):
@@ -64,8 +68,7 @@ class SandboxRuntime:
         self._process_runner = process_runner
         self._capture_limit_bytes = capture_limit_bytes
         self._next_sequence = 0
-        self._finished = False
-        self._custody_intact = True
+        self._state = SandboxRuntimeState.ACTIVE
 
     @classmethod
     def open(
@@ -305,8 +308,10 @@ class SandboxRuntime:
     def fulfil(self, request: ActionRequest) -> RawFact:
         """Fulfil one validation-owned request without assigning semantic meaning."""
 
-        if self._finished:
+        if self._state is SandboxRuntimeState.FINISHED:
             raise RuntimeError("sandbox session is already finished")
+        if self._state is SandboxRuntimeState.CUSTODY_LOST:
+            raise RuntimeError("sandbox subprocess custody is lost")
         if isinstance(request, ObservationRequest):
             return self._observe(request)
         logical_cwd, cwd = self._working_directory(request.scope)
@@ -327,7 +332,7 @@ class SandboxRuntime:
             )
         after_snapshot = self._snapshot()
         if isinstance(process, IncompleteProcessExecution):
-            self._custody_intact = False
+            self._state = SandboxRuntimeState.CUSTODY_LOST
             return CommandFailureFact(
                 action_id=request.action_id,
                 exit_code=process.exit_code,
@@ -362,11 +367,14 @@ class SandboxRuntime:
         )
 
     def finish(self, reason: SandboxFinishReason) -> SandboxCleanupFact:
-        """Remove every owned runtime root and return raw cleanup evidence."""
+        """Return cleanup evidence, preserving roots when custody was lost."""
+
+        if self._state is SandboxRuntimeState.FINISHED:
+            raise RuntimeError("sandbox session is already finished")
 
         started = self._event(OperationKind.CLEANUP_STARTED)
         failures: list[SandboxRuntimeFailure] = []
-        if not self._custody_intact:
+        if self._state is SandboxRuntimeState.CUSTODY_LOST:
             failures.append(
                 SandboxRuntimeFailure(
                     "remove_session_root",
@@ -381,7 +389,7 @@ class SandboxRuntime:
                     shutil.rmtree(self._session_root)
             except OSError as error:
                 failures.append(SandboxRuntimeFailure("remove_session_root", str(error)))
-        self._finished = True
+        self._state = SandboxRuntimeState.FINISHED
         finished = self._event(OperationKind.CLEANUP_FINISHED)
         return SandboxCleanupFact(
             reason=reason,

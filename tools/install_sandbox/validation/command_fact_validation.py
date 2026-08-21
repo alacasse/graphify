@@ -162,10 +162,8 @@ def _valid_command_mechanics(
 def valid_command(request: CommandRequest, value: CommandFact) -> bool:
     timed_out = cast(object, value.timed_out)
     exit_code = cast(object, value.exit_code)
-    if (
-        not _valid_command_mechanics(request, value)
-        or not _valid_exit(exit_code, cast(object, value.signal), optional=False)
-        or (timed_out and cast(int, exit_code) >= 0)
+    if not _valid_command_mechanics(request, value) or not _valid_exit(
+        exit_code, cast(object, value.signal), optional=False
     ):
         return False
     kinds = (
@@ -209,7 +207,6 @@ def valid_command_failure(request: CommandRequest, value: CommandFailureFact) ->
     if (
         not _valid_command_mechanics(request, value)
         or not _valid_exit(exit_code, cast(object, value.signal), optional=True)
-        or (timed_out and exit_code is not None and cast(int, exit_code) >= 0)
         or not isinstance(cast(object, value.operation), str)
         or not value.operation
         or not isinstance(cast(object, value.detail), str)

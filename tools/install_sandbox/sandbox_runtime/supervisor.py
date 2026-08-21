@@ -143,7 +143,7 @@ def _terminate_tree(process: subprocess.Popen[bytes]) -> tuple[bool, bool, bool]
 
 def _write_status(status_fd: int, value: str) -> None:
     try:
-        os.write(status_fd, f"{value}\n".encode())
+        os.write(status_fd, value.encode())
     except OSError as error:
         if error.errno != errno.EPIPE:
             raise
@@ -159,7 +159,10 @@ def _exit_like(returncode: int) -> None:
     raise AssertionError("signal did not terminate supervisor")
 
 
-def _start_process(argv: tuple[str, ...], status_fd: int) -> subprocess.Popen[bytes] | None:
+def _start_process(
+    argv: tuple[str, ...],
+    status_fd: int,
+) -> subprocess.Popen[bytes] | None:
     try:
         _enable_subreaper()
     except OSError as error:

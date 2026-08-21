@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -131,6 +132,58 @@ def test_sandbox_runtime_preserves_partial_capture_when_a_command_times_out(
     )
 
     runtime.finish(SandboxFinishReason.ABORTED)
+
+
+def test_termination_control_failure_preserves_evidence_and_loses_custody(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    prepared_source.mkdir()
+    session_root = tmp_path / "session"
+    runtime = SandboxRuntime.open(
+        session_root,
+        prepared_source,
+        command_timeout_seconds=0.2,
+    )
+
+    def refuse_termination(_process: subprocess.Popen[bytes]) -> None:
+        raise OSError("forced termination control failure")
+
+    monkeypatch.setattr(subprocess.Popen, "terminate", refuse_termination)
+    request = CommandRequest(
+        action_id=ActionId("plan-fixture", 0),
+        subject=TargetSubject("fictional"),
+        scope=Scope.PROJECT,
+        phase=PhaseKind.INSTALL,
+        argv=(
+            sys.executable,
+            "-c",
+            "import sys, time; print('partial evidence', flush=True); time.sleep(5)",
+        ),
+    )
+
+    fact = runtime.fulfil(request)
+
+    assert isinstance(fact, CommandFailureFact)
+    assert fact.operation == "terminate_process_group"
+    assert fact.detail == "forced termination control failure"
+    assert fact.timed_out
+    assert fact.exit_code is None
+    assert fact.stdout.data == b"partial evidence\n"
+    assert fact.stdout.error == "forced termination control failure"
+    assert tuple(event.kind.value for event in fact.chronology) == (
+        "command_started",
+        "command_timed_out",
+        "command_terminated",
+        "command_kill_escalated",
+        "command_failed",
+    )
+    with pytest.raises(RuntimeError, match="subprocess custody is lost"):
+        runtime.fulfil(request)
+    cleanup = runtime.finish(SandboxFinishReason.ABORTED)
+    assert not cleanup.removed
+    assert cleanup.failures
 
 
 def test_sandbox_runtime_preserves_non_utf8_stream_bytes(tmp_path: Path) -> None:
@@ -410,6 +463,95 @@ def _fictional_documents() -> CatalogDocuments:
     )
 
 
+_FORGE_SUPERVISOR_STATUS = """
+import os
+from pathlib import Path
+
+for descriptor in Path(f"/proc/{os.getppid()}/fd").iterdir():
+    try:
+        if not os.readlink(descriptor).startswith("socket:"):
+            continue
+        forged = os.open(descriptor, os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        continue
+    os.write(forged, b"TARGET_EXIT:0")
+    os.write(forged, b"QUIESCENT")
+    os.close(forged)
+""".strip()
+
+
+def test_timeout_and_target_exit_zero_remain_independent_raw_facts(tmp_path: Path) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    source = prepared_source / "fixtures" / "config.txt"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"expected payload\n")
+    command = """
+import signal
+import sys
+import time
+from pathlib import Path
+
+destination = Path(".fictional/config.txt")
+destination.parent.mkdir(parents=True, exist_ok=True)
+destination.write_bytes(b"expected payload\\n")
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+print("ready", flush=True)
+time.sleep(5)
+""".strip()
+    runtime = SandboxRuntime.open(
+        tmp_path / "session",
+        prepared_source,
+        command_timeout_seconds=0.1,
+    )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        _fictional_documents(),
+        HarnessPolicy(
+            install_argv=(sys.executable, "-c", command),
+            uninstall_argv=(sys.executable, "-c", "raise SystemExit(0)"),
+        ),
+        runtime.fulfil,
+    )
+
+    assert isinstance(result, ValidationCompleted)
+    fact = result.raw_facts[0]
+    assert isinstance(fact, CommandFact)
+    assert fact.timed_out
+    assert fact.exit_code == 0
+    assert fact.signal is None
+    lifecycle = result.scenario_results[0]
+    assert isinstance(lifecycle, LifecycleResult)
+    assert lifecycle.status is ScenarioStatus.FINDING
+    assert lifecycle.phases[0].status is PhaseStatus.FINDING
+    assert lifecycle.phases[0].findings[0].detail == "command timed out"
+    cleanup = runtime.finish(SandboxFinishReason.COMPLETED)
+    assert cleanup.removed
+    assert cleanup.failures == ()
+
+
+def test_product_cannot_forge_the_supervisor_status_channel(tmp_path: Path) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    prepared_source.mkdir()
+    runtime = SandboxRuntime.open(tmp_path / "session", prepared_source)
+    request = CommandRequest(
+        action_id=ActionId("plan-fixture", 0),
+        subject=TargetSubject("fictional"),
+        scope=Scope.PROJECT,
+        phase=PhaseKind.INSTALL,
+        argv=(sys.executable, "-c", f"{_FORGE_SUPERVISOR_STATUS}\nraise SystemExit(17)"),
+    )
+
+    fact = runtime.fulfil(request)
+
+    assert isinstance(fact, CommandFact)
+    assert fact.exit_code == 17
+    assert fact.signal is None
+    cleanup = runtime.finish(SandboxFinishReason.COMPLETED)
+    assert cleanup.removed
+    assert cleanup.failures == ()
+
+
 @pytest.mark.parametrize("ignore_term", (False, True), ids=("graceful", "escalated"))
 def test_validation_accepts_observable_non_timeout_descendant_cleanup(
     tmp_path: Path,
@@ -493,7 +635,8 @@ def test_lost_supervisor_preserves_command_evidence_and_refuses_cleanup(
         "path.write_text('late')"
     )
     command = (
-        "import os, signal, subprocess, sys, time; "
+        f"{_FORGE_SUPERVISOR_STATUS}\n"
+        "import signal, subprocess, sys, time; "
         "print('evidence before custody loss', flush=True); "
         f"subprocess.Popen([sys.executable, '-c', {child!r}, {str(late_path)!r}], "
         "start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
@@ -510,7 +653,6 @@ def test_lost_supervisor_preserves_command_evidence_and_refuses_cleanup(
         ),
         runtime.fulfil,
     )
-    cleanup = runtime.finish(SandboxFinishReason.ABORTED)
 
     assert isinstance(result, ValidationCompleted)
     lifecycle = result.scenario_results[0]
@@ -522,6 +664,19 @@ def test_lost_supervisor_preserves_command_evidence_and_refuses_cleanup(
     assert fact.stdout.data == b"evidence before custody loss\n"
     assert fact.stdout.error == "supervisor did not confirm quiescence"
     assert fact.operation == "complete_process_custody"
+    with pytest.raises(RuntimeError, match="subprocess custody is lost"):
+        runtime.fulfil(
+            CommandRequest(
+                action_id=ActionId("plan-fixture", 99),
+                subject=TargetSubject("fictional"),
+                scope=Scope.PROJECT,
+                phase=PhaseKind.INSTALL,
+                argv=(sys.executable, "-c", "raise SystemExit(0)"),
+            )
+        )
+
+    cleanup = runtime.finish(SandboxFinishReason.ABORTED)
+
     assert not cleanup.removed
     assert cleanup.failures
     time.sleep(0.4)

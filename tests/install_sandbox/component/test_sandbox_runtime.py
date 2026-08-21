@@ -662,8 +662,9 @@ def test_lost_supervisor_preserves_command_evidence_and_refuses_cleanup(
     assert isinstance(fact, CommandFailureFact)
     assert fact.exit_code is None
     assert fact.stdout.data == b"evidence before custody loss\n"
-    assert fact.stdout.error == "supervisor did not confirm quiescence"
+    assert fact.stdout.error is not None
     assert fact.operation == "complete_process_custody"
+    assert fact.detail == "supervisor did not confirm quiescence"
     with pytest.raises(RuntimeError, match="subprocess custody is lost"):
         runtime.fulfil(
             CommandRequest(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -36,6 +37,13 @@ class ProcessFailure:
     operation: str
     detail: str
     chronology: tuple[OperationEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SpawnedProcess:
+    process: subprocess.Popen[bytes]
+    status_fd: int
+    started: OperationEvent
 
 
 @dataclass(slots=True)
@@ -121,7 +129,11 @@ class LocalProcessRunner:
         chronology: list[OperationEvent],
         event: Callable[[OperationKind], OperationEvent],
     ) -> str | None:
-        error = self._signal_group(process, signal.SIGTERM)
+        try:
+            process.terminate()
+            error = None
+        except OSError as process_error:
+            error = str(process_error)
         chronology.append(event(OperationKind.COMMAND_TERMINATED))
         if error is not None:
             return error
@@ -145,22 +157,44 @@ class LocalProcessRunner:
         cwd: Path,
         environment: dict[str, str],
         event: Callable[[OperationKind], OperationEvent],
-    ) -> tuple[subprocess.Popen[bytes], OperationEvent] | ProcessFailure:
+    ) -> _SpawnedProcess | ProcessFailure:
         started = event(OperationKind.COMMAND_STARTED)
+        status_read_fd, status_write_fd = os.pipe()
+        supervisor_environment = dict(environment)
+        supervisor_environment["GRAPHIFY_SANDBOX_SUPERVISOR_STATUS_FD"] = str(status_write_fd)
+        supervisor = str(Path(__file__).with_name("supervisor.py"))
         try:
             process = subprocess.Popen(
-                argv,
+                (sys.executable, supervisor, *argv),
                 cwd=cwd,
-                env=environment,
+                env=supervisor_environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 shell=False,
                 start_new_session=True,
+                pass_fds=(status_write_fd,),
             )
         except OSError as error:
+            os.close(status_read_fd)
+            os.close(status_write_fd)
             failed = event(OperationKind.COMMAND_FAILED)
             return ProcessFailure("spawn_command", str(error), (started, failed))
-        return process, started
+        os.close(status_write_fd)
+        return _SpawnedProcess(process, status_read_fd, started)
+
+    def _read_status(self, status_fd: int) -> tuple[str, ...]:
+        try:
+            with os.fdopen(status_fd, "rb") as status_stream:
+                payload = status_stream.read(16 * 1024)
+        except OSError as error:
+            return (f"STATUS_ERROR:{error}",)
+        return tuple(line.decode(errors="replace") for line in payload.splitlines())
+
+    def _status_detail(self, status: tuple[str, ...], prefix: str) -> str | None:
+        return next(
+            (line.removeprefix(prefix) for line in status if line.startswith(prefix)),
+            None,
+        )
 
     def _start_pumps(
         self,
@@ -257,11 +291,13 @@ class LocalProcessRunner:
         spawned = self._spawn(argv, cwd, environment, event)
         if isinstance(spawned, ProcessFailure):
             return spawned
-        process, started = spawned
+        process = spawned.process
+        started = spawned.started
         threads, captures = self._start_pumps(process)
         chronology = [started]
         timed_out, termination_error = self._await_process(process, chronology, event)
         if termination_error is not None:
+            os.close(spawned.status_fd)
             chronology.append(event(OperationKind.COMMAND_FAILED))
             return ProcessFailure(
                 "terminate_process_group",
@@ -276,6 +312,22 @@ class LocalProcessRunner:
             event,
             timed_out=timed_out,
         )
+        status = self._read_status(spawned.status_fd)
+        spawn_error = self._status_detail(status, "SPAWN_ERROR:")
+        custody_error = self._status_detail(status, "CUSTODY_ERROR:")
+        status_error = self._status_detail(status, "STATUS_ERROR:")
+        if spawn_error is not None or custody_error is not None or "SPAWNED" not in status:
+            chronology.append(event(OperationKind.COMMAND_FAILED))
+            detail = spawn_error or custody_error or status_error
+            return ProcessFailure(
+                "spawn_command" if spawn_error is not None else "establish_process_custody",
+                detail or "supervisor did not confirm custody",
+                tuple(chronology),
+            )
+        if "KILL_ESCALATED" in status and not any(
+            item.kind is OperationKind.COMMAND_KILL_ESCALATED for item in chronology
+        ):
+            chronology.append(event(OperationKind.COMMAND_KILL_ESCALATED))
         exit_code = process.returncode
         if exit_code is None:
             chronology.append(event(OperationKind.COMMAND_FAILED))

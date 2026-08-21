@@ -42,14 +42,16 @@ scopes:
         )
 
     documents = CatalogDocuments.from_directory(catalog_dir)
+    next_sequence = 0
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        nonlocal next_sequence
         assert isinstance(request, CommandRequest)
-        sequence = request.action_id.ordinal * 2
         chronology = (
-            OperationEvent(sequence, OperationKind.COMMAND_STARTED, sequence),
-            OperationEvent(sequence + 1, OperationKind.COMMAND_FAILED, sequence + 1),
+            OperationEvent(next_sequence, OperationKind.COMMAND_STARTED, next_sequence),
+            OperationEvent(next_sequence + 1, OperationKind.COMMAND_FAILED, next_sequence + 1),
         )
+        next_sequence += 2
         return ActionFailureFact(
             request.action_id,
             ActionKind.COMMAND,

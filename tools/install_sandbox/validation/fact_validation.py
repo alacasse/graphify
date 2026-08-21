@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import PurePosixPath
 from typing import cast
 
@@ -107,6 +108,14 @@ def _valid_byte_capture(value: object) -> bool:
     )
 
 
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def _valid_stream_capture(value: object, *, timed_out: bool) -> bool:
     if not isinstance(value, StreamCapture):
         return False
@@ -142,14 +151,20 @@ def _valid_entry_payload(value: EntryFact) -> bool:
     if error is not None:
         return isinstance(error, str) and bool(error)
     if kind is EntryKind.FILE:
-        return (
-            type(cast(object, value.size)) is int
-            and cast(int, value.size) >= 0
-            and isinstance(value.sha256, str)
-            and len(value.sha256) == 64
-            and _valid_byte_capture(cast(object, value.content))
-            and value.symlink_target is None
-        )
+        raw_size = cast(object, value.size)
+        raw_content = cast(object, value.content)
+        if (
+            type(raw_size) is not int
+            or raw_size < 0
+            or not _valid_sha256(cast(object, value.sha256))
+            or not _valid_byte_capture(raw_content)
+            or value.symlink_target is not None
+        ):
+            return False
+        content = cast(ByteCapture, raw_content)
+        if raw_size != len(content.data) + content.omitted_bytes:
+            return False
+        return not content.complete or value.sha256 == hashlib.sha256(content.data).hexdigest()
     if kind is EntryKind.SYMLINK:
         return (
             value.size is None
@@ -190,8 +205,7 @@ def _valid_snapshot_entry(value: object) -> bool:
         return (
             type(cast(object, value.size)) is int
             and cast(int, value.size) >= 0
-            and isinstance(value.sha256, str)
-            and len(value.sha256) == 64
+            and _valid_sha256(cast(object, value.sha256))
             and value.symlink_target is None
         )
     if value.kind is EntryKind.SYMLINK:
@@ -371,3 +385,15 @@ def validate_raw_fact(request: ActionRequest, value: object) -> RawFact | str:
             else "Raw Fact observation evidence is invalid"
         )
     return "Raw Fact variant disagrees with the request"
+
+
+def validate_session_chronology(facts: tuple[RawFact, ...]) -> str | None:
+    """Require all accepted facts to extend one gapless session chronology."""
+
+    events = tuple(event for fact in facts for event in fact.chronology)
+    if tuple(event.sequence for event in events) != tuple(range(len(events))):
+        return "Raw Facts do not form one total session chronology"
+    occurred = tuple(event.occurred_ns for event in events)
+    if occurred != tuple(sorted(occurred)):
+        return "Raw Facts do not form one total session chronology"
+    return None

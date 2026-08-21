@@ -189,6 +189,42 @@ def _passing_fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
     return _passing_observation(request)
 
 
+class _SessionFacts:
+    def __init__(self) -> None:
+        self._next_sequence = 0
+        self._next_time = 0
+
+    def bind(self, fact: RawFact) -> RawFact:
+        chronology = tuple(
+            replace(
+                event,
+                sequence=self._next_sequence + offset,
+                occurred_ns=self._next_time + offset,
+            )
+            for offset, event in enumerate(fact.chronology)
+        )
+        self._next_sequence += len(chronology)
+        self._next_time += len(chronology)
+        if isinstance(fact, CommandFact):
+            return replace(
+                fact,
+                started_ns=chronology[0].occurred_ns,
+                finished_ns=chronology[-1].occurred_ns,
+                chronology=chronology,
+            )
+        if isinstance(fact, ObservationFact):
+            return replace(
+                fact,
+                started_ns=chronology[0].occurred_ns,
+                finished_ns=chronology[-1].occurred_ns,
+                chronology=chronology,
+            )
+        return replace(fact, chronology=chronology)
+
+    def passing(self, request: CommandRequest | ObservationRequest) -> RawFact:
+        return self.bind(_passing_fulfil(request))
+
+
 def _catalog_text(project: object, user: object | None = None) -> str:
     if user is None:
         user = {
@@ -364,16 +400,19 @@ def test_failed_setup_command_blocks_dependent_lifecycle_phases() -> None:
         )
     )
     requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         requests.append(request)
         if isinstance(request, ObservationRequest):
-            return _passing_observation(request)
-        return replace(
-            _passing_command(request),
-            exit_code=17 if len(requests) == 1 else 0,
-            stdout=StreamCapture(b"partial product output", True),
-            stderr=StreamCapture(b"product error", True),
+            return session.bind(_passing_observation(request))
+        return session.bind(
+            replace(
+                _passing_command(request),
+                exit_code=17 if len(requests) == 1 else 0,
+                stdout=StreamCapture(b"partial product output", True),
+                stderr=StreamCapture(b"product error", True),
+            )
         )
 
     result = validate(
@@ -525,6 +564,7 @@ def test_runtime_failure_makes_the_scenario_and_dependents_incomplete() -> None:
         )
     )
     requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         requests.append(request)
@@ -534,14 +574,16 @@ def test_runtime_failure_makes_the_scenario_and_dependents_incomplete() -> None:
                 OperationKind.COMMAND_STARTED,
                 OperationKind.COMMAND_FAILED,
             )
-            return ActionFailureFact(
-                request.action_id,
-                ActionKind.COMMAND,
-                "spawn_command",
-                "fixture executable is unavailable",
-                chronology,
+            return session.bind(
+                ActionFailureFact(
+                    request.action_id,
+                    ActionKind.COMMAND,
+                    "spawn_command",
+                    "fixture executable is unavailable",
+                    chronology,
+                )
             )
-        return _passing_fulfil(request)
+        return session.passing(request)
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
@@ -583,22 +625,23 @@ def test_untrustworthy_filesystem_evidence_prevents_dependent_phases(
         )
     )
     requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         requests.append(request)
         if request.action_id.ordinal not in {0, 1}:
-            return _passing_fulfil(request)
+            return session.passing(request)
         if isinstance(request, CommandRequest):
             command = _passing_command(request)
             if failure_kind != "snapshot":
-                return command
+                return session.bind(command)
             entries = tuple(
                 replace(entry, error="root scan failed")
                 if entry.root is SurfaceRoot.PROJECT
                 else entry
                 for entry in command.after_snapshot.entries
             )
-            return replace(command, after_snapshot=FilesystemSnapshot(entries))
+            return session.bind(replace(command, after_snapshot=FilesystemSnapshot(entries)))
         observation = _passing_observation(request)
         first = observation.surfaces[0]
         if failure_kind == "entry":
@@ -611,11 +654,13 @@ def test_untrustworthy_filesystem_evidence_prevents_dependent_phases(
         else:
             destination = replace(
                 first.destination,
-                content=ByteCapture(b"partial", False, 7),
+                content=ByteCapture(b"partial", False, 10),
             )
-        return replace(
-            observation,
-            surfaces=(replace(first, destination=destination),),
+        return session.bind(
+            replace(
+                observation,
+                surfaces=(replace(first, destination=destination),),
+            )
         )
 
     result = validate(
@@ -649,14 +694,18 @@ def test_timeout_is_a_product_finding_with_partial_capture_preserved() -> None:
         )
     )
 
+    session = _SessionFacts()
+
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         if isinstance(request, CommandRequest) and request.phase is PhaseKind.INSTALL:
-            return _timed_out_command(
-                request,
-                stdout=StreamCapture(b"output before timeout", False, 7),
-                stderr=StreamCapture(b"error before timeout", False, 5),
+            return session.bind(
+                _timed_out_command(
+                    request,
+                    stdout=StreamCapture(b"output before timeout", False, 7),
+                    stderr=StreamCapture(b"error before timeout", False, 5),
+                )
             )
-        return _passing_fulfil(request)
+        return session.passing(request)
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
@@ -784,6 +833,146 @@ def test_raw_fact_protocol_rejects_an_unknown_surface_member() -> None:
     assert result.reasons == ("Raw Fact observation evidence is invalid",)
 
 
+def test_raw_fact_protocol_rejects_a_restarted_session_chronology() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        chronology = tuple(
+            replace(event, sequence=offset, occurred_ns=offset)
+            for offset, event in enumerate(fact.chronology)
+        )
+        if isinstance(fact, CommandFact):
+            return replace(
+                fact,
+                started_ns=chronology[0].occurred_ns,
+                finished_ns=chronology[-1].occurred_ns,
+                chronology=chronology,
+            )
+        assert isinstance(fact, ObservationFact)
+        return replace(
+            fact,
+            started_ns=chronology[0].occurred_ns,
+            finished_ns=chronology[-1].occurred_ns,
+            chronology=chronology,
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Facts do not form one total session chronology",)
+
+
+def _wrong_file_size(entry: EntryFact) -> EntryFact:
+    assert entry.size is not None
+    return replace(entry, size=entry.size + 1)
+
+
+def _non_hex_file_digest(entry: EntryFact) -> EntryFact:
+    return replace(entry, sha256="z" * 64)
+
+
+def _contradictory_file_digest(entry: EntryFact) -> EntryFact:
+    return replace(entry, sha256="0" * 64)
+
+
+def _wrong_omitted_byte_count(entry: EntryFact) -> EntryFact:
+    return replace(entry, content=ByteCapture(b"expected", False, 2))
+
+
+@pytest.mark.parametrize(
+    "malform",
+    (
+        _wrong_file_size,
+        _non_hex_file_digest,
+        _contradictory_file_digest,
+        _wrong_omitted_byte_count,
+    ),
+)
+def test_raw_fact_protocol_rejects_incoherent_entry_file_evidence(
+    malform: Callable[[EntryFact], EntryFact],
+) -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        if isinstance(fact, CommandFact) or request.action_id.ordinal != 1:
+            return fact
+        assert isinstance(fact, ObservationFact)
+        surface = fact.surfaces[0]
+        return replace(
+            fact,
+            surfaces=(replace(surface, destination=malform(surface.destination)),),
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Fact observation evidence is invalid",)
+
+
+def test_raw_fact_protocol_rejects_a_non_sha256_snapshot_digest() -> None:
+    documents = CatalogDocuments(
+        (
+            CatalogDocument(
+                "fictional.yaml",
+                _catalog_text(_supported_project(_owned_file_surface())),
+            ),
+        )
+    )
+
+    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+        fact = _passing_fulfil(request)
+        if isinstance(fact, ObservationFact):
+            return fact
+        assert isinstance(fact, CommandFact)
+        invalid_entry = SnapshotEntry(
+            SurfaceRoot.PROJECT,
+            "invalid.txt",
+            EntryKind.FILE,
+            size=1,
+            sha256="z" * 64,
+        )
+        return replace(
+            fact,
+            after_snapshot=FilesystemSnapshot((*fact.after_snapshot.entries, invalid_entry)),
+        )
+
+    result = validate(
+        ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
+        documents,
+        HarnessPolicy(),
+        fulfil,
+    )
+
+    assert isinstance(result, ValidationRejected)
+    assert result.reasons == ("Raw Fact command evidence is invalid",)
+
+
 def test_observation_failure_takes_precedence_over_a_product_timeout() -> None:
     documents = CatalogDocuments(
         (
@@ -794,14 +983,17 @@ def test_observation_failure_takes_precedence_over_a_product_timeout() -> None:
         )
     )
     requests: list[CommandRequest | ObservationRequest] = []
+    session = _SessionFacts()
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
         requests.append(request)
         if isinstance(request, CommandRequest) and request.action_id.ordinal == 0:
-            return _timed_out_command(
-                request,
-                stdout=StreamCapture(b"partial", False),
-                stderr=StreamCapture(b"", False),
+            return session.bind(
+                _timed_out_command(
+                    request,
+                    stdout=StreamCapture(b"partial", False),
+                    stderr=StreamCapture(b"", False),
+                )
             )
         if isinstance(request, ObservationRequest) and request.action_id.ordinal == 1:
             chronology = _chronology(
@@ -809,14 +1001,16 @@ def test_observation_failure_takes_precedence_over_a_product_timeout() -> None:
                 OperationKind.OBSERVATION_STARTED,
                 OperationKind.OBSERVATION_FAILED,
             )
-            return ActionFailureFact(
-                request.action_id,
-                ActionKind.OBSERVATION,
-                "observe_surface",
-                "filesystem became unreadable",
-                chronology,
+            return session.bind(
+                ActionFailureFact(
+                    request.action_id,
+                    ActionKind.OBSERVATION,
+                    "observe_surface",
+                    "filesystem became unreadable",
+                    chronology,
+                )
             )
-        return _passing_fulfil(request)
+        return session.passing(request)
 
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.PROJECT,)),
@@ -1773,11 +1967,12 @@ scopes:
         )
     )
 
+    session = _SessionFacts()
     result = validate(
         ValidationRequest(targets=("fictional",), scopes=(Scope.USER,)),
         documents,
         HarnessPolicy(),
-        _passing_fulfil,
+        session.passing,
     )
 
     assert isinstance(result, ValidationCompleted)

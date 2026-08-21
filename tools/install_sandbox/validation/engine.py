@@ -14,7 +14,7 @@ from .catalog import (
     compile_catalog,
 )
 from .evaluation import derive_results, evaluate_phase
-from .fact_validation import validate_raw_fact
+from .fact_validation import validate_raw_fact, validate_session_chronology
 from .plan import build_validation_plan
 from .plan_types import (
     AggregatePlan,
@@ -77,6 +77,9 @@ def _fulfil_phase(
     command = _fulfil_action(phase.command, fulfil)
     if isinstance(command, str):
         return False, command
+    chronology_rejection = validate_session_chronology((*facts, command))
+    if chronology_rejection is not None:
+        return False, chronology_rejection
     facts.append(command)
     if isinstance(command, ActionFailureFact):
         return True, None
@@ -84,6 +87,9 @@ def _fulfil_phase(
     observation = _fulfil_action(phase.observation, fulfil)
     if isinstance(observation, str):
         return False, observation
+    chronology_rejection = validate_session_chronology((*facts, observation))
+    if chronology_rejection is not None:
+        return False, chronology_rejection
     facts.append(observation)
     result = evaluate_phase(
         phase,

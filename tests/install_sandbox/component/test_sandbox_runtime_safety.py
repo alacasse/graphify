@@ -66,9 +66,11 @@ def test_snapshot_records_root_replacement_without_following_it(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("stdio", ("inherit", "closed"))
+@pytest.mark.parametrize("detached", (False, True), ids=("same-session", "detached-session"))
 def test_timeout_terminates_descendants_and_reaches_quiescence(
     tmp_path: Path,
     stdio: str,
+    detached: bool,
 ) -> None:
     prepared_source = tmp_path / "prepared-source"
     prepared_source.mkdir()
@@ -78,10 +80,12 @@ def test_timeout_terminates_descendants_and_reaches_quiescence(
         prepared_source,
         command_timeout_seconds=0.2,
     )
+    late_path = session_root / "project" / "late.txt"
     child = (
-        "import signal, time; from pathlib import Path; "
+        "import signal, sys, time; from pathlib import Path; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(1); "
-        "Path('late.txt').write_text('late')"
+        "path = Path(sys.argv[1]); path.parent.mkdir(parents=True, exist_ok=True); "
+        "path.write_text('late')"
     )
     child_stdio = (
         "" if stdio == "inherit" else ", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL"
@@ -96,7 +100,8 @@ def test_timeout_terminates_descendants_and_reaches_quiescence(
             "-c",
             (
                 "import subprocess, sys, time; "
-                f"subprocess.Popen([sys.executable, '-c', {child!r}]{child_stdio}); "
+                f"subprocess.Popen([sys.executable, '-c', {child!r}, {str(late_path)!r}], "
+                f"start_new_session={detached!r}{child_stdio}); "
                 "time.sleep(5)"
             ),
         ),
@@ -109,10 +114,13 @@ def test_timeout_terminates_descendants_and_reaches_quiescence(
     assert isinstance(fact, CommandFact)
     assert fact.timed_out
     assert elapsed < 0.8
-    assert any(event.kind.value == "command_kill_escalated" for event in fact.chronology)
+    assert any(event.kind.value == "command_terminated" for event in fact.chronology)
+    if not detached:
+        assert any(event.kind.value == "command_kill_escalated" for event in fact.chronology)
+    cleanup = runtime.finish(SandboxFinishReason.ABORTED)
+    assert cleanup.removed
     time.sleep(1.1)
-    assert not (session_root / "project" / "late.txt").exists()
-    runtime.finish(SandboxFinishReason.ABORTED)
+    assert not session_root.exists()
 
 
 def test_subprocess_pwd_matches_its_isolated_logical_working_directory(

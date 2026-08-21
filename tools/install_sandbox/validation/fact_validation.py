@@ -38,6 +38,8 @@ from .protocol import (
     SurfaceFact,
 )
 
+_PRE_SPAWN_COMMAND_FAILURE_OPERATIONS = frozenset({"spawn_command", "establish_process_custody"})
+
 
 def _valid_action_id(value: object) -> bool:
     if not isinstance(value, ActionId):
@@ -166,10 +168,15 @@ def _valid_failure(request: ActionRequest, value: ActionFailureFact) -> bool:
         if expected_kind is ActionKind.COMMAND
         else ((OperationKind.OBSERVATION_STARTED, OperationKind.OBSERVATION_FAILED),)
     )
+    operation = cast(object, value.operation)
     return (
         value.action_kind is expected_kind
-        and isinstance(cast(object, value.operation), str)
-        and bool(value.operation)
+        and isinstance(operation, str)
+        and bool(operation)
+        and (
+            expected_kind is ActionKind.OBSERVATION
+            or operation in _PRE_SPAWN_COMMAND_FAILURE_OPERATIONS
+        )
         and isinstance(cast(object, value.detail), str)
         and bool(value.detail)
         and valid_chronology(

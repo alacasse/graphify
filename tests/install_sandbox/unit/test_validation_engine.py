@@ -808,7 +808,11 @@ def test_raw_fact_protocol_rejects_incoherent_command_evidence(
     assert "Raw Fact" in result.reasons[0]
 
 
-def test_raw_fact_protocol_rejects_lossy_post_spawn_action_failure() -> None:
+@pytest.mark.parametrize(
+    "operation",
+    ("terminate_process_group", "complete_process_custody"),
+)
+def test_raw_fact_protocol_rejects_lossy_post_spawn_action_failure(operation: str) -> None:
     request = CommandRequest(
         action_id=ActionId("plan-fixture", 0),
         subject=TargetSubject("fictional"),
@@ -821,8 +825,6 @@ def test_raw_fact_protocol_rejects_lossy_post_spawn_action_failure() -> None:
         for sequence, kind in enumerate(
             (
                 OperationKind.COMMAND_STARTED,
-                OperationKind.COMMAND_TIMED_OUT,
-                OperationKind.COMMAND_TERMINATED,
                 OperationKind.COMMAND_FAILED,
             )
         )
@@ -833,7 +835,7 @@ def test_raw_fact_protocol_rejects_lossy_post_spawn_action_failure() -> None:
         ActionFailureFact(
             request.action_id,
             ActionKind.COMMAND,
-            "terminate_process_group",
+            operation,
             "post-spawn evidence was discarded",
             chronology,
         ),

@@ -55,7 +55,7 @@ scopes:
         return ActionFailureFact(
             request.action_id,
             ActionKind.COMMAND,
-            "fixture_stop",
+            "spawn_command",
             "catalog component test does not execute product commands",
             chronology,
         )

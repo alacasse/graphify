@@ -8,10 +8,12 @@ from tools.install_sandbox.validation.catalog import CatalogDocuments, CatalogRe
 from tools.install_sandbox.validation.engine import ValidationCompleted, validate
 from tools.install_sandbox.validation.plan_types import HarnessPolicy, ValidationRequest
 from tools.install_sandbox.validation.protocol import (
-    CommandFact,
+    ActionFailureFact,
+    ActionKind,
     CommandRequest,
-    ObservationFact,
     ObservationRequest,
+    OperationEvent,
+    OperationKind,
     RawFact,
 )
 
@@ -42,9 +44,19 @@ scopes:
     documents = CatalogDocuments.from_directory(catalog_dir)
 
     def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
-        if isinstance(request, CommandRequest):
-            return CommandFact(request.action_id, 0)
-        return ObservationFact(request.action_id, ())
+        assert isinstance(request, CommandRequest)
+        sequence = request.action_id.ordinal * 2
+        chronology = (
+            OperationEvent(sequence, OperationKind.COMMAND_STARTED, sequence),
+            OperationEvent(sequence + 1, OperationKind.COMMAND_FAILED, sequence + 1),
+        )
+        return ActionFailureFact(
+            request.action_id,
+            ActionKind.COMMAND,
+            "fixture_stop",
+            "catalog component test does not execute product commands",
+            chronology,
+        )
 
     result = validate(
         ValidationRequest(targets=("first", "second"), scopes=(Scope.PROJECT,)),

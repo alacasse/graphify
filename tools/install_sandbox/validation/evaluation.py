@@ -33,7 +33,9 @@ from .results import (
 )
 
 
-def _phase_result(phase: PhasePlan, facts: dict[ActionId, RawFact]) -> PhaseResult:
+def evaluate_phase(phase: PhasePlan, facts: dict[ActionId, RawFact]) -> PhaseResult:
+    """Derive one closed phase result from already validated correlated facts."""
+
     command = facts.get(phase.command.action_id)
     observation = facts.get(phase.observation.action_id)
     if isinstance(command, ActionFailureFact):
@@ -53,13 +55,26 @@ def _phase_result(phase: PhasePlan, facts: dict[ActionId, RawFact]) -> PhaseResu
             observation if isinstance(observation, ObservationFact) else None,
             reason="required raw phase evidence is missing",
         )
-    if command.argv != phase.command.argv or command.working_directory is None:
+    if command.argv != phase.command.argv:
         return PhaseResult(
             phase.kind,
             PhaseStatus.INCOMPLETE,
             command,
             observation if isinstance(observation, ObservationFact) else None,
             reason="command evidence disagrees with the plan",
+        )
+    capture_errors = tuple(
+        f"{name} capture failed: {capture.error}"
+        for name, capture in (("stdout", command.stdout), ("stderr", command.stderr))
+        if capture.error is not None
+    )
+    if capture_errors:
+        return PhaseResult(
+            phase.kind,
+            PhaseStatus.INCOMPLETE,
+            command,
+            observation if isinstance(observation, ObservationFact) else None,
+            reason="; ".join(capture_errors),
         )
     if not isinstance(observation, ObservationFact):
         failure = observation if isinstance(observation, ActionFailureFact) else None
@@ -151,7 +166,7 @@ def _evaluated_phases(
         if prevented is not None:
             results.append(_prevented_result(phase, *prevented))
             continue
-        result = _phase_result(phase, facts)
+        result = evaluate_phase(phase, facts)
         if (
             phase.kind in {PhaseKind.REINSTALL, PhaseKind.REPAIR}
             and stable_installed is not None

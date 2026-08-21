@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path, PurePosixPath
 
@@ -32,10 +31,10 @@ from tools.install_sandbox.validation.protocol import (
     RawFact,
     SandboxPath,
     SnapshotEntry,
-    StreamCapture,
     SurfaceFact,
 )
 
+from .process import LocalProcessRunner, ProcessFailure
 from .types import SandboxCleanupFact, SandboxFinishReason, SandboxRuntimeFailure
 
 
@@ -50,13 +49,13 @@ class SandboxRuntime:
         self,
         session_root: Path,
         prepared_source: Path,
-        command_timeout_seconds: float,
+        process_runner: LocalProcessRunner,
         capture_limit_bytes: int,
     ) -> None:
         self._session_root = session_root
         self._prepared_source = prepared_source
         self._roots = {root: session_root / root.value for root in SurfaceRoot}
-        self._command_timeout_seconds = command_timeout_seconds
+        self._process_runner = process_runner
         self._capture_limit_bytes = capture_limit_bytes
         self._next_sequence = 0
         self._finished = False
@@ -68,6 +67,7 @@ class SandboxRuntime:
         prepared_source: Path,
         *,
         command_timeout_seconds: float = 30.0,
+        termination_grace_seconds: float = 0.2,
         capture_limit_bytes: int = 1_000_000,
     ) -> SandboxRuntime:
         """Allocate one fresh session whose logical roots never alias."""
@@ -86,13 +86,23 @@ class SandboxRuntime:
             raise SandboxConfigurationError(
                 "sandbox session and prepared source must not alias or contain one another"
             )
-        if command_timeout_seconds <= 0 or capture_limit_bytes <= 0:
-            raise SandboxConfigurationError("sandbox timeout and capture limit must be positive")
+        if (
+            command_timeout_seconds <= 0
+            or termination_grace_seconds <= 0
+            or capture_limit_bytes <= 0
+        ):
+            raise SandboxConfigurationError(
+                "sandbox timeout, termination grace, and capture limit must be positive"
+            )
         session_root.mkdir(parents=True)
         runtime = cls(
             resolved_session,
             resolved_source,
-            command_timeout_seconds,
+            LocalProcessRunner(
+                command_timeout_seconds,
+                termination_grace_seconds,
+                capture_limit_bytes,
+            ),
             capture_limit_bytes,
         )
         for root in runtime._roots.values():
@@ -104,10 +114,11 @@ class SandboxRuntime:
         self._next_sequence += 1
         return event
 
-    def _environment(self) -> dict[str, str]:
+    def _environment(self, cwd: Path) -> dict[str, str]:
         environment = os.environ.copy()
         environment["HOME"] = str(self._roots[SurfaceRoot.HOME])
         environment["XDG_CONFIG_HOME"] = str(self._roots[SurfaceRoot.XDG])
+        environment["PWD"] = str(cwd)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         environment.pop("CLAUDE_CONFIG_DIR", None)
         environment.pop("LOCALAPPDATA", None)
@@ -116,15 +127,6 @@ class SandboxRuntime:
     def _working_directory(self, scope: Scope) -> tuple[SurfaceRoot, Path]:
         logical = SurfaceRoot.USER_CWD if scope is Scope.USER else SurfaceRoot.PROJECT
         return logical, self._roots[logical]
-
-    def _capture(self, value: bytes, *, complete: bool) -> StreamCapture:
-        visible = value[: self._capture_limit_bytes]
-        omitted = len(value) - len(visible)
-        return StreamCapture(
-            visible,
-            complete and omitted == 0,
-            omitted,
-        )
 
     def _relative_path(self, value: str) -> PurePosixPath | None:
         path = PurePosixPath(value)
@@ -301,51 +303,33 @@ class SandboxRuntime:
             return self._observe(request)
         logical_cwd, cwd = self._working_directory(request.scope)
         before_snapshot = self._snapshot()
-        started = self._event(OperationKind.COMMAND_STARTED)
-        try:
-            process = subprocess.Popen(
-                request.argv,
-                cwd=cwd,
-                env=self._environment(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-            )
-        except OSError as error:
-            failed = self._event(OperationKind.COMMAND_FAILED)
+        process = self._process_runner.run(
+            request.argv,
+            cwd,
+            self._environment(cwd),
+            self._event,
+        )
+        if isinstance(process, ProcessFailure):
             return ActionFailureFact(
                 request.action_id,
                 ActionKind.COMMAND,
-                "spawn_command",
-                str(error),
-                (started, failed),
+                process.operation,
+                process.detail,
+                process.chronology,
             )
-        chronology = [started]
-        timed_out = False
-        try:
-            stdout, stderr = process.communicate(timeout=self._command_timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            chronology.append(self._event(OperationKind.COMMAND_TIMED_OUT))
-            process.kill()
-            chronology.append(self._event(OperationKind.COMMAND_TERMINATED))
-            stdout, stderr = process.communicate()
-        finished = self._event(OperationKind.COMMAND_FINISHED)
-        chronology.append(finished)
-        signal = -process.returncode if process.returncode < 0 else None
         after_snapshot = self._snapshot()
         return CommandFact(
             action_id=request.action_id,
-            exit_code=process.returncode,
+            exit_code=process.exit_code,
             argv=request.argv,
             working_directory=logical_cwd,
-            signal=signal,
-            timed_out=timed_out,
-            stdout=self._capture(stdout, complete=not timed_out),
-            stderr=self._capture(stderr, complete=not timed_out),
-            started_ns=started.occurred_ns,
-            finished_ns=finished.occurred_ns,
-            chronology=tuple(chronology),
+            signal=process.signal,
+            timed_out=process.timed_out,
+            stdout=process.stdout,
+            stderr=process.stderr,
+            started_ns=process.started_ns,
+            finished_ns=process.finished_ns,
+            chronology=process.chronology,
             before_snapshot=before_snapshot,
             after_snapshot=after_snapshot,
         )

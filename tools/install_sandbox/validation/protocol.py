@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 from .catalog import InstallSurface, Scope, SurfaceRoot
@@ -38,8 +38,10 @@ class OperationKind(StrEnum):
     COMMAND_FAILED = "command_failed"
     COMMAND_TIMED_OUT = "command_timed_out"
     COMMAND_TERMINATED = "command_terminated"
+    COMMAND_KILL_ESCALATED = "command_kill_escalated"
     COMMAND_FINISHED = "command_finished"
     OBSERVATION_STARTED = "observation_started"
+    OBSERVATION_FAILED = "observation_failed"
     OBSERVATION_FINISHED = "observation_finished"
     CLEANUP_STARTED = "cleanup_started"
     CLEANUP_FINISHED = "cleanup_finished"
@@ -59,6 +61,7 @@ class StreamCapture:
     data: bytes
     complete: bool
     omitted_bytes: int = 0
+    error: str | None = None
 
 
 class ActionKind(StrEnum):
@@ -176,17 +179,17 @@ class CommandFact:
 
     action_id: ActionId
     exit_code: int
-    argv: tuple[str, ...] = ()
-    working_directory: SurfaceRoot | None = None
-    signal: int | None = None
-    timed_out: bool = False
-    stdout: StreamCapture = field(default_factory=lambda: StreamCapture(b"", False))
-    stderr: StreamCapture = field(default_factory=lambda: StreamCapture(b"", False))
-    started_ns: int = 0
-    finished_ns: int = 0
-    chronology: tuple[OperationEvent, ...] = ()
-    before_snapshot: FilesystemSnapshot = field(default_factory=lambda: FilesystemSnapshot(()))
-    after_snapshot: FilesystemSnapshot = field(default_factory=lambda: FilesystemSnapshot(()))
+    argv: tuple[str, ...]
+    working_directory: SurfaceRoot
+    signal: int | None
+    timed_out: bool
+    stdout: StreamCapture
+    stderr: StreamCapture
+    started_ns: int
+    finished_ns: int
+    chronology: tuple[OperationEvent, ...]
+    before_snapshot: FilesystemSnapshot
+    after_snapshot: FilesystemSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,9 +198,9 @@ class ObservationFact:
 
     action_id: ActionId
     surfaces: tuple[SurfaceFact, ...]
-    started_ns: int = 0
-    finished_ns: int = 0
-    chronology: tuple[OperationEvent, ...] = ()
+    started_ns: int
+    finished_ns: int
+    chronology: tuple[OperationEvent, ...]
 
 
 @dataclass(frozen=True, slots=True)

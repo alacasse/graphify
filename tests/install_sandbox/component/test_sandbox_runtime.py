@@ -153,6 +153,40 @@ def test_sandbox_runtime_preserves_non_utf8_stream_bytes(tmp_path: Path) -> None
     runtime.finish(SandboxFinishReason.COMPLETED)
 
 
+def test_sandbox_runtime_bounds_large_streams_during_capture(tmp_path: Path) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    prepared_source.mkdir()
+    runtime = SandboxRuntime.open(
+        tmp_path / "session",
+        prepared_source,
+        capture_limit_bytes=32,
+    )
+    request = CommandRequest(
+        action_id=ActionId("plan-fixture", 0),
+        subject=TargetSubject("fictional"),
+        scope=Scope.PROJECT,
+        phase=PhaseKind.INSTALL,
+        argv=(
+            sys.executable,
+            "-c",
+            "import os; os.write(1, b'o' * 1048576); os.write(2, b'e' * 1048576)",
+        ),
+    )
+
+    fact = runtime.fulfil(request)
+
+    assert isinstance(fact, CommandFact)
+    assert fact.stdout.data == b"o" * 32
+    assert fact.stdout.omitted_bytes == 1_048_576 - 32
+    assert fact.stdout.complete is False
+    assert fact.stdout.error is None
+    assert fact.stderr.data == b"e" * 32
+    assert fact.stderr.omitted_bytes == 1_048_576 - 32
+    assert fact.stderr.complete is False
+    assert fact.stderr.error is None
+    runtime.finish(SandboxFinishReason.COMPLETED)
+
+
 def test_sandbox_runtime_observes_files_without_classifying_them(tmp_path: Path) -> None:
     prepared_source = tmp_path / "prepared-source"
     source = prepared_source / "fixtures" / "config.txt"

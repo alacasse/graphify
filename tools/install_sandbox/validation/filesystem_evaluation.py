@@ -93,7 +93,9 @@ def _installed_surface(
             (ProductFinding("installed surface", f"{surface.path} is not a regular file"),),
             (),
         )
-    if isinstance(surface, (OwnedFileSurface, RepairableBundleSurface)):
+    if isinstance(surface, RepairableBundleSurface):
+        return (), ("repairable bundle semantic evidence is not implemented in this slice",)
+    if isinstance(surface, OwnedFileSurface):
         return _owned_payload_findings(surface, surface_fact)
     assert isinstance(surface, TextEntrySurface)
     return _text_entry_findings(surface, destination)

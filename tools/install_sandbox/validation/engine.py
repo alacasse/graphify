@@ -13,7 +13,8 @@ from .catalog import (
     InstallTargetCatalog,
     compile_catalog,
 )
-from .evaluation import derive_results
+from .evaluation import derive_results, evaluate_phase
+from .fact_validation import validate_raw_fact
 from .plan import build_validation_plan
 from .plan_types import (
     AggregatePlan,
@@ -29,17 +30,12 @@ from .plan_types import (
 )
 from .protocol import (
     ActionFailureFact,
-    ActionId,
-    ActionKind,
     ActionRequest,
     CommandFact,
-    CommandRequest,
     Fulfil,
-    ObservationFact,
-    ObservationRequest,
     RawFact,
 )
-from .results import DetailedScenarioResult
+from .results import DetailedScenarioResult, PhaseStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,52 +58,15 @@ class ValidationRejected:
 type ValidationResult = ValidationCompleted | ValidationRejected
 
 
-def _matches(request: ActionRequest, fact: RawFact) -> bool:
-    if request.action_id != fact.action_id:
-        return False
-    if isinstance(fact, ActionFailureFact):
-        expected = (
-            ActionKind.COMMAND if isinstance(request, CommandRequest) else ActionKind.OBSERVATION
-        )
-        return fact.action_kind is expected
-    return (isinstance(request, CommandRequest) and isinstance(fact, CommandFact)) or (
-        isinstance(request, ObservationRequest) and isinstance(fact, ObservationFact)
-    )
-
-
-def _validated_fact(value: object) -> RawFact | str:
-    if not isinstance(value, (CommandFact, ObservationFact, ActionFailureFact)):
-        return "fulfil returned an unknown Raw Fact variant"
-    action_id = cast(object, value.action_id)
-    if not isinstance(action_id, ActionId):
-        return "Raw Fact action_id is invalid"
-    plan_id = cast(object, action_id.plan_id)
-    ordinal = cast(object, action_id.ordinal)
-    if not isinstance(plan_id, str) or not plan_id or type(ordinal) is not int or ordinal < 0:
-        return "Raw Fact action_id is invalid"
-    if isinstance(value, CommandFact) and type(cast(object, value.exit_code)) is not int:
-        return "Command Fact exit_code must be an integer"
-    if isinstance(value, ObservationFact) and not isinstance(cast(object, value.surfaces), tuple):
-        return "Observation Fact surfaces must be a tuple"
-    if isinstance(value, ActionFailureFact) and (
-        type(cast(object, value.action_kind)) is not ActionKind
-        or not value.operation
-        or not value.detail
-    ):
-        return "Action Failure Fact is invalid"
-    return value
-
-
 def _fulfil_action(
     action: ActionRequest,
     fulfil: Callable[[ActionRequest], object],
 ) -> RawFact | str:
-    fact = _validated_fact(fulfil(action))
-    if isinstance(fact, str):
-        return fact
-    if not _matches(action, fact):
-        return f"Raw Fact does not match planned action {action.action_id!r}"
-    return fact
+    try:
+        value = fulfil(action)
+    except Exception as error:
+        return f"Raw Fact fulfilment raised {type(error).__name__}: {error}"
+    return validate_raw_fact(action, value)
 
 
 def _fulfil_phase(
@@ -126,9 +85,11 @@ def _fulfil_phase(
     if isinstance(observation, str):
         return False, observation
     facts.append(observation)
-    blocked = (
-        command.timed_out or command.exit_code != 0 or isinstance(observation, ActionFailureFact)
+    result = evaluate_phase(
+        phase,
+        {fact.action_id: fact for fact in (command, observation)},
     )
+    blocked = command.timed_out or command.exit_code != 0 or result.status is PhaseStatus.INCOMPLETE
     return blocked, None
 
 

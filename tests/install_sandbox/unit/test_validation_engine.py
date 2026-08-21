@@ -26,6 +26,7 @@ from tools.install_sandbox.validation.engine import (
     ValidationRejected,
     validate,
 )
+from tools.install_sandbox.validation.fact_validation import validate_raw_fact
 from tools.install_sandbox.validation.plan_types import (
     AggregatePlan,
     HarnessPolicy,
@@ -58,6 +59,7 @@ from tools.install_sandbox.validation.protocol import (
     StreamCapture,
     SurfaceExpectation,
     SurfaceFact,
+    TargetSubject,
 )
 from tools.install_sandbox.validation.results import (
     LifecycleResult,
@@ -804,6 +806,40 @@ def test_raw_fact_protocol_rejects_incoherent_command_evidence(
 
     assert isinstance(result, ValidationRejected)
     assert "Raw Fact" in result.reasons[0]
+
+
+def test_raw_fact_protocol_rejects_lossy_post_spawn_action_failure() -> None:
+    request = CommandRequest(
+        action_id=ActionId("plan-fixture", 0),
+        subject=TargetSubject("fictional"),
+        scope=Scope.PROJECT,
+        phase=PhaseKind.INSTALL,
+        argv=("fictional", "install"),
+    )
+    chronology = tuple(
+        OperationEvent(sequence, kind, sequence)
+        for sequence, kind in enumerate(
+            (
+                OperationKind.COMMAND_STARTED,
+                OperationKind.COMMAND_TIMED_OUT,
+                OperationKind.COMMAND_TERMINATED,
+                OperationKind.COMMAND_FAILED,
+            )
+        )
+    )
+
+    result = validate_raw_fact(
+        request,
+        ActionFailureFact(
+            request.action_id,
+            ActionKind.COMMAND,
+            "terminate_process_group",
+            "post-spawn evidence was discarded",
+            chronology,
+        ),
+    )
+
+    assert result == "Raw Fact failure evidence is invalid"
 
 
 def test_raw_fact_protocol_rejects_an_unknown_surface_member() -> None:

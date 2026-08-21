@@ -162,22 +162,7 @@ def _valid_failure(request: ActionRequest, value: ActionFailureFact) -> bool:
         ActionKind.COMMAND if isinstance(request, CommandRequest) else ActionKind.OBSERVATION
     )
     expected_events = (
-        (
-            (OperationKind.COMMAND_STARTED, OperationKind.COMMAND_FAILED),
-            (
-                OperationKind.COMMAND_STARTED,
-                OperationKind.COMMAND_TIMED_OUT,
-                OperationKind.COMMAND_TERMINATED,
-                OperationKind.COMMAND_FAILED,
-            ),
-            (
-                OperationKind.COMMAND_STARTED,
-                OperationKind.COMMAND_TIMED_OUT,
-                OperationKind.COMMAND_TERMINATED,
-                OperationKind.COMMAND_KILL_ESCALATED,
-                OperationKind.COMMAND_FAILED,
-            ),
-        )
+        ((OperationKind.COMMAND_STARTED, OperationKind.COMMAND_FAILED),)
         if expected_kind is ActionKind.COMMAND
         else ((OperationKind.OBSERVATION_STARTED, OperationKind.OBSERVATION_FAILED),)
     )

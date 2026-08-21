@@ -9,6 +9,7 @@
     "tools/install_sandbox/__init__.py",
     "tools/install_sandbox/docker.py",
     "tools/install_sandbox/reporting.py",
+    "tools/install_sandbox/validation",
     "tests/install_sandbox/unit",
     "tests/install_sandbox/component",
     "tests/install_sandbox/behavioral"

@@ -42,6 +42,9 @@ def run_quality_gate(
     child_environment["UV_PROJECT"] = str(PROJECT_ROOT)
     if environment is not None:
         child_environment.update(environment)
+    child_environment["PYTHONPATH"] = os.pathsep.join(
+        value for value in (str(repository), child_environment.get("PYTHONPATH")) if value
+    )
     return subprocess.run(
         [
             *FROZEN_PYTHON_RUN,
@@ -289,6 +292,13 @@ def copy_live_install_sandbox_gate_fixture(tmp_path: Path) -> Path:
         fixture_root / "tools" / "install_sandbox",
         ignore=shutil.ignore_patterns("__pycache__", "graphify-out", "out"),
     )
+    shutil.copyfile(PROJECT_ROOT / "tools" / "__init__.py", fixture_root / "tools" / "__init__.py")
+    for evidence_class in ("unit", "component"):
+        shutil.copytree(
+            PROJECT_ROOT / "tests" / "install_sandbox" / evidence_class,
+            fixture_root / "tests" / "install_sandbox" / evidence_class,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
     workflow = Path(".github/workflows/install-sandbox.yml")
     (fixture_root / workflow).parent.mkdir(parents=True)
     shutil.copyfile(PROJECT_ROOT / workflow, fixture_root / workflow)
@@ -303,6 +313,7 @@ def copy_install_sandbox_gate_fixture(tmp_path: Path) -> Path:
     fixture_root = tmp_path / "repository"
     production = fixture_root / "tools/install_sandbox"
     production.mkdir(parents=True)
+    shutil.copyfile(PROJECT_ROOT / "tools" / "__init__.py", fixture_root / "tools" / "__init__.py")
     sources = {
         "__init__.py": '"""Fixed gate-installation fixture."""\n',
         "ci_result.py": "def main() -> int:\n    return 0\n",
@@ -578,7 +589,7 @@ def run_fast_gate(
 
     if replacement_source is not None:
         unit_tests = fixture_root / "tests" / "install_sandbox" / "unit"
-        unit_tests.mkdir(parents=True)
+        unit_tests.mkdir(parents=True, exist_ok=True)
         (unit_tests / "test_fixture.py").write_text(replacement_source, encoding="utf-8")
     if bandit_config is not None:
         (production / ".bandit").write_text(bandit_config, encoding="utf-8")

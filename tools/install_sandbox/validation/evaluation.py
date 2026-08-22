@@ -10,6 +10,8 @@ from .plan_types import (
     LifecyclePlan,
     NotApplicablePhasePlan,
     PhasePlan,
+    PurgePlan,
+    ScopeIsolationPlan,
     UnsupportedPlan,
     ValidationPlan,
 )
@@ -20,6 +22,7 @@ from .protocol import (
     CommandFailureFact,
     ObservationFact,
     PhaseKind,
+    PreparationFact,
     RawFact,
 )
 from .results import (
@@ -29,7 +32,10 @@ from .results import (
     PhaseResult,
     PhaseStatus,
     ProductFinding,
+    PurgeResult,
+    PurgeStatus,
     ScenarioStatus,
+    ScopeIsolationResult,
     UnsupportedResult,
 )
 
@@ -236,8 +242,96 @@ def _aggregate_result(
     plan: AggregatePlan,
     facts: dict[ActionId, RawFact],
 ) -> AggregateResult:
-    phases = _evaluated_phases((*plan.preparations, plan.uninstall), facts)
-    return AggregateResult(plan.scope, _roll_up(phases), phases, plan.runtime_limitations)
+    phases = tuple(evaluate_phase(phase, facts) for phase in (*plan.preparations, plan.uninstall))
+    raw_preparation = facts.get(plan.preparation.action_id)
+    preparation = (
+        raw_preparation
+        if isinstance(raw_preparation, (PreparationFact, ActionFailureFact))
+        else None
+    )
+    if not isinstance(preparation, PreparationFact):
+        uninstall = phases[-1]
+        phases = (
+            *phases[:-1],
+            PhaseResult(
+                uninstall.kind,
+                PhaseStatus.INCOMPLETE,
+                uninstall.command,
+                uninstall.observation,
+                reason=(
+                    preparation.detail
+                    if isinstance(preparation, ActionFailureFact)
+                    else "aggregate preservation preparation evidence is missing"
+                ),
+                failure=(preparation if isinstance(preparation, ActionFailureFact) else None),
+            ),
+        )
+    return AggregateResult(
+        plan.scope,
+        _roll_up(phases),
+        phases,
+        plan.runtime_limitations,
+        preparation,
+    )
+
+
+def _scope_isolation_result(
+    plan: ScopeIsolationPlan,
+    facts: dict[ActionId, RawFact],
+) -> ScopeIsolationResult:
+    phases = _evaluated_phases(
+        (
+            *plan.preserved_preparations,
+            *plan.selected_lifecycles,
+            *plan.selected_preparations,
+            plan.uninstall,
+        ),
+        facts,
+    )
+    return ScopeIsolationResult(
+        plan.selected_scope,
+        plan.preserved_scope,
+        _roll_up(phases),
+        phases,
+        plan.runtime_limitations,
+    )
+
+
+def derive_purge_result(
+    plan: PurgePlan,
+    raw_facts: tuple[RawFact, ...],
+) -> PurgeResult:
+    """Derive the closed purge result, including harness preparation trust."""
+
+    facts = {fact.action_id: fact for fact in raw_facts}
+    phases = list(_evaluated_phases((*plan.preparations, plan.purge), facts))
+    raw_preparation = facts.get(plan.preparation.action_id)
+    preparation = (
+        raw_preparation
+        if isinstance(raw_preparation, (PreparationFact, ActionFailureFact))
+        else None
+    )
+    if not isinstance(preparation, PreparationFact):
+        failure = preparation if isinstance(preparation, ActionFailureFact) else None
+        if not phases or phases[-1].status not in {PhaseStatus.BLOCKED, PhaseStatus.INCOMPLETE}:
+            phases[-1] = PhaseResult(
+                PhaseKind.PURGE,
+                PhaseStatus.INCOMPLETE,
+                None,
+                None,
+                reason=(
+                    failure.detail
+                    if failure is not None
+                    else "purge fixture preparation evidence is missing"
+                ),
+                failure=failure,
+            )
+    status = PurgeStatus.PASS
+    if any(phase.status is PhaseStatus.INCOMPLETE for phase in phases):
+        status = PurgeStatus.INCOMPLETE
+    elif any(phase.status in {PhaseStatus.FINDING, PhaseStatus.BLOCKED} for phase in phases):
+        status = PurgeStatus.FINDING
+    return PurgeResult(status, tuple(phases), preparation, plan.runtime_limitations)
 
 
 def derive_results(
@@ -253,6 +347,8 @@ def derive_results(
             results.append(_lifecycle_result(scenario, facts))
         elif isinstance(scenario, AggregatePlan):
             results.append(_aggregate_result(scenario, facts))
+        elif isinstance(scenario, ScopeIsolationPlan):
+            results.append(_scope_isolation_result(scenario, facts))
         else:
             assert isinstance(scenario, UnsupportedPlan)
             results.append(

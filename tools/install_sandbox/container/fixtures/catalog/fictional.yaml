@@ -1,0 +1,19 @@
+scopes:
+  user:
+    supported: true
+    runtime_limitations:
+      - The fictional user target proves filesystem effects only.
+    surfaces:
+      - kind: owned_file
+        root: home
+        path: .fictional/user.txt
+        source: fixtures/user.txt
+  project:
+    supported: true
+    runtime_limitations:
+      - The fictional project target proves filesystem effects only.
+    surfaces:
+      - kind: owned_file
+        root: project
+        path: .fictional/project.txt
+        source: fixtures/project.txt

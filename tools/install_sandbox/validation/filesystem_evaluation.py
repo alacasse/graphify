@@ -10,6 +10,8 @@ from .protocol import (
     CommandFact,
     EntryFact,
     EntryKind,
+    HarnessFileSurface,
+    ManagedTreeSurface,
     ObservationFact,
     PreparedSourcePath,
     SandboxPath,
@@ -88,6 +90,9 @@ def _installed_surface(
     )
     if problems:
         return (), problems
+    harness_result = _installed_harness_surface(surface_fact)
+    if harness_result is not None:
+        return harness_result
     if destination.kind is not EntryKind.FILE or destination.content is None:
         return (
             (ProductFinding("installed surface", f"{surface.path} is not a regular file"),),
@@ -99,6 +104,33 @@ def _installed_surface(
         return _owned_payload_findings(surface, surface_fact)
     assert isinstance(surface, TextEntrySurface)
     return _text_entry_findings(surface, destination)
+
+
+def _installed_harness_surface(
+    surface_fact: SurfaceFact,
+) -> tuple[tuple[ProductFinding, ...], tuple[str, ...]] | None:
+    surface = surface_fact.surface
+    destination = surface_fact.destination
+    if isinstance(surface, ManagedTreeSurface):
+        if destination.kind is EntryKind.DIRECTORY:
+            return (), ()
+        return (
+            (ProductFinding("preserved tree", f"{surface.path} is not a directory"),),
+            (),
+        )
+    if isinstance(surface, HarnessFileSurface):
+        if destination.kind is not EntryKind.FILE or destination.content is None:
+            return (
+                (ProductFinding("preserved sentinel", f"{surface.path} is not a file"),),
+                (),
+            )
+        if destination.content.data == surface.content:
+            return (), ()
+        return (
+            (ProductFinding("preserved sentinel", f"{surface.path} content changed"),),
+            (),
+        )
+    return None
 
 
 def _absent_surface(
@@ -135,7 +167,12 @@ def _observation_evidence(
         return (), ("filesystem observation cardinality disagrees with the plan",)
     findings: list[ProductFinding] = []
     problems: list[str] = []
-    for expected, observed in zip(request.surfaces, fact.surfaces, strict=True):
+    for expected, expectation, observed in zip(
+        request.surfaces,
+        request.expectations,
+        fact.surfaces,
+        strict=True,
+    ):
         if observed.surface != expected:
             problems.append("filesystem observation surface disagrees with the plan")
             continue
@@ -149,9 +186,7 @@ def _observation_evidence(
             problems.append("prepared-source observation disagrees with the plan")
             continue
         evaluator = (
-            _absent_surface
-            if request.expectation is SurfaceExpectation.ABSENT
-            else _installed_surface
+            _absent_surface if expectation is SurfaceExpectation.ABSENT else _installed_surface
         )
         surface_findings, surface_problems = evaluator(observed)
         findings.extend(surface_findings)
@@ -174,6 +209,21 @@ def _allowed_changes(phase: PhasePlan) -> frozenset[tuple[SurfaceRoot, str]]:
     return frozenset(allowed)
 
 
+def _change_is_allowed(
+    phase: PhasePlan,
+    allowed: frozenset[tuple[SurfaceRoot, str]],
+    location: tuple[SurfaceRoot, str],
+) -> bool:
+    if location in allowed:
+        return True
+    root, path = location
+    return any(
+        root is surface.root and (path == surface.path or path.startswith(f"{surface.path}/"))
+        for surface in phase.surfaces
+        if isinstance(surface, ManagedTreeSurface)
+    )
+
+
 def _snapshot_evidence(
     phase: PhasePlan,
     command: CommandFact,
@@ -193,8 +243,9 @@ def _snapshot_evidence(
         for location in set(before) | set(after)
         if before.get(location) != after.get(location)
     }
+    allowed = _allowed_changes(phase)
     unexpected = sorted(
-        changed - _allowed_changes(phase),
+        (location for location in changed if not _change_is_allowed(phase, allowed, location)),
         key=lambda item: (item[0].value, item[1]),
     )
     if not unexpected:

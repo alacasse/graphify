@@ -29,6 +29,11 @@ class PhaseKind(StrEnum):
     TARGET_UNINSTALL = "target-uninstall"
     AGGREGATE_PREPARE = "aggregate-prepare"
     AGGREGATE_UNINSTALL = "aggregate-uninstall"
+    ISOLATION_PRESERVE = "isolation-preserve"
+    ISOLATION_PREPARE = "isolation-prepare"
+    ISOLATION_UNINSTALL = "isolation-uninstall"
+    PURGE_PREPARE = "purge-prepare"
+    PURGE = "purge"
 
 
 class OperationKind(StrEnum):
@@ -43,6 +48,9 @@ class OperationKind(StrEnum):
     OBSERVATION_STARTED = "observation_started"
     OBSERVATION_FAILED = "observation_failed"
     OBSERVATION_FINISHED = "observation_finished"
+    PREPARATION_STARTED = "preparation_started"
+    PREPARATION_FAILED = "preparation_failed"
+    PREPARATION_FINISHED = "preparation_finished"
     CLEANUP_STARTED = "cleanup_started"
     CLEANUP_FINISHED = "cleanup_finished"
 
@@ -67,6 +75,7 @@ class StreamCapture:
 class ActionKind(StrEnum):
     COMMAND = "command"
     OBSERVATION = "observation"
+    PREPARATION = "preparation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +91,34 @@ class ByteCapture:
 class SandboxPath:
     root: SurfaceRoot
     path: str
+
+
+@dataclass(frozen=True, slots=True)
+class FixtureFile:
+    """One validation-owned harness file prepared mechanically by the runtime."""
+
+    location: SandboxPath
+    content: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessFileSurface:
+    """A validation-owned sentinel whose exact bytes must survive a command."""
+
+    root: SurfaceRoot
+    path: str
+    content: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedTreeSurface:
+    """A complete validation-owned directory tree observed as one boundary."""
+
+    root: SurfaceRoot
+    path: str
+
+
+type ObservationSurface = InstallSurface | HarnessFileSurface | ManagedTreeSurface
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +150,7 @@ class EntryFact:
 
 @dataclass(frozen=True, slots=True)
 class SurfaceFact:
-    surface: InstallSurface
+    surface: ObservationSurface
     destination: EntryFact
     source: EntryFact | None
 
@@ -166,11 +203,19 @@ class ObservationRequest:
     subject: ActionSubject
     scope: Scope
     phase: PhaseKind
-    surfaces: tuple[InstallSurface, ...]
-    expectation: SurfaceExpectation
+    surfaces: tuple[ObservationSurface, ...]
+    expectations: tuple[SurfaceExpectation, ...]
 
 
-type ActionRequest = CommandRequest | ObservationRequest
+@dataclass(frozen=True, slots=True)
+class PreparationRequest:
+    """Ask the Sandbox Runtime to establish purge preconditions without policy."""
+
+    action_id: ActionId
+    files: tuple[FixtureFile, ...]
+
+
+type ActionRequest = CommandRequest | ObservationRequest | PreparationRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +270,17 @@ class ObservationFact:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparationFact:
+    """Raw observations of validation-owned fixture files after preparation."""
+
+    action_id: ActionId
+    files: tuple[EntryFact, ...]
+    started_ns: int
+    finished_ns: int
+    chronology: tuple[OperationEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ActionFailureFact:
     """A mechanical failure that prevented one requested Raw Fact."""
 
@@ -235,5 +291,7 @@ class ActionFailureFact:
     chronology: tuple[OperationEvent, ...]
 
 
-type RawFact = CommandFact | CommandFailureFact | ObservationFact | ActionFailureFact
+type RawFact = (
+    CommandFact | CommandFailureFact | ObservationFact | PreparationFact | ActionFailureFact
+)
 type Fulfil = Callable[[ActionRequest], RawFact]

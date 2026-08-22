@@ -24,6 +24,17 @@ from .process_types import (
 from .supervisor_status import SupervisorStatus
 
 MINIMUM_TERMINATION_GRACE_SECONDS = 0.25
+_SUPERVISOR_MODULE = "tools.install_sandbox.sandbox_runtime.supervisor"
+
+
+def _supervisor_bootstrap() -> str:
+    repository_root = str(Path(__file__).resolve().parents[3])
+    return (
+        "import sys; "
+        f"sys.path.insert(0, {repository_root!r}); "
+        f"from {_SUPERVISOR_MODULE} import main; "
+        "raise SystemExit(main())"
+    )
 
 
 class LocalProcessRunner:
@@ -111,10 +122,14 @@ class LocalProcessRunner:
         status_fd = status_supervisor.fileno()
         supervisor_environment = dict(environment)
         supervisor_environment["GRAPHIFY_SANDBOX_SUPERVISOR_STATUS_FD"] = str(status_fd)
-        supervisor = str(Path(__file__).with_name("supervisor.py"))
         try:
             process = subprocess.Popen(
-                (sys.executable, supervisor, *argv),
+                (
+                    sys.executable,
+                    "-c",
+                    _supervisor_bootstrap(),
+                    *argv,
+                ),
                 cwd=cwd,
                 env=supervisor_environment,
                 stdout=subprocess.PIPE,

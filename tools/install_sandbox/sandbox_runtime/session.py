@@ -28,6 +28,8 @@ from tools.install_sandbox.validation.protocol import (
     ObservationRequest,
     OperationEvent,
     OperationKind,
+    PreparationFact,
+    PreparationRequest,
     PreparedSourcePath,
     RawFact,
     SandboxPath,
@@ -64,7 +66,8 @@ class SandboxRuntime:
     ) -> None:
         self._session_root = session_root
         self._prepared_source = prepared_source
-        self._roots = {root: session_root / root.value for root in SurfaceRoot}
+        self._roots: dict[SurfaceRoot, Path] = {}
+        self._scenario_count = 0
         self._process_runner = process_runner
         self._capture_limit_bytes = capture_limit_bytes
         self._next_sequence = 0
@@ -116,9 +119,23 @@ class SandboxRuntime:
             ),
             capture_limit_bytes,
         )
-        for root in runtime._roots.values():
-            root.mkdir()
+        runtime.begin_scenario("initial direct seam")
         return runtime
+
+    def begin_scenario(self, identity: str) -> None:
+        """Allocate a distinct fresh root set for one planned scenario."""
+
+        if self._state is not SandboxRuntimeState.ACTIVE:
+            raise RuntimeError("sandbox session cannot allocate another scenario")
+        if not identity or not identity.strip():
+            raise ValueError("sandbox scenario identity must be non-empty")
+        scenario_root = self._session_root / "scenarios" / f"{self._scenario_count:03d}"
+        scenario_root.mkdir(parents=True)
+        roots = {root: scenario_root / root.value for root in SurfaceRoot}
+        for root in roots.values():
+            root.mkdir()
+        self._roots = roots
+        self._scenario_count += 1
 
     def _event(self, kind: OperationKind) -> OperationEvent:
         event = OperationEvent(self._next_sequence, kind, time.monotonic_ns())
@@ -238,6 +255,54 @@ class SandboxRuntime:
             (started, finished),
         )
 
+    def _prepare(self, request: PreparationRequest) -> PreparationFact | ActionFailureFact:
+        started = self._event(OperationKind.PREPARATION_STARTED)
+        paths: list[tuple[Path, bytes]] = []
+        for fixture in request.files:
+            path, error = self._observed_path(fixture.location)
+            if path is None:
+                failed = self._event(OperationKind.PREPARATION_FAILED)
+                return ActionFailureFact(
+                    request.action_id,
+                    ActionKind.PREPARATION,
+                    "prepare_fixture",
+                    error or "fixture path is unavailable",
+                    (started, failed),
+                )
+            if path.exists() or path.is_symlink():
+                failed = self._event(OperationKind.PREPARATION_FAILED)
+                return ActionFailureFact(
+                    request.action_id,
+                    ActionKind.PREPARATION,
+                    "prepare_fixture",
+                    f"fixture path is not fresh: {fixture.location.path}",
+                    (started, failed),
+                )
+            paths.append((path, fixture.content))
+        try:
+            for path, content in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("xb") as handle:
+                    handle.write(content)
+        except OSError as error:
+            failed = self._event(OperationKind.PREPARATION_FAILED)
+            return ActionFailureFact(
+                request.action_id,
+                ActionKind.PREPARATION,
+                "prepare_fixture",
+                str(error),
+                (started, failed),
+            )
+        files = tuple(self._entry(fixture.location) for fixture in request.files)
+        finished = self._event(OperationKind.PREPARATION_FINISHED)
+        return PreparationFact(
+            request.action_id,
+            files,
+            started.occurred_ns,
+            finished.occurred_ns,
+            (started, finished),
+        )
+
     def _snapshot_entry(
         self,
         root: SurfaceRoot,
@@ -312,8 +377,12 @@ class SandboxRuntime:
             raise RuntimeError("sandbox session is already finished")
         if self._state is SandboxRuntimeState.CUSTODY_LOST:
             raise RuntimeError("sandbox subprocess custody is lost")
+        if not self._roots:
+            raise RuntimeError("sandbox scenario has not been allocated")
         if isinstance(request, ObservationRequest):
             return self._observe(request)
+        if isinstance(request, PreparationRequest):
+            return self._prepare(request)
         logical_cwd, cwd = self._working_directory(request.scope)
         before_snapshot = self._snapshot()
         process = self._process_runner.run(

@@ -4,11 +4,16 @@ import json
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox.sandbox_runtime.session import SandboxRuntime
+from tools.install_sandbox.sandbox_runtime import session as sandbox_session
+from tools.install_sandbox.sandbox_runtime.session import (
+    SandboxConfigurationError,
+    SandboxRuntime,
+)
 from tools.install_sandbox.sandbox_runtime.types import SandboxFinishReason
 from tools.install_sandbox.validation.catalog import (
     CatalogDocument,
@@ -17,7 +22,8 @@ from tools.install_sandbox.validation.catalog import (
     Scope,
     SurfaceRoot,
 )
-from tools.install_sandbox.validation.engine import ValidationCompleted, validate
+from tools.install_sandbox.validation.completion import ValidationCompleted
+from tools.install_sandbox.validation.engine import validate
 from tools.install_sandbox.validation.plan_types import HarnessPolicy, ValidationRequest
 from tools.install_sandbox.validation.protocol import (
     ActionFailureFact,
@@ -27,9 +33,12 @@ from tools.install_sandbox.validation.protocol import (
     CommandFailureFact,
     CommandRequest,
     EntryKind,
+    FixtureFile,
     ObservationFact,
     ObservationRequest,
     PhaseKind,
+    PreparationFact,
+    PreparationRequest,
     PreparedSourcePath,
     SandboxPath,
     SurfaceExpectation,
@@ -40,6 +49,192 @@ from tools.install_sandbox.validation.results import (
     PhaseStatus,
     ScenarioStatus,
 )
+
+
+def test_sandbox_runtime_prepares_validation_owned_purge_files(tmp_path: Path) -> None:
+    prepared_source = tmp_path / "prepared-source"
+    prepared_source.mkdir()
+    session_root = tmp_path / "session"
+    runtime = SandboxRuntime.open(session_root, prepared_source)
+    request = PreparationRequest(
+        ActionId("plan-fixture", 0),
+        (
+            FixtureFile(
+                SandboxPath(SurfaceRoot.PROJECT, "graphify-out/graph.json"),
+                b"{}\n",
+            ),
+            FixtureFile(
+                SandboxPath(SurfaceRoot.PROJECT, "user-owned.txt"),
+                b"unrelated\n",
+            ),
+        ),
+    )
+
+    fact = runtime.fulfil(request)
+
+    assert isinstance(fact, PreparationFact)
+    assert tuple(entry.location for entry in fact.files) == tuple(
+        fixture.location for fixture in request.files
+    )
+    project_root = session_root / "scenarios/000/project"
+    assert (project_root / "graphify-out/graph.json").read_bytes() == b"{}\n"
+    assert (project_root / "user-owned.txt").read_bytes() == b"unrelated\n"
+    cleanup = runtime.finish(SandboxFinishReason.COMPLETED)
+    assert cleanup.removed is True
+
+
+def test_sandbox_runtime_allocates_fresh_roots_for_every_scenario(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    session = tmp_path / "session"
+    runtime = SandboxRuntime.open(session, source)
+    request = PreparationRequest(
+        ActionId("plan-fixture", 0),
+        (
+            FixtureFile(
+                SandboxPath(SurfaceRoot.PROJECT, "same-location.txt"),
+                b"scenario-owned\n",
+            ),
+        ),
+    )
+
+    first = runtime.fulfil(request)
+    runtime.begin_scenario("second")
+    second = runtime.fulfil(replace(request, action_id=ActionId("plan-fixture", 1)))
+
+    assert isinstance(first, PreparationFact)
+    assert isinstance(second, PreparationFact)
+    assert len(tuple((session / "scenarios").iterdir())) == 2
+    runtime.finish(SandboxFinishReason.COMPLETED)
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    ("existing-session", "missing-source", "invalid-timeout", "invalid-capture"),
+)
+def test_sandbox_runtime_rejects_invalid_root_and_budget_configuration(
+    tmp_path: Path,
+    configuration: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    session = tmp_path / "session"
+    if configuration == "existing-session":
+        session.mkdir()
+    elif configuration == "missing-source":
+        source.rmdir()
+
+    with pytest.raises(SandboxConfigurationError):
+        if configuration == "invalid-timeout":
+            SandboxRuntime.open(session, source, command_timeout_seconds=0.0)
+        elif configuration == "invalid-capture":
+            SandboxRuntime.open(session, source, capture_limit_bytes=0)
+        else:
+            SandboxRuntime.open(session, source)
+
+
+@pytest.mark.parametrize("failure", ("unsafe", "existing"))
+def test_sandbox_runtime_returns_typed_preparation_failures(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    session = tmp_path / "session"
+    runtime = SandboxRuntime.open(session, source)
+    location = SandboxPath(SurfaceRoot.PROJECT, "../outside")
+    if failure == "existing":
+        location = SandboxPath(SurfaceRoot.PROJECT, "fixture.txt")
+        (session / "scenarios/000/project/fixture.txt").write_text("existing", encoding="utf-8")
+    request = PreparationRequest(
+        ActionId("plan-fixture", 0),
+        (FixtureFile(location, b"fresh"),),
+    )
+
+    fact = runtime.fulfil(request)
+
+    assert isinstance(fact, ActionFailureFact)
+    assert fact.action_kind is ActionKind.PREPARATION
+    assert fact.operation == "prepare_fixture"
+    runtime.finish(SandboxFinishReason.REJECTED)
+
+
+def test_sandbox_runtime_observes_entry_variants_and_bounded_source_bytes(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "payload.bin").write_bytes(b"long-payload")
+    session = tmp_path / "session"
+    runtime = SandboxRuntime.open(session, source, capture_limit_bytes=4)
+    project_root = session / "scenarios/000/project"
+    (project_root / "directory").mkdir()
+    (project_root / "link").symlink_to("directory")
+    surfaces = (
+        OwnedFileSurface(SurfaceRoot.PROJECT, "../unsafe", "payload.bin"),
+        OwnedFileSurface(SurfaceRoot.PROJECT, "link", "payload.bin"),
+        OwnedFileSurface(SurfaceRoot.PROJECT, "directory", "payload.bin"),
+    )
+    request = ObservationRequest(
+        ActionId("plan-fixture", 0),
+        TargetSubject("fictional"),
+        Scope.PROJECT,
+        PhaseKind.INSTALL,
+        surfaces,
+        (
+            SurfaceExpectation.INSTALLED,
+            SurfaceExpectation.INSTALLED,
+            SurfaceExpectation.INSTALLED,
+        ),
+    )
+
+    fact = runtime.fulfil(request)
+
+    assert isinstance(fact, ObservationFact)
+    assert tuple(surface.destination.kind for surface in fact.surfaces) == (
+        EntryKind.OTHER,
+        EntryKind.SYMLINK,
+        EntryKind.DIRECTORY,
+    )
+    assert all(surface.source is not None for surface in fact.surfaces)
+    assert all(
+        surface.source is not None
+        and surface.source.content is not None
+        and not surface.source.content.complete
+        for surface in fact.surfaces
+    )
+    runtime.finish(SandboxFinishReason.COMPLETED)
+
+
+def test_sandbox_runtime_reports_cleanup_failure_and_terminal_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    runtime = SandboxRuntime.open(tmp_path / "session", source)
+
+    def fail_removal(_path: Path) -> None:
+        raise OSError("forced cleanup failure")
+
+    monkeypatch.setattr(
+        sandbox_session.shutil,
+        "rmtree",
+        fail_removal,
+    )
+
+    cleanup = runtime.finish(SandboxFinishReason.ABORTED)
+
+    assert cleanup.failures[0].detail == "forced cleanup failure"
+    with pytest.raises(RuntimeError, match="already finished"):
+        runtime.finish(SandboxFinishReason.ABORTED)
+    with pytest.raises(RuntimeError, match="already finished"):
+        runtime.fulfil(
+            PreparationRequest(
+                ActionId("plan-fixture", 0),
+                (FixtureFile(SandboxPath(SurfaceRoot.PROJECT, "fresh"), b"fresh"),),
+            )
+        )
 
 
 def test_sandbox_runtime_preserves_raw_command_evidence_and_cleans_up(
@@ -274,7 +469,7 @@ def test_sandbox_runtime_observes_files_without_classifying_them(tmp_path: Path)
         scope=Scope.PROJECT,
         phase=PhaseKind.INSTALL,
         surfaces=(surface,),
-        expectation=SurfaceExpectation.INSTALLED,
+        expectations=(SurfaceExpectation.INSTALLED,),
     )
 
     runtime.fulfil(command)
@@ -412,6 +607,7 @@ else:
             uninstall_argv=(sys.executable, str(product), "uninstall"),
         ),
         runtime.fulfil,
+        runtime.begin_scenario,
     )
     cleanup = runtime.finish(SandboxFinishReason.COMPLETED)
 
@@ -512,6 +708,7 @@ time.sleep(5)
             uninstall_argv=(sys.executable, "-c", "raise SystemExit(0)"),
         ),
         runtime.fulfil,
+        runtime.begin_scenario,
     )
 
     assert isinstance(result, ValidationCompleted)
@@ -603,6 +800,7 @@ else:
             uninstall_argv=(sys.executable, str(product), "uninstall"),
         ),
         runtime.fulfil,
+        runtime.begin_scenario,
     )
     cleanup = runtime.finish(SandboxFinishReason.COMPLETED)
 
@@ -652,6 +850,7 @@ def test_lost_supervisor_preserves_command_evidence_and_refuses_cleanup(
             uninstall_argv=(sys.executable, "-c", "raise SystemExit(0)"),
         ),
         runtime.fulfil,
+        runtime.begin_scenario,
     )
 
     assert isinstance(result, ValidationCompleted)

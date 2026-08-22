@@ -5,15 +5,17 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox.validation.catalog import CatalogDocuments, CatalogReadError, Scope
-from tools.install_sandbox.validation.engine import ValidationCompleted, validate
+from tools.install_sandbox.validation.completion import ValidationCompleted
+from tools.install_sandbox.validation.engine import validate
 from tools.install_sandbox.validation.plan_types import HarnessPolicy, ValidationRequest
 from tools.install_sandbox.validation.protocol import (
     ActionFailureFact,
     ActionKind,
+    ActionRequest,
     CommandRequest,
-    ObservationRequest,
     OperationEvent,
     OperationKind,
+    PreparationRequest,
     RawFact,
 )
 
@@ -44,19 +46,32 @@ scopes:
     documents = CatalogDocuments.from_directory(catalog_dir)
     next_sequence = 0
 
-    def fulfil(request: CommandRequest | ObservationRequest) -> RawFact:
+    def fulfil(request: ActionRequest) -> RawFact:
         nonlocal next_sequence
-        assert isinstance(request, CommandRequest)
+        assert isinstance(request, (CommandRequest, PreparationRequest))
+        action_kind = (
+            ActionKind.COMMAND if isinstance(request, CommandRequest) else ActionKind.PREPARATION
+        )
+        started = (
+            OperationKind.COMMAND_STARTED
+            if isinstance(request, CommandRequest)
+            else OperationKind.PREPARATION_STARTED
+        )
+        failed = (
+            OperationKind.COMMAND_FAILED
+            if isinstance(request, CommandRequest)
+            else OperationKind.PREPARATION_FAILED
+        )
         chronology = (
-            OperationEvent(next_sequence, OperationKind.COMMAND_STARTED, next_sequence),
-            OperationEvent(next_sequence + 1, OperationKind.COMMAND_FAILED, next_sequence + 1),
+            OperationEvent(next_sequence, started, next_sequence),
+            OperationEvent(next_sequence + 1, failed, next_sequence + 1),
         )
         next_sequence += 2
         return ActionFailureFact(
             request.action_id,
-            ActionKind.COMMAND,
-            "spawn_command",
-            "catalog component test does not execute product commands",
+            action_kind,
+            "spawn_command" if action_kind is ActionKind.COMMAND else "prepare_fixture",
+            "catalog component test does not execute product actions",
             chronology,
         )
 

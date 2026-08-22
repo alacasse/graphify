@@ -203,7 +203,7 @@ def test_subprocess_pwd_matches_its_isolated_logical_working_directory(
     fact = runtime.fulfil(request)
 
     assert isinstance(fact, CommandFact)
-    expected = str((session_root / "project").resolve())
+    expected = str((session_root / "scenarios/000/project").resolve())
     assert fact.stdout.data.decode().splitlines() == [expected, expected]
     runtime.finish(SandboxFinishReason.COMPLETED)
 

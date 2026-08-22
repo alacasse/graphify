@@ -13,6 +13,7 @@ from .protocol import (
     CommandFailureFact,
     ObservationFact,
     PhaseKind,
+    PreparationFact,
 )
 
 
@@ -28,6 +29,12 @@ class ScenarioStatus(StrEnum):
     PASS = "PASS"
     FINDING = "FINDING"
     UNSUPPORTED = "UNSUPPORTED"
+    INCOMPLETE = "INCOMPLETE"
+
+
+class PurgeStatus(StrEnum):
+    PASS = "PASS"
+    FINDING = "FINDING"
     INCOMPLETE = "INCOMPLETE"
 
 
@@ -124,11 +131,30 @@ class AggregateResult:
     status: ScenarioStatus
     phases: tuple[PhaseResult, ...]
     runtime_limitations: tuple[str, ...]
+    preparation: PreparationFact | ActionFailureFact | None = None
 
     def __post_init__(self) -> None:
         _validate_scenario_result(self.status, self.phases)
         if type(cast(object, self.scope)) is not Scope:
             raise ValueError("aggregate result requires a closed scope")
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeIsolationResult:
+    selected_scope: Scope
+    preserved_scope: Scope
+    status: ScenarioStatus
+    phases: tuple[PhaseResult, ...]
+    runtime_limitations: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _validate_scenario_result(self.status, self.phases)
+        if (
+            type(cast(object, self.selected_scope)) is not Scope
+            or type(cast(object, self.preserved_scope)) is not Scope
+            or self.selected_scope is self.preserved_scope
+        ):
+            raise ValueError("scope isolation result requires two closed distinct scopes")
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +173,27 @@ class UnsupportedResult:
             or not self.reason
         ):
             raise ValueError("unsupported result requires a target, scope, and reason")
+
+
+@dataclass(frozen=True, slots=True)
+class PurgeResult:
+    status: PurgeStatus
+    phases: tuple[PhaseResult, ...]
+    preparation: PreparationFact | ActionFailureFact | None
+    runtime_limitations: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(cast(object, self.status)) is not PurgeStatus or not self.phases:
+            raise ValueError("purge result requires a closed status and phase evidence")
+        expected = PurgeStatus.PASS
+        if any(phase.status is PhaseStatus.INCOMPLETE for phase in self.phases):
+            expected = PurgeStatus.INCOMPLETE
+        elif any(
+            phase.status in {PhaseStatus.FINDING, PhaseStatus.BLOCKED} for phase in self.phases
+        ):
+            expected = PurgeStatus.FINDING
+        if self.status is not expected:
+            raise ValueError("purge status disagrees with its phase results")
 
 
 def _validate_scenario_result(
@@ -169,4 +216,6 @@ def _validate_scenario_result(
         raise ValueError("scenario status disagrees with its phase results")
 
 
-type DetailedScenarioResult = LifecycleResult | AggregateResult | UnsupportedResult
+type DetailedScenarioResult = (
+    LifecycleResult | AggregateResult | ScopeIsolationResult | UnsupportedResult
+)

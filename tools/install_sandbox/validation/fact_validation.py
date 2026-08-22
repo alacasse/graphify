@@ -29,12 +29,18 @@ from .protocol import (
     CommandRequest,
     EntryFact,
     EntryKind,
+    HarnessFileSurface,
+    ManagedTreeSurface,
     ObservationFact,
     ObservationRequest,
+    ObservationSurface,
     OperationKind,
+    PreparationFact,
+    PreparationRequest,
     PreparedSourcePath,
     RawFact,
     SandboxPath,
+    SurfaceExpectation,
     SurfaceFact,
 )
 
@@ -125,7 +131,15 @@ def _valid_surface_fact(expected: object, value: object) -> bool:
         return False
     if not _valid_entry(cast(object, value.destination)):
         return False
-    surface = cast(OwnedFileSurface | RepairableBundleSurface | TextEntrySurface, expected)
+    surface = cast(ObservationSurface, expected)
+    if type(surface) not in {
+        OwnedFileSurface,
+        RepairableBundleSurface,
+        TextEntrySurface,
+        HarnessFileSurface,
+        ManagedTreeSurface,
+    }:
+        return False
     if value.destination.location != SandboxPath(surface.root, surface.path):
         return False
     if isinstance(surface, (OwnedFileSurface, RepairableBundleSurface)):
@@ -140,7 +154,13 @@ def _valid_observation(request: ObservationRequest, value: ObservationFact) -> b
     if not isinstance(raw_surfaces, tuple):
         return False
     surfaces = cast(tuple[object, ...], raw_surfaces)
-    if len(surfaces) != len(request.surfaces):
+    raw_expectations = cast(object, request.expectations)
+    if not isinstance(raw_expectations, tuple):
+        return False
+    expectations = cast(tuple[object, ...], raw_expectations)
+    if len(surfaces) != len(request.surfaces) or len(expectations) != len(request.surfaces):
+        return False
+    if any(type(expectation) is not SurfaceExpectation for expectation in expectations):
         return False
     if not all(
         _valid_surface_fact(expected, observed)
@@ -159,14 +179,51 @@ def _valid_observation(request: ObservationRequest, value: ObservationFact) -> b
     )
 
 
-def _valid_failure(request: ActionRequest, value: ActionFailureFact) -> bool:
-    expected_kind = (
-        ActionKind.COMMAND if isinstance(request, CommandRequest) else ActionKind.OBSERVATION
+def _valid_preparation(request: PreparationRequest, value: PreparationFact) -> bool:
+    raw_files = cast(object, value.files)
+    if not isinstance(raw_files, tuple):
+        return False
+    files = cast(tuple[object, ...], raw_files)
+    if len(files) != len(request.files):
+        return False
+    for fixture, observed in zip(request.files, files, strict=True):
+        if (
+            not _valid_location(cast(object, fixture.location))
+            or not isinstance(cast(object, fixture.content), bytes)
+            or not _valid_entry(observed)
+        ):
+            return False
+        entry = cast(EntryFact, observed)
+        if (
+            entry.location != fixture.location
+            or entry.kind is not EntryKind.FILE
+            or entry.content is None
+            or not entry.content.complete
+            or entry.content.data != fixture.content
+        ):
+            return False
+    return valid_chronology(
+        value.chronology,
+        value.started_ns,
+        value.finished_ns,
+        ((OperationKind.PREPARATION_STARTED, OperationKind.PREPARATION_FINISHED),),
     )
+
+
+def _valid_failure(request: ActionRequest, value: ActionFailureFact) -> bool:
+    expected_kind = ActionKind.OBSERVATION
+    if isinstance(request, CommandRequest):
+        expected_kind = ActionKind.COMMAND
+    elif isinstance(request, PreparationRequest):
+        expected_kind = ActionKind.PREPARATION
     expected_events = (
         ((OperationKind.COMMAND_STARTED, OperationKind.COMMAND_FAILED),)
         if expected_kind is ActionKind.COMMAND
-        else ((OperationKind.OBSERVATION_STARTED, OperationKind.OBSERVATION_FAILED),)
+        else (
+            ((OperationKind.PREPARATION_STARTED, OperationKind.PREPARATION_FAILED),)
+            if expected_kind is ActionKind.PREPARATION
+            else ((OperationKind.OBSERVATION_STARTED, OperationKind.OBSERVATION_FAILED),)
+        )
     )
     operation = cast(object, value.operation)
     return (
@@ -175,6 +232,7 @@ def _valid_failure(request: ActionRequest, value: ActionFailureFact) -> bool:
         and bool(operation)
         and (
             expected_kind is ActionKind.OBSERVATION
+            or expected_kind is ActionKind.PREPARATION
             or operation in _PRE_SPAWN_COMMAND_FAILURE_OPERATIONS
         )
         and isinstance(cast(object, value.detail), str)
@@ -188,18 +246,7 @@ def _valid_failure(request: ActionRequest, value: ActionFailureFact) -> bool:
     )
 
 
-def validate_raw_fact(request: ActionRequest, value: object) -> RawFact | str:
-    """Return one coherent correlated Raw Fact or a fail-closed protocol reason."""
-
-    if not isinstance(
-        value,
-        (CommandFact, CommandFailureFact, ObservationFact, ActionFailureFact),
-    ):
-        return "Raw Fact has an unknown variant"
-    if not _valid_action_id(cast(object, value.action_id)):
-        return "Raw Fact action identity is invalid"
-    if value.action_id != request.action_id:
-        return "Raw Fact action identity disagrees with the request"
+def _validate_variant(request: ActionRequest, value: RawFact) -> RawFact | str:
     if isinstance(value, ActionFailureFact):
         return value if _valid_failure(request, value) else "Raw Fact failure evidence is invalid"
     if isinstance(request, CommandRequest) and isinstance(value, CommandFact):
@@ -216,7 +263,34 @@ def validate_raw_fact(request: ActionRequest, value: object) -> RawFact | str:
             if _valid_observation(request, value)
             else "Raw Fact observation evidence is invalid"
         )
+    if isinstance(request, PreparationRequest) and isinstance(value, PreparationFact):
+        return (
+            value
+            if _valid_preparation(request, value)
+            else "Raw Fact preparation evidence is invalid"
+        )
     return "Raw Fact variant disagrees with the request"
+
+
+def validate_raw_fact(request: ActionRequest, value: object) -> RawFact | str:
+    """Return one coherent correlated Raw Fact or a fail-closed protocol reason."""
+
+    if not isinstance(
+        value,
+        (
+            CommandFact,
+            CommandFailureFact,
+            ObservationFact,
+            PreparationFact,
+            ActionFailureFact,
+        ),
+    ):
+        return "Raw Fact has an unknown variant"
+    if not _valid_action_id(cast(object, value.action_id)):
+        return "Raw Fact action identity is invalid"
+    if value.action_id != request.action_id:
+        return "Raw Fact action identity disagrees with the request"
+    return _validate_variant(request, value)
 
 
 def validate_session_chronology(facts: tuple[RawFact, ...]) -> str | None:

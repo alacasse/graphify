@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+from dataclasses import replace
 from typing import cast
 
 from .catalog import (
@@ -26,7 +27,9 @@ from .plan_types import (
     PlanAccepted,
     PlanCompilation,
     PlanRejected,
+    PurgePlan,
     ScenarioPlan,
+    ScopeIsolationPlan,
     UnsupportedPlan,
     ValidationPlan,
     ValidationRequest,
@@ -35,7 +38,9 @@ from .protocol import (
     ActionId,
     ActionSubject,
     AggregateSubject,
+    ObservationSurface,
     PhaseKind,
+    PreparationRequest,
     TargetSubject,
 )
 
@@ -59,6 +64,14 @@ def _aggregate_uninstall_command(policy: HarnessPolicy, scope: Scope) -> tuple[s
     return (*policy.uninstall_argv, *project)
 
 
+def _selected_scope_facts(
+    catalog: InstallTargetCatalog,
+    request: ValidationRequest,
+    scope: Scope,
+) -> tuple[tuple[TargetFacts, SupportedScopeFacts], ...]:
+    return _aggregate_candidates(catalog, frozenset(request.targets), scope)
+
+
 def _phase(
     plan_id: str,
     ordinal: int,
@@ -66,9 +79,21 @@ def _phase(
     subject: ActionSubject,
     scope: Scope,
     argv: tuple[str, ...],
-    surfaces: tuple[InstallSurface, ...],
+    surfaces: tuple[ObservationSurface, ...],
+    preserved_surfaces: tuple[ObservationSurface, ...] = (),
 ) -> tuple[PhasePlan, int]:
-    return PhasePlan(kind, ActionId(plan_id, ordinal), subject, scope, argv, surfaces), ordinal + 2
+    return (
+        PhasePlan(
+            kind,
+            ActionId(plan_id, ordinal),
+            subject,
+            scope,
+            argv,
+            surfaces,
+            preserved_surfaces,
+        ),
+        ordinal + 2,
+    )
 
 
 def _phase_kinds(facts: SupportedScopeFacts) -> tuple[PhaseKind, ...]:
@@ -149,6 +174,30 @@ def _aggregate_candidates(
     return tuple(candidates)
 
 
+def _preparations(
+    candidates: tuple[tuple[TargetFacts, SupportedScopeFacts], ...],
+    *,
+    kind: PhaseKind,
+    scope: Scope,
+    policy: HarnessPolicy,
+    plan_id: str,
+    ordinal: int,
+) -> tuple[tuple[PhasePlan, ...], int]:
+    phases: list[PhasePlan] = []
+    for target, facts in _minimum_surface_cover(candidates):
+        phase, ordinal = _phase(
+            plan_id,
+            ordinal,
+            kind,
+            TargetSubject(target.name),
+            scope,
+            _install_command(policy, target.name, scope),
+            facts.surfaces,
+        )
+        phases.append(phase)
+    return tuple(phases), ordinal
+
+
 def _minimum_surface_cover(
     candidates: tuple[tuple[TargetFacts, SupportedScopeFacts], ...],
 ) -> tuple[tuple[TargetFacts, SupportedScopeFacts], ...]:
@@ -191,9 +240,11 @@ def _aggregate(
     if not candidates:
         return None, ordinal
     selected = _minimum_surface_cover(candidates)
+    fixture_preparation = PreparationRequest(ActionId(plan_id, ordinal), policy.purge_fixtures)
+    ordinal += 1
     preparations: list[PhasePlan] = []
     for target, facts in selected:
-        preparation, ordinal = _phase(
+        phase, ordinal = _phase(
             plan_id,
             ordinal,
             PhaseKind.AGGREGATE_PREPARE,
@@ -202,7 +253,7 @@ def _aggregate(
             _install_command(policy, target.name, scope),
             facts.surfaces,
         )
-        preparations.append(preparation)
+        preparations.append(phase)
     all_surfaces = _unique_surfaces(candidates)
     aggregate_subject = AggregateSubject(tuple(target.name for target, _ in selected))
     uninstall, ordinal = _phase(
@@ -213,6 +264,7 @@ def _aggregate(
         scope,
         _aggregate_uninstall_command(policy, scope),
         all_surfaces,
+        policy.preservation_surfaces,
     )
     limitations = tuple(
         sorted({limitation for _, facts in candidates for limitation in facts.runtime_limitations})
@@ -220,8 +272,157 @@ def _aggregate(
     return (
         AggregatePlan(
             scope,
+            fixture_preparation,
             tuple(preparations),
             uninstall,
+            limitations,
+        ),
+        ordinal,
+    )
+
+
+def _scope_isolation(
+    catalog: InstallTargetCatalog,
+    request: ValidationRequest,
+    selected_scope: Scope,
+    policy: HarnessPolicy,
+    plan_id: str,
+    ordinal: int,
+) -> tuple[ScopeIsolationPlan | None, int]:
+    preserved_scope = Scope.PROJECT if selected_scope is Scope.USER else Scope.USER
+    selected = _selected_scope_facts(catalog, request, selected_scope)
+    preserved = _selected_scope_facts(catalog, request, preserved_scope)
+    if not selected or not preserved:
+        return None, ordinal
+    preserved_preparations, ordinal = _preparations(
+        preserved,
+        kind=PhaseKind.ISOLATION_PRESERVE,
+        scope=preserved_scope,
+        policy=policy,
+        plan_id=plan_id,
+        ordinal=ordinal,
+    )
+    preserved_surfaces = _unique_surfaces(preserved)
+    selected_lifecycles: list[LifecyclePhasePlan] = []
+    for target, facts in selected:
+        lifecycle, ordinal = _lifecycle(
+            target,
+            selected_scope,
+            facts,
+            policy,
+            plan_id,
+            ordinal,
+        )
+        selected_lifecycles.extend(
+            replace(phase, preserved_surfaces=preserved_surfaces)
+            if isinstance(phase, PhasePlan)
+            else phase
+            for phase in lifecycle.phases
+        )
+    selected_preparations, ordinal = _preparations(
+        selected,
+        kind=PhaseKind.ISOLATION_PREPARE,
+        scope=selected_scope,
+        policy=policy,
+        plan_id=plan_id,
+        ordinal=ordinal,
+    )
+    selected_preparations = tuple(
+        replace(phase, preserved_surfaces=preserved_surfaces) for phase in selected_preparations
+    )
+    selected_surfaces = _unique_surfaces(selected)
+    subject = AggregateSubject(
+        tuple(
+            phase.subject.name
+            for phase in selected_preparations
+            if isinstance(phase.subject, TargetSubject)
+        )
+    )
+    uninstall, ordinal = _phase(
+        plan_id,
+        ordinal,
+        PhaseKind.ISOLATION_UNINSTALL,
+        subject,
+        selected_scope,
+        _aggregate_uninstall_command(policy, selected_scope),
+        selected_surfaces,
+        preserved_surfaces,
+    )
+    limitations = tuple(
+        sorted(
+            {
+                limitation
+                for _, facts in (*selected, *preserved)
+                for limitation in facts.runtime_limitations
+            }
+        )
+    )
+    return (
+        ScopeIsolationPlan(
+            selected_scope,
+            preserved_scope,
+            preserved_preparations,
+            tuple(selected_lifecycles),
+            selected_preparations,
+            uninstall,
+            limitations,
+        ),
+        ordinal,
+    )
+
+
+def _purge(
+    catalog: InstallTargetCatalog,
+    request: ValidationRequest,
+    policy: HarnessPolicy,
+    plan_id: str,
+    ordinal: int,
+) -> tuple[PurgePlan, int]:
+    candidates = tuple(
+        item for scope in request.scopes for item in _selected_scope_facts(catalog, request, scope)
+    )
+    preparations: list[PhasePlan] = []
+    for scope in request.scopes:
+        scoped, ordinal = _preparations(
+            _selected_scope_facts(catalog, request, scope),
+            kind=PhaseKind.PURGE_PREPARE,
+            scope=scope,
+            policy=policy,
+            plan_id=plan_id,
+            ordinal=ordinal,
+        )
+        preparations.extend(scoped)
+    preparation = PreparationRequest(ActionId(plan_id, ordinal), policy.purge_fixtures)
+    ordinal += 1
+    surfaces = (*_unique_surfaces(candidates), policy.purge_output_surface)
+    subject = AggregateSubject(
+        tuple(
+            phase.subject.name for phase in preparations if isinstance(phase.subject, TargetSubject)
+        )
+    )
+    purge, ordinal = _phase(
+        plan_id,
+        ordinal,
+        PhaseKind.PURGE,
+        subject,
+        Scope.PROJECT,
+        policy.purge_argv,
+        surfaces,
+        tuple(
+            surface
+            for surface in policy.preservation_surfaces
+            if surface != policy.purge_output_surface
+        ),
+    )
+    limitations = tuple(
+        sorted({limitation for _, facts in candidates for limitation in facts.runtime_limitations})
+    )
+    return (
+        PurgePlan(
+            tuple(preparations),
+            preparation,
+            policy.purge_output_surface,
+            purge,
             limitations,
         ),
         ordinal,
@@ -251,7 +452,12 @@ def _selection_rejection(request: ValidationRequest) -> PlanRejected | None:
 def _policy_rejection(policy: HarnessPolicy) -> PlanRejected | None:
     install_argv = cast(object, policy.install_argv)
     uninstall_argv = cast(object, policy.uninstall_argv)
-    for label, argv in (("install", install_argv), ("uninstall", uninstall_argv)):
+    purge_argv = cast(object, policy.purge_argv)
+    for label, argv in (
+        ("install", install_argv),
+        ("uninstall", uninstall_argv),
+        ("purge", purge_argv),
+    ):
         if not isinstance(argv, tuple) or not argv:
             return PlanRejected((f"{label} command policy is invalid",))
         arguments = cast(tuple[object, ...], argv)
@@ -294,6 +500,45 @@ def _target_scenarios(
     return scenarios, ordinal
 
 
+def _append_aggregate_scenarios(
+    scenarios: list[ScenarioPlan],
+    catalog: InstallTargetCatalog,
+    request: ValidationRequest,
+    policy: HarnessPolicy,
+    plan_id: str,
+    ordinal: int,
+) -> int:
+    for scope in request.scopes:
+        aggregate, ordinal = _aggregate(catalog, request, scope, policy, plan_id, ordinal)
+        if aggregate is not None:
+            scenarios.append(aggregate)
+    return ordinal
+
+
+def _append_isolation_scenarios(
+    scenarios: list[ScenarioPlan],
+    catalog: InstallTargetCatalog,
+    request: ValidationRequest,
+    policy: HarnessPolicy,
+    plan_id: str,
+    ordinal: int,
+) -> int:
+    if frozenset(request.scopes) != frozenset(Scope):
+        return ordinal
+    for selected_scope in Scope:
+        isolation, ordinal = _scope_isolation(
+            catalog,
+            request,
+            selected_scope,
+            policy,
+            plan_id,
+            ordinal,
+        )
+        if isolation is not None:
+            scenarios.append(isolation)
+    return ordinal
+
+
 def build_validation_plan(
     catalog: InstallTargetCatalog,
     request: ValidationRequest,
@@ -309,10 +554,9 @@ def build_validation_plan(
     if isinstance(compiled, PlanRejected):
         return compiled
     scenarios, ordinal = compiled
-    for scope in request.scopes:
-        aggregate, ordinal = _aggregate(catalog, request, scope, policy, plan_id, ordinal)
-        if aggregate is not None:
-            scenarios.append(aggregate)
+    ordinal = _append_aggregate_scenarios(scenarios, catalog, request, policy, plan_id, ordinal)
+    ordinal = _append_isolation_scenarios(scenarios, catalog, request, policy, plan_id, ordinal)
     if not scenarios:
         return PlanRejected(("validation plan must contain at least one scenario",))
-    return PlanAccepted(ValidationPlan(plan_id, tuple(scenarios)))
+    purge, _ordinal = _purge(catalog, request, policy, plan_id, ordinal)
+    return PlanAccepted(ValidationPlan(plan_id, tuple(scenarios), purge))

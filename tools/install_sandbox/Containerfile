@@ -1,0 +1,27 @@
+FROM python:3.12-slim
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/runner
+
+RUN python -m pip install \
+        "build==1.5.0" \
+        "PyYAML==6.0.3" \
+        "setuptools==82.0.1" \
+        "wheel==0.47.0" \
+    && mkdir -p /runner/tools/install_sandbox /work /diagnostic
+
+COPY tools/__init__.py /runner/tools/__init__.py
+COPY tools/install_sandbox/__init__.py /runner/tools/install_sandbox/__init__.py
+COPY tools/install_sandbox/validation /runner/tools/install_sandbox/validation
+COPY tools/install_sandbox/sandbox_runtime /runner/tools/install_sandbox/sandbox_runtime
+COPY tools/install_sandbox/diagnostics /runner/tools/install_sandbox/diagnostics
+COPY tools/install_sandbox/container /runner/tools/install_sandbox/container
+COPY tools/install_sandbox/container/fixtures/catalog /opt/graphify-fixture/catalog
+COPY tools/install_sandbox/container/fixtures/source /opt/graphify-fixture/source
+
+RUN chmod 1777 /work /diagnostic \
+    && rm -rf /runner/tools/install_sandbox/container/fixtures
+
+WORKDIR /work
+ENTRYPOINT ["python", "-m", "tools.install_sandbox.container.entrypoint"]

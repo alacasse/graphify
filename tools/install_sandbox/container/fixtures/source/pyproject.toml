@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphify-fictional"
+version = "1.0.0"
+requires-python = ">=3.12"
+
+[project.scripts]
+graphify = "graphify.cli:main"
+
+[tool.setuptools]
+packages = ["graphify"]
+
+[tool.setuptools.package-data]
+graphify = ["fixtures/*.txt"]

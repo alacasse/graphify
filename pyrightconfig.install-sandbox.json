@@ -1,0 +1,16 @@
+{
+  "include": [
+    "tools/install_sandbox",
+    "tests/install_sandbox/component",
+    "tests/install_sandbox/docker"
+  ],
+  "strict": [
+    "tools/install_sandbox",
+    "tests/install_sandbox/component",
+    "tests/install_sandbox/docker"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "venvPath": ".",
+  "venv": ".venv"
+}

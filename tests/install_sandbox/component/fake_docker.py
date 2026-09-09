@@ -72,8 +72,15 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     marker.write_text("running", encoding="utf-8")
     run_id = _environment(arguments, "INSTALL_SANDBOX_RUN_ID")
     output = _output_mount(arguments)
+    if os.environ.get("FAKE_DOCKER_CASE_PROGRAM"):
+        code = _execute_case(arguments)
+        marker.unlink(missing_ok=True)
+        return 9 if mode == "run_fail" else code
     (output / "journal.log").write_text("controlled container evidence\n", encoding="utf-8")
     print("container started", flush=True)
+    if mode == "run_interrupt":
+        os.kill(os.getppid(), signal.SIGTERM)
+        time.sleep(60)
     if mode in {"hold", "run_timeout"}:
         (state / f"ready-{run_id}").write_text("ready", encoding="utf-8")
         if mode == "run_timeout":
@@ -88,6 +95,25 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     if mode != "container_cleanup_fail":
         marker.unlink(missing_ok=True)
     return 0
+
+
+def _execute_case(arguments: list[str]) -> int:
+    mounts: dict[str, str] = {}
+    for index, argument in enumerate(arguments):
+        if argument == "--mount":
+            parts = dict(
+                item.split("=", 1) for item in arguments[index + 1].split(",") if "=" in item
+            )
+            mounts[parts["dst"]] = parts["src"]
+    return subprocess.call(
+        [
+            sys.executable,
+            os.environ["FAKE_DOCKER_CASE_PROGRAM"],
+            mounts["/sandbox/subject"],
+            mounts["/sandbox/case.json"],
+            mounts["/sandbox/output"],
+        ]
+    )
 
 
 def _container_list(state: Path, arguments: list[str]) -> int:

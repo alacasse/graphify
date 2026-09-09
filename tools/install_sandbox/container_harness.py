@@ -1,8 +1,7 @@
-"""Build and run the isolated install-sandbox Docker probe."""
+"""Build and run one installation case in an isolated Docker container."""
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
@@ -20,47 +19,30 @@ from pathlib import Path
 from types import FrameType
 from typing import Literal, TextIO
 
-__all__ = ["ContainerHarness", "ContainerProbeRequest", "ContainerProbeResult"]
+__all__ = ["ContainerHarness", "ContainerRunResult"]
 
-_ATTESTATION_NAME = "infrastructure-probe.json"
 _CONTAINER_ROOTS = {
-    "home": "/sandbox/home",
-    "output": "/sandbox/output",
-    "prepared_source": "/sandbox/source",
-    "project": "/sandbox/project",
     "subject": "/sandbox/subject",
+    "case": "/sandbox/case.json",
+    "output": "/sandbox/output",
     "working_directory": "/sandbox/work",
-    "xdg": "/sandbox/xdg",
 }
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _TAIL_LIMIT = 64 * 1024
 
-ProbeState = Literal["passed", "incomplete", "interrupted"]
-ProbePhase = Literal["preflight", "build", "run", "cleanup", "complete"]
+RunState = Literal["completed", "incomplete", "interrupted"]
+RunPhase = Literal["preflight", "build", "run", "cleanup", "complete"]
 
 
 @dataclass(frozen=True, slots=True)
-class ContainerProbeRequest:
-    """Inputs and operational budgets for one isolated probe invocation."""
-
-    subject_checkout: Path
-    output_directory: Path
-    runtime_executable: str | Path = "docker"
-    build_timeout_seconds: float = 60.0
-    run_timeout_seconds: float = 120.0
-    graceful_termination_seconds: float = 10.0
-
-
-@dataclass(frozen=True, slots=True)
-class ContainerProbeResult:
-    """Closed infrastructure result returned by :meth:`ContainerHarness.run_probe`."""
+class ContainerRunResult:
+    """Closed infrastructure result returned by :meth:`ContainerHarness.run_case`."""
 
     run_id: str
-    state: ProbeState
-    phase: ProbePhase
+    state: RunState
+    phase: RunPhase
     exit_code: int
     image_id: str | None
-    attestation_path: Path | None
     cleanup_complete: bool
     stdout_tail: str
     stderr_tail: str
@@ -70,6 +52,7 @@ class ContainerProbeResult:
 @dataclass(frozen=True, slots=True)
 class _PreparedRequest:
     subject_checkout: Path
+    case_file: Path
     output_directory: Path
     runtime_executable: str
     build_timeout_seconds: float
@@ -88,11 +71,10 @@ class _CommandResult:
 
 @dataclass(frozen=True, slots=True)
 class _Outcome:
-    state: ProbeState
-    phase: ProbePhase
+    state: RunState
+    phase: RunPhase
     exit_code: int
     detail: str
-    attestation_path: Path | None = None
 
 
 class _PreflightError(ValueError):
@@ -117,7 +99,7 @@ class _DiagnosticTails:
         self.stdout = _Tail()
         self.stderr = _Tail()
 
-    def add(self, phase: ProbePhase, result: _CommandResult) -> None:
+    def add(self, phase: RunPhase, result: _CommandResult) -> None:
         if result.stdout_tail:
             self.stdout.append(f"[{phase}]\n{result.stdout_tail}")
         if result.stderr_tail:
@@ -149,32 +131,50 @@ class _SignalCapture:
 
 
 class ContainerHarness:
-    """Own the complete Docker probe build, run, validation, and cleanup lifecycle."""
+    """Own image construction, case container execution, and invocation cleanup."""
 
-    def run_probe(self, request: ContainerProbeRequest) -> ContainerProbeResult:
-        """Run one probe and return a fail-closed infrastructure result."""
-
+    def run_case(
+        self,
+        *,
+        subject_checkout: Path,
+        case_file: Path,
+        output_directory: Path,
+        runtime_executable: str | Path = "docker",
+        build_timeout_seconds: float = 300.0,
+        run_timeout_seconds: float = 900.0,
+        graceful_termination_seconds: float = 10.0,
+    ) -> ContainerRunResult:
+        """Run one container; case conformity is reported separately by the runner."""
         run_id = uuid.uuid4().hex
+        request = _PreparedRequest(
+            subject_checkout,
+            case_file,
+            output_directory,
+            str(runtime_executable),
+            build_timeout_seconds,
+            run_timeout_seconds,
+            graceful_termination_seconds,
+        )
         try:
             prepared = _prepare_request(request)
-        except _PreflightError as exc:
+        except (_PreflightError, OSError, RuntimeError) as exc:
             return _preflight_failure(run_id, str(exc))
-        return _ProbeRun(prepared, run_id).execute()
+        return _ContainerRun(prepared, run_id).execute()
 
 
-class _ProbeRun:
+class _ContainerRun:
     def __init__(self, request: _PreparedRequest, run_id: str) -> None:
         self.request = request
         self.run_id = run_id
-        self.image_tag = f"install-sandbox-probe:{run_id}"
-        self.container_name = f"install-sandbox-probe-{run_id}"
+        self.image_tag = f"install-sandbox-case:{run_id}"
+        self.container_name = f"install-sandbox-case-{run_id}"
         self.image_id: str | None = None
         self.build_attempted = False
         self.run_attempted = False
         self.diagnostics = _DiagnosticTails()
         self.interrupts = _SignalCapture()
 
-    def execute(self) -> ContainerProbeResult:
+    def execute(self) -> ContainerRunResult:
         with self.interrupts:
             daemon_outcome = self._check_daemon()
             if daemon_outcome is not None:
@@ -230,7 +230,7 @@ class _ProbeRun:
             str(context),
         ]
         result = self._command(command, self.request.build_timeout_seconds, "build")
-        failure = _command_failure(result, "build", "probe image build failed")
+        failure = _command_failure(result, "build", "case image build failed")
         if failure is not None:
             return failure
         return self._load_image_id(image_id_file)
@@ -255,15 +255,16 @@ class _ProbeRun:
             self.request.run_timeout_seconds,
             "run",
         )
-        failure = _command_failure(result, "run", "probe container failed")
+        failure = _command_failure(result, "run", "case container failed")
         if failure is not None:
             return failure
-        return self._validate_attestation()
+        return _Outcome("completed", "complete", 0, "case container completed")
 
     def _run_command(self, image_id: str) -> list[str]:
         uid = os.getuid()
         gid = os.getgid()
         subject_mount = _mount(self.request.subject_checkout, _CONTAINER_ROOTS["subject"], True)
+        case_mount = _mount(self.request.case_file, _CONTAINER_ROOTS["case"], True)
         output_mount = _mount(self.request.output_directory, _CONTAINER_ROOTS["output"], False)
         return [
             self.request.runtime_executable,
@@ -276,6 +277,8 @@ class _ProbeRun:
             "--mount",
             subject_mount,
             "--mount",
+            case_mount,
+            "--mount",
             output_mount,
             "--env",
             f"INSTALL_SANDBOX_RUN_ID={self.run_id}",
@@ -284,19 +287,15 @@ class _ProbeRun:
             "--workdir",
             _CONTAINER_ROOTS["working_directory"],
             image_id,
+            "--subject-checkout",
+            _CONTAINER_ROOTS["subject"],
+            "--case-file",
+            _CONTAINER_ROOTS["case"],
+            "--output-directory",
+            _CONTAINER_ROOTS["output"],
+            "--work-directory",
+            _CONTAINER_ROOTS["working_directory"] + "/case",
         ]
-
-    def _validate_attestation(self) -> _Outcome:
-        path = self.request.output_directory / _ATTESTATION_NAME
-        try:
-            document = _read_attestation(path)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            existing = path if path.exists() else None
-            return _Outcome("incomplete", "run", 2, f"invalid probe attestation: {exc}", existing)
-        expected = _expected_attestation(self.run_id, self.image_id)
-        if document != expected:
-            return _Outcome("incomplete", "run", 2, "probe attestation is incoherent", path)
-        return _Outcome("passed", "complete", 0, "probe passed", path)
 
     def _cleanup(self) -> bool:
         if not self.build_attempted:
@@ -349,7 +348,7 @@ class _ProbeRun:
         self,
         command: Sequence[str],
         timeout: float,
-        phase: ProbePhase,
+        phase: RunPhase,
         *,
         observe_interrupts: bool = True,
     ) -> _CommandResult:
@@ -363,14 +362,13 @@ class _ProbeRun:
         self.diagnostics.add(phase, result)
         return result
 
-    def _result(self, outcome: _Outcome, cleanup_complete: bool) -> ContainerProbeResult:
-        return ContainerProbeResult(
+    def _result(self, outcome: _Outcome, cleanup_complete: bool) -> ContainerRunResult:
+        return ContainerRunResult(
             run_id=self.run_id,
             state=outcome.state,
             phase=outcome.phase,
             exit_code=outcome.exit_code,
             image_id=self.image_id,
-            attestation_path=outcome.attestation_path,
             cleanup_complete=cleanup_complete,
             stdout_tail=self.diagnostics.stdout.value,
             stderr_tail=self.diagnostics.stderr.value,
@@ -378,9 +376,9 @@ class _ProbeRun:
         )
 
 
-def _prepare_request(request: ContainerProbeRequest) -> _PreparedRequest:
+def _prepare_request(request: _PreparedRequest) -> _PreparedRequest:
     if threading.current_thread() is not threading.main_thread():
-        raise _PreflightError("run_probe must be called from the process main thread")
+        raise _PreflightError("run_case must be called from the process main thread")
     if os.name != "posix" or not hasattr(os, "getuid") or not hasattr(os, "getgid"):
         raise _PreflightError("this slice requires a POSIX host with UID/GID support")
     _validate_budgets(request)
@@ -388,13 +386,15 @@ def _prepare_request(request: ContainerProbeRequest) -> _PreparedRequest:
     if not runtime:
         raise _PreflightError("runtime_executable must not be empty")
     subject = _resolve_subject(request.subject_checkout)
+    case_file = _resolve_case(request.case_file)
+    output = request.output_directory.expanduser().resolve()
+    _validate_mount_paths(subject, case_file, output)
     output = _prepare_output(request.output_directory)
-    if _paths_overlap(subject, output):
-        raise _PreflightError("output_directory must not overlap subject_checkout")
-    if "," in str(subject) or "," in str(output):
-        raise _PreflightError("Docker mount paths containing commas are unsupported")
+    if "/" in runtime:
+        runtime = str(Path(runtime).expanduser().resolve())
     return _PreparedRequest(
         subject,
+        case_file,
         output,
         runtime,
         request.build_timeout_seconds,
@@ -403,7 +403,26 @@ def _prepare_request(request: ContainerProbeRequest) -> _PreparedRequest:
     )
 
 
-def _validate_budgets(request: ContainerProbeRequest) -> None:
+def _resolve_case(case_file: Path) -> Path:
+    try:
+        resolved = case_file.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise _PreflightError(f"case_file is unavailable: {exc}") from exc
+    if not resolved.is_file():
+        raise _PreflightError("case_file must be a regular file")
+    return resolved
+
+
+def _validate_mount_paths(subject: Path, case_file: Path, output: Path) -> None:
+    if _paths_overlap(subject, output):
+        raise _PreflightError("output_directory must not overlap subject_checkout")
+    if _paths_overlap(case_file, output):
+        raise _PreflightError("case_file must be outside output_directory")
+    if any("," in str(path) for path in (subject, case_file, output)):
+        raise _PreflightError("Docker mount paths containing commas are unsupported")
+
+
+def _validate_budgets(request: _PreparedRequest) -> None:
     budgets = {
         "build_timeout_seconds": request.build_timeout_seconds,
         "run_timeout_seconds": request.run_timeout_seconds,
@@ -452,14 +471,13 @@ def _mount(source: Path, destination: str, read_only: bool) -> str:
     return f"{options},readonly" if read_only else options
 
 
-def _preflight_failure(run_id: str, detail: str) -> ContainerProbeResult:
-    return ContainerProbeResult(
+def _preflight_failure(run_id: str, detail: str) -> ContainerRunResult:
+    return ContainerRunResult(
         run_id=run_id,
         state="incomplete",
         phase="preflight",
         exit_code=2,
         image_id=None,
-        attestation_path=None,
         cleanup_complete=True,
         stdout_tail="",
         stderr_tail="",
@@ -469,7 +487,7 @@ def _preflight_failure(run_id: str, detail: str) -> ContainerProbeResult:
 
 def _command_failure(
     result: _CommandResult,
-    phase: ProbePhase,
+    phase: RunPhase,
     detail: str,
 ) -> _Outcome | None:
     if result.interrupted_by is not None:
@@ -481,7 +499,7 @@ def _command_failure(
     return None
 
 
-def _interrupted(phase: ProbePhase, signal_number: int) -> _Outcome:
+def _interrupted(phase: RunPhase, signal_number: int) -> _Outcome:
     return _Outcome(
         "interrupted",
         phase,
@@ -499,31 +517,7 @@ def _apply_cleanup(outcome: _Outcome, cleanup_complete: bool) -> _Outcome:
         "cleanup",
         exit_code,
         f"{outcome.detail}; owned Docker resources remain",
-        outcome.attestation_path,
     )
-
-
-def _expected_attestation(run_id: str, image_id: str | None) -> dict[str, object]:
-    return {
-        "checks": {
-            "output_write_succeeded": True,
-            "roots_distinct": True,
-            "subject_mount_read_only": True,
-            "subject_write_rejected": True,
-        },
-        "identity": {"gid": os.getgid(), "uid": os.getuid()},
-        "image_id": image_id,
-        "image_payload": ["probe.py"],
-        "paths": _CONTAINER_ROOTS,
-        "run_id": run_id,
-        "schema_version": 1,
-    }
-
-
-def _read_attestation(path: Path) -> object:
-    if path.stat().st_size > _TAIL_LIMIT:
-        raise ValueError("attestation exceeds 64 KiB")
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _execute_command(

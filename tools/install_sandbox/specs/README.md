@@ -8,7 +8,7 @@ implementation template and do not make their current schema permanent.
 
 The upstream-refounded successor deliberately retains this catalog without
 restoring the former loader, typed models, lifecycle runner, quality gates, or
-workflows. No current production module consumes these files yet.
+workflows. The 24 retained YAML files are not consumed by the new reader.
 
 A later catalog slice must review the facts against the then-current Graphify
 installer, define the validation and loading boundary with the owner, and add
@@ -19,14 +19,27 @@ The YAML is the independent oracle for expected Graphify-owned file effects.
 It must not be generated from the installer output or behavior it is meant to
 test.
 
+## Reference development format
+
+`reference/sandbox-reference.yaml` contains the new target facts. Supply
+`reference/` alone to `InstallSpecReader`; it discovers direct `*.yaml` files
+and derives target identities from their filename stems. This does not migrate
+the retained catalog or make its older format readable.
+
+`spec.py` validates the new facts. The common first-install witnesses and
+operation belong to the case, and `InstallTestCoordinator` assembles and writes
+the complete project case JSON. Product source paths are transported without
+reading or embedding their contents. No installation is executed by this entry.
+The local Python environment needs PyYAML for YAML reading.
+
 ## Current ownership
 
 | Concern | Current owner |
 | --- | --- |
 | Catalog membership and target identity | `*.yaml` filename stems |
 | Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
-| Schema vocabulary, validation, defaults, and typed conversion | Not implemented on the successor line |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; not implemented on the successor line |
+| Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
+| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; only first-install project case assembly is implemented |
 
 ## Classify data before changing it
 

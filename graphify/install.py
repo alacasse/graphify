@@ -471,6 +471,12 @@ _PLATFORM_CONFIG: dict[str, dict] = {
         "claude_md": False,
         "skill_refs": "agents",
     },
+    "sandbox-reference": {
+        "skill_file": "skill.md",
+        "skill_dst": Path(".sandbox-reference") / "skills" / "graphify" / "SKILL.md",
+        "claude_md": False,
+        "skill_refs": "claude",
+    },
     "devin": {
         # Monolith: devin ships the full SKILL.md inline, no references/ sidecar.
         "skill_file": "skill-devin.md",
@@ -606,6 +612,8 @@ def _print_banner() -> None:
 def install(platform: str = "claude", *, project: bool = False, project_dir: Path | None = None) -> None:
     _print_banner()
     platform = _canonical_platform(platform)
+    if platform == "sandbox-reference" and not project:
+        _refuse_sandbox_reference("user installation")
     if platform == "gemini":
         gemini_install(project_dir=project_dir, project=project)
         return
@@ -625,6 +633,9 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
     cfg = _PLATFORM_CONFIG[platform]
     project_dir = project_dir or Path(".")
     skill_dst = _copy_skill_file(platform, project=project, project_dir=project_dir)
+
+    if platform == "sandbox-reference":
+        _sandbox_reference_configure(project_dir)
 
     if platform == "kilo":
         # Kilo Code also supports a native /graphify command file.
@@ -698,6 +709,40 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
     print("Prefer a hosted version? Early access to the graphify platform is")
     print("open free before the public v1 launch: https://app.graphify.com")
     print()
+def _refuse_sandbox_reference(operation: str) -> NoReturn:
+    print(
+        f"error: sandbox-reference {operation} is not implemented; "
+        "only project installation is available (--project).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def _sandbox_reference_configure(project_dir: Path) -> None:
+    """Register the project skill in the reference target's shared files."""
+    directory = project_dir / ".sandbox-reference"
+    settings_path = directory / "settings.json"
+    settings = _read_settings_for_merge(settings_path)
+    instructions = settings.setdefault("instructions", [])
+    if not isinstance(instructions, list):
+        print(
+            f"error: refusing to modify {settings_path}: instructions must be a JSON list",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    entry = "skills/graphify/SKILL.md"
+    if entry not in instructions:
+        instructions.append(entry)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+    target = directory / "instructions.md"
+    content = target.read_text(encoding="utf-8") if target.exists() else ""
+    new_content = _replace_or_append_section(content, "## graphify", _always_on("agents-md"))
+    if content != new_content:
+        target.write_text(new_content, encoding="utf-8")
+    print(f"  project configured ->  {directory}")
+
+
 def _print_install_usage() -> None:
     platforms = ", ".join([*_PLATFORM_CONFIG, "gemini", "cursor"])
     print("Usage: graphify install [--project] [--strict] [--platform P|P]")
@@ -1631,6 +1676,8 @@ def _project_install(platform_name: str, project_dir: Path | None = None, strict
         install(platform=platform_name, project=True, project_dir=project_dir)
 def _project_uninstall(platform_name: str, project_dir: Path | None = None) -> None:
     """Remove project-scoped platform skill/config files only."""
+    if platform_name == "sandbox-reference":
+        _refuse_sandbox_reference("uninstallation")
     project_dir = project_dir or Path(".")
     platform_name = _canonical_platform(platform_name)
     if platform_name in ("claude", "windows"):
@@ -1670,7 +1717,10 @@ def _project_uninstall_all(project_dir: Path | None = None) -> None:
     project_dir = project_dir or Path(".")
     print("Uninstalling project-scoped graphify files...\n")
     for platform_name in _PLATFORM_CONFIG:
-        _project_uninstall(platform_name, project_dir)
+        # The reference target's uninstall is not implemented yet. Keep the
+        # existing all-platform cleanup available for the other targets.
+        if platform_name != "sandbox-reference":
+            _project_uninstall(platform_name, project_dir)
     for platform_name in ("gemini", "cursor"):
         _project_uninstall(platform_name, project_dir)
     print("\nDone.")
@@ -2135,6 +2185,8 @@ def dispatch_install_cli(cmd: str) -> bool:
             else:
                 selected_platform = arg
                 i += 1
+        if selected_platform == "sandbox-reference":
+            _refuse_sandbox_reference("uninstallation")
         if project_scope:
             if selected_platform:
                 _project_uninstall(selected_platform, Path("."))

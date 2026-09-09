@@ -14,15 +14,6 @@ import uuid
 from pathlib import Path
 
 _IMAGE_ID = "sha256:" + ("a" * 64)
-_ROOTS = {
-    "home": "/sandbox/home",
-    "output": "/sandbox/output",
-    "prepared_source": "/sandbox/source",
-    "project": "/sandbox/project",
-    "subject": "/sandbox/subject",
-    "working_directory": "/sandbox/work",
-    "xdg": "/sandbox/xdg",
-}
 
 
 def main(arguments: list[str]) -> int:
@@ -42,6 +33,9 @@ def main(arguments: list[str]) -> int:
     if command == "image":
         return _image(state, mode, arguments)
     if command in {"stop", "kill", "rm"}:
+        if mode == "container_cleanup_fail":
+            print("container cleanup refused", file=sys.stderr)
+            return 8
         _resource_marker(state, "container", arguments[-1]).unlink(missing_ok=True)
         return 0
     return 2
@@ -63,10 +57,10 @@ def _build(state: Path, mode: str, arguments: list[str]) -> int:
         return 7
     tag = _option(arguments, "--tag")
     iidfile = Path(_option(arguments, "--iidfile"))
-    if mode == "barrier":
-        _barrier(state, tag)
     _resource_marker(state, "image", tag).write_text(_IMAGE_ID, encoding="utf-8")
-    iidfile.write_text(_IMAGE_ID + "\n", encoding="utf-8")
+    if mode != "missing_image_id":
+        image_id = "invalid" if mode == "invalid_image_id" else _IMAGE_ID
+        iidfile.write_text(image_id + "\n", encoding="utf-8")
     if os.environ.get("FAKE_DOCKER_VERBOSE") == "1":
         print("A" * 70_000)
     return 0
@@ -77,8 +71,9 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     marker = _resource_marker(state, "container", name)
     marker.write_text("running", encoding="utf-8")
     run_id = _environment(arguments, "INSTALL_SANDBOX_RUN_ID")
-    image_id = _environment(arguments, "INSTALL_SANDBOX_IMAGE_ID")
     output = _output_mount(arguments)
+    (output / "journal.log").write_text("controlled container evidence\n", encoding="utf-8")
+    print("container started", flush=True)
     if mode in {"hold", "run_timeout"}:
         (state / f"ready-{run_id}").write_text("ready", encoding="utf-8")
         if mode == "run_timeout":
@@ -88,31 +83,11 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
         marker.unlink(missing_ok=True)
         print("run failed", file=sys.stderr)
         return 9
-    if mode == "invalid_json":
-        (output / "infrastructure-probe.json").write_text("{", encoding="utf-8")
-    else:
-        _write_attestation(output, run_id, image_id)
-    marker.unlink(missing_ok=True)
+    if mode == "invalid_result":
+        (output / "result.json").write_text("{", encoding="utf-8")
+    if mode != "container_cleanup_fail":
+        marker.unlink(missing_ok=True)
     return 0
-
-
-def _write_attestation(output: Path, run_id: str, image_id: str) -> None:
-    document: dict[str, object] = {
-        "checks": {
-            "output_write_succeeded": True,
-            "roots_distinct": True,
-            "subject_mount_read_only": True,
-            "subject_write_rejected": True,
-        },
-        "identity": {"gid": os.getgid(), "uid": os.getuid()},
-        "image_id": image_id,
-        "image_payload": ["probe.py"],
-        "paths": _ROOTS,
-        "run_id": run_id,
-        "schema_version": 1,
-    }
-    path = output / "infrastructure-probe.json"
-    path.write_text(json.dumps(document), encoding="utf-8")
 
 
 def _container_list(state: Path, arguments: list[str]) -> int:
@@ -150,15 +125,6 @@ def _spawn_ignoring_child(state: Path) -> None:
     environment["FAKE_DOCKER_CHILD_PID"] = str(state / "child-pid")
     subprocess.Popen([sys.executable, "-c", code], env=environment)
     _wait_for_path(state / "child-pid")
-
-
-def _barrier(state: Path, tag: str) -> None:
-    (state / f"barrier-{_key(tag)}").write_text("ready", encoding="utf-8")
-    deadline = time.monotonic() + 5
-    while len(list(state.glob("barrier-*"))) < 2:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("fake build barrier timed out")
-        time.sleep(0.01)
 
 
 def _wait_for_path(path: Path) -> None:

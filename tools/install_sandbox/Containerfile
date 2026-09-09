@@ -5,25 +5,14 @@ ENV HOME=/sandbox/home \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN mkdir -p \
-        /opt/install-sandbox \
-        /sandbox/home \
-        /sandbox/output \
-        /sandbox/project \
-        /sandbox/source \
-        /sandbox/subject \
-        /sandbox/work \
-        /sandbox/xdg \
-    && chmod 1777 \
-        /sandbox/home \
-        /sandbox/output \
-        /sandbox/project \
-        /sandbox/source \
-        /sandbox/work \
-        /sandbox/xdg
+RUN mkdir -p /opt/install-sandbox/tools/install_sandbox \
+        /sandbox/home /sandbox/xdg /sandbox/output /sandbox/subject /sandbox/work \
+    && chmod 1777 /sandbox/home /sandbox/xdg /sandbox/work
 
-COPY --chmod=0555 docker_probe.py /opt/install-sandbox/probe.py
+# Only the sandbox's internal case program is embedded, never the tested product.
+COPY --chmod=0444 case.py spec.py driver.py environment.py preparer.py \
+    results.py runner.py verifier.py container_main.py /opt/install-sandbox/tools/install_sandbox/
 
 WORKDIR /sandbox/work
 
-ENTRYPOINT ["python", "-B", "/opt/install-sandbox/probe.py"]
+ENTRYPOINT ["python", "-I", "-B", "-u", "/opt/install-sandbox/tools/install_sandbox/container_main.py"]

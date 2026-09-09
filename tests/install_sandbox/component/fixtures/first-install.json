@@ -1,0 +1,46 @@
+{
+  "name": "first-install",
+  "target": "sandbox-reference",
+  "scope": "project",
+  "spec": {
+    "scopes": ["user", "project"],
+    "directory": ".sandbox-reference",
+    "skill": {
+      "file": "skills/graphify/SKILL.md",
+      "source": "graphify/skill.md",
+      "references": "graphify/skills/claude/references"
+    },
+    "markdown": {
+      "file": "instructions.md",
+      "marker": "## graphify",
+      "source": "graphify/always_on/agents-md.md"
+    },
+    "json": {
+      "file": "settings.json",
+      "list": "instructions"
+    }
+  },
+  "initial_files": [
+    {
+      "root": "project",
+      "path": ".sandbox-reference/instructions.md",
+      "content": "# My project\n\n## Language\nRespond in English.\n\n## Changes\nExplain proposed changes.\n"
+    },
+    {
+      "root": "project",
+      "path": ".sandbox-reference/settings.json",
+      "content": "{\n  \"theme\": \"dark\",\n  \"instructions\": [\"my-instructions.md\"]\n}\n"
+    },
+    {
+      "root": "project",
+      "path": ".sandbox-reference/my-instructions.md",
+      "content": "# My instructions\nDo not modify my personal documents.\n"
+    },
+    {
+      "root": "home",
+      "path": "personal-notes.txt",
+      "content": "Personal document to preserve.\n"
+    }
+  ],
+  "operations": ["install"]
+}

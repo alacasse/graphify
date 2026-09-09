@@ -1,0 +1,16 @@
+scopes: [user, project]
+directory: .sandbox-reference
+
+skill:
+  file: skills/graphify/SKILL.md
+  source: graphify/skill.md
+  references: graphify/skills/claude/references
+
+markdown:
+  file: instructions.md
+  marker: "## graphify"
+  source: graphify/always_on/agents-md.md
+
+json:
+  file: settings.json
+  list: instructions

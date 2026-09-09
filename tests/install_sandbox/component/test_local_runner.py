@@ -30,7 +30,7 @@ _FILES = {
 }
 
 
-def _script(mode: str) -> str:
+def controlled_script(mode: str) -> str:
     effects = dict(_FILES)
     if mode == "missing":
         del effects[".sandbox-reference/skills/graphify/references/one.md"]
@@ -87,7 +87,7 @@ class LocalCase:
         if len(self.calls) == 2 and self.mode != "not_started":
             executable = self.root / "work/software/venv/bin/graphify"
             executable.parent.mkdir(parents=True)
-            executable.write_text(_script(self.mode), encoding="utf-8")
+            executable.write_text(controlled_script(self.mode), encoding="utf-8")
             executable.chmod(0o755)
         return result
 

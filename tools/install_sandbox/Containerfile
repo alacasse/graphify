@@ -6,13 +6,17 @@ ENV HOME=/sandbox/home \
     PYTHONUNBUFFERED=1
 
 RUN mkdir -p /opt/install-sandbox/tools/install_sandbox \
-        /sandbox/home /sandbox/xdg /sandbox/output /sandbox/subject /sandbox/work \
+        /sandbox/home /sandbox/xdg /sandbox/output /sandbox/work \
     && chmod 1777 /sandbox/home /sandbox/xdg /sandbox/work
 
-# Only the sandbox's internal case program is embedded, never the tested product.
-COPY --chmod=0444 case.py spec.py driver.py environment.py preparer.py \
-    results.py timings.py runner.py verifier.py container_main.py /opt/install-sandbox/tools/install_sandbox/
+COPY --chmod=0444 case.py spec.py driver.py environment.py results.py timings.py \
+    runner.py verifier.py container_main.py /opt/install-sandbox/tools/install_sandbox/
+COPY subject/ /opt/install-sandbox/reference/
+RUN cp -a /opt/install-sandbox/reference /tmp/package \
+    && python -m venv /opt/install-sandbox/venv \
+    && /opt/install-sandbox/venv/bin/python -m pip install --disable-pip-version-check /tmp/package \
+    && rm -rf /tmp/package \
+    && chmod -R a+rX /opt/install-sandbox
 
 WORKDIR /sandbox/work
-
 ENTRYPOINT ["python", "-I", "-B", "-u", "/opt/install-sandbox/tools/install_sandbox/container_main.py"]

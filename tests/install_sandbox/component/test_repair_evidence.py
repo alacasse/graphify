@@ -56,8 +56,10 @@ def test_missing_proof_is_reported_by_coordinator(
     result = run_repair(tmp_path)
     assert not result.passed and result.test is None and result.result_error, asdict(result)
     assert result.container.state == "completed" and result.container.cleanup_complete
-    assert (tmp_path / "results/uncorrupted-result.json").exists()
-    assert (tmp_path / "results/steps/1/after.json").exists() or relative == "steps/1/after.json"
+    assert (tmp_path / "campaign/cases/repair-references/uncorrupted-result.json").exists()
+    assert (
+        tmp_path / "campaign/cases/repair-references/steps/1/after.json"
+    ).exists() or relative == "steps/1/after.json"
 
 
 @pytest.mark.parametrize(
@@ -86,7 +88,7 @@ def test_inconsistent_history_is_reported_by_coordinator(
     result = run_repair(tmp_path)
     assert not result.passed and result.test is None and result.result_error, asdict(result)
     assert "invalid" in result.result_error
-    assert (tmp_path / "results/steps/1/preparation/result.json").exists()
+    assert (tmp_path / "campaign/cases/repair-references/steps/1/preparation/result.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -118,4 +120,4 @@ def test_inconsistent_intermediate_proof_is_rejected(
     )
     result = run_repair(tmp_path)
     assert not result.passed and result.test is None and result.result_error, asdict(result)
-    assert (tmp_path / "results/uncorrupted-result.json").exists()
+    assert (tmp_path / "campaign/cases/repair-references/uncorrupted-result.json").exists()

@@ -25,17 +25,20 @@ def arrange_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "
 
 
 def run_first(tmp_path: Path) -> CoordinatedResult:
-    return InstallTestCoordinator().run_case(
+    campaign = InstallTestCoordinator().run_campaign(
         specs_directory=_SPECS,
         target="sandbox-reference",
+        case_names=["first-install"],
         subject_checkout=tmp_path / "subject",
-        case_file=tmp_path / "case.json",
-        output_directory=tmp_path / "results",
+        output_directory=tmp_path / "campaign",
         runtime_executable=_COMPONENT / "fake_docker.py",
         build_timeout_seconds=10,
         run_timeout_seconds=10,
         graceful_termination_seconds=0.1,
     )
+    result = campaign.cases[0].result
+    assert result is not None, campaign
+    return result
 
 
 @pytest.mark.parametrize(
@@ -45,7 +48,6 @@ def run_first(tmp_path: Path) -> CoordinatedResult:
         ("missing", False, "failed"),
         ("nonzero", False, "failed"),
         ("signal", False, "incomplete"),
-        ("passed", True, "not_run"),
     ],
 )
 def test_conduct_keeps_case_status_separate_from_completed_harness(
@@ -62,9 +64,9 @@ def test_conduct_keeps_case_status_separate_from_completed_harness(
     assert result.result_error is None and result.test is not None
     assert result.test.status == expected
     assert result.passed == (expected == "passed")
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
+    case = InstallTestCase.from_json((tmp_path / "campaign/inputs/first-install.json").read_text())
     assert case.target == "sandbox-reference" and case.operations == ["install"]
-    shutil.rmtree(tmp_path / "work")
+    shutil.rmtree(tmp_path / "work/first-install")
     shutil.rmtree(tmp_path / "subject")
     assert (result.output_directory / "journal.log").read_text()
     assert json.loads((result.output_directory / "result.json").read_text())["status"] == expected
@@ -75,7 +77,7 @@ def test_conduct_keeps_case_status_separate_from_completed_harness(
         assert bool(step["verification"].mismatches) == (mode == "missing")
 
 
-@pytest.mark.parametrize("mode", ["cleanup_fail", "run_fail"])
+@pytest.mark.parametrize("mode", ["container_cleanup_fail", "run_fail"])
 def test_valid_passed_case_survives_harness_problem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -132,7 +134,7 @@ def test_unreadable_result_does_not_hide_harness_result(
     original = Path.read_text
 
     def read(path: Path, *args: object, **kwargs: object) -> str:
-        if path == tmp_path / "results/result.json":
+        if path == tmp_path / "campaign/cases/first-install/result.json":
             raise PermissionError("Controlled result read denied")
         return original(path)
 
@@ -141,23 +143,3 @@ def test_unreadable_result_does_not_hide_harness_result(
     assert result.container.state == "completed" and result.test is None
     assert "unreadable" in (result.result_error or "")
     assert not result.passed
-
-
-@pytest.mark.parametrize("destination", ["subject/case.json", "results/case.json", "case.json"])
-def test_rejects_unsafe_or_existing_case_before_writes(
-    tmp_path: Path,
-    destination: str,
-) -> None:
-    subject = tmp_path / "subject"
-    subject.mkdir()
-    (tmp_path / "case.json").write_text("Existing case")
-    with pytest.raises(ValueError):
-        InstallTestCoordinator().run_case(
-            specs_directory=_SPECS,
-            target="sandbox-reference",
-            subject_checkout=subject,
-            case_file=tmp_path / destination,
-            output_directory=tmp_path / "results",
-        )
-    assert (tmp_path / "case.json").read_text() == "Existing case"
-    assert not (tmp_path / "results").exists()

@@ -1,4 +1,4 @@
-"""Build and run one installation case in an isolated Docker container."""
+"""Prepare one image, run fresh case containers, and clean only owned resources."""
 
 from __future__ import annotations
 
@@ -14,31 +14,30 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
 from typing import Literal, TextIO
 
-from tools.install_sandbox.timings import Timing, elapsed, measure, skip_pending
+from tools.install_sandbox.preparer import prepare_context
+from tools.install_sandbox.timings import Timing, measure, skip_pending
 
 __all__ = ["ContainerHarness", "ContainerRunResult"]
 
-_CONTAINER_ROOTS = {
-    "subject": "/sandbox/subject",
-    "case": "/sandbox/case.json",
-    "output": "/sandbox/output",
-    "working_directory": "/sandbox/work",
-}
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _TAIL_LIMIT = 64 * 1024
 
 RunState = Literal["completed", "incomplete", "interrupted"]
-RunPhase = Literal["preflight", "build", "run", "cleanup", "complete"]
+RunPhase = Literal["preflight", "build", "verify", "run", "cleanup", "complete"]
 
 
 @dataclass(frozen=True, slots=True)
 class ContainerRunResult:
-    """Closed infrastructure result returned by :meth:`ContainerHarness.run_case`."""
+    """One infrastructure operation, separate from business verdicts.
+
+    Preparation cleanup covers its verification container; the image remains owned
+    until the campaign calls cleanup. Case cleanup covers only that case container.
+    """
 
     run_id: str
     state: RunState
@@ -50,17 +49,6 @@ class ContainerRunResult:
     stderr_tail: str
     detail: str
     timings: list[Timing] = field(default_factory=list[Timing])
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedRequest:
-    subject_checkout: Path
-    case_file: Path
-    output_directory: Path
-    runtime_executable: str
-    build_timeout_seconds: float
-    run_timeout_seconds: float
-    graceful_termination_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,122 +122,122 @@ class _SignalCapture:
 
 
 class ContainerHarness:
-    """Own image construction, case container execution, and invocation cleanup."""
+    """Docker resources live within one coordinator-owned campaign context."""
 
-    def run_case(
+    def __init__(
         self,
         *,
-        subject_checkout: Path,
-        case_file: Path,
-        output_directory: Path,
         runtime_executable: str | Path = "docker",
-        build_timeout_seconds: float = 300.0,
-        run_timeout_seconds: float = 900.0,
-        graceful_termination_seconds: float = 10.0,
-    ) -> ContainerRunResult:
-        """Run one container; case conformity is reported separately by the runner."""
-        started = time.monotonic_ns()
-        timings = [Timing(phase) for phase in ("preflight", "build", "run", "cleanup")]
-        run_id = uuid.uuid4().hex
-        request = _PreparedRequest(
-            subject_checkout,
-            case_file,
-            output_directory,
-            str(runtime_executable),
-            build_timeout_seconds,
-            run_timeout_seconds,
-            graceful_termination_seconds,
-        )
-        try:
-            prepared = _prepare_request(request)
-        except (_PreflightError, OSError, RuntimeError) as exc:
-            timings[0] = Timing("preflight", state="measured", duration_seconds=elapsed(started))
-            skip_pending(timings)
-            return replace(_preflight_failure(run_id, str(exc)), timings=timings)
-        return _ContainerRun(prepared, run_id, timings, started).execute()
-
-
-class _ContainerRun:
-    def __init__(
-        self, request: _PreparedRequest, run_id: str, timings: list[Timing], started: int
+        build_timeout_seconds: float = 300,
+        verify_timeout_seconds: float = 60,
+        run_timeout_seconds: float = 900,
+        graceful_termination_seconds: float = 10,
     ) -> None:
-        self.timings = timings
-        self.started = started
-        self.request = request
-        self.run_id = run_id
-        self.image_tag = f"install-sandbox-case:{run_id}"
-        self.container_name = f"install-sandbox-case-{run_id}"
+        self.runtime = _validate_runtime(
+            runtime_executable,
+            (
+                build_timeout_seconds,
+                verify_timeout_seconds,
+                run_timeout_seconds,
+                graceful_termination_seconds,
+            ),
+        )
+        self.build_timeout = build_timeout_seconds
+        self.verify_timeout = verify_timeout_seconds
+        self.run_timeout = run_timeout_seconds
+        self.grace = graceful_termination_seconds
+        self.run_id = uuid.uuid4().hex
+        self.image_tag = f"install-sandbox-campaign:{self.run_id}"
         self.image_id: str | None = None
         self.build_attempted = False
-        self.run_attempted = False
-        self.diagnostics = _DiagnosticTails()
+        self.ready = False
+        self.pending_containers: set[str] = set()
         self.interrupts = _SignalCapture()
+        self.temporary: tempfile.TemporaryDirectory[str] | None = None
+        self.logs: Path | None = None
+        self.diagnostics = _DiagnosticTails()
 
-    def execute(self) -> ContainerRunResult:
-        with self.interrupts:
-            daemon_outcome = self._check_daemon()
-            self.timings[0] = Timing(
-                "preflight", state="measured", duration_seconds=elapsed(self.started)
-            )
-            if daemon_outcome is not None:
-                return self._result(daemon_outcome, cleanup_complete=True)
-            try:
-                outcome = self._build_and_run()
-            except Exception as exc:
-                outcome = _Outcome("incomplete", "run", 2, f"unexpected harness error: {exc}")
-            with measure(self.timings[3]):
-                outcome, cleanup_complete = self._cleanup_outcome(outcome)
-            if cleanup_complete and self.interrupts.signal_number is not None:
-                outcome = _interrupted("cleanup", self.interrupts.signal_number)
-        return self._result(_apply_cleanup(outcome, cleanup_complete), cleanup_complete)
+    def __enter__(self) -> ContainerHarness:
+        self.interrupts.__enter__()
+        return self
 
-    def _cleanup_outcome(self, outcome: _Outcome) -> tuple[_Outcome, bool]:
+    def __exit__(self, *_args: object) -> None:
+        self.interrupts.__exit__()
+
+    @property
+    def interrupted(self) -> bool:
+        return self.interrupts.signal_number is not None
+
+    def prepare(self, subject_checkout: Path, output_directory: Path) -> ContainerRunResult:
+        if self.logs is not None:
+            raise ValueError("A harness prepares exactly one campaign image")
+        subject_checkout = subject_checkout.expanduser().resolve(strict=True)
+        if not subject_checkout.is_dir() or _paths_overlap(
+            subject_checkout, output_directory.expanduser().resolve()
+        ):
+            raise ValueError("Preparation evidence must be separate from the subject directory")
+        self.logs = _prepare_output(output_directory)
+        records = [Timing(p) for p in ("copy_sources", "preflight", "build", "verify")]
+        outcome = _Outcome("incomplete", "preflight", 2, "Preparation did not complete")
         try:
-            return outcome, self._cleanup()
-        except Exception as exc:
-            detail = f"{outcome.detail}; cleanup raised: {exc}"
-            return _Outcome("incomplete", "cleanup", outcome.exit_code or 2, detail), False
+            outcome = self._prepare_image(subject_checkout, records)
+        except Exception as error:
+            outcome = _Outcome("incomplete", "build", 2, f"Preparation failed: {error}")
+        self.ready = outcome.state == "completed" and not self.pending_containers
+        return self._result(outcome, not self.pending_containers, records, self.run_id)
 
-    def _check_daemon(self) -> _Outcome | None:
-        command = [
-            self.request.runtime_executable,
-            "version",
-            "--format",
-            "{{.Server.Version}}",
-        ]
-        result = self._command(command, min(self.request.build_timeout_seconds, 10.0), "preflight")
-        return _command_failure(result, "preflight", "Docker daemon preflight failed")
+    def _prepare_image(self, subject: Path, records: list[Timing]) -> _Outcome:
+        with measure(records[0]):
+            self._check_temporary_parent(subject)
+            self.temporary = tempfile.TemporaryDirectory(prefix=f"install-sandbox-{self.run_id}-")
+            context = prepare_context(subject, Path(self.temporary.name))
+        with measure(records[1]):
+            result = self._command(
+                [self.runtime, "version", "--format", "{{.Server.Version}}"],
+                min(self.build_timeout, 10),
+                "preflight",
+            )
+        failure = _command_failure(result, "preflight", "Docker daemon preflight failed")
+        if failure is not None:
+            return failure
+        with measure(records[2]):
+            failure = self._build_image(context)
+        if failure is not None:
+            return failure
+        with measure(records[3]):
+            verified = self._container(None, None, self.verify_timeout, "verify")
+        return _Outcome(verified.state, verified.phase, verified.exit_code, verified.detail)
 
-    def _build_and_run(self) -> _Outcome:
-        if self.interrupts.signal_number is not None:
-            return _interrupted("build", self.interrupts.signal_number)
-        with tempfile.TemporaryDirectory(prefix=f"install-sandbox-{self.run_id}-") as temporary:
-            image_id_file = Path(temporary) / "image-id"
-            with measure(self.timings[1]):
-                build_outcome = self._build_image(image_id_file)
-            if build_outcome is not None:
-                return build_outcome
-            if self.interrupts.signal_number is not None:
-                return _interrupted("run", self.interrupts.signal_number)
-            with measure(self.timings[2]):
-                return self._run_image()
+    def _check_temporary_parent(self, subject: Path) -> None:
+        assert self.logs is not None
+        parent = Path(tempfile.gettempdir()).resolve()
+        if parent.is_relative_to(subject) or parent.is_relative_to(self.logs.parent):
+            raise ValueError(
+                "Temporary build context must be outside subject and campaign evidence"
+            )
 
-    def _build_image(self, image_id_file: Path) -> _Outcome | None:
-        context = Path(__file__).resolve().parent
+    def _build_image(self, context: Path) -> _Outcome | None:
+        if self.interrupted:
+            return _interrupted("build", self.interrupts.signal_number or signal.SIGINT)
+        image_id_file = context.parent / "image-id"
         self.build_attempted = True
-        command = [
-            self.request.runtime_executable,
+        result = self._command(
+            [
+                self.runtime,
+                "build",
+                "--progress=plain",
+                "--file",
+                str(context / "Containerfile"),
+                "--tag",
+                self.image_tag,
+                "--iidfile",
+                str(image_id_file),
+                str(context),
+            ],
+            self.build_timeout,
             "build",
-            "--file",
-            str(context / "Containerfile"),
-            "--tag",
-            self.image_tag,
-            "--iidfile",
-            str(image_id_file),
-            str(context),
-        ]
-        result = self._command(command, self.request.build_timeout_seconds, "build")
-        failure = _command_failure(result, "build", "case image build failed")
+        )
+        failure = _command_failure(result, "build", "Campaign image build failed")
         if failure is not None:
             return failure
         return self._load_image_id(image_id_file)
@@ -264,80 +252,160 @@ class _ContainerRun:
         self.image_id = image_id
         return None
 
-    def _run_image(self) -> _Outcome:
-        if self.interrupts.signal_number is not None:
-            return _interrupted("run", self.interrupts.signal_number)
-        assert self.image_id is not None
-        self.run_attempted = True
-        result = self._command(
-            self._run_command(self.image_id),
-            self.request.run_timeout_seconds,
-            "run",
-        )
-        failure = _command_failure(result, "run", "case container failed")
-        if failure is not None:
-            return failure
-        return _Outcome("completed", "complete", 0, "case container completed")
+    def run_case(self, *, case_file: Path, output_directory: Path) -> ContainerRunResult:
+        if not self.ready:
+            raise ValueError("Campaign image is not available")
+        case = _resolve_case(case_file)
+        output = output_directory.expanduser().resolve()
+        if _paths_overlap(case, output) or any("," in str(p) for p in (case, output)):
+            raise ValueError("Case and evidence mount paths must be separate and comma-free")
+        output = _prepare_output(output_directory)
+        return self._container(case, output, self.run_timeout, "run")
 
-    def _run_command(self, image_id: str) -> list[str]:
-        uid = os.getuid()
-        gid = os.getgid()
-        subject_mount = _mount(self.request.subject_checkout, _CONTAINER_ROOTS["subject"], True)
-        case_mount = _mount(self.request.case_file, _CONTAINER_ROOTS["case"], True)
-        output_mount = _mount(self.request.output_directory, _CONTAINER_ROOTS["output"], False)
-        return [
-            self.request.runtime_executable,
+    def _container(
+        self,
+        case: Path | None,
+        output: Path | None,
+        timeout: float,
+        phase: RunPhase,
+    ) -> ContainerRunResult:
+        run_id = uuid.uuid4().hex
+        name = f"install-sandbox-case-{run_id}"
+        records = [Timing(phase), Timing("cleanup")]
+        self.diagnostics = _DiagnosticTails()
+        outcome = _Outcome("incomplete", phase, 2, "Container did not complete")
+        try:
+            with measure(records[0]):
+                outcome = self._launch(name, run_id, case, output, timeout, phase)
+        except Exception as error:
+            outcome = _Outcome("incomplete", phase, 2, f"Container failed: {error}")
+        with measure(records[1]):
+            clean = self._safe_cleanup_container(name)
+        if self.interrupted:
+            outcome = _interrupted(phase, self.interrupts.signal_number or signal.SIGINT)
+        return self._result(_apply_cleanup(outcome, clean), clean, records, run_id)
+
+    def _launch(
+        self,
+        name: str,
+        run_id: str,
+        case: Path | None,
+        output: Path | None,
+        timeout: float,
+        phase: RunPhase,
+    ) -> _Outcome:
+        if self.interrupted:
+            return _interrupted(phase, self.interrupts.signal_number or signal.SIGINT)
+        self.pending_containers.add(name)
+        result = self._command(self._run_command(name, run_id, case, output), timeout, phase)
+        return _command_failure(result, phase, "Container failed") or _Outcome(
+            "completed",
+            "complete",
+            0,
+            "Container completed",
+        )
+
+    def _run_command(
+        self,
+        name: str,
+        run_id: str,
+        case: Path | None,
+        output: Path | None,
+    ) -> list[str]:
+        assert self.image_id is not None
+        command = [
+            self.runtime,
             "run",
             "--rm",
             "--name",
-            self.container_name,
+            name,
             "--user",
-            f"{uid}:{gid}",
-            "--mount",
-            subject_mount,
-            "--mount",
-            case_mount,
-            "--mount",
-            output_mount,
+            f"{os.getuid()}:{os.getgid()}",
             "--env",
-            f"INSTALL_SANDBOX_RUN_ID={self.run_id}",
+            f"INSTALL_SANDBOX_RUN_ID={run_id}",
             "--env",
-            f"INSTALL_SANDBOX_IMAGE_ID={image_id}",
+            f"INSTALL_SANDBOX_IMAGE_ID={self.image_id}",
             "--workdir",
-            _CONTAINER_ROOTS["working_directory"],
-            image_id,
-            "--subject-checkout",
-            _CONTAINER_ROOTS["subject"],
+            "/sandbox/work",
+        ]
+        if case is None:
+            return [
+                *command,
+                "--entrypoint",
+                "/opt/install-sandbox/venv/bin/graphify",
+                self.image_id,
+                "--help",
+            ]
+        assert output is not None
+        return [
+            *command,
+            "--mount",
+            _mount(case, "/sandbox/case.json", True),
+            "--mount",
+            _mount(output, "/sandbox/output", False),
+            self.image_id,
+            "--reference-sources",
+            "/opt/install-sandbox/reference",
+            "--prepared-executable",
+            "/opt/install-sandbox/venv/bin/graphify",
             "--case-file",
-            _CONTAINER_ROOTS["case"],
+            "/sandbox/case.json",
             "--output-directory",
-            _CONTAINER_ROOTS["output"],
+            "/sandbox/output",
             "--work-directory",
-            _CONTAINER_ROOTS["working_directory"] + "/case",
+            "/sandbox/work/case",
         ]
 
-    def _cleanup(self) -> bool:
-        if not self.build_attempted:
-            return True
-        container_absent = self._cleanup_container()
-        image_tag_absent = self._cleanup_image_tag()
-        return container_absent and image_tag_absent
+    def cleanup(self) -> ContainerRunResult:
+        records = [Timing("cleanup")]
+        clean = True
+        outcome = _Outcome("completed", "complete", 0, "Campaign resources cleaned")
+        with measure(records[0]):
+            for name in tuple(self.pending_containers):
+                clean = self._safe_cleanup_container(name) and clean
+            try:
+                clean = (not self.build_attempted or self._cleanup_image_tag()) and clean
+            except Exception as error:
+                outcome = _Outcome("incomplete", "cleanup", 2, f"Image cleanup failed: {error}")
+                clean = False
+            clean = self._cleanup_context() and clean
+        self.ready = False
+        if self.interrupted:
+            outcome = _interrupted("cleanup", self.interrupts.signal_number or signal.SIGINT)
+        return self._result(_apply_cleanup(outcome, clean), clean, records, self.run_id)
 
-    def _cleanup_container(self) -> bool:
-        if not self.run_attempted or self._container_absent():
+    def _cleanup_context(self) -> bool:
+        try:
+            if self.temporary is not None:
+                self.temporary.cleanup()
             return True
-        timeout = max(15.0, self.request.graceful_termination_seconds + 5.0)
-        grace = str(max(1, math.ceil(self.request.graceful_termination_seconds)))
-        self._cleanup_command(["stop", "--time", grace, self.container_name], timeout)
-        if not self._container_absent():
-            self._cleanup_command(["kill", self.container_name], timeout)
-        if not self._container_absent():
-            self._cleanup_command(["rm", "--force", self.container_name], timeout)
-        return self._container_absent()
+        except OSError:
+            return False
 
-    def _container_absent(self) -> bool:
+    def _safe_cleanup_container(self, name: str) -> bool:
+        try:
+            clean = name not in self.pending_containers or self._cleanup_container(name)
+        except Exception:
+            return False
+        if clean:
+            self.pending_containers.discard(name)
+        return clean
+
+    def _cleanup_container(self, name: str) -> bool:
+        if self._container_absent(name):
+            return True
+        timeout = max(15.0, self.grace + 5.0)
+        grace = str(max(1, math.ceil(self.grace)))
+        self._cleanup_command(["stop", "--time", grace, name], timeout)
+        if not self._container_absent(name):
+            self._cleanup_command(["kill", name], timeout)
+        if not self._container_absent(name):
+            self._cleanup_command(["rm", "--force", name], timeout)
+        return self._container_absent(name)
+
+    def _container_absent(self, name: str) -> bool:
         result = self._cleanup_command(
-            ["container", "ls", "--all", "--quiet", "--filter", f"name=^/{self.container_name}$"],
+            ["container", "ls", "--all", "--quiet", "--filter", f"name=^/{name}$"],
             15.0,
         )
         return result.exit_code == 0 and not result.stdout_tail.strip()
@@ -357,10 +425,7 @@ class _ContainerRun:
 
     def _cleanup_command(self, arguments: list[str], timeout: float) -> _CommandResult:
         return self._command(
-            [self.request.runtime_executable, *arguments],
-            timeout,
-            "cleanup",
-            observe_interrupts=False,
+            [self.runtime, *arguments], timeout, "cleanup", observe_interrupts=False
         )
 
     def _command(
@@ -371,57 +436,52 @@ class _ContainerRun:
         *,
         observe_interrupts: bool = True,
     ) -> _CommandResult:
-        interrupts = self.interrupts if observe_interrupts else None
-        result = _execute_command(
-            command,
-            timeout,
-            self.request.graceful_termination_seconds,
-            interrupts,
-        )
+        assert self.logs is not None
+        with (self.logs / f"{phase}.log").open("a", encoding="utf-8") as log:
+            log.write(f"Command: {list(command)!r}\n")
+            log.flush()
+            result = _execute_command(
+                command,
+                timeout,
+                self.grace,
+                self.interrupts if observe_interrupts else None,
+                log,
+            )
         self.diagnostics.add(phase, result)
         return result
 
-    def _result(self, outcome: _Outcome, cleanup_complete: bool) -> ContainerRunResult:
-        skip_pending(self.timings)
+    def _result(
+        self,
+        outcome: _Outcome,
+        clean: bool,
+        records: list[Timing],
+        run_id: str,
+    ) -> ContainerRunResult:
+        skip_pending(records)
         return ContainerRunResult(
-            run_id=self.run_id,
-            state=outcome.state,
-            phase=outcome.phase,
-            exit_code=outcome.exit_code,
-            image_id=self.image_id,
-            cleanup_complete=cleanup_complete,
-            stdout_tail=self.diagnostics.stdout.value,
-            stderr_tail=self.diagnostics.stderr.value,
-            detail=outcome.detail,
-            timings=self.timings,
+            run_id,
+            outcome.state,
+            outcome.phase,
+            outcome.exit_code,
+            self.image_id,
+            clean,
+            self.diagnostics.stdout.value,
+            self.diagnostics.stderr.value,
+            outcome.detail,
+            records,
         )
 
 
-def _prepare_request(request: _PreparedRequest) -> _PreparedRequest:
+def _validate_runtime(runtime: str | Path, budgets: Sequence[float]) -> str:
     if threading.current_thread() is not threading.main_thread():
-        raise _PreflightError("run_case must be called from the process main thread")
-    if os.name != "posix" or not hasattr(os, "getuid") or not hasattr(os, "getgid"):
-        raise _PreflightError("this slice requires a POSIX host with UID/GID support")
-    _validate_budgets(request)
-    runtime = str(request.runtime_executable)
-    if not runtime:
-        raise _PreflightError("runtime_executable must not be empty")
-    subject = _resolve_subject(request.subject_checkout)
-    case_file = _resolve_case(request.case_file)
-    output = request.output_directory.expanduser().resolve()
-    _validate_mount_paths(subject, case_file, output)
-    output = _prepare_output(request.output_directory)
-    if "/" in runtime:
-        runtime = str(Path(runtime).expanduser().resolve())
-    return _PreparedRequest(
-        subject,
-        case_file,
-        output,
-        runtime,
-        request.build_timeout_seconds,
-        request.run_timeout_seconds,
-        request.graceful_termination_seconds,
-    )
+        raise ValueError("Campaigns must be called from the process main thread")
+    if os.name != "posix":
+        raise ValueError("Campaigns require a POSIX host with UID/GID support")
+    if any(not math.isfinite(value) or value <= 0 for value in budgets):
+        raise ValueError("Operational budgets must be finite and positive")
+    if not str(runtime):
+        raise ValueError("runtime_executable must not be empty")
+    return str(Path(runtime).expanduser().resolve()) if "/" in str(runtime) else str(runtime)
 
 
 def _resolve_case(case_file: Path) -> Path:
@@ -431,37 +491,6 @@ def _resolve_case(case_file: Path) -> Path:
         raise _PreflightError(f"case_file is unavailable: {exc}") from exc
     if not resolved.is_file():
         raise _PreflightError("case_file must be a regular file")
-    return resolved
-
-
-def _validate_mount_paths(subject: Path, case_file: Path, output: Path) -> None:
-    if _paths_overlap(subject, output):
-        raise _PreflightError("output_directory must not overlap subject_checkout")
-    if _paths_overlap(case_file, output):
-        raise _PreflightError("case_file must be outside output_directory")
-    if any("," in str(path) for path in (subject, case_file, output)):
-        raise _PreflightError("Docker mount paths containing commas are unsupported")
-
-
-def _validate_budgets(request: _PreparedRequest) -> None:
-    budgets = {
-        "build_timeout_seconds": request.build_timeout_seconds,
-        "run_timeout_seconds": request.run_timeout_seconds,
-        "graceful_termination_seconds": request.graceful_termination_seconds,
-    }
-    invalid = [name for name, value in budgets.items() if not math.isfinite(value) or value <= 0]
-    if invalid:
-        names = ", ".join(invalid)
-        raise _PreflightError(f"operational budgets must be finite and positive: {names}")
-
-
-def _resolve_subject(subject: Path) -> Path:
-    try:
-        resolved = subject.expanduser().resolve(strict=True)
-    except OSError as exc:
-        raise _PreflightError(f"subject_checkout is unavailable: {exc}") from exc
-    if not resolved.is_dir():
-        raise _PreflightError("subject_checkout must be a directory")
     return resolved
 
 
@@ -490,20 +519,6 @@ def _paths_overlap(first: Path, second: Path) -> bool:
 def _mount(source: Path, destination: str, read_only: bool) -> str:
     options = f"type=bind,src={source},dst={destination}"
     return f"{options},readonly" if read_only else options
-
-
-def _preflight_failure(run_id: str, detail: str) -> ContainerRunResult:
-    return ContainerRunResult(
-        run_id=run_id,
-        state="incomplete",
-        phase="preflight",
-        exit_code=2,
-        image_id=None,
-        cleanup_complete=True,
-        stdout_tail="",
-        stderr_tail="",
-        detail=detail,
-    )
 
 
 def _command_failure(
@@ -546,6 +561,7 @@ def _execute_command(
     timeout_seconds: float,
     graceful_termination_seconds: float,
     interrupts: _SignalCapture | None,
+    log: TextIO | None = None,
 ) -> _CommandResult:
     try:
         process = subprocess.Popen(
@@ -561,7 +577,7 @@ def _execute_command(
         return _CommandResult(127, stderr_tail=str(exc))
     except OSError as exc:
         return _CommandResult(2, stderr_tail=str(exc))
-    return _observe_process(process, timeout_seconds, graceful_termination_seconds, interrupts)
+    return _observe_process(process, timeout_seconds, graceful_termination_seconds, interrupts, log)
 
 
 def _observe_process(
@@ -569,14 +585,15 @@ def _observe_process(
     timeout_seconds: float,
     graceful_termination_seconds: float,
     interrupts: _SignalCapture | None,
+    log: TextIO | None = None,
 ) -> _CommandResult:
     assert process.stdout is not None
     assert process.stderr is not None
     stdout_tail = _Tail()
     stderr_tail = _Tail()
     readers = [
-        threading.Thread(target=_pump_stream, args=(process.stdout, sys.stdout, stdout_tail)),
-        threading.Thread(target=_pump_stream, args=(process.stderr, sys.stderr, stderr_tail)),
+        threading.Thread(target=_pump_stream, args=(process.stdout, sys.stdout, stdout_tail, log)),
+        threading.Thread(target=_pump_stream, args=(process.stderr, sys.stderr, stderr_tail, log)),
     ]
     for reader in readers:
         reader.start()
@@ -638,9 +655,17 @@ def _process_group_exists(process_group_id: int) -> bool:
     return True
 
 
-def _pump_stream(source: TextIO, destination: TextIO, tail: _Tail) -> None:
+def _pump_stream(
+    source: TextIO,
+    destination: TextIO,
+    tail: _Tail,
+    log: TextIO | None = None,
+) -> None:
     for line in iter(source.readline, ""):
         tail.append(line)
+        if log is not None:
+            log.write(line)
+            log.flush()
         try:
             destination.write(line)
             destination.flush()

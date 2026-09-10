@@ -17,7 +17,10 @@ from tests.install_sandbox.component.test_local_runner import LocalCase
 from tests.install_sandbox.component.test_preserve_skill_backup import arrange_backup, run_backup
 from tests.install_sandbox.component.test_repair_references import arrange_repair, run_repair
 from tests.install_sandbox.component.test_repair_skill import arrange_skill, run_skill
-from tools.install_sandbox import coordinator
+from tests.install_sandbox.docker import test_preserve_skill_backup_docker as backup_proof
+from tests.install_sandbox.docker import test_reinstall_docker as reinstall_proof
+from tests.install_sandbox.docker import test_repair_references_docker as repair_proof
+from tests.install_sandbox.docker import test_repair_skill_docker as skill_proof
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.coordinator import CoordinatedResult
 from tools.install_sandbox.driver import command_environment, execute_command
@@ -59,9 +62,6 @@ def test_five_cases_retain_nonoverlapping_durations_after_cleanup(
     assert result.passed and result.test is not None
     assert not result.container_timings.diagnostics
     assert [r.phase for r in result.timings] == [
-        "case",
-        "preflight",
-        "build",
         "run",
         "cleanup",
         "read",
@@ -72,9 +72,19 @@ def test_five_cases_retain_nonoverlapping_durations_after_cleanup(
     commands = [r for r in internal.phases if r.phase == "command"]
     assert len(commands) == len(result.test.steps)
     assert [r.step for r in commands] == list(range(len(result.test.steps)))
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
+    case = InstallTestCase.from_json(
+        (tmp_path / f"campaign/inputs/{result.test.case['name']}.json").read_text()
+    )
     assert read_timings(result.output_directory, case) == internal
     assert result.container.cleanup_complete
+    checks = {
+        "reinstall": reinstall_proof.check_case,
+        "repair-references": repair_proof.check_case,
+        "repair-skill": skill_proof.check_case,
+        "preserve-skill-backup": backup_proof.check_case,
+    }
+    if result.test.case["name"] in checks:
+        checks[result.test.case["name"]](result)
     (tmp_path / "coordinated-result.json").write_text(json.dumps(asdict(result), default=str))
     unmeasured = Timing("additional_checks", state="unavailable")
     (tmp_path / "timing-report.txt").write_text(render_timings(result, unmeasured))
@@ -104,40 +114,6 @@ def test_command_failures_keep_durations_without_changing_case_outcomes(
     assert commands[index].duration_seconds is not None
     if mode == "first_failure":
         assert commands[1].state == "not_run" and commands[1].duration_seconds is None
-
-
-@pytest.mark.parametrize("failed_command", [1, 2])
-def test_failed_package_preparation_marks_unexecuted_phases(
-    tmp_path: Path, failed_command: int
-) -> None:
-    result = LocalCase(tmp_path, preparation_failure=failed_command).run()
-    assert result.status == "not_run"
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
-    evidence = read_timings(tmp_path / "results", case)
-    phases = {r.phase: r for r in evidence.phases}
-    assert phases["venv"].state == "measured"
-    assert phases["pip"].state == ("not_run" if failed_command == 1 else "measured")
-    assert phases["command"].state == "not_run"
-    assert phases["finalize"].state == "measured"
-
-
-@pytest.mark.parametrize("mode", ["daemon_fail", "build_fail", "run_fail", "cleanup_fail"])
-def test_host_failures_preserve_elapsed_and_skipped_phases(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    first.arrange_first(tmp_path, monkeypatch)
-    monkeypatch.setenv("FAKE_DOCKER_MODE", mode)
-    result = first.run_first(tmp_path)
-    assert not result.passed
-    assert result.duration_seconds is not None
-    records = {r.phase: r for r in result.timings}
-    assert records["preflight"].state == "measured"
-    if mode in {"daemon_fail", "build_fail"}:
-        assert records["run"].state == "not_run"
-        assert records["run"].duration_seconds is None
-    else:
-        assert result.test is not None and result.test.status == "passed"
-        assert records["cleanup"].state == "measured"
 
 
 def test_writer_failure_does_not_change_business_result(
@@ -173,7 +149,7 @@ def test_progress_writes_are_outside_phase_duration(
         return replace_file(path, target)
 
     monkeypatch.setattr(Path, "replace", slow_write)
-    with writer.measure("copy_sources"):
+    with writer.measure("initial"):
         assert (
             json.loads((tmp_path / "timings.json").read_text())["phases"][0]["state"] == "running"
         )
@@ -207,8 +183,8 @@ def test_killed_process_leaves_completed_and_running_phases(tmp_path: Path) -> N
         "from tools.install_sandbox.results import TestResultWriter\n"
         "w = TestResultWriter(Path(sys.argv[1]))\n"
         "w.initialize_timings('first-install', 1)\n"
-        "with w.measure('copy_sources'): pass\n"
-        "with w.measure('venv'):\n"
+        "with w.measure('initial'): pass\n"
+        "with w.measure('command', 0):\n"
         "    print('ready', flush=True)\n    time.sleep(60)\n"
     )
     output = local.root / "results"
@@ -275,34 +251,6 @@ def test_phase_exception_retains_duration_without_swallowing_error() -> None:
     assert record.diagnostic == "Operation raised RuntimeError"
 
 
-@pytest.mark.parametrize("mode", ["run_timeout", "build_timeout", "run_interrupt"])
-def test_host_timeout_or_interruption_retains_cleanup_duration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    first.arrange_first(tmp_path, monkeypatch)
-    monkeypatch.delenv("FAKE_DOCKER_CASE_PROGRAM")
-    monkeypatch.setenv("FAKE_DOCKER_MODE", mode)
-    result = coordinator.InstallTestCoordinator().run_case(
-        specs_directory=Path(__file__).resolve().parents[3]
-        / "tools/install_sandbox/specs/reference",
-        target="sandbox-reference",
-        subject_checkout=tmp_path / "subject",
-        case_file=tmp_path / "case.json",
-        output_directory=tmp_path / "results",
-        runtime_executable=Path(__file__).with_name("fake_docker.py"),
-        build_timeout_seconds=0.5,
-        run_timeout_seconds=0.5,
-        graceful_termination_seconds=0.1,
-    )
-    assert not result.passed and result.container.cleanup_complete
-    assert result.container.exit_code == (143 if mode == "run_interrupt" else 124)
-    records = {r.phase: r for r in result.timings}
-    assert records["cleanup"].state == "measured"
-    interrupted = records["build" if mode == "build_timeout" else "run"]
-    assert interrupted.state == "measured" and interrupted.duration_seconds is not None
-    assert result.container_timings.diagnostics
-
-
 def test_total_includes_both_result_and_timing_evidence_reading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -312,9 +260,9 @@ def test_total_includes_both_result_and_timing_evidence_reading(
     monkeypatch.setattr(time, "monotonic_ns", lambda: ticks[0])
 
     def read_evidence(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
-        if path == tmp_path / "results/result.json":
+        if path == tmp_path / "campaign/cases/first-install/result.json":
             ticks[0] += 3_000_000_000
-        if path == tmp_path / "results/timings.json":
+        if path == tmp_path / "campaign/cases/first-install/timings.json":
             ticks[0] += 500_000_000
         return read(path, encoding=encoding, errors=errors)
 

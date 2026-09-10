@@ -72,18 +72,20 @@ def arrange_reinstall(
 
 
 def run_reinstall(tmp_path: Path) -> CoordinatedResult:
-    return InstallTestCoordinator().run_case(
+    campaign = InstallTestCoordinator().run_campaign(
         specs_directory=_SPECS,
         target="sandbox-reference",
-        case_name="reinstall",
+        case_names=["reinstall"],
         subject_checkout=tmp_path / "subject",
-        case_file=tmp_path / "case.json",
-        output_directory=tmp_path / "results",
+        output_directory=tmp_path / "campaign",
         runtime_executable=_COMPONENT / "fake_docker.py",
         build_timeout_seconds=10,
         run_timeout_seconds=10,
         graceful_termination_seconds=0.1,
     )
+    result = campaign.cases[0].result
+    assert result is not None, campaign
+    return result
 
 
 def test_two_installs_share_preparation_and_preserve_distinct_evidence(
@@ -96,16 +98,16 @@ def test_two_installs_share_preparation_and_preserve_distinct_evidence(
     assert first["command"] is not None and second["command"] is not None
     assert first["command"]["args"] == second["command"]["args"]
     assert first["command"]["cwd"] == second["command"]["cwd"]
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "2"
+    assert (tmp_path / "work/reinstall/command-tmp/attempts").read_text() == "2"
     output = result.output_directory
-    assert (output / "preparation.log").read_text().count("controlled package preparation") == 2
+    assert "inherited from campaign" in (output / "preparation.log").read_text()
     for index, step in enumerate(result.test.steps):
         assert step["verification"] is not None and step["verification"].complete
         assert not step["verification"].mismatches and not step["verification"].obstacles
         assert f"installation {index}" in (output / f"steps/{index}/stdout.txt").read_text()
-    shutil.rmtree(tmp_path / "work")
+    shutil.rmtree(tmp_path / "work/reinstall")
     shutil.rmtree(tmp_path / "subject")
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
+    case = InstallTestCase.from_json((tmp_path / "campaign/inputs/reinstall.json").read_text())
     assert read_result(output, case) == result.test
     _check_retained_snapshots(output)
 
@@ -165,12 +167,12 @@ def test_faults_stop_dependents_and_retain_both_diagnostics(
         assert mismatch in {m.type for m in step["verification"].mismatches}
     else:
         assert step["command"]["exit_code"] != 0
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == str(index + 1)
-    assert (tmp_path / f"results/steps/{index}/after.json").exists()
+    assert (tmp_path / "work/reinstall/command-tmp/attempts").read_text() == str(index + 1)
+    assert (tmp_path / f"campaign/cases/reinstall/steps/{index}/after.json").exists()
     if index == 0:
         assert result.test.steps[1]["command"] is None
         assert "Step 0" in (result.test.steps[1]["skip_reason"] or "")
-        assert not (tmp_path / "results/steps/1").exists()
+        assert not (tmp_path / "campaign/cases/reinstall/steps/1").exists()
 
 
 def test_version_change_is_compared_to_first_installation_not_package_metadata(
@@ -189,17 +191,3 @@ def test_version_change_is_compared_to_first_installation_not_package_metadata(
     assert (
         output / f"steps/1/after/project/{_SKILL}.graphify_version"
     ).read_text() == "Changed version\n"
-
-
-def test_preparation_failure_skips_both_steps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    arrange_reinstall(tmp_path, monkeypatch, "passed", 1)
-    monkeypatch.setenv("CONTROLLED_PREPARATION_FAIL", "1")
-    result = run_reinstall(tmp_path)
-    assert result.test is not None and result.test.status == "not_run"
-    assert result.result_error is None
-    for step in result.test.steps:
-        assert step["command"] is None and step["verification"] is None
-        assert step["observations"] is None and step["skip_reason"]
-    assert not (tmp_path / "work/command-tmp/attempts").exists()

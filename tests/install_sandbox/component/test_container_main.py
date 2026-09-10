@@ -14,14 +14,15 @@ import pytest
 from tests.install_sandbox.component.test_local_runner import LocalCase
 from tools.install_sandbox.container_main import main
 from tools.install_sandbox.driver import InstallerCommandResult, InstallerDriver
-from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.runner import InstallTestRunner
 
 
 def _arguments(root: Path) -> list[str]:
     return [
-        "--subject-checkout",
+        "--reference-sources",
         str(root / "subject"),
+        "--prepared-executable",
+        str(root / "prepared/bin/graphify"),
         "--case-file",
         str(root / "case.json"),
         "--output-directory",
@@ -32,26 +33,25 @@ def _arguments(root: Path) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "mode,preparation_failure,status",
+    "mode,status",
     [
-        ("passed", 0, "passed"),
-        ("missing", 0, "failed"),
-        ("passed", 1, "not_run"),
-        ("not_started", 0, "incomplete"),
+        ("passed", "passed"),
+        ("missing", "failed"),
+        ("not_started", "incomplete"),
     ],
 )
 def test_saved_case_status_is_separate_from_program_exit(
     tmp_path: Path,
     mode: str,
-    preparation_failure: int,
     status: str,
 ) -> None:
-    local = LocalCase(tmp_path, mode, preparation_failure)
-    runner = InstallTestRunner(GraphifyPreparer(local.prepare_command), InstallerDriver())
+    local = LocalCase(tmp_path, mode)
+    local.prepare_executable()
+    runner = InstallTestRunner()
     assert main(_arguments(tmp_path), runner=runner) == 0
     output = tmp_path / "results"
     assert json.loads((output / "result.json").read_bytes())["status"] == status
-    assert "preparation output" in (output / "preparation.log").read_text()
+    assert "inherited from campaign" in (output / "preparation.log").read_text()
     if status == "failed":
         saved = json.loads((output / "steps/0/verification.json").read_bytes())
         assert any(item["type"] == "missing_file" for item in saved["mismatches"])
@@ -71,7 +71,8 @@ def test_result_write_failure_keeps_evidence_and_returns_nonzero(
         return original(path, target)
 
     monkeypatch.setattr(Path, "replace", replace)
-    runner = InstallTestRunner(GraphifyPreparer(local.prepare_command))
+    local.prepare_executable()
+    runner = InstallTestRunner()
     assert main(_arguments(tmp_path), runner=runner) == 1
     assert "Cannot finalize result.json" in capsys.readouterr().err
     assert not (tmp_path / "results/result.json").exists()
@@ -97,7 +98,7 @@ def test_unexpected_stop_is_not_success(
             raise KeyboardInterrupt
         raise RuntimeError("Controlled unexpected stop")
 
-    runner = InstallTestRunner(GraphifyPreparer(execute))
+    runner = InstallTestRunner(InstallerDriver(execute))
     assert main(_arguments(tmp_path), runner=runner) == (130 if interrupted else 1)
     diagnostic = capsys.readouterr().err
     assert ("interrupted" if interrupted else "Controlled unexpected stop") in diagnostic
@@ -111,10 +112,10 @@ def test_invalid_case_fails_before_commands(
 ) -> None:
     local = LocalCase(tmp_path)
     (tmp_path / "case.json").write_text("{}", encoding="utf-8")
-    runner = InstallTestRunner(GraphifyPreparer(local.prepare_command))
+    local.prepare_executable()
+    runner = InstallTestRunner()
     assert main(_arguments(tmp_path), runner=runner) == 1
     assert "ValueError" in capsys.readouterr().err
-    assert not local.calls
 
 
 def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> None:
@@ -158,7 +159,7 @@ def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr.decode()
     saved = json.loads((tmp_path / "results/result.json").read_bytes())
     assert saved["status"] == "not_run"
-    assert "Software preparation failed" in saved["preparation"]["reason"]
+    assert "Initial verification failed" in saved["preparation"]["reason"]
     assert not (tmp_path / "work/software/venv").exists()
 
 

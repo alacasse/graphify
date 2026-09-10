@@ -19,12 +19,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_preserve_skill_backup_docker() -> None:
-    run_proof("preserve-skill-backup", _check_case)
+    run_proof("preserve-skill-backup", check_case)
 
 
-def _check_case(result: CoordinatedResult) -> None:
+def check_case(result: CoordinatedResult) -> None:
     output = result.output_directory
-    case = InstallTestCase.from_json((output.parent / "case.json").read_text())
+    case = InstallTestCase.from_json(
+        (output.parents[1] / "inputs" / f"{output.name}.json").read_text()
+    )
     reread = read_result(output, case)
     assert reread == result.test and result.passed, asdict(result)
     preparation = reread.steps[1].get("preparation")

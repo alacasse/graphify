@@ -1,8 +1,11 @@
 """Assemble and conduct a selected project case from discovered target facts."""
 
+import json
 import time
-from dataclasses import dataclass, field, replace
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from typing import Literal
 
 from tools.install_sandbox.case import InstallTestCase, case_operations, first_install_files
 from tools.install_sandbox.container_harness import ContainerHarness, ContainerRunResult
@@ -37,17 +40,6 @@ class CoordinatedResult:
         )
 
 
-def _check_destinations(subject: Path, case_file: Path, output: Path) -> None:
-    if subject.is_relative_to(output) or output.is_relative_to(subject):
-        raise ValueError("Subject and evidence directories must be separate")
-    if case_file.is_relative_to(subject) or case_file.is_relative_to(output):
-        raise ValueError("Case file must be outside subject and evidence directories")
-    if case_file.exists():
-        raise ValueError("Case file must be fresh")
-    if output.exists() and (not output.is_dir() or any(output.iterdir())):
-        raise ValueError("Evidence directory must be fresh or empty")
-
-
 def _collect_result(
     container: ContainerRunResult, case: InstallTestCase, output: Path
 ) -> CoordinatedResult:
@@ -57,67 +49,206 @@ def _collect_result(
         return CoordinatedResult(container, None, f"Result unavailable: {error}", output)
     except OSError as error:
         return CoordinatedResult(container, None, f"Result unreadable: {error}", output)
-    except ValueError as error:
+    except (ValueError, RecursionError, OverflowError) as error:
         return CoordinatedResult(container, None, f"Result invalid: {error}", output)
     return CoordinatedResult(container, result, None, output)
 
 
+@dataclass
+class CampaignCase:
+    name: str
+    output_directory: Path
+    result: CoordinatedResult | None = None
+    not_run_reason: str | None = None
+    state: Literal["pending", "running", "finished", "not_run", "incomplete"] = "pending"
+    error: str | None = None
+
+
+@dataclass
+class CampaignResult:
+    output_directory: Path
+    cases: list[CampaignCase]
+    preparation: ContainerRunResult | None = None
+    cleanup: ContainerRunResult | None = None
+    error: str | None = None
+    duration_seconds: float | None = None
+    timings: list[Timing] = field(default_factory=list[Timing])
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.error is None
+            and self.preparation is not None
+            and self.preparation.state == "completed"
+            and self.preparation.cleanup_complete
+            and bool(self.cases)
+            and all(c.result is not None and c.result.passed for c in self.cases)
+            and self.cleanup is not None
+            and self.cleanup.state == "completed"
+            and self.cleanup.cleanup_complete
+        )
+
+    def save(self) -> None:
+        from tools.install_sandbox.timing_report import render_campaign
+
+        payload = {"version": 1, "passed": self.passed, **asdict(self)}
+        documents = {
+            "campaign.json": json.dumps(payload, indent=2, default=str) + "\n",
+            "campaign.txt": render_campaign(self),
+        }
+        for name, content in documents.items():
+            temporary = self.output_directory / f"{name}.tmp"
+            temporary.write_text(content, encoding="utf-8")
+            temporary.replace(self.output_directory / name)
+
+
 class InstallTestCoordinator:
-    def run_case(
+    def run_campaign(
         self,
         *,
         specs_directory: Path,
         target: str,
-        case_name: str = "first-install",
+        case_names: Sequence[str],
         subject_checkout: Path,
-        case_file: Path,
         output_directory: Path,
         runtime_executable: str | Path = "docker",
-        build_timeout_seconds: float = 300.0,
-        run_timeout_seconds: float = 900.0,
-        graceful_termination_seconds: float = 10.0,
-    ) -> CoordinatedResult:
-        """Conduct one discovered project case, then validate its result after cleanup."""
+        build_timeout_seconds: float = 300,
+        verify_timeout_seconds: float = 60,
+        run_timeout_seconds: float = 900,
+        graceful_termination_seconds: float = 10,
+    ) -> CampaignResult:
+        """Prepare once, conduct ordered isolated cases, and always finalize owned resources."""
         started = time.monotonic_ns()
-        preparation, reading = Timing("case"), Timing("read")
-        with measure(preparation):
-            subject, case_path, output, case = self._prepare_case(
-                specs_directory, target, case_name, subject_checkout, case_file, output_directory
+        inputs = Timing("inputs")
+        with measure(inputs):
+            harness = ContainerHarness(
+                runtime_executable=runtime_executable,
+                build_timeout_seconds=build_timeout_seconds,
+                verify_timeout_seconds=verify_timeout_seconds,
+                run_timeout_seconds=run_timeout_seconds,
+                graceful_termination_seconds=graceful_termination_seconds,
             )
-        container = ContainerHarness().run_case(
-            subject_checkout=subject,
-            case_file=case_path,
-            output_directory=output,
-            runtime_executable=runtime_executable,
-            build_timeout_seconds=build_timeout_seconds,
-            run_timeout_seconds=run_timeout_seconds,
-            graceful_termination_seconds=graceful_termination_seconds,
+            subject, output, cases = self._prepare_campaign(
+                specs_directory,
+                target,
+                case_names,
+                subject_checkout,
+                output_directory,
+            )
+        result = CampaignResult(
+            output,
+            [CampaignCase(c.name, output / "cases" / c.name) for c in cases],
+            timings=[inputs],
         )
+        with harness:
+            try:
+                result.save()
+                result.preparation = harness.prepare(subject, output / "preparation")
+                result.timings.extend(result.preparation.timings)
+                result.save()
+                self._conduct_cases(harness, cases, result)
+            except (Exception, KeyboardInterrupt) as error:
+                result.error = f"Campaign stopped: {type(error).__name__}: {error}"
+                self._skip_remaining(result, result.error)
+            finally:
+                result.cleanup = harness.cleanup()
+                result.timings.extend(result.cleanup.timings)
+                result.duration_seconds = elapsed(started)
+                result.save()
+        return result
+
+    def _prepare_campaign(
+        self,
+        specs: Path,
+        target: str,
+        names: Sequence[str],
+        subject: Path,
+        output: Path,
+    ) -> tuple[Path, Path, list[InstallTestCase]]:
+        subject = subject.expanduser().resolve(strict=True)
+        destination = output.expanduser()
+        output = destination.resolve()
+        _check_campaign_paths(subject, destination, output)
+        if isinstance(names, str) or not names or len(set(names)) != len(names):
+            raise ValueError("Select a nonempty ordered list of distinct case names")
+        catalog = InstallSpecReader().read(specs)
+        if target not in catalog:
+            raise ValueError(f"Target not found in {specs}: {target}")
+        cases = [self.build_case(target, catalog[target], case_name=name) for name in names]
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "inputs").mkdir()
+        (output / "cases").mkdir()
+        for case in cases:
+            (output / "cases" / case.name).mkdir()
+            case.write(output / "inputs" / f"{case.name}.json")
+        return subject, output, cases
+
+    def _conduct_cases(
+        self,
+        harness: ContainerHarness,
+        cases: list[InstallTestCase],
+        result: CampaignResult,
+    ) -> None:
+        assert result.preparation is not None
+        if result.preparation.state != "completed" or not result.preparation.cleanup_complete:
+            self._skip_remaining(
+                result, "Common preparation unavailable: " + result.preparation.detail
+            )
+            result.save()
+            return
+        for case, entry in zip(cases, result.cases, strict=True):
+            if harness.interrupted:
+                self._skip_remaining(result, "Campaign interrupted")
+                break
+            entry.state = "running"
+            result.save()
+            entry.result = self._run_and_read(harness, case, entry.output_directory, result)
+            entry.state = "finished"
+            result.save()
+            if (
+                not entry.result.container.cleanup_complete
+                or harness.interrupted
+                or entry.result.container.state == "interrupted"
+            ):
+                self._skip_remaining(
+                    result,
+                    "Previous container cleanup incomplete"
+                    if not entry.result.container.cleanup_complete
+                    else "Campaign interrupted",
+                )
+                break
+        result.save()
+
+    def _run_and_read(
+        self,
+        harness: ContainerHarness,
+        case: InstallTestCase,
+        output: Path,
+        campaign: CampaignResult,
+    ) -> CoordinatedResult:
+        started = time.monotonic_ns()
+        container = harness.run_case(
+            case_file=campaign.output_directory / "inputs" / f"{case.name}.json",
+            output_directory=output,
+        )
+        reading = Timing("read")
         with measure(reading):
             result = _collect_result(container, case, output)
-            timings = read_timings(output, case)
+            internal = read_timings(output, case)
         return replace(
             result,
-            timings=[preparation, *container.timings, reading],
-            container_timings=timings,
             duration_seconds=elapsed(started),
+            timings=[*container.timings, reading],
+            container_timings=internal,
         )
 
-    def _prepare_case(
-        self,
-        specs_directory: Path,
-        target: str,
-        case_name: str,
-        subject_checkout: Path,
-        case_file: Path,
-        output_directory: Path,
-    ) -> tuple[Path, Path, Path, InstallTestCase]:
-        subject, case_path, output = (
-            path.expanduser().resolve() for path in (subject_checkout, case_file, output_directory)
-        )
-        _check_destinations(subject, case_path, output)
-        case = self.write_case(specs_directory, target, case_path, case_name=case_name)
-        return subject, case_path, output, case
+    @staticmethod
+    def _skip_remaining(result: CampaignResult, reason: str) -> None:
+        for entry in result.cases:
+            if entry.state == "running":
+                entry.state, entry.error = "incomplete", reason
+            elif entry.result is None:
+                entry.state, entry.not_run_reason = "not_run", reason
 
     def write_case(
         self,
@@ -146,3 +277,14 @@ class InstallTestCoordinator:
             initial_files=first_install_files(spec),
             operations=case_operations(case_name),
         )
+
+
+def _check_campaign_paths(subject: Path, destination: Path, output: Path) -> None:
+    if not subject.is_dir():
+        raise ValueError("subject_checkout must be a directory")
+    if subject.is_relative_to(output) or output.is_relative_to(subject):
+        raise ValueError("Subject and campaign evidence directories must be separate")
+    if destination.is_symlink() or "," in str(output):
+        raise ValueError("Campaign evidence must not be a symlink or contain commas")
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise ValueError("Campaign evidence directory must be fresh or empty")

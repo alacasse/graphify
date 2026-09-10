@@ -42,7 +42,7 @@ def test_missing_proofs_prevent_host_success(
     result = run_skill(tmp_path)
     assert result.test is None and result.result_error and not result.passed, asdict(result)
     assert result.container.state == "completed" and result.container.cleanup_complete
-    assert (tmp_path / "results/uncorrupted-result.json").exists()
+    assert (tmp_path / "campaign/cases/repair-skill/uncorrupted-result.json").exists()
 
 
 @pytest.mark.parametrize(

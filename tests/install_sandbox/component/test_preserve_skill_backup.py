@@ -67,18 +67,20 @@ def arrange_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = 
 
 
 def run_backup(tmp_path: Path) -> CoordinatedResult:
-    return InstallTestCoordinator().run_case(
+    campaign = InstallTestCoordinator().run_campaign(
         specs_directory=_SPECS,
         target="sandbox-reference",
-        case_name="preserve-skill-backup",
+        case_names=["preserve-skill-backup"],
         subject_checkout=tmp_path / "subject",
-        case_file=tmp_path / "case.json",
-        output_directory=tmp_path / "results",
+        output_directory=tmp_path / "campaign",
         runtime_executable=_COMPONENT / "fake_docker.py",
         build_timeout_seconds=10,
         run_timeout_seconds=10,
         graceful_termination_seconds=0.1,
     )
+    result = campaign.cases[0].result
+    assert result is not None, campaign
+    return result
 
 
 def test_skill_and_backup_proofs_survive_cleanup(
@@ -91,9 +93,9 @@ def test_skill_and_backup_proofs_survive_cleanup(
     assert original == {
         str(p): p.read_bytes() for p in (tmp_path / "subject").rglob("*") if p.is_file()
     }
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "2"
+    assert (tmp_path / "work/preserve-skill-backup/command-tmp/attempts").read_text() == "2"
     output = result.output_directory
-    assert (output / "preparation.log").read_text().count("controlled package preparation") == 2
+    assert "inherited from campaign" in (output / "preparation.log").read_text()
     assert (output / "steps/0/after/project" / SKILL).read_bytes() == SOURCE
     assert (output / "steps/1/before/project" / SKILL).read_bytes() == SOURCE
     assert (output / "steps/1/before/project" / (SKILL + ".bak")).read_bytes() == BACKUP
@@ -105,8 +107,10 @@ def test_skill_and_backup_proofs_survive_cleanup(
     assert prep is not None and prep["ready"] and "deleted_path" not in prep["plan"]
     snapshot = json.loads((output / "steps/0/after.json").read_bytes())
     assert not any(e["path"] == SKILL + ".bak" for e in snapshot["entries"])
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
-    shutil.rmtree(tmp_path / "work")
+    case = InstallTestCase.from_json(
+        (tmp_path / "campaign/inputs/preserve-skill-backup.json").read_text()
+    )
+    shutil.rmtree(tmp_path / "work/preserve-skill-backup")
     shutil.rmtree(tmp_path / "subject")
     assert read_result(output, case) == result.test
 
@@ -148,7 +152,7 @@ def test_incorrect_reinstallation_retains_diagnostics(
         assert mismatch in {m.type for m in verification.mismatches}
     else:
         assert not verification.mismatches
-    assert (tmp_path / "results/steps/1/after.json").exists()
+    assert (tmp_path / "campaign/cases/preserve-skill-backup/steps/1/after.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -174,7 +178,7 @@ def test_bad_preparation_blocks_second_command(
     result = run_backup(tmp_path)
     assert result.test is not None and result.result_error is None, asdict(result)
     assert not result.passed and result.test.status == "incomplete"
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "1"
+    assert (tmp_path / "work/preserve-skill-backup/command-tmp/attempts").read_text() == "1"
     step = result.test.steps[1]
     assert step["command"] is None and step["verification"] is None and step["observations"] is None
     prep = step.get("preparation")
@@ -183,10 +187,12 @@ def test_bad_preparation_blocks_second_command(
     assert (
         prep["verification"].obstacles if mode == "unreadable" else prep["verification"].mismatches
     )
-    assert not (tmp_path / "results/steps/1/stdout.txt").exists()
+    assert not (tmp_path / "campaign/cases/preserve-skill-backup/steps/1/stdout.txt").exists()
     if mode == "write_failure":
         assert (
-            tmp_path / "results/steps/1/before/project" / (SKILL + ".bak")
+            tmp_path
+            / "campaign/cases/preserve-skill-backup/steps/1/before/project"
+            / (SKILL + ".bak")
         ).read_bytes() == b"Partial backup write\n"
 
 
@@ -199,7 +205,7 @@ def test_first_failure_prevents_backup_preparation(
     assert result.test is not None and result.result_error is None, asdict(result)
     assert result.test.status == "failed" and not result.passed
     assert "preparation" not in result.test.steps[1]
-    assert not (tmp_path / "results/steps/1").exists()
+    assert not (tmp_path / "campaign/cases/preserve-skill-backup/steps/1").exists()
 
 
 def test_unreadable_backup_is_incomplete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

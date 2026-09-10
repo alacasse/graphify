@@ -23,7 +23,7 @@ def _document() -> dict[str, object]:
     return asdict(
         InstallTestResult(
             {"name": case.name, "target": case.target, "scope": case.scope},
-            {"ready": True, "reason": None, "log": "preparation.log"},
+            {"ready": True, "reason": None, "log": "preparation.log", "source": "campaign"},
             [
                 {
                     "operation": "install",
@@ -112,11 +112,16 @@ def test_diagnostics_are_reconstructed_and_retained(tmp_path: Path, status: str)
 def test_not_run_preserves_preparation_diagnostic(tmp_path: Path) -> None:
     document = _document()
     document["status"] = "not_run"
-    document["preparation"] = {"ready": False, "reason": "Copy failed", "log": "preparation.log"}
+    document["preparation"] = {
+        "ready": False,
+        "reason": "Initial witness failed",
+        "log": "preparation.log",
+        "source": "campaign",
+    }
     document["steps"] = [
         {
             "operation": "install",
-            "skip_reason": "Copy failed",
+            "skip_reason": "Initial witness failed",
             "command": None,
             "verification": None,
             "observations": None,

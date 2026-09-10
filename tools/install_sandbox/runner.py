@@ -1,8 +1,10 @@
 """Conduct one validated local case and retain its established result and evidence."""
 
 import json
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
 
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.driver import InstallerDriver
@@ -109,12 +111,26 @@ class InstallTestRunner:
             return
         result.preparation["ready"] = True
         writer.append_log("journal.log", "Preparation ready; attempting install\n")
-        self._install(case, prepared.executable, environment, expected, before, writer, result)
+        for index, step in enumerate(result.steps):
+            if index:
+                before = deepcopy(before)
+                writer.write_snapshot(before, "before", step_index=index)
+            before = self._install(
+                case, prepared.executable, environment, expected, before, writer, step, index
+            )
+            result.status = self._step_status(step)
+            if result.status != "passed":
+                reason = f"Step {index} {result.status}; dependent installation not attempted"
+                for dependent in result.steps[index + 1 :]:
+                    dependent["skip_reason"] = reason
+                writer.append_log("journal.log", reason + "\n")
+                break
 
     @staticmethod
     def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:
         result.preparation["reason"] = reason
-        result.steps[0]["skip_reason"] = reason
+        for step in result.steps:
+            step["skip_reason"] = reason
         writer.append_log("preparation.log", reason + "\n")
         writer.append_log("journal.log", "Preparation prevented installation\n")
 
@@ -126,8 +142,9 @@ class InstallTestRunner:
         expected: FilesystemSnapshot,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
-        result: InstallTestResult,
-    ) -> None:
+        step: StepEvidence,
+        index: int,
+    ) -> FilesystemSnapshot:
         command = self.driver.install(
             case,
             executable,
@@ -135,20 +152,28 @@ class InstallTestRunner:
             environment.home,
             environment.project.parent.parent / "command-tmp",
         )
-        step = result.steps[0]
         step["skip_reason"] = None
-        step["command"] = writer.write_command(command)
+        step["command"] = writer.write_command(command, step_index=index)
         writer.append_log(
-            "journal.log", f"Command {command.state}: {command.exit_code}; {command.reason}\n"
+            "journal.log",
+            f"Step {index} command {command.state}: {command.exit_code}; {command.reason}\n",
         )
-        after = environment.observe(writer, "after")
+        after = environment.observe(writer, "after", step_index=index)
         verification = self.verifier.verify(case, expected, before, after)
         step["verification"] = verification
-        step["observations"] = {"before": "steps/0/before.json", "after": "steps/0/after.json"}
-        writer.write_verification(verification)
-        if command.state != "completed" or not verification.complete:
-            result.status = "incomplete"
-        elif command.exit_code != 0 or verification.mismatches:
-            result.status = "failed"
-        else:
-            result.status = "passed"
+        step["observations"] = {
+            "before": f"steps/{index}/before.json",
+            "after": f"steps/{index}/after.json",
+        }
+        writer.write_verification(verification, step_index=index)
+        return after
+
+    @staticmethod
+    def _step_status(step: StepEvidence) -> Literal["passed", "failed", "incomplete"]:
+        command, verification = step["command"], step["verification"]
+        assert command is not None and verification is not None
+        if command["state"] != "completed" or not verification.complete:
+            return "incomplete"
+        if command["exit_code"] != 0 or verification.mismatches:
+            return "failed"
+        return "passed"

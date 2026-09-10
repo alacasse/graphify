@@ -8,7 +8,7 @@ import pytest
 
 from tests.install_sandbox.component.test_local_runner import LocalCase, controlled_script
 from tools.install_sandbox.case import InstallTestCase
-from tools.install_sandbox.coordinator import FirstInstallResult, InstallTestCoordinator
+from tools.install_sandbox.coordinator import CoordinatedResult, InstallTestCoordinator
 
 _COMPONENT = Path(__file__).parent
 _SPECS = Path(__file__).resolve().parents[3] / "tools/install_sandbox/specs/reference"
@@ -24,8 +24,8 @@ def _arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "passe
     monkeypatch.setenv("CONTROLLED_INSTALLER", str(executable))
 
 
-def _run(tmp_path: Path) -> FirstInstallResult:
-    return InstallTestCoordinator().run_first_install(
+def _run(tmp_path: Path) -> CoordinatedResult:
+    return InstallTestCoordinator().run_case(
         specs_directory=_SPECS,
         target="sandbox-reference",
         subject_checkout=tmp_path / "subject",
@@ -152,7 +152,7 @@ def test_rejects_unsafe_or_existing_case_before_writes(
     subject.mkdir()
     (tmp_path / "case.json").write_text("Existing case")
     with pytest.raises(ValueError):
-        InstallTestCoordinator().run_first_install(
+        InstallTestCoordinator().run_case(
             specs_directory=_SPECS,
             target="sandbox-reference",
             subject_checkout=subject,

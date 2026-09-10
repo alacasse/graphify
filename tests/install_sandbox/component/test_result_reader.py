@@ -307,3 +307,67 @@ def test_mismatch_content_strings_are_preserved_verbatim(
     ]
     _write(tmp_path, document)
     assert asdict(read_result(tmp_path, _case())) == document
+
+
+def _reinstall_document() -> tuple[InstallTestCase, dict[str, object]]:
+    from dataclasses import replace
+
+    case = replace(_case(), name="reinstall", operations=["install", "install"])
+    document = _document()
+    _object(document["case"])["name"] = "reinstall"
+    first = _step(document)
+    second = json.loads(json.dumps(first).replace("steps/0/", "steps/1/"))
+    document["steps"] = [first, second]
+    return case, document
+
+
+@pytest.mark.parametrize("index", [0, 1])
+@pytest.mark.parametrize("defect", ["exit_code", "complete", "missing_evidence", "wrong_step"])
+def test_passed_reinstall_validates_every_step(tmp_path: Path, index: int, defect: str) -> None:
+    case, document = _reinstall_document()
+    step = cast(list[dict[str, object]], document["steps"])[index]
+    if defect == "exit_code":
+        _object(step["command"])["exit_code"] = 7
+    elif defect == "complete":
+        _object(step["verification"])["complete"] = False
+    elif defect == "missing_evidence":
+        _object(step["observations"])["after"] = None
+    else:
+        _object(step["command"])["stdout_file"] = f"steps/{1 - index}/stdout.txt"
+    _write(tmp_path, document)
+    with pytest.raises(ValueError):
+        read_result(tmp_path, case)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "continued_after_failure",
+        "unnecessary_skip",
+        "partial_skip",
+        "missing_step",
+        "extra_step",
+        "wrong_status",
+    ],
+)
+def test_reinstall_rejects_inconsistent_dependency_history(tmp_path: Path, defect: str) -> None:
+    case, document = _reinstall_document()
+    steps = cast(list[dict[str, object]], document["steps"])
+    if defect == "continued_after_failure":
+        _object(steps[0]["command"])["exit_code"] = 7
+        document["status"] = "failed"
+    elif defect == "unnecessary_skip":
+        steps[1].update(command=None, verification=None, observations=None, skip_reason="Skipped")
+    elif defect == "partial_skip":
+        _object(steps[0]["command"])["exit_code"] = 7
+        steps[1].update(command=None, skip_reason="Previous failed")
+        document["status"] = "failed"
+    elif defect == "missing_step":
+        steps.pop()
+    elif defect == "extra_step":
+        steps.append(steps[1])
+    else:
+        document["status"] = "incomplete"
+    _write(tmp_path, document)
+    with pytest.raises(ValueError):
+        read_result(tmp_path, case)

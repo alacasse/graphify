@@ -109,7 +109,9 @@ class TestResultWriter:
         except OSError as error:
             raise EvidenceWriteError(f"Cannot create evidence directory: {error}") from error
 
-    def write_snapshot(self, snapshot: FilesystemSnapshot, name: str) -> None:
+    def write_snapshot(
+        self, snapshot: FilesystemSnapshot, name: str, *, step_index: int = 0
+    ) -> None:
         if name == "expected":
             try:
                 (self.output_directory / "expected").mkdir(exist_ok=True)
@@ -120,15 +122,15 @@ class TestResultWriter:
         for entry in snapshot.entries:
             key = (entry["root"], entry["path"])
             if key in snapshot.contents:
-                prefix = "expected" if name == "expected" else f"steps/0/{name}/{key[0]}"
+                prefix = "expected" if name == "expected" else f"steps/{step_index}/{name}/{key[0]}"
                 relative = f"{prefix}/{key[1]}"
                 self._write_bytes(relative, snapshot.contents[key])
                 entry["content_file"] = relative
-        relative = "expected.json" if name == "expected" else f"steps/0/{name}.json"
+        relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
 
-    def write_verification(self, result: VerificationResult) -> None:
-        self._write_json("steps/0/verification.json", asdict(result))
+    def write_verification(self, result: VerificationResult, *, step_index: int = 0) -> None:
+        self._write_json(f"steps/{step_index}/verification.json", asdict(result))
 
     def _write_json(self, relative: str, value: object) -> None:
         self._write_bytes(relative, (json.dumps(value, indent=2) + "\n").encode("utf-8"))
@@ -146,17 +148,19 @@ class TestResultWriter:
         content = message.encode("utf-8") if isinstance(message, str) else message
         self._write_bytes(relative, content, append=True)
 
-    def write_command(self, result: InstallerCommandResult) -> CommandEvidence:
-        self._write_bytes("steps/0/stdout.txt", result.stdout)
-        self._write_bytes("steps/0/stderr.txt", result.stderr)
+    def write_command(
+        self, result: InstallerCommandResult, *, step_index: int = 0
+    ) -> CommandEvidence:
+        self._write_bytes(f"steps/{step_index}/stdout.txt", result.stdout)
+        self._write_bytes(f"steps/{step_index}/stderr.txt", result.stderr)
         return {
             "args": result.args,
             "cwd": result.cwd,
             "state": result.state,
             "exit_code": result.exit_code,
             "reason": result.reason,
-            "stdout_file": "steps/0/stdout.txt",
-            "stderr_file": "steps/0/stderr.txt",
+            "stdout_file": f"steps/{step_index}/stdout.txt",
+            "stderr_file": f"steps/{step_index}/stderr.txt",
         }
 
     def write_result(self, result: InstallTestResult) -> None:

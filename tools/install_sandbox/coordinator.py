@@ -1,9 +1,9 @@
-"""Assemble the common first-install case from discovered target facts."""
+"""Assemble and conduct a selected project case from discovered target facts."""
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.install_sandbox.case import InstallTestCase, first_install_files
+from tools.install_sandbox.case import InstallTestCase, case_operations, first_install_files
 from tools.install_sandbox.container_harness import ContainerHarness, ContainerRunResult
 from tools.install_sandbox.result_reader import read_result
 from tools.install_sandbox.results import InstallTestResult
@@ -12,7 +12,7 @@ from tools.install_sandbox.spec_reader import InstallSpecReader
 
 
 @dataclass(frozen=True)
-class FirstInstallResult:
+class CoordinatedResult:
     """Keep container execution, the validated case and transport diagnostics separate."""
 
     container: ContainerRunResult
@@ -44,24 +44,25 @@ def _check_destinations(subject: Path, case_file: Path, output: Path) -> None:
 
 def _collect_result(
     container: ContainerRunResult, case: InstallTestCase, output: Path
-) -> FirstInstallResult:
+) -> CoordinatedResult:
     try:
         result = read_result(output, case)
     except FileNotFoundError as error:
-        return FirstInstallResult(container, None, f"Result unavailable: {error}", output)
+        return CoordinatedResult(container, None, f"Result unavailable: {error}", output)
     except OSError as error:
-        return FirstInstallResult(container, None, f"Result unreadable: {error}", output)
+        return CoordinatedResult(container, None, f"Result unreadable: {error}", output)
     except ValueError as error:
-        return FirstInstallResult(container, None, f"Result invalid: {error}", output)
-    return FirstInstallResult(container, result, None, output)
+        return CoordinatedResult(container, None, f"Result invalid: {error}", output)
+    return CoordinatedResult(container, result, None, output)
 
 
 class InstallTestCoordinator:
-    def run_first_install(
+    def run_case(
         self,
         *,
         specs_directory: Path,
         target: str,
+        case_name: str = "first-install",
         subject_checkout: Path,
         case_file: Path,
         output_directory: Path,
@@ -69,13 +70,13 @@ class InstallTestCoordinator:
         build_timeout_seconds: float = 300.0,
         run_timeout_seconds: float = 900.0,
         graceful_termination_seconds: float = 10.0,
-    ) -> FirstInstallResult:
+    ) -> CoordinatedResult:
         """Conduct one discovered project case, then validate its result after cleanup."""
         subject, case_path, output = (
             path.expanduser().resolve() for path in (subject_checkout, case_file, output_directory)
         )
         _check_destinations(subject, case_path, output)
-        case = self.write_first_install(specs_directory, target, case_path)
+        case = self.write_case(specs_directory, target, case_path, case_name=case_name)
         container = ContainerHarness().run_case(
             subject_checkout=subject,
             case_file=case_path,
@@ -87,23 +88,30 @@ class InstallTestCoordinator:
         )
         return _collect_result(container, case, output)
 
-    def write_first_install(
-        self, specs_directory: Path, target: str, case_file: Path
+    def write_case(
+        self,
+        specs_directory: Path,
+        target: str,
+        case_file: Path,
+        *,
+        case_name: str = "first-install",
     ) -> InstallTestCase:
         """Discover targets, assemble one project case and write its complete JSON."""
         specs = InstallSpecReader().read(specs_directory)
         if target not in specs:
             raise ValueError(f"Target not found in {specs_directory}: {target}")
-        case = self.first_install(target, specs[target])
+        case = self.build_case(target, specs[target], case_name=case_name)
         case.write(case_file)
         return case
 
-    def first_install(self, target: str, spec: InstallTestSpec) -> InstallTestCase:
+    def build_case(
+        self, target: str, spec: InstallTestSpec, *, case_name: str = "first-install"
+    ) -> InstallTestCase:
         return InstallTestCase(
-            name="first-install",
+            name=case_name,
             target=target,
             scope="project",
             spec=spec,
             initial_files=first_install_files(spec),
-            operations=["install"],
+            operations=case_operations(case_name),
         )

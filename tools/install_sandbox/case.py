@@ -61,6 +61,14 @@ def _initial_files(value: object) -> list[InitialFile]:
     return result
 
 
+def case_operations(name: str) -> list[str]:
+    if name == "first-install":
+        return ["install"]
+    if name == "reinstall":
+        return ["install", "install"]
+    raise ValueError(f"Unsupported project case: {name}")
+
+
 @dataclass(frozen=True)
 class InstallTestCase:
     name: str
@@ -74,20 +82,22 @@ class InstallTestCase:
     def from_json(cls, payload: str) -> "InstallTestCase":
         data = fields(json.loads(payload), "name target scope spec initial_files operations")
         spec = InstallTestSpec.from_data(data["spec"])
-        if data["name"] != "first-install" or data["operations"] != ["install"]:
-            raise ValueError("Only first-install with one install operation is supported")
+        name = text(data["name"])
+        operations = case_operations(name)
+        if data["operations"] != operations:
+            raise ValueError("Operations do not match the case definition")
         if data["scope"] != "project" or "project" not in spec.scopes:
-            raise ValueError("First-install requires a supported project scope")
+            raise ValueError("Installation case requires a supported project scope")
         initial_files = _initial_files(data["initial_files"])
         if initial_files != first_install_files(spec):
-            raise ValueError("Initial files do not match the first-install definition")
+            raise ValueError("Initial files do not match the case definition")
         return cls(
-            "first-install",
+            name,
             text(data["target"]),
             "project",
             spec,
             initial_files,
-            ["install"],
+            operations,
         )
 
     def to_json(self) -> str:

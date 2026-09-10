@@ -4,8 +4,10 @@ import json
 import multiprocessing
 import os
 import signal
+import sys
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import cast
@@ -136,6 +138,79 @@ def test_signals_return_after_owned_cleanup(
 def _run_in_process(root: Path, sender: Connection) -> None:
     sender.send(conduct(root, 10))
     sender.close()
+
+
+def test_cleanup_wait_uses_little_parent_cpu(tmp_path: Path) -> None:
+    with ContainerHarness(runtime_executable=sys.executable) as harness:
+        harness.logs = tmp_path
+        wall_start, cpu_start = time.monotonic(), time.process_time()
+        # Exercise the cleanup command seam without Docker or its fixed 15 s budgets.
+        result = harness._cleanup_command(  # pyright: ignore[reportPrivateUsage]
+            ["-c", "import time; time.sleep(0.6); print('finished')"], 2
+        )
+        elapsed, cpu = time.monotonic() - wall_start, time.process_time() - cpu_start
+    assert result.exit_code == 0 and not result.timed_out
+    assert result.interrupted_by is None and "finished" in result.stdout_tail
+    assert 0.6 <= elapsed < 3, (elapsed, cpu)
+    # Parent CPU excludes the sleeping child and scheduler delays. This leaves
+    # ample reader/startup overhead while rejecting the observed ~0.62 s spin.
+    assert cpu < 0.1, (elapsed, cpu)
+
+
+def test_cleanup_timeout_reaps_process_group(tmp_path: Path) -> None:
+    child_code = (
+        "import os, signal, sys, time; from pathlib import Path; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)"
+    )
+    code = (
+        "import os, subprocess, sys, time; from pathlib import Path; "
+        "Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[3], sys.argv[2]]); "
+        "time.sleep(60)"
+    )
+    parent_file, child_file = tmp_path / "parent-pid", tmp_path / "child-pid"
+    try:
+        with ContainerHarness(
+            runtime_executable=sys.executable, graceful_termination_seconds=0.1
+        ) as harness:
+            harness.logs = tmp_path
+            start = time.monotonic()
+            result = harness._cleanup_command(  # pyright: ignore[reportPrivateUsage]
+                ["-c", code, str(parent_file), str(child_file), child_code], 0.6
+            )
+        assert result.timed_out and result.interrupted_by is None
+        assert result.exit_code == -signal.SIGTERM
+        assert 0.6 <= time.monotonic() - start < 3
+        parent, child = int(parent_file.read_text()), int(child_file.read_text())
+        assert _wait_until(lambda: not _process_is_live(child))
+        assert not _process_is_live(parent)
+        with pytest.raises(ChildProcessError):
+            os.waitpid(parent, os.WNOHANG)
+    finally:
+        if parent_file.exists():
+            with suppress(ProcessLookupError):
+                os.killpg(int(parent_file.read_text()), signal.SIGKILL)
+
+
+@pytest.mark.parametrize("sent_signal", [signal.SIGINT, signal.SIGTERM])
+def test_signal_during_cleanup_allows_command_to_finish(
+    tmp_path: Path, sent_signal: signal.Signals
+) -> None:
+    code = (
+        "import os, signal, sys, time; "
+        "os.kill(os.getppid(), int(sys.argv[1])); "
+        "time.sleep(0.2); print('cleanup finished')"
+    )
+    with ContainerHarness(runtime_executable=sys.executable) as harness:
+        harness.logs = tmp_path
+        result = harness._cleanup_command(  # pyright: ignore[reportPrivateUsage]
+            ["-c", code, str(int(sent_signal))], 2
+        )
+        assert harness.interrupted and harness.interrupts.signal_number == sent_signal
+    assert result.exit_code == 0 and not result.timed_out
+    assert result.interrupted_by is None
+    assert "cleanup finished" in result.stdout_tail
 
 
 @pytest.mark.parametrize("budget", [0, -1, float("nan"), float("inf")])

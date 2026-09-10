@@ -12,7 +12,7 @@ from typing import cast
 
 import pytest
 
-from tools.install_sandbox.coordinator import FirstInstallResult, InstallTestCoordinator
+from tools.install_sandbox.coordinator import CoordinatedResult, InstallTestCoordinator
 from tools.install_sandbox.result_reader import safe_evidence_path
 
 pytestmark = pytest.mark.skipif(
@@ -55,7 +55,7 @@ def _runtime(directory: Path) -> Path:
     return wrapper
 
 
-def _assert_execution(directory: Path, result: FirstInstallResult) -> None:
+def _assert_execution(directory: Path, result: CoordinatedResult) -> None:
     assert result.container.state == "completed", asdict(result)
     commands = [
         cast(list[str], json.loads(line))
@@ -74,37 +74,49 @@ def _assert_execution(directory: Path, result: FirstInstallResult) -> None:
     assert result.passed, asdict(result)
 
 
-def _assert_saved_evidence(result: FirstInstallResult) -> None:
+def _assert_saved_evidence(result: CoordinatedResult) -> None:
     output = result.output_directory
-    count = 0
-    for relative in ("expected.json", "steps/0/before.json", "steps/0/after.json"):
-        snapshot = cast(
-            dict[str, object], json.loads(safe_evidence_path(output, relative).read_bytes())
-        )
-        for entry in cast(list[dict[str, object]], snapshot["entries"]):
-            reference = entry.get("content_file")
-            if isinstance(reference, str):
-                safe_evidence_path(output, reference).read_bytes()
-                count += 1
-    assert count > 0
-    for relative in ("journal.log", "preparation.log", "steps/0/stdout.txt", "steps/0/stderr.txt"):
-        safe_evidence_path(output, relative).read_bytes()
     assert result.test is not None
-    command = result.test.steps[0]["command"]
-    assert command is not None
-    assert command["args"] == [
-        "/sandbox/work/case/software/venv/bin/graphify",
-        "install",
-        "--platform",
-        "sandbox-reference",
-        "--project",
-    ]
+    references = ["expected.json"]
+    for index, step in enumerate(result.test.steps):
+        references.extend([f"steps/{index}/before.json", f"steps/{index}/after.json"])
+        command = step["command"]
+        assert command is not None
+        assert command["args"] == [
+            "/sandbox/work/case/software/venv/bin/graphify",
+            "install",
+            "--platform",
+            "sandbox-reference",
+            "--project",
+        ]
+        for name in ("stdout.txt", "stderr.txt", "verification.json"):
+            safe_evidence_path(output, f"steps/{index}/{name}").read_bytes()
+    for relative in references:
+        _read_snapshot_contents(output, relative)
+    for relative in ("journal.log", "preparation.log"):
+        safe_evidence_path(output, relative).read_bytes()
     preparation = (output / "preparation.log").read_text()
     assert "Successfully installed" in preparation
     assert "/sandbox/work/case/software/source" in preparation
 
 
-def _assert_owned_cleanup(directory: Path, result: FirstInstallResult) -> None:
+def _read_snapshot_contents(output: Path, relative: str) -> None:
+    snapshot = cast(
+        dict[str, object], json.loads(safe_evidence_path(output, relative).read_bytes())
+    )
+    assert not snapshot["obstacles"]
+    references = [
+        entry.get("content_file") for entry in cast(list[dict[str, object]], snapshot["entries"])
+    ]
+    count = 0
+    for reference in references:
+        if isinstance(reference, str):
+            safe_evidence_path(output, reference).read_bytes()
+            count += 1
+    assert count > 0
+
+
+def _assert_owned_cleanup(directory: Path, result: CoordinatedResult) -> None:
     runtime = str(directory / "record-docker")
     name = f"install-sandbox-case-{result.container.run_id}"
     tag = f"install-sandbox-case:{result.container.run_id}"
@@ -115,16 +127,17 @@ def _assert_owned_cleanup(directory: Path, result: FirstInstallResult) -> None:
         assert not subprocess.check_output([runtime, *arguments], text=True).strip()
 
 
-def test_first_install_docker() -> None:
+def run_proof(case_name: str) -> CoordinatedResult:
     subject = Path(os.environ["INSTALL_SANDBOX_SUBJECT"]).resolve()
     directory = Path(os.environ["INSTALL_SANDBOX_EVIDENCE_DIRECTORY"]).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     before = _subject_state(subject)
     (directory / "subject-before.json").write_text(json.dumps(before, indent=2))
     start = time.monotonic()
-    result = InstallTestCoordinator().run_first_install(
+    result = InstallTestCoordinator().run_case(
         specs_directory=_ROOT / "tools/install_sandbox/specs/reference",
         target="sandbox-reference",
+        case_name=case_name,
         subject_checkout=subject,
         case_file=directory / "case.json",
         output_directory=directory / "results",
@@ -144,3 +157,8 @@ def test_first_install_docker() -> None:
     _assert_execution(directory, result)
     _assert_owned_cleanup(directory, result)
     _assert_saved_evidence(result)
+    return result
+
+
+def test_first_install_docker() -> None:
+    run_proof("first-install")

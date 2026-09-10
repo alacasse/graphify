@@ -46,13 +46,15 @@ class TestEnvironment:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(initial["content"].encode("utf-8"))
 
-    def observe(self, writer: TestResultWriter, phase: str) -> FilesystemSnapshot:
+    def observe(
+        self, writer: TestResultWriter, phase: str, *, step_index: int = 0
+    ) -> FilesystemSnapshot:
         if phase not in {"before", "after"}:
             raise ValueError("Observation phase must be before or after")
         snapshot = FilesystemSnapshot()
         for root, directory in (("project", self.project), ("home", self.home)):
             self._capture(snapshot, root, directory, ".", expected=False)
-        writer.write_snapshot(snapshot, phase)
+        writer.write_snapshot(snapshot, phase, step_index=step_index)
         return snapshot
 
     def preserve_expected(self, subject: Path, writer: TestResultWriter) -> FilesystemSnapshot:
@@ -113,7 +115,12 @@ class TestEnvironment:
         self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, path: Path, *, expected: bool
     ) -> None:
         dest = destinations(self.case)
-        if not expected and entry["root"] == "project" and entry["path"] == dest["version"]:
+        if (
+            not expected
+            and self.case.name == "first-install"
+            and entry["root"] == "project"
+            and entry["path"] == dest["version"]
+        ):
             return
         keep = expected or self._keep_content(entry, dest)
         if keep:
@@ -135,6 +142,6 @@ class TestEnvironment:
         if (entry["root"], entry["path"]) in witnesses:
             return True
         return entry["root"] == "project" and (
-            entry["path"] in (dest["skill"], dest["markdown"], dest["json"])
+            entry["path"] in (dest["skill"], dest["markdown"], dest["json"], dest["version"])
             or entry["path"].startswith(dest["references"] + "/")
         )

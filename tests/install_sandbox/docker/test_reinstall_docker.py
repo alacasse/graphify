@@ -8,6 +8,7 @@ import pytest
 
 from tests.install_sandbox.docker.test_first_install_docker import run_proof
 from tools.install_sandbox.case import InstallTestCase
+from tools.install_sandbox.coordinator import CoordinatedResult
 from tools.install_sandbox.environment import destinations
 from tools.install_sandbox.result_reader import read_result
 
@@ -18,7 +19,10 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_reinstall_docker() -> None:
-    result = run_proof("reinstall")
+    run_proof("reinstall", _check_case)
+
+
+def _check_case(result: CoordinatedResult) -> None:
     output = result.output_directory
     case = InstallTestCase.from_json((output.parent / "case.json").read_text())
     assert case.operations == ["install", "install"]

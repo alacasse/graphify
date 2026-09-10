@@ -11,7 +11,7 @@ RUN mkdir -p /opt/install-sandbox/tools/install_sandbox \
 
 # Only the sandbox's internal case program is embedded, never the tested product.
 COPY --chmod=0444 case.py spec.py driver.py environment.py preparer.py \
-    results.py runner.py verifier.py container_main.py /opt/install-sandbox/tools/install_sandbox/
+    results.py timings.py runner.py verifier.py container_main.py /opt/install-sandbox/tools/install_sandbox/
 
 WORKDIR /sandbox/work
 

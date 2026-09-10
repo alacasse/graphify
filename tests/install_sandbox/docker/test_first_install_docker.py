@@ -4,7 +4,7 @@ import json
 import os
 import shutil
 import subprocess
-import time
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import cast
@@ -13,6 +13,8 @@ import pytest
 
 from tools.install_sandbox.coordinator import CoordinatedResult, InstallTestCoordinator
 from tools.install_sandbox.result_reader import safe_evidence_path
+from tools.install_sandbox.timing_report import render_timings
+from tools.install_sandbox.timings import Timing, measure
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_INSTALL_SANDBOX_DOCKER") != "1",
@@ -108,11 +110,12 @@ def _assert_owned_cleanup(directory: Path, result: CoordinatedResult) -> None:
         assert not subprocess.check_output([runtime, *arguments], text=True).strip()
 
 
-def run_proof(case_name: str) -> CoordinatedResult:
+def run_proof(
+    case_name: str, check_case: Callable[[CoordinatedResult], None] | None = None
+) -> CoordinatedResult:
     subject = Path(os.environ["INSTALL_SANDBOX_SUBJECT"]).resolve()
     directory = Path(os.environ["INSTALL_SANDBOX_EVIDENCE_DIRECTORY"]).resolve()
     directory.mkdir(parents=True, exist_ok=False)
-    start = time.monotonic()
     result = InstallTestCoordinator().run_case(
         specs_directory=_ROOT / "tools/install_sandbox/specs/reference",
         target="sandbox-reference",
@@ -124,15 +127,36 @@ def run_proof(case_name: str) -> CoordinatedResult:
         build_timeout_seconds=float(os.environ.get("INSTALL_SANDBOX_BUILD_TIMEOUT", "300")),
         run_timeout_seconds=float(os.environ.get("INSTALL_SANDBOX_RUN_TIMEOUT", "900")),
     )
+    checks = Timing("additional_checks")
+    try:
+        with measure(checks):
+            _assert_execution(directory, result)
+            _assert_owned_cleanup(directory, result)
+            _assert_saved_evidence(result)
+            if check_case is not None:
+                check_case(result)
+            _assert_timings(result)
+    finally:
+        _write_summary(directory, result, checks)
+    return result
+
+
+def _assert_timings(result: CoordinatedResult) -> None:
+    assert result.duration_seconds is not None
+    assert not result.container_timings.diagnostics, asdict(result.container_timings)
+    assert result.container_timings.duration_seconds is not None
+    assert all(record.state == "measured" for record in result.timings)
+    assert all(record.state == "measured" for record in result.container_timings.phases)
+
+
+def _write_summary(directory: Path, result: CoordinatedResult, checks: Timing) -> None:
     summary = {
-        "duration_seconds": time.monotonic() - start,
+        "duration_seconds": result.duration_seconds,
+        "additional_checks": asdict(checks),
         "result": asdict(result),
     }
     (directory / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-    _assert_execution(directory, result)
-    _assert_owned_cleanup(directory, result)
-    _assert_saved_evidence(result)
-    return result
+    (directory / "summary.txt").write_text(render_timings(result, checks), encoding="utf-8")
 
 
 def test_first_install_docker() -> None:

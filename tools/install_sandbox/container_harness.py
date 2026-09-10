@@ -14,10 +14,12 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import FrameType
 from typing import Literal, TextIO
+
+from tools.install_sandbox.timings import Timing, elapsed, measure, skip_pending
 
 __all__ = ["ContainerHarness", "ContainerRunResult"]
 
@@ -47,6 +49,7 @@ class ContainerRunResult:
     stdout_tail: str
     stderr_tail: str
     detail: str
+    timings: list[Timing] = field(default_factory=list[Timing])
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +148,8 @@ class ContainerHarness:
         graceful_termination_seconds: float = 10.0,
     ) -> ContainerRunResult:
         """Run one container; case conformity is reported separately by the runner."""
+        started = time.monotonic_ns()
+        timings = [Timing(phase) for phase in ("preflight", "build", "run", "cleanup")]
         run_id = uuid.uuid4().hex
         request = _PreparedRequest(
             subject_checkout,
@@ -158,12 +163,18 @@ class ContainerHarness:
         try:
             prepared = _prepare_request(request)
         except (_PreflightError, OSError, RuntimeError) as exc:
-            return _preflight_failure(run_id, str(exc))
-        return _ContainerRun(prepared, run_id).execute()
+            timings[0] = Timing("preflight", state="measured", duration_seconds=elapsed(started))
+            skip_pending(timings)
+            return replace(_preflight_failure(run_id, str(exc)), timings=timings)
+        return _ContainerRun(prepared, run_id, timings, started).execute()
 
 
 class _ContainerRun:
-    def __init__(self, request: _PreparedRequest, run_id: str) -> None:
+    def __init__(
+        self, request: _PreparedRequest, run_id: str, timings: list[Timing], started: int
+    ) -> None:
+        self.timings = timings
+        self.started = started
         self.request = request
         self.run_id = run_id
         self.image_tag = f"install-sandbox-case:{run_id}"
@@ -177,13 +188,17 @@ class _ContainerRun:
     def execute(self) -> ContainerRunResult:
         with self.interrupts:
             daemon_outcome = self._check_daemon()
+            self.timings[0] = Timing(
+                "preflight", state="measured", duration_seconds=elapsed(self.started)
+            )
             if daemon_outcome is not None:
                 return self._result(daemon_outcome, cleanup_complete=True)
             try:
                 outcome = self._build_and_run()
             except Exception as exc:
                 outcome = _Outcome("incomplete", "run", 2, f"unexpected harness error: {exc}")
-            outcome, cleanup_complete = self._cleanup_outcome(outcome)
+            with measure(self.timings[3]):
+                outcome, cleanup_complete = self._cleanup_outcome(outcome)
             if cleanup_complete and self.interrupts.signal_number is not None:
                 outcome = _interrupted("cleanup", self.interrupts.signal_number)
         return self._result(_apply_cleanup(outcome, cleanup_complete), cleanup_complete)
@@ -210,10 +225,14 @@ class _ContainerRun:
             return _interrupted("build", self.interrupts.signal_number)
         with tempfile.TemporaryDirectory(prefix=f"install-sandbox-{self.run_id}-") as temporary:
             image_id_file = Path(temporary) / "image-id"
-            build_outcome = self._build_image(image_id_file)
+            with measure(self.timings[1]):
+                build_outcome = self._build_image(image_id_file)
             if build_outcome is not None:
                 return build_outcome
-            return self._run_image()
+            if self.interrupts.signal_number is not None:
+                return _interrupted("run", self.interrupts.signal_number)
+            with measure(self.timings[2]):
+                return self._run_image()
 
     def _build_image(self, image_id_file: Path) -> _Outcome | None:
         context = Path(__file__).resolve().parent
@@ -363,6 +382,7 @@ class _ContainerRun:
         return result
 
     def _result(self, outcome: _Outcome, cleanup_complete: bool) -> ContainerRunResult:
+        skip_pending(self.timings)
         return ContainerRunResult(
             run_id=self.run_id,
             state=outcome.state,
@@ -373,6 +393,7 @@ class _ContainerRun:
             stdout_tail=self.diagnostics.stdout.value,
             stderr_tail=self.diagnostics.stderr.value,
             detail=outcome.detail,
+            timings=self.timings,
         )
 
 

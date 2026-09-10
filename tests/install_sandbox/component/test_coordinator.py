@@ -14,7 +14,7 @@ _COMPONENT = Path(__file__).parent
 _SPECS = Path(__file__).resolve().parents[3] / "tools/install_sandbox/specs/reference"
 
 
-def _arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "passed") -> None:
+def arrange_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "passed") -> None:
     LocalCase(tmp_path)
     (tmp_path / "case.json").unlink()
     executable = tmp_path / "controlled-installer"
@@ -24,7 +24,7 @@ def _arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "passe
     monkeypatch.setenv("CONTROLLED_INSTALLER", str(executable))
 
 
-def _run(tmp_path: Path) -> CoordinatedResult:
+def run_first(tmp_path: Path) -> CoordinatedResult:
     return InstallTestCoordinator().run_case(
         specs_directory=_SPECS,
         target="sandbox-reference",
@@ -55,9 +55,9 @@ def test_conduct_keeps_case_status_separate_from_completed_harness(
     preparation_failure: bool,
     expected: str,
 ) -> None:
-    _arrange(tmp_path, monkeypatch, mode)
+    arrange_first(tmp_path, monkeypatch, mode)
     monkeypatch.setenv("CONTROLLED_PREPARATION_FAIL", "1" if preparation_failure else "0")
-    result = _run(tmp_path)
+    result = run_first(tmp_path)
     assert result.container.state == "completed" and result.container.cleanup_complete
     assert result.result_error is None and result.test is not None
     assert result.test.status == expected
@@ -81,9 +81,9 @@ def test_valid_passed_case_survives_harness_problem(
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
 ) -> None:
-    _arrange(tmp_path, monkeypatch)
+    arrange_first(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_DOCKER_MODE", mode)
-    result = _run(tmp_path)
+    result = run_first(tmp_path)
     assert result.test is not None and result.test.status == "passed"
     assert result.result_error is None and not result.passed
     assert result.container.state == "incomplete"
@@ -100,10 +100,10 @@ def test_completed_harness_without_valid_result_is_not_success(
     mode: str,
     diagnostic: str,
 ) -> None:
-    _arrange(tmp_path, monkeypatch)
+    arrange_first(tmp_path, monkeypatch)
     monkeypatch.delenv("FAKE_DOCKER_CASE_PROGRAM")
     monkeypatch.setenv("FAKE_DOCKER_MODE", mode)
-    result = _run(tmp_path)
+    result = run_first(tmp_path)
     assert result.container.state == "completed"
     assert not result.passed and result.test is None
     assert diagnostic in (result.result_error or "")
@@ -114,10 +114,10 @@ def test_interrupted_harness_preserves_partial_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _arrange(tmp_path, monkeypatch)
+    arrange_first(tmp_path, monkeypatch)
     monkeypatch.delenv("FAKE_DOCKER_CASE_PROGRAM")
     monkeypatch.setenv("FAKE_DOCKER_MODE", "run_interrupt")
-    result = _run(tmp_path)
+    result = run_first(tmp_path)
     assert result.container.state == "interrupted"
     assert result.test is None and not result.passed
     assert "unavailable" in (result.result_error or "")
@@ -128,7 +128,7 @@ def test_unreadable_result_does_not_hide_harness_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _arrange(tmp_path, monkeypatch)
+    arrange_first(tmp_path, monkeypatch)
     original = Path.read_text
 
     def read(path: Path, *args: object, **kwargs: object) -> str:
@@ -137,7 +137,7 @@ def test_unreadable_result_does_not_hide_harness_result(
         return original(path)
 
     monkeypatch.setattr(Path, "read_text", read)
-    result = _run(tmp_path)
+    result = run_first(tmp_path)
     assert result.container.state == "completed" and result.test is None
     assert "unreadable" in (result.result_error or "")
     assert not result.passed

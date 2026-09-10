@@ -8,11 +8,12 @@ from typing import Literal
 
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.driver import InstallerDriver
-from tools.install_sandbox.environment import TestEnvironment
+from tools.install_sandbox.environment import TestEnvironment, reference_repair_plan
 from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.results import (
     FilesystemSnapshot,
     InstallTestResult,
+    ReferenceRepairEvidence,
     StepEvidence,
     TestResultWriter,
 )
@@ -109,14 +110,50 @@ class InstallTestRunner:
                 result, writer, "Initial verification failed: " + json.dumps(asdict(initial))
             )
             return
+        if case.name == "repair-references":
+            try:
+                reference_repair_plan(case, expected)
+            except ValueError as error:
+                self._not_run(result, writer, str(error))
+                return
         result.preparation["ready"] = True
+        self._run_steps(case, prepared.executable, environment, expected, before, writer, result)
+
+    def _run_steps(
+        self,
+        case: InstallTestCase,
+        executable: Path,
+        environment: TestEnvironment,
+        expected: FilesystemSnapshot,
+        before: FilesystemSnapshot,
+        writer: TestResultWriter,
+        result: InstallTestResult,
+    ) -> None:
         writer.append_log("journal.log", "Preparation ready; attempting install\n")
         for index, step in enumerate(result.steps):
+            installed = before
             if index:
-                before = deepcopy(before)
-                writer.write_snapshot(before, "before", step_index=index)
+                if case.name == "repair-references":
+                    before = self._prepare_repair(
+                        case, environment, expected, installed, writer, step
+                    )
+                    preparation = step.get("preparation")
+                    assert preparation is not None
+                    if not preparation["ready"]:
+                        result.status = "incomplete"
+                        break
+                else:
+                    before = deepcopy(installed)
+                    writer.write_snapshot(before, "before", step_index=index)
             before = self._install(
-                case, prepared.executable, environment, expected, before, writer, step, index
+                case,
+                executable,
+                environment,
+                expected,
+                installed if index and case.name == "repair-references" else before,
+                writer,
+                step,
+                index,
             )
             result.status = self._step_status(step)
             if result.status != "passed":
@@ -125,6 +162,37 @@ class InstallTestRunner:
                     dependent["skip_reason"] = reason
                 writer.append_log("journal.log", reason + "\n")
                 break
+
+    def _prepare_repair(
+        self,
+        case: InstallTestCase,
+        environment: TestEnvironment,
+        expected: FilesystemSnapshot,
+        installed: FilesystemSnapshot,
+        writer: TestResultWriter,
+        step: StepEvidence,
+    ) -> FilesystemSnapshot:
+        plan, content = reference_repair_plan(case, expected)
+        writer.write_repair_plan(plan, content)
+        writer.append_log("journal.log", "Preparing reference deletion and alteration\n")
+        reason = environment.prepare_reference_repair(plan, content)
+        degraded = environment.observe(writer, "before", step_index=1)
+        verification = self.verifier.verify_reference_repair(plan, content, installed, degraded)
+        if reason is None and (not verification.complete or verification.mismatches):
+            reason = "Reference repair preparation verification failed"
+        evidence: ReferenceRepairEvidence = {
+            "plan": plan,
+            "ready": reason is None,
+            "reason": reason,
+            "before": "steps/1/before.json",
+            "verification": verification,
+        }
+        step["preparation"] = evidence
+        writer.write_repair_preparation(evidence)
+        if reason is not None:
+            step["skip_reason"] = reason
+            writer.append_log("journal.log", reason + "; repair installation not attempted\n")
+        return degraded
 
     @staticmethod
     def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:

@@ -78,7 +78,22 @@ class CommandEvidence(TypedDict):
     stderr_file: str | None
 
 
+class ReferenceRepairPlan(TypedDict):
+    deleted_path: str
+    altered_path: str
+    altered_content_file: str
+
+
+class ReferenceRepairEvidence(TypedDict):
+    plan: ReferenceRepairPlan
+    ready: bool
+    reason: str | None
+    before: str
+    verification: VerificationResult
+
+
 class StepEvidence(TypedDict):
+    preparation: NotRequired[ReferenceRepairEvidence]
     operation: str
     skip_reason: str | None
     command: CommandEvidence | None
@@ -128,6 +143,16 @@ class TestResultWriter:
                 entry["content_file"] = relative
         relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
+
+    def write_repair_plan(self, plan: ReferenceRepairPlan, content: bytes) -> None:
+        self._write_json("steps/1/preparation/plan.json", plan)
+        self._write_bytes(plan["altered_content_file"], content)
+
+    def write_repair_preparation(self, evidence: ReferenceRepairEvidence) -> None:
+        self._write_json(
+            "steps/1/preparation/result.json",
+            {**evidence, "verification": asdict(evidence["verification"])},
+        )
 
     def write_verification(self, result: VerificationResult, *, step_index: int = 0) -> None:
         self._write_json(f"steps/{step_index}/verification.json", asdict(result))

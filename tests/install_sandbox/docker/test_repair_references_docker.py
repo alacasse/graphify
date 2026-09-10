@@ -19,12 +19,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_repair_references_docker() -> None:
-    run_proof("repair-references", _check_case)
+    run_proof("repair-references", check_case)
 
 
-def _check_case(result: CoordinatedResult) -> None:
+def check_case(result: CoordinatedResult) -> None:
     output = result.output_directory
-    case = InstallTestCase.from_json((output.parent / "case.json").read_text())
+    case = InstallTestCase.from_json(
+        (output.parents[1] / "inputs" / f"{output.name}.json").read_text()
+    )
     reread = read_result(output, case)
     assert result.test == reread and result.passed, asdict(result)
     preparation = reread.steps[1].get("preparation")

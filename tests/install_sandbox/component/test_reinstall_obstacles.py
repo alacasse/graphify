@@ -8,7 +8,6 @@ import pytest
 from tests.install_sandbox.component.test_local_runner import LocalCase
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.driver import InstallerCommandResult, InstallerDriver, execute_command
-from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.result_reader import read_result
 from tools.install_sandbox.runner import InstallTestRunner
 
@@ -63,10 +62,9 @@ def test_launch_failure_still_observes_files_and_records_stop(tmp_path: Path, in
         attempts.append(args)
         return execute_command(args, cwd, env, timeout)
 
-    result = InstallTestRunner(
-        GraphifyPreparer(local.prepare_command), InstallerDriver(execute)
-    ).run_case(
-        subject_checkout=tmp_path / "subject",
+    result = InstallTestRunner(InstallerDriver(execute)).run_case(
+        reference_sources=tmp_path / "subject",
+        prepared_executable=local.prepare_executable(),
         case_file=tmp_path / "case.json",
         work_directory=tmp_path / "work",
         output_directory=tmp_path / "results",

@@ -4,13 +4,12 @@ import json
 import shutil
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from tools.install_sandbox.driver import InstallerCommandResult, InstallerDriver, execute_command
-from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.results import EvidenceWriteError, InstallTestResult
 from tools.install_sandbox.runner import InstallTestRunner
 
@@ -55,8 +54,6 @@ def controlled_script(mode: str) -> str:
 class LocalCase:
     root: Path
     mode: str = "passed"
-    preparation_failure: int = 0
-    calls: list[list[str]] = field(default_factory=list[list[str]])
 
     def __post_init__(self) -> None:
         sources = {
@@ -71,32 +68,21 @@ class LocalCase:
             path.write_text(content, encoding="utf-8")
         shutil.copyfile(_CASE, self.root / "case.json")
 
-    def prepare_command(
-        self, args: list[str], cwd: Path, environment: dict[str, str], timeout: float
-    ) -> InstallerCommandResult:
-        self.calls.append(args)
-        assert cwd == self.root / "work/software/source"
-        assert (cwd / "local-untracked.txt").read_text() == "Local uncommitted content.\n"
-        # The seam runs only this controlled local Python, never venv/pip or Graphify.
-        code = (
-            "print('preparation output'); import sys; print('preparation error', file=sys.stderr)"
-        )
-        if self.preparation_failure == len(self.calls):
-            code += "; raise SystemExit(9)"
-        result = execute_command([sys.executable, "-c", code], cwd, environment, timeout)
-        if len(self.calls) == 2 and self.mode != "not_started":
-            executable = self.root / "work/software/venv/bin/graphify"
-            executable.parent.mkdir(parents=True)
-            executable.write_text(controlled_script(self.mode), encoding="utf-8")
-            executable.chmod(0o755)
-        return result
+    @property
+    def executable(self) -> Path:
+        return self.root / "prepared/bin/graphify"
+
+    def prepare_executable(self) -> Path:
+        if self.mode != "not_started":
+            self.executable.parent.mkdir(parents=True, exist_ok=True)
+            self.executable.write_text(controlled_script(self.mode), encoding="utf-8")
+            self.executable.chmod(0o755)
+        return self.executable
 
     def run(self, *, timeout: float = 5) -> InstallTestResult:
-        return InstallTestRunner(
-            GraphifyPreparer(self.prepare_command),
-            InstallerDriver(timeout=timeout),
-        ).run_case(
-            subject_checkout=self.root / "subject",
+        return InstallTestRunner(InstallerDriver(timeout=timeout)).run_case(
+            reference_sources=self.root / "subject",
+            prepared_executable=self.prepare_executable(),
             case_file=self.root / "case.json",
             work_directory=self.root / "work",
             output_directory=self.root / "results",
@@ -107,19 +93,22 @@ def test_passed_result_and_all_contents_survive_workspace_removal(tmp_path: Path
     local = LocalCase(tmp_path)
     result = local.run()
     assert result.status == "passed"
-    assert result.preparation == {"ready": True, "reason": None, "log": "preparation.log"}
+    assert result.preparation == {
+        "ready": True,
+        "reason": None,
+        "log": "preparation.log",
+        "source": "campaign",
+    }
     command = result.steps[0]["command"]
     assert command is not None
     assert command["args"] == [
-        str(tmp_path / "work/software/venv/bin/graphify"),
+        str(tmp_path / "prepared/bin/graphify"),
         "install",
         "--platform",
         "sandbox-reference",
         "--project",
     ]
     assert command["cwd"] == str(tmp_path / "work/environment/project")
-    assert local.calls[0] == [sys.executable, "-m", "venv", str(tmp_path / "work/software/venv")]
-    assert local.calls[1][-1] == str(tmp_path / "work/software/source")
     shutil.rmtree(tmp_path / "work")
     shutil.rmtree(tmp_path / "subject")
     output = tmp_path / "results"
@@ -135,24 +124,9 @@ def test_passed_result_and_all_contents_survive_workspace_removal(tmp_path: Path
             if entry.get("content_file"):
                 assert (output / entry["content_file"]).is_file()
     assert (output / "expected/graphify/skill.md").read_text() == "# Local skill\n"
-    assert "preparation output" in (output / "preparation.log").read_text()
+    assert "inherited from campaign" in (output / "preparation.log").read_text()
     assert "attempting install" in (output / "journal.log").read_text()
     assert not (output / "result.json.tmp").exists()
-
-
-@pytest.mark.parametrize("failure", [1, 2])
-def test_preparation_failure_skips_installation(tmp_path: Path, failure: int) -> None:
-    local = LocalCase(tmp_path, preparation_failure=failure)
-    result = local.run()
-    assert result.status == "not_run"
-    assert len(local.calls) == failure
-    assert not result.preparation["ready"]
-    assert result.steps[0]["command"] is None
-    assert result.steps[0]["verification"] is None
-    assert result.steps[0]["observations"] is None
-    assert result.steps[0]["skip_reason"]
-    assert "code 9" in (result.preparation["reason"] or "")
-    assert "preparation error" in (tmp_path / "results/preparation.log").read_text()
 
 
 @pytest.mark.parametrize(
@@ -246,7 +220,7 @@ def test_invalid_case_rejected_before_preparation(tmp_path: Path) -> None:
     (tmp_path / "case.json").write_text("{}")
     with pytest.raises(ValueError):
         local.run()
-    assert not local.calls and not (tmp_path / "results").exists()
+    assert not (tmp_path / "results").exists()
 
 
 def test_writer_failure_does_not_claim_saved_result(
@@ -273,32 +247,22 @@ def test_caller_environment_cannot_override_isolated_home(
     local = LocalCase(tmp_path)
     monkeypatch.setenv("PYTHONPATH", "/caller/python")
     monkeypatch.setenv("XDG_CONFIG_HOME", "/caller/config")
-    original = local.prepare_command
 
     def execute(
         args: list[str], cwd: Path, env: dict[str, str], timeout: float
     ) -> InstallerCommandResult:
         assert "PYTHONPATH" not in env and "XDG_CONFIG_HOME" not in env
-        assert env["HOME"] == str(tmp_path / "work/software/home")
-        return original(args, cwd, env, timeout)
+        assert env["HOME"] == str(tmp_path / "work/environment/home")
+        return execute_command(args, cwd, env, timeout)
 
-    result = InstallTestRunner(GraphifyPreparer(execute)).run_case(
-        subject_checkout=tmp_path / "subject",
+    result = InstallTestRunner(InstallerDriver(execute)).run_case(
+        reference_sources=tmp_path / "subject",
+        prepared_executable=local.prepare_executable(),
         case_file=tmp_path / "case.json",
         work_directory=tmp_path / "work",
         output_directory=tmp_path / "results",
     )
     assert result.status == "passed"
-
-
-def test_source_copy_failure_prevents_any_command(tmp_path: Path) -> None:
-    local = LocalCase(tmp_path)
-    shutil.rmtree(tmp_path / "subject")
-    result = local.run()
-    assert result.status == "not_run"
-    assert not local.calls
-    assert "Software preparation failed" in (result.preparation["reason"] or "")
-    assert result.evidence["expected_contents"] is None
 
 
 def test_initial_witness_is_verified_before_install(
@@ -331,10 +295,9 @@ def test_evidence_write_failure_is_explicit(tmp_path: Path, relative: str) -> No
         return result
 
     with pytest.raises(EvidenceWriteError, match="Cannot write evidence"):
-        InstallTestRunner(
-            GraphifyPreparer(local.prepare_command), InstallerDriver(execute)
-        ).run_case(
-            subject_checkout=tmp_path / "subject",
+        InstallTestRunner(InstallerDriver(execute)).run_case(
+            reference_sources=tmp_path / "subject",
+            prepared_executable=local.prepare_executable(),
             case_file=tmp_path / "case.json",
             work_directory=tmp_path / "work",
             output_directory=tmp_path / "results",
@@ -350,20 +313,20 @@ def test_existing_evidence_is_never_overwritten(tmp_path: Path) -> None:
     (output / "result.json").write_bytes(b"Existing evidence\n")
     with pytest.raises(ValueError, match="fresh or empty"):
         local.run()
-    assert not local.calls
     assert (output / "result.json").read_bytes() == b"Existing evidence\n"
 
 
 def test_overlapping_work_and_subject_rejected_before_copy(tmp_path: Path) -> None:
     local = LocalCase(tmp_path)
     with pytest.raises(ValueError, match="must be separate"):
-        InstallTestRunner(GraphifyPreparer(local.prepare_command)).run_case(
-            subject_checkout=tmp_path / "subject",
+        InstallTestRunner().run_case(
+            reference_sources=tmp_path / "subject",
+            prepared_executable=local.prepare_executable(),
             case_file=tmp_path / "case.json",
             work_directory=tmp_path / "subject/work",
             output_directory=tmp_path / "results",
         )
-    assert not local.calls and not (tmp_path / "results").exists()
+    assert not (tmp_path / "results").exists()
 
 
 def test_signal_interruption_stops_children_before_final_observation(tmp_path: Path) -> None:

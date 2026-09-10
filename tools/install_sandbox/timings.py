@@ -40,7 +40,7 @@ def measure(record: Timing) -> Generator[Timing]:
 
 
 def case_timings(case_name: str, step_count: int) -> list[Timing]:
-    records = [Timing(phase) for phase in ("copy_sources", "venv", "pip", "initial")]
+    records = [Timing("initial")]
     for index in range(step_count):
         if index:
             record = Timing("step_preparation", index)

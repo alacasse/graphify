@@ -7,16 +7,14 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tests.install_sandbox.component.controlled_case import prepare
 from tools.install_sandbox.container_main import main
 from tools.install_sandbox.driver import InstallerDriver
-from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.runner import InstallTestRunner
 
 
 def run() -> int:
     subject, case, output = sys.argv[1:]
-    work = Path(output).parent / "work"
+    work = Path(output).parents[2] / "work" / Path(output).name
     skill = work / "environment/project/.sandbox-reference/skills/graphify/SKILL.md"
     mode = os.environ.get("CONTROLLED_SKILL_PREPARATION", "passed")
     preparing = (Path(output) / "steps/1/preparation/plan.json").exists
@@ -37,8 +35,10 @@ def run() -> int:
     with patch.object(Path, "write_bytes", write), patch.object(Path, "read_bytes", read):
         return main(
             [
-                "--subject-checkout",
+                "--reference-sources",
                 subject,
+                "--prepared-executable",
+                os.environ["CONTROLLED_INSTALLER"],
                 "--case-file",
                 case,
                 "--output-directory",
@@ -46,7 +46,7 @@ def run() -> int:
                 "--work-directory",
                 str(work),
             ],
-            runner=InstallTestRunner(GraphifyPreparer(prepare), InstallerDriver(timeout=0.3)),
+            runner=InstallTestRunner(InstallerDriver(timeout=0.3)),
         )
 
 

@@ -7,17 +7,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tests.install_sandbox.component.controlled_case import prepare
 from tools.install_sandbox.container_main import main
 from tools.install_sandbox.driver import InstallerDriver
-from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.runner import InstallTestRunner
 
 
 def run() -> int:
     subject, case, output = sys.argv[1:]
     result_directory = Path(output)
-    work = result_directory.parent / "work"
+    work = result_directory.parents[2] / "work" / result_directory.name
     project = work / "environment/project"
     refs = project / ".sandbox-reference/skills/graphify/references"
     mode = os.environ.get("CONTROLLED_REPAIR_PREPARATION", "passed")
@@ -56,8 +54,10 @@ def _execute(subject: str, case: str, output: str, work: Path, refs: Path, mode:
     ):
         return main(
             [
-                "--subject-checkout",
+                "--reference-sources",
                 subject,
+                "--prepared-executable",
+                os.environ["CONTROLLED_INSTALLER"],
                 "--case-file",
                 case,
                 "--output-directory",
@@ -65,7 +65,7 @@ def _execute(subject: str, case: str, output: str, work: Path, refs: Path, mode:
                 "--work-directory",
                 str(work),
             ],
-            runner=InstallTestRunner(GraphifyPreparer(prepare), InstallerDriver(timeout=0.3)),
+            runner=InstallTestRunner(InstallerDriver(timeout=0.3)),
         )
 
 

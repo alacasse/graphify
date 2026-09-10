@@ -61,7 +61,7 @@ def _read(output: Path, case: InstallTestCase) -> CaseTimingResult:
     data = fields(
         json.loads(path.read_text(), object_pairs_hook=_object), "version duration_seconds phases"
     )
-    if type(data["version"]) is not int or data["version"] != 1:
+    if type(data["version"]) is not int or data["version"] != 2:
         raise ValueError("Unsupported timing version")
     raw = data["phases"]
     expected = case_timings(case.name, len(case.operations))

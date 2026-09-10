@@ -72,23 +72,27 @@ def arrange_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = 
 
 
 def run_repair(tmp_path: Path) -> CoordinatedResult:
-    return InstallTestCoordinator().run_case(
+    campaign = InstallTestCoordinator().run_campaign(
         specs_directory=_SPECS,
         target="sandbox-reference",
-        case_name="repair-references",
+        case_names=["repair-references"],
         subject_checkout=tmp_path / "subject",
-        case_file=tmp_path / "case.json",
-        output_directory=tmp_path / "results",
+        output_directory=tmp_path / "campaign",
         runtime_executable=_COMPONENT / "fake_docker.py",
         build_timeout_seconds=10,
         run_timeout_seconds=10,
         graceful_termination_seconds=0.1,
     )
+    result = campaign.cases[0].result
+    assert result is not None, campaign
+    return result
 
 
 def _read(tmp_path: Path):
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
-    return read_result(tmp_path / "results", case)
+    case = InstallTestCase.from_json(
+        (tmp_path / "campaign/inputs/repair-references.json").read_text()
+    )
+    return read_result(tmp_path / "campaign/cases/repair-references", case)
 
 
 def test_repair_preserves_three_distinct_states_and_sources_after_cleanup(
@@ -104,9 +108,9 @@ def test_repair_preserves_three_distinct_states_and_sources_after_cleanup(
     assert source_before == {
         str(p): p.read_bytes() for p in (tmp_path / "subject").rglob("*") if p.is_file()
     }
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "2"
+    assert (tmp_path / "work/repair-references/command-tmp/attempts").read_text() == "2"
     output = result.output_directory
-    assert (output / "preparation.log").read_text().count("controlled package preparation") == 2
+    assert "inherited from campaign" in (output / "preparation.log").read_text()
     first, second = result.test.steps
     assert first["command"] is not None and second["command"] is not None
     assert first["command"]["args"] == second["command"]["args"]
@@ -125,7 +129,7 @@ def test_repair_preserves_three_distinct_states_and_sources_after_cleanup(
     before = json.loads((output / "steps/1/before.json").read_bytes())
     assert not any(e["path"] == _REFS + "one.md" for e in before["entries"])
     assert (output / "expected" / _SOURCE / "sub/two.md").read_bytes() == _SECOND
-    shutil.rmtree(tmp_path / "work")
+    shutil.rmtree(tmp_path / "work/repair-references")
     shutil.rmtree(tmp_path / "subject")
     assert _read(tmp_path) == result.test
 
@@ -161,7 +165,7 @@ def test_incorrect_or_interrupted_repair_retains_diagnostics(
     verification = step["verification"]
     assert verification is not None and verification.complete
     assert mismatch in {m.type for m in verification.mismatches}
-    assert (tmp_path / "results/steps/1/after.json").exists()
+    assert (tmp_path / "campaign/cases/repair-references/steps/1/after.json").exists()
     assert _read(tmp_path) == result.test
 
 
@@ -187,7 +191,7 @@ def test_preparation_failure_stops_repair_and_retains_partial_effects(
     result = run_repair(tmp_path)
     assert result.test is not None and result.result_error is None, asdict(result)
     assert result.test.status == "incomplete" and not result.passed
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "1"
+    assert (tmp_path / "work/repair-references/command-tmp/attempts").read_text() == "1"
     step = result.test.steps[1]
     assert step["command"] is None and step["verification"] is None and step["observations"] is None
     prep = step.get("preparation")
@@ -195,11 +199,14 @@ def test_preparation_failure_stops_repair_and_retains_partial_effects(
     verification = prep["verification"]
     assert verification.obstacles if mode == "unreadable" else verification.mismatches
     assert verification.complete == (mode != "unreadable")
-    assert (tmp_path / "results/steps/1/before.json").exists()
-    assert not (tmp_path / "results/steps/1/stdout.txt").exists()
+    assert (tmp_path / "campaign/cases/repair-references/steps/1/before.json").exists()
+    assert not (tmp_path / "campaign/cases/repair-references/steps/1/stdout.txt").exists()
     if mode == "write_failure":
         assert (
-            tmp_path / "results/steps/1/before/project" / _REFS / "sub/two.md"
+            tmp_path
+            / "campaign/cases/repair-references/steps/1/before/project"
+            / _REFS
+            / "sub/two.md"
         ).read_bytes() == b"Partial preparation write\n"
     assert _read(tmp_path) == result.test
 
@@ -218,7 +225,7 @@ def test_insufficient_sources_prevents_both_commands(
     assert result.test is not None and result.result_error is None
     assert result.test.status == "not_run"
     assert "at least two" in (result.test.preparation["reason"] or "")
-    assert not (tmp_path / "work/command-tmp/attempts").exists()
+    assert not (tmp_path / "work/repair-references/command-tmp/attempts").exists()
     assert all(s["command"] is None and s["skip_reason"] for s in result.test.steps)
 
 
@@ -230,5 +237,5 @@ def test_first_failure_prevents_degradation(
     assert result.test is not None and result.result_error is None
     assert result.test.status == "failed"
     assert "preparation" not in result.test.steps[1]
-    assert not (tmp_path / "results/steps/1").exists()
+    assert not (tmp_path / "campaign/cases/repair-references/steps/1").exists()
     assert result.test.steps[1]["skip_reason"]

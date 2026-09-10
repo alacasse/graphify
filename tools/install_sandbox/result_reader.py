@@ -219,10 +219,13 @@ def _step_preparation(value: object, output: Path) -> StepPreparationEvidence:
 
 
 def _preparation(value: object, output: Path) -> PreparationEvidence:
-    data = fields(value, "ready reason log")
+    data = fields(value, "ready reason log source")
+    if data["source"] != "campaign":
+        raise ValueError("Package preparation must be inherited from campaign")
     log = text(data["log"])
     safe_evidence_path(output, log)
     return {
+        "source": "campaign",
         "ready": _boolean(data["ready"]),
         "reason": _optional_text(data["reason"]),
         "log": log,

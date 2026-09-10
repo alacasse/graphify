@@ -10,6 +10,7 @@ from tools.install_sandbox.environment import destinations
 from tools.install_sandbox.results import (
     FilesystemSnapshot,
     ObservationObstacle,
+    ReferenceRepairPlan,
     SnapshotEntry,
     VerificationMismatch,
     VerificationResult,
@@ -368,7 +369,7 @@ def _reinstall_stability(
     after: FilesystemSnapshot,
     result: VerificationResult,
 ) -> None:
-    if case.name != "reinstall":
+    if case.name not in {"reinstall", "repair-references"}:
         return
     dest = destinations(case)
     _require_absent(after, dest["skill"] + ".bak", result)
@@ -419,6 +420,27 @@ class InstallVerifier:
         self._shared_files(case, expected, before, after, result)
         _preservation(case, expected, before, after, result)
         _reinstall_stability(case, before, after, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_reference_repair(
+        self,
+        plan: ReferenceRepairPlan,
+        content: bytes,
+        installed: FilesystemSnapshot,
+        degraded: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Check exactly two intended changes, preserving every other observed entry."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
+        )
+        _require_absent(degraded, plan["deleted_path"], result)
+        _compare_bytes(degraded, plan["altered_path"], content, result)
+        keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
+        for root, path in sorted(keys):
+            if root == "project" and path in (plan["deleted_path"], plan["altered_path"]):
+                continue
+            _preserved_entry(installed, degraded, root, path, result)
         result.complete = not result.obstacles
         return result
 

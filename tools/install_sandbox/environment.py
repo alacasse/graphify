@@ -5,7 +5,12 @@ import stat
 from pathlib import Path
 
 from tools.install_sandbox.case import InstallTestCase
-from tools.install_sandbox.results import FilesystemSnapshot, SnapshotEntry, TestResultWriter
+from tools.install_sandbox.results import (
+    FilesystemSnapshot,
+    ReferenceRepairPlan,
+    SnapshotEntry,
+    TestResultWriter,
+)
 
 
 def destinations(case: InstallTestCase) -> dict[str, str]:
@@ -19,6 +24,29 @@ def destinations(case: InstallTestCase) -> dict[str, str]:
         "markdown": str(directory / spec.markdown_file),
         "json": str(directory / spec.json_file),
     }
+
+
+def reference_repair_plan(
+    case: InstallTestCase, expected: FilesystemSnapshot
+) -> tuple[ReferenceRepairPlan, bytes]:
+    """Select from retained source files, never from the installed inventory."""
+    source = case.spec.references_source + "/"
+    files = sorted(
+        e["path"]
+        for e in expected.entries
+        if e["root"] == "subject" and e["kind"] == "file" and e["path"].startswith(source)
+    )
+    if expected.obstacles or len(files) < 2:
+        raise ValueError("Reference repair requires at least two fully observed source files")
+    content = expected.contents.get(("subject", files[1]))
+    if content is None:
+        raise ValueError("Reference repair source content unavailable")
+    destination = destinations(case)["references"] + "/"
+    return {
+        "deleted_path": destination + files[0][len(source) :],
+        "altered_path": destination + files[1][len(source) :],
+        "altered_content_file": "steps/1/preparation/altered-content.bin",
+    }, content + b"\nSandbox repair witness.\n"
 
 
 def _obstacle(
@@ -45,6 +73,15 @@ class TestEnvironment:
             path = root / initial["path"]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(initial["content"].encode("utf-8"))
+
+    def prepare_reference_repair(self, plan: ReferenceRepairPlan, content: bytes) -> str | None:
+        """Leave partial effects in place so the next observation can retain them."""
+        try:
+            (self.project / plan["deleted_path"]).unlink()
+            (self.project / plan["altered_path"]).write_bytes(content)
+        except OSError as error:
+            return f"Reference repair preparation failed: {error}"
+        return None
 
     def observe(
         self, writer: TestResultWriter, phase: str, *, step_index: int = 0

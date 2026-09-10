@@ -26,11 +26,16 @@ test.
 and derives target identities from their filename stems. This does not migrate
 the retained catalog or make its older format readable.
 
-`spec.py` validates the new facts. The common initial witnesses and the first-install or reinstall
+`spec.py` validates the new facts. The common initial witnesses and the first-install, reinstall, or repair-references
 operations belong to the case, and `InstallTestCoordinator` assembles and writes
 the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
 The local Python environment needs PyYAML for YAML reading.
+
+The repair-references case prepares a deletion and an alteration between two
+verified project installations. Selection comes from the retained source
+inventory, and preparation diagnostics remain separate from product commands.
+The YAML needs no additional facts for this case.
 
 ## Current ownership
 
@@ -39,7 +44,7 @@ The local Python environment needs PyYAML for YAML reading.
 | Catalog membership and target identity | `*.yaml` filename stems |
 | Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
 | Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install and reinstall project cases are implemented |
+| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, and repair-references project cases are implemented |
 
 ## Classify data before changing it
 

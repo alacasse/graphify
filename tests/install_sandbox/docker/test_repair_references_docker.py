@@ -26,6 +26,7 @@ def test_repair_references_docker() -> None:
     preparation = reread.steps[1].get("preparation")
     assert preparation is not None and preparation["ready"]
     plan = preparation["plan"]
+    assert "deleted_path" in plan
     first = output / "steps/0/after/project"
     degraded = output / "steps/1/before/project"
     repaired = output / "steps/1/after/project"

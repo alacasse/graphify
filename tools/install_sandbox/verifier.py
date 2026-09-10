@@ -11,6 +11,7 @@ from tools.install_sandbox.results import (
     FilesystemSnapshot,
     ObservationObstacle,
     ReferenceRepairPlan,
+    SkillBackupPlan,
     SkillRepairPlan,
     SnapshotEntry,
     VerificationMismatch,
@@ -373,7 +374,7 @@ def _reinstall_stability(
     after: FilesystemSnapshot,
     result: VerificationResult,
 ) -> None:
-    if case.name not in {"reinstall", "repair-references", "repair-skill"}:
+    if case.name not in {"reinstall", "repair-references", "repair-skill", "preserve-skill-backup"}:
         return
     dest = destinations(case)
     key = ("project", dest["version"])
@@ -470,6 +471,26 @@ class InstallVerifier:
         for root, path in sorted(keys):
             if (root, path) != ("project", plan["altered_path"]):
                 _preserved_entry(installed, degraded, root, path, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_skill_backup(
+        self,
+        plan: SkillBackupPlan,
+        content: bytes,
+        installed: FilesystemSnapshot,
+        prepared: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Require exactly the new backup, with every existing entry unchanged."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, prepared) for o in s.obstacles]
+        )
+        _require_absent(installed, plan["backup_path"], result)
+        _compare_bytes(prepared, plan["backup_path"], content, result)
+        keys = {(e["root"], e["path"]) for s in (installed, prepared) for e in s.entries}
+        for root, path in sorted(keys):
+            if (root, path) != ("project", plan["backup_path"]):
+                _preserved_entry(installed, prepared, root, path, result)
         result.complete = not result.obstacles
         return result
 

@@ -8,8 +8,14 @@ import pytest
 from tests.install_sandbox.component.test_repair_references import arrange_repair, run_repair
 
 
-def _corrupt_after_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str) -> None:
-    program = Path(__file__).with_name("controlled_repair_case.py")
+def corrupt_after_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    *,
+    program_name: str = "controlled_repair_case.py",
+) -> None:
+    program = Path(__file__).with_name(program_name)
     adapter = tmp_path / "corrupt-evidence.py"
     adapter.write_text(
         "import json, sys, subprocess\nfrom pathlib import Path\n"
@@ -46,7 +52,7 @@ def test_missing_proof_is_reported_by_coordinator(
     relative: str,
 ) -> None:
     arrange_repair(tmp_path, monkeypatch)
-    _corrupt_after_run(tmp_path, monkeypatch, f"(output / {relative!r}).unlink()")
+    corrupt_after_run(tmp_path, monkeypatch, f"(output / {relative!r}).unlink()")
     result = run_repair(tmp_path)
     assert not result.passed and result.test is None and result.result_error, asdict(result)
     assert result.container.state == "completed" and result.container.cleanup_complete
@@ -74,7 +80,7 @@ def test_inconsistent_history_is_reported_by_coordinator(
     code: str,
 ) -> None:
     arrange_repair(tmp_path, monkeypatch)
-    _corrupt_after_run(
+    corrupt_after_run(
         tmp_path, monkeypatch, code + '\n(output / "result.json").write_text(json.dumps(document))'
     )
     result = run_repair(tmp_path)
@@ -102,7 +108,7 @@ def test_inconsistent_intermediate_proof_is_rejected(
         "wrong_alteration": '(output / "steps/1/preparation/altered-content.bin")'
         '.write_bytes(b"Wrong witness")',
     }[defect]
-    _corrupt_after_run(
+    corrupt_after_run(
         tmp_path,
         monkeypatch,
         'path = output / "steps/1/before.json"\nsnapshot = json.loads(path.read_bytes())\n'

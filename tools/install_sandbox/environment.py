@@ -8,6 +8,7 @@ from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.results import (
     FilesystemSnapshot,
     ReferenceRepairPlan,
+    SkillRepairPlan,
     SnapshotEntry,
     TestResultWriter,
 )
@@ -49,6 +50,17 @@ def reference_repair_plan(
     }, content + b"\nSandbox repair witness.\n"
 
 
+def skill_repair_plan(
+    case: InstallTestCase, expected: FilesystemSnapshot
+) -> tuple[SkillRepairPlan, bytes]:
+    """Retain the exact skill alteration independently of installed contents."""
+    content = expected.contents[("subject", case.spec.skill_source)]
+    return {
+        "altered_path": destinations(case)["skill"],
+        "altered_content_file": "steps/1/preparation/altered-content.bin",
+    }, content + b"\nSandbox skill repair witness.\n"
+
+
 def _obstacle(
     snapshot: FilesystemSnapshot, operation: str, root: str, path: str, error: OSError | str
 ) -> None:
@@ -81,6 +93,14 @@ class TestEnvironment:
             (self.project / plan["altered_path"]).write_bytes(content)
         except OSError as error:
             return f"Reference repair preparation failed: {error}"
+        return None
+
+    def prepare_skill_repair(self, plan: SkillRepairPlan, content: bytes) -> str | None:
+        """Preserve a failed write's partial effects for observation."""
+        try:
+            (self.project / plan["altered_path"]).write_bytes(content)
+        except OSError as error:
+            return f"Skill repair preparation failed: {error}"
         return None
 
     def observe(
@@ -180,5 +200,6 @@ class TestEnvironment:
             return True
         return entry["root"] == "project" and (
             entry["path"] in (dest["skill"], dest["markdown"], dest["json"], dest["version"])
+            or (self.case.name == "repair-skill" and entry["path"] == dest["skill"] + ".bak")
             or entry["path"].startswith(dest["references"] + "/")
         )

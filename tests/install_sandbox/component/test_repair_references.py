@@ -113,6 +113,7 @@ def test_repair_preserves_three_distinct_states_and_sources_after_cleanup(
     assert first["command"]["cwd"] == second["command"]["cwd"]
     prep = second.get("preparation")
     assert prep is not None and prep["ready"]
+    assert "deleted_path" in prep["plan"]
     assert prep["plan"]["deleted_path"] == _REFS + "one.md"
     assert prep["plan"]["altered_path"] == _REFS + "sub/two.md"
     for phase in ("steps/0/after", "steps/1/before", "steps/1/after"):

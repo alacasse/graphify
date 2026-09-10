@@ -11,6 +11,7 @@ from tools.install_sandbox.results import (
     FilesystemSnapshot,
     ObservationObstacle,
     ReferenceRepairPlan,
+    SkillRepairPlan,
     SnapshotEntry,
     VerificationMismatch,
     VerificationResult,
@@ -293,8 +294,11 @@ def _preservation(
     before: FilesystemSnapshot,
     after: FilesystemSnapshot,
     result: VerificationResult,
+    skill_backup: bytes | None = None,
 ) -> None:
     allowed = _allowed(case, expected)
+    if skill_backup is not None:
+        allowed.add(destinations(case)["skill"] + ".bak")
     keys = {(e["root"], e["path"]) for s in (before, after) for e in s.entries}
     for root, path in sorted(keys):
         # An incomplete source inventory cannot establish unauthorized membership.
@@ -369,10 +373,9 @@ def _reinstall_stability(
     after: FilesystemSnapshot,
     result: VerificationResult,
 ) -> None:
-    if case.name not in {"reinstall", "repair-references"}:
+    if case.name not in {"reinstall", "repair-references", "repair-skill"}:
         return
     dest = destinations(case)
-    _require_absent(after, dest["skill"] + ".bak", result)
     key = ("project", dest["version"])
     previous, current = before.contents.get(key), after.contents.get(key)
     if previous is not None and current is not None and previous != current:
@@ -403,6 +406,8 @@ class InstallVerifier:
         expected: FilesystemSnapshot,
         before: FilesystemSnapshot,
         after: FilesystemSnapshot,
+        *,
+        skill_backup: bytes | None = None,
     ) -> VerificationResult:
         result = VerificationResult(
             obstacles=[
@@ -418,7 +423,11 @@ class InstallVerifier:
         _references(case, expected, after, result)
         _file(after, dest["version"], result)
         self._shared_files(case, expected, before, after, result)
-        _preservation(case, expected, before, after, result)
+        _preservation(case, expected, before, after, result, skill_backup)
+        if skill_backup is not None:
+            _compare_bytes(after, dest["skill"] + ".bak", skill_backup, result)
+        elif case.name != "first-install":
+            _require_absent(after, dest["skill"] + ".bak", result)
         _reinstall_stability(case, before, after, result)
         result.complete = not result.obstacles
         return result
@@ -441,6 +450,26 @@ class InstallVerifier:
             if root == "project" and path in (plan["deleted_path"], plan["altered_path"]):
                 continue
             _preserved_entry(installed, degraded, root, path, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_skill_repair(
+        self,
+        plan: SkillRepairPlan,
+        content: bytes,
+        installed: FilesystemSnapshot,
+        degraded: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Require exactly the skill alteration and no backup or other change."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
+        )
+        _compare_bytes(degraded, plan["altered_path"], content, result)
+        _require_absent(degraded, plan["altered_path"] + ".bak", result)
+        keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
+        for root, path in sorted(keys):
+            if (root, path) != ("project", plan["altered_path"]):
+                _preserved_entry(installed, degraded, root, path, result)
         result.complete = not result.obstacles
         return result
 

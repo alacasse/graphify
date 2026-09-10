@@ -8,12 +8,16 @@ from typing import Literal
 
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.driver import InstallerDriver
-from tools.install_sandbox.environment import TestEnvironment, reference_repair_plan
+from tools.install_sandbox.environment import (
+    TestEnvironment,
+    reference_repair_plan,
+    skill_repair_plan,
+)
 from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.results import (
     FilesystemSnapshot,
     InstallTestResult,
-    ReferenceRepairEvidence,
+    RepairEvidence,
     StepEvidence,
     TestResultWriter,
 )
@@ -133,7 +137,7 @@ class InstallTestRunner:
         for index, step in enumerate(result.steps):
             installed = before
             if index:
-                if case.name == "repair-references":
+                if case.name in {"repair-references", "repair-skill"}:
                     before = self._prepare_repair(
                         case, environment, expected, installed, writer, step
                     )
@@ -150,7 +154,9 @@ class InstallTestRunner:
                 executable,
                 environment,
                 expected,
-                installed if index and case.name == "repair-references" else before,
+                installed
+                if index and case.name in {"repair-references", "repair-skill"}
+                else before,
                 writer,
                 step,
                 index,
@@ -172,15 +178,23 @@ class InstallTestRunner:
         writer: TestResultWriter,
         step: StepEvidence,
     ) -> FilesystemSnapshot:
-        plan, content = reference_repair_plan(case, expected)
-        writer.write_repair_plan(plan, content)
-        writer.append_log("journal.log", "Preparing reference deletion and alteration\n")
-        reason = environment.prepare_reference_repair(plan, content)
-        degraded = environment.observe(writer, "before", step_index=1)
-        verification = self.verifier.verify_reference_repair(plan, content, installed, degraded)
+        if case.name == "repair-skill":
+            plan, content = skill_repair_plan(case, expected)
+            writer.write_repair_plan(plan, content)
+            writer.append_log("journal.log", "Preparing skill alteration\n")
+            reason = environment.prepare_skill_repair(plan, content)
+            degraded = environment.observe(writer, "before", step_index=1)
+            verification = self.verifier.verify_skill_repair(plan, content, installed, degraded)
+        else:
+            plan, content = reference_repair_plan(case, expected)
+            writer.write_repair_plan(plan, content)
+            writer.append_log("journal.log", "Preparing reference deletion and alteration\n")
+            reason = environment.prepare_reference_repair(plan, content)
+            degraded = environment.observe(writer, "before", step_index=1)
+            verification = self.verifier.verify_reference_repair(plan, content, installed, degraded)
         if reason is None and (not verification.complete or verification.mismatches):
-            reason = "Reference repair preparation verification failed"
-        evidence: ReferenceRepairEvidence = {
+            reason = "Repair preparation verification failed"
+        evidence: RepairEvidence = {
             "plan": plan,
             "ready": reason is None,
             "reason": reason,
@@ -227,7 +241,10 @@ class InstallTestRunner:
             f"Step {index} command {command.state}: {command.exit_code}; {command.reason}\n",
         )
         after = environment.observe(writer, "after", step_index=index)
-        verification = self.verifier.verify(case, expected, before, after)
+        backup = (
+            skill_repair_plan(case, expected)[1] if index and case.name == "repair-skill" else None
+        )
+        verification = self.verifier.verify(case, expected, before, after, skill_backup=backup)
         step["verification"] = verification
         step["observations"] = {
             "before": f"steps/{index}/before.json",

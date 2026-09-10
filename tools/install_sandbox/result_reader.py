@@ -11,8 +11,9 @@ from tools.install_sandbox.results import (
     InstallTestResult,
     ObservationObstacle,
     PreparationEvidence,
-    ReferenceRepairEvidence,
     ReferenceRepairPlan,
+    RepairEvidence,
+    SkillRepairPlan,
     StepEvidence,
     VerificationMismatch,
     VerificationResult,
@@ -159,21 +160,32 @@ def _step(value: object, output: Path) -> StepEvidence:
     return step
 
 
-def _repair_preparation(value: object, output: Path) -> ReferenceRepairEvidence:
+def _repair_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan:
+    has_deleted = isinstance(value, dict) and "deleted_path" in value
+    data = fields(
+        cast(object, value),
+        "altered_path altered_content_file" + (" deleted_path" if has_deleted else ""),
+    )
+    common: SkillRepairPlan = {
+        "altered_path": relative_path(data["altered_path"]),
+        "altered_content_file": relative_path(data["altered_content_file"]),
+    }
+    if has_deleted:
+        return {**common, "deleted_path": relative_path(data["deleted_path"])}
+    return common
+
+
+def _repair_preparation(value: object, output: Path) -> RepairEvidence:
     data = fields(value, "plan ready reason before verification")
-    plan = fields(data["plan"], "deleted_path altered_path altered_content_file")
+    plan = _repair_plan(data["plan"])
     content_file = text(plan["altered_content_file"])
     if content_file != "steps/1/preparation/altered-content.bin":
         raise ValueError("Invalid altered content evidence path")
     if data["before"] != "steps/1/before.json":
         raise ValueError("Invalid preparation observation path")
     safe_evidence_path(output, content_file)
-    result: ReferenceRepairEvidence = {
-        "plan": {
-            "deleted_path": relative_path(plan["deleted_path"]),
-            "altered_path": relative_path(plan["altered_path"]),
-            "altered_content_file": content_file,
-        },
+    result: RepairEvidence = {
+        "plan": plan,
         "ready": _boolean(data["ready"]),
         "reason": _optional_text(data["reason"]),
         "before": "steps/1/before.json",
@@ -387,7 +399,7 @@ def _check_content_binding(entry: dict[str, object], output: Path, prefix: str) 
 
 def _check_repair_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
     _check_preparation_location(result, case)
-    if case.name != "repair-references":
+    if case.name not in {"repair-references", "repair-skill"}:
         return
     first, second = result.steps
     preparation = second.get("preparation")
@@ -410,8 +422,23 @@ def _check_repair_evidence(result: InstallTestResult, case: InstallTestCase, out
     plan = preparation["plan"]
     if _read_json_evidence(output, "steps/1/preparation/plan.json") != plan:
         raise ValueError("Repair plan differs from its saved evidence")
-    _check_repair_plan(plan, case, output, sources)
+    _check_case_repair_plan(plan, case, output, sources)
     _check_repeated_command(first, second)
+
+
+def _check_case_repair_plan(
+    plan: ReferenceRepairPlan | SkillRepairPlan,
+    case: InstallTestCase,
+    output: Path,
+    sources: list[dict[str, object]],
+) -> None:
+    if case.name == "repair-skill":
+        _check_skill_repair_plan(plan, case, output)
+        _check_skill_content_evidence(case, output)
+    else:
+        if "deleted_path" not in plan:
+            raise ValueError("Reference repair requires a deletion")
+        _check_repair_plan(plan, case, output, sources)
 
 
 def _check_command_evidence(result: InstallTestResult, output: Path) -> None:
@@ -464,9 +491,22 @@ def _check_repair_plan(
         raise ValueError("Altered content is inconsistent with the retained source")
 
 
+def _check_skill_repair_plan(
+    plan: ReferenceRepairPlan | SkillRepairPlan, case: InstallTestCase, output: Path
+) -> None:
+    if "deleted_path" in plan or plan["altered_path"] != destinations(case)["skill"]:
+        raise ValueError("Skill repair path does not match the case")
+    source = safe_evidence_path(output, "expected/" + case.spec.skill_source).read_bytes()
+    content = safe_evidence_path(output, plan["altered_content_file"]).read_bytes()
+    if content != source + b"\nSandbox skill repair witness.\n":
+        raise ValueError("Altered skill content is inconsistent with the retained source")
+
+
 def _check_preparation_location(result: InstallTestResult, case: InstallTestCase) -> None:
     for index, step in enumerate(result.steps):
-        if "preparation" in step and (case.name != "repair-references" or index != 1):
+        if "preparation" in step and (
+            case.name not in {"repair-references", "repair-skill"} or index != 1
+        ):
             raise ValueError("Unexpected step preparation")
 
 
@@ -475,3 +515,25 @@ def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
         assert first["command"] is not None
         if any(first["command"][key] != second["command"][key] for key in ("args", "cwd")):
             raise ValueError("Repair must repeat the first installation command and directory")
+
+
+def _check_skill_content_evidence(case: InstallTestCase, output: Path) -> None:
+    """A skill or backup observed as a readable file must retain its actual bytes."""
+    skill = destinations(case)["skill"]
+    for relative in ("steps/0/after.json", "steps/1/before.json", "steps/1/after.json"):
+        path = safe_evidence_path(output, relative)
+        if not path.exists():
+            continue  # A blocked preparation has no second command observation.
+        snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
+        obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
+        for value in _list(snapshot["entries"]):
+            entry = cast(dict[str, object], value)
+            if entry["root"] == "project" and entry["path"] in {skill, skill + ".bak"}:
+                _check_retained_skill(entry, obstacles)
+
+
+def _check_retained_skill(entry: dict[str, object], obstacles: list[ObservationObstacle]) -> None:
+    if entry["kind"] != "file" or entry.get("content_file") is not None:
+        return
+    if not any(o["root"] == "project" and o["path"] == entry["path"] for o in obstacles):
+        raise ValueError("Observed skill and backup require retained content, not only a digest")

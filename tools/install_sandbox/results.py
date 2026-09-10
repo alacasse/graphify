@@ -78,14 +78,17 @@ class CommandEvidence(TypedDict):
     stderr_file: str | None
 
 
-class ReferenceRepairPlan(TypedDict):
-    deleted_path: str
+class SkillRepairPlan(TypedDict):
     altered_path: str
     altered_content_file: str
 
 
-class ReferenceRepairEvidence(TypedDict):
-    plan: ReferenceRepairPlan
+class ReferenceRepairPlan(SkillRepairPlan):
+    deleted_path: str
+
+
+class RepairEvidence(TypedDict):
+    plan: ReferenceRepairPlan | SkillRepairPlan
     ready: bool
     reason: str | None
     before: str
@@ -93,7 +96,7 @@ class ReferenceRepairEvidence(TypedDict):
 
 
 class StepEvidence(TypedDict):
-    preparation: NotRequired[ReferenceRepairEvidence]
+    preparation: NotRequired[RepairEvidence]
     operation: str
     skip_reason: str | None
     command: CommandEvidence | None
@@ -144,11 +147,13 @@ class TestResultWriter:
         relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
 
-    def write_repair_plan(self, plan: ReferenceRepairPlan, content: bytes) -> None:
+    def write_repair_plan(
+        self, plan: ReferenceRepairPlan | SkillRepairPlan, content: bytes
+    ) -> None:
         self._write_json("steps/1/preparation/plan.json", plan)
         self._write_bytes(plan["altered_content_file"], content)
 
-    def write_repair_preparation(self, evidence: ReferenceRepairEvidence) -> None:
+    def write_repair_preparation(self, evidence: RepairEvidence) -> None:
         self._write_json(
             "steps/1/preparation/result.json",
             {**evidence, "verification": asdict(evidence["verification"])},

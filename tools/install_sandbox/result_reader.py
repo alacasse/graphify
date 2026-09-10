@@ -12,9 +12,10 @@ from tools.install_sandbox.results import (
     ObservationObstacle,
     PreparationEvidence,
     ReferenceRepairPlan,
-    RepairEvidence,
+    SkillBackupPlan,
     SkillRepairPlan,
     StepEvidence,
+    StepPreparationEvidence,
     VerificationMismatch,
     VerificationResult,
 )
@@ -156,8 +157,18 @@ def _step(value: object, output: Path) -> StepEvidence:
         "observations": references,
     }
     if has_preparation:
-        step["preparation"] = _repair_preparation(data["preparation"], output)
+        step["preparation"] = _step_preparation(data["preparation"], output)
     return step
+
+
+def _step_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan | SkillBackupPlan:
+    if isinstance(value, dict) and "backup_path" in value:
+        data = fields(cast(object, value), "backup_path backup_content_file")
+        return {
+            "backup_path": relative_path(data["backup_path"]),
+            "backup_content_file": relative_path(data["backup_content_file"]),
+        }
+    return _repair_plan(cast(object, value))
 
 
 def _repair_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan:
@@ -175,16 +186,21 @@ def _repair_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan:
     return common
 
 
-def _repair_preparation(value: object, output: Path) -> RepairEvidence:
+def _step_preparation(value: object, output: Path) -> StepPreparationEvidence:
     data = fields(value, "plan ready reason before verification")
-    plan = _repair_plan(data["plan"])
-    content_file = text(plan["altered_content_file"])
-    if content_file != "steps/1/preparation/altered-content.bin":
-        raise ValueError("Invalid altered content evidence path")
+    plan = _step_plan(data["plan"])
+    if "backup_content_file" in plan:
+        content_file = plan["backup_content_file"]
+        expected_file = "steps/1/preparation/backup-content.bin"
+    else:
+        content_file = plan["altered_content_file"]
+        expected_file = "steps/1/preparation/altered-content.bin"
+    if content_file != expected_file:
+        raise ValueError("Invalid preparation content evidence path")
     if data["before"] != "steps/1/before.json":
         raise ValueError("Invalid preparation observation path")
     safe_evidence_path(output, content_file)
-    result: RepairEvidence = {
+    result: StepPreparationEvidence = {
         "plan": plan,
         "ready": _boolean(data["ready"]),
         "reason": _optional_text(data["reason"]),
@@ -195,10 +211,10 @@ def _repair_preparation(value: object, output: Path) -> RepairEvidence:
     if result["ready"]:
         if result["reason"] is not None or not verification.complete or verification.mismatches:
             raise ValueError(
-                "Ready repair preparation requires complete verification without mismatch"
+                "Ready step preparation requires complete verification without mismatch"
             )
     elif result["reason"] is None:
-        raise ValueError("Unavailable repair preparation requires a reason")
+        raise ValueError("Unavailable step preparation requires a reason")
     return result
 
 
@@ -264,7 +280,7 @@ def _check_next_step(result: InstallTestResult, step: StepEvidence, index: int) 
     if preparation is not None and not preparation["ready"]:
         _check_skipped(step)
         if step["skip_reason"] != preparation["reason"]:
-            raise ValueError("Repair skip reason contradicts preparation")
+            raise ValueError("Step skip reason contradicts preparation")
         return "incomplete"
     status = _check_attempted(step)
     _check_references(result, step, index)
@@ -317,7 +333,7 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         },
     )
     _check_consistency(result)
-    _check_repair_evidence(result, case, output_directory)
+    _check_step_preparation_evidence(result, case, output_directory)
     return result
 
 
@@ -397,33 +413,53 @@ def _check_content_binding(entry: dict[str, object], output: Path, prefix: str) 
         safe_evidence_path(output, binding).read_bytes()
 
 
-def _check_repair_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
+def _check_step_preparation_evidence(
+    result: InstallTestResult, case: InstallTestCase, output: Path
+) -> None:
     _check_preparation_location(result, case)
-    if case.name not in {"repair-references", "repair-skill"}:
+    if case.name not in {"repair-references", "repair-skill", "preserve-skill-backup"}:
         return
     first, second = result.steps
     preparation = second.get("preparation")
     first_passed = first["command"] is not None and _check_attempted(first) == "passed"
     if (preparation is not None) != first_passed:
-        raise ValueError("Repair preparation must follow a successful first installation")
+        raise ValueError("Step preparation must follow a successful first installation")
     if not result.preparation["ready"]:
         return
     sources = _check_snapshot(output, "expected.json")
     _check_snapshot(output, "steps/0/before.json")
     _check_command_evidence(result, output)
+    if case.name == "preserve-skill-backup":
+        _check_skill_content_evidence(case, output)
     if preparation is None:
         return
     _check_snapshot(output, preparation["before"], complete=preparation["verification"].complete)
-    saved = _repair_preparation(
+    saved = _step_preparation(
         _read_json_evidence(output, "steps/1/preparation/result.json"), output
     )
     if saved != preparation:
-        raise ValueError("Repair preparation differs from its saved evidence")
+        raise ValueError("Step preparation differs from its saved evidence")
     plan = preparation["plan"]
     if _read_json_evidence(output, "steps/1/preparation/plan.json") != plan:
-        raise ValueError("Repair plan differs from its saved evidence")
-    _check_case_repair_plan(plan, case, output, sources)
+        raise ValueError("Step preparation plan differs from its saved evidence")
+    _check_case_preparation_plan(plan, case, output, sources)
     _check_repeated_command(first, second)
+
+
+def _check_case_preparation_plan(
+    plan: ReferenceRepairPlan | SkillRepairPlan | SkillBackupPlan,
+    case: InstallTestCase,
+    output: Path,
+    sources: list[dict[str, object]],
+) -> None:
+    if case.name == "preserve-skill-backup":
+        if "backup_path" not in plan:
+            raise ValueError("Backup preservation requires a backup plan")
+        _check_skill_backup_plan(plan, case, output)
+        return
+    if "backup_path" in plan:
+        raise ValueError("Unexpected backup preparation plan")
+    _check_case_repair_plan(plan, case, output, sources)
 
 
 def _check_case_repair_plan(
@@ -443,7 +479,7 @@ def _check_case_repair_plan(
 
 def _check_command_evidence(result: InstallTestResult, output: Path) -> None:
     if result.evidence != {"journal": "journal.log", "expected_contents": "expected/"}:
-        raise ValueError("Repair result requires its retained source and journal references")
+        raise ValueError("Prepared step result requires its retained source and journal references")
     for relative in (result.preparation["log"], "journal.log"):
         safe_evidence_path(output, relative).read_bytes()
     for index, step in enumerate(result.steps):
@@ -502,10 +538,20 @@ def _check_skill_repair_plan(
         raise ValueError("Altered skill content is inconsistent with the retained source")
 
 
+def _check_skill_backup_plan(plan: SkillBackupPlan, case: InstallTestCase, output: Path) -> None:
+    if plan["backup_path"] != destinations(case)["skill"] + ".bak":
+        raise ValueError("Backup path does not match the case")
+    source = safe_evidence_path(output, "expected/" + case.spec.skill_source).read_bytes()
+    content = safe_evidence_path(output, plan["backup_content_file"]).read_bytes()
+    if content != source + b"\nSandbox previous backup witness.\n":
+        raise ValueError("Backup witness is inconsistent with the retained source")
+
+
 def _check_preparation_location(result: InstallTestResult, case: InstallTestCase) -> None:
     for index, step in enumerate(result.steps):
         if "preparation" in step and (
-            case.name not in {"repair-references", "repair-skill"} or index != 1
+            case.name not in {"repair-references", "repair-skill", "preserve-skill-backup"}
+            or index != 1
         ):
             raise ValueError("Unexpected step preparation")
 
@@ -514,7 +560,9 @@ def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
     if second["command"] is not None:
         assert first["command"] is not None
         if any(first["command"][key] != second["command"][key] for key in ("args", "cwd")):
-            raise ValueError("Repair must repeat the first installation command and directory")
+            raise ValueError(
+                "Dependent installation must repeat the first installation command and directory"
+            )
 
 
 def _check_skill_content_evidence(case: InstallTestCase, output: Path) -> None:
@@ -527,7 +575,7 @@ def _check_skill_content_evidence(case: InstallTestCase, output: Path) -> None:
         snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
         obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
         for value in _list(snapshot["entries"]):
-            entry = cast(dict[str, object], value)
+            entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
             if entry["root"] == "project" and entry["path"] in {skill, skill + ".bak"}:
                 _check_retained_skill(entry, obstacles)
 

@@ -8,6 +8,7 @@ from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.results import (
     FilesystemSnapshot,
     ReferenceRepairPlan,
+    SkillBackupPlan,
     SkillRepairPlan,
     SnapshotEntry,
     TestResultWriter,
@@ -61,6 +62,17 @@ def skill_repair_plan(
     }, content + b"\nSandbox skill repair witness.\n"
 
 
+def skill_backup_plan(
+    case: InstallTestCase, expected: FilesystemSnapshot
+) -> tuple[SkillBackupPlan, bytes]:
+    """Build the backup witness from retained sources, independently of installed files."""
+    content = expected.contents[("subject", case.spec.skill_source)]
+    return {
+        "backup_path": destinations(case)["skill"] + ".bak",
+        "backup_content_file": "steps/1/preparation/backup-content.bin",
+    }, content + b"\nSandbox previous backup witness.\n"
+
+
 def _obstacle(
     snapshot: FilesystemSnapshot, operation: str, root: str, path: str, error: OSError | str
 ) -> None:
@@ -101,6 +113,14 @@ class TestEnvironment:
             (self.project / plan["altered_path"]).write_bytes(content)
         except OSError as error:
             return f"Skill repair preparation failed: {error}"
+        return None
+
+    def prepare_skill_backup(self, plan: SkillBackupPlan, content: bytes) -> str | None:
+        """Keep any partial write observable if preparing the backup fails."""
+        try:
+            (self.project / plan["backup_path"]).write_bytes(content)
+        except OSError as error:
+            return f"Skill backup preparation failed: {error}"
         return None
 
     def observe(
@@ -200,6 +220,9 @@ class TestEnvironment:
             return True
         return entry["root"] == "project" and (
             entry["path"] in (dest["skill"], dest["markdown"], dest["json"], dest["version"])
-            or (self.case.name == "repair-skill" and entry["path"] == dest["skill"] + ".bak")
+            or (
+                self.case.name in {"repair-skill", "preserve-skill-backup"}
+                and entry["path"] == dest["skill"] + ".bak"
+            )
             or entry["path"].startswith(dest["references"] + "/")
         )

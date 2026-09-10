@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 
 def main(argv: list[str] | None = None, *, runner: InstallTestRunner | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--subject-checkout", required=True, type=Path)
+    parser.add_argument("--reference-sources", required=True, type=Path)
+    parser.add_argument("--prepared-executable", required=True, type=Path)
     parser.add_argument("--case-file", required=True, type=Path)
     parser.add_argument("--output-directory", required=True, type=Path)
     parser.add_argument("--work-directory", type=Path, default=Path("/sandbox/work/case"))
@@ -26,7 +27,8 @@ def main(argv: list[str] | None = None, *, runner: InstallTestRunner | None = No
 
         conductor = runner if runner is not None else InstallTestRunner()
         conductor.run_case(
-            subject_checkout=args.subject_checkout,
+            reference_sources=args.reference_sources,
+            prepared_executable=args.prepared_executable,
             case_file=args.case_file,
             output_directory=args.output_directory,
             work_directory=args.work_directory,

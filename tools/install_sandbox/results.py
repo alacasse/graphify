@@ -67,6 +67,7 @@ class VerificationResult:
 
 
 class PreparationEvidence(TypedDict):
+    source: Literal["campaign"]
     ready: bool
     reason: str | None
     log: str
@@ -162,7 +163,7 @@ class TestResultWriter:
         if self.timing_diagnostics:
             return
         payload = {
-            "version": 1,
+            "version": 2,
             "duration_seconds": self.timing_duration,
             "phases": [asdict(record) for record in self.timings],
         }

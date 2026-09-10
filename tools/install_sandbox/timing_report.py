@@ -1,9 +1,11 @@
 """Plain-language duration report; container details are never added to host totals."""
 
-from tools.install_sandbox.coordinator import CoordinatedResult
+from tools.install_sandbox.coordinator import CampaignResult, CoordinatedResult
 from tools.install_sandbox.timings import Timing
 
 _LABELS = {
+    "inputs": "Prepare campaign inputs",
+    "verify": "Verify the prepared package and clean its container",
     "case": "Prepare the case",
     "preflight": "Check Docker",
     "build": "Build the image",
@@ -80,4 +82,39 @@ def render_timings(result: CoordinatedResult, additional_checks: Timing) -> str:
         "Durations include waiting; cache, network and machine load can change them.",
     ]
     lines.extend(f"Timing diagnostic: {message}" for message in internal.diagnostics)
+    return "\n".join(lines) + "\n"
+
+
+def render_campaign(result: CampaignResult) -> str:
+    preparation = result.preparation
+    cleanup = result.cleanup
+    lines = [
+        f"Campaign passed: {result.passed}",
+        f"Preparation: {preparation.state if preparation else 'not completed'}",
+        f"Image: {preparation.image_id if preparation else 'unavailable'}",
+        f"Final cleanup: {cleanup.cleanup_complete if cleanup else 'not completed'}",
+        f"Campaign total: {format_duration(result.duration_seconds)}",
+        "Common phases (counted once):",
+        *[_line(record) for record in result.timings],
+    ]
+    if result.error:
+        lines.append(result.error)
+    for entry in result.cases:
+        lines.append(f"\nCase: {entry.name}")
+        if entry.result is None:
+            lines.append(
+                f"  {entry.state}: {entry.not_run_reason or entry.error or 'awaiting result'}"
+            )
+        else:
+            case = entry.result
+            lines.extend(
+                [
+                    f"  Passed: {case.passed}; total: {format_duration(case.duration_seconds)}",
+                    f"  Evidence error: {case.result_error or 'none'}",
+                    *[_line(record) for record in case.timings],
+                    "  Container details (included in run, never added to totals):",
+                    *[_line(record) for record in case.container_timings.phases],
+                    *[f"  Timing diagnostic: {d}" for d in case.container_timings.diagnostics],
+                ]
+            )
     return "\n".join(lines) + "\n"

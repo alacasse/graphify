@@ -69,18 +69,20 @@ def arrange_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str = "
 
 
 def run_skill(tmp_path: Path) -> CoordinatedResult:
-    return InstallTestCoordinator().run_case(
+    campaign = InstallTestCoordinator().run_campaign(
         specs_directory=_SPECS,
         target="sandbox-reference",
-        case_name="repair-skill",
+        case_names=["repair-skill"],
         subject_checkout=tmp_path / "subject",
-        case_file=tmp_path / "case.json",
-        output_directory=tmp_path / "results",
+        output_directory=tmp_path / "campaign",
         runtime_executable=_COMPONENT / "fake_docker.py",
         build_timeout_seconds=10,
         run_timeout_seconds=10,
         graceful_termination_seconds=0.1,
     )
+    result = campaign.cases[0].result
+    assert result is not None, campaign
+    return result
 
 
 def test_skill_and_backup_proofs_survive_cleanup(
@@ -93,9 +95,9 @@ def test_skill_and_backup_proofs_survive_cleanup(
     assert original == {
         str(p): p.read_bytes() for p in (tmp_path / "subject").rglob("*") if p.is_file()
     }
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "2"
+    assert (tmp_path / "work/repair-skill/command-tmp/attempts").read_text() == "2"
     output = result.output_directory
-    assert (output / "preparation.log").read_text().count("controlled package preparation") == 2
+    assert "inherited from campaign" in (output / "preparation.log").read_text()
     assert (output / "steps/0/after/project" / SKILL).read_bytes() == SOURCE
     assert (output / "steps/1/before/project" / SKILL).read_bytes() == ALTERED
     assert (output / "steps/1/after/project" / SKILL).read_bytes() == SOURCE
@@ -107,8 +109,8 @@ def test_skill_and_backup_proofs_survive_cleanup(
     for phase in ("steps/0/after", "steps/1/before"):
         snapshot = json.loads((output / (phase + ".json")).read_bytes())
         assert not any(e["path"] == SKILL + ".bak" for e in snapshot["entries"])
-    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
-    shutil.rmtree(tmp_path / "work")
+    case = InstallTestCase.from_json((tmp_path / "campaign/inputs/repair-skill.json").read_text())
+    shutil.rmtree(tmp_path / "work/repair-skill")
     shutil.rmtree(tmp_path / "subject")
     assert read_result(output, case) == result.test
 
@@ -150,7 +152,7 @@ def test_incorrect_repair_retains_diagnostics(
         assert mismatch in {m.type for m in verification.mismatches}
     else:
         assert not verification.mismatches
-    assert (tmp_path / "results/steps/1/after.json").exists()
+    assert (tmp_path / "campaign/cases/repair-skill/steps/1/after.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -167,7 +169,7 @@ def test_bad_preparation_blocks_second_command(
     result = run_skill(tmp_path)
     assert result.test is not None and result.result_error is None, asdict(result)
     assert not result.passed and result.test.status == "incomplete"
-    assert (tmp_path / "work/command-tmp/attempts").read_text() == "1"
+    assert (tmp_path / "work/repair-skill/command-tmp/attempts").read_text() == "1"
     step = result.test.steps[1]
     assert step["command"] is None and step["verification"] is None and step["observations"] is None
     prep = step.get("preparation")
@@ -176,10 +178,10 @@ def test_bad_preparation_blocks_second_command(
     assert (
         prep["verification"].obstacles if mode == "unreadable" else prep["verification"].mismatches
     )
-    assert not (tmp_path / "results/steps/1/stdout.txt").exists()
+    assert not (tmp_path / "campaign/cases/repair-skill/steps/1/stdout.txt").exists()
     if mode == "write_failure":
         assert (
-            tmp_path / "results/steps/1/before/project" / SKILL
+            tmp_path / "campaign/cases/repair-skill/steps/1/before/project" / SKILL
         ).read_bytes() == b"Partial skill write\n"
 
 
@@ -192,7 +194,7 @@ def test_first_failure_prevents_alteration(
     assert result.test is not None and result.result_error is None, asdict(result)
     assert result.test.status == "failed" and not result.passed
     assert "preparation" not in result.test.steps[1]
-    assert not (tmp_path / "results/steps/1").exists()
+    assert not (tmp_path / "campaign/cases/repair-skill/steps/1").exists()
 
 
 def test_unreadable_backup_is_incomplete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

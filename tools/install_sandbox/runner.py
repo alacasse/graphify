@@ -15,7 +15,6 @@ from tools.install_sandbox.environment import (
     skill_backup_plan,
     skill_repair_plan,
 )
-from tools.install_sandbox.preparer import GraphifyPreparer
 from tools.install_sandbox.results import (
     FilesystemSnapshot,
     InstallTestResult,
@@ -50,7 +49,7 @@ def _new_result(case: InstallTestCase) -> InstallTestResult:
     ]
     return InstallTestResult(
         {"name": case.name, "target": case.target, "scope": case.scope},
-        {"ready": False, "reason": None, "log": "preparation.log"},
+        {"ready": False, "reason": None, "log": "preparation.log", "source": "campaign"},
         steps,
         "not_run",
         {"journal": "journal.log", "expected_contents": None},
@@ -58,17 +57,15 @@ def _new_result(case: InstallTestCase) -> InstallTestResult:
 
 
 class InstallTestRunner:
-    def __init__(
-        self, preparer: GraphifyPreparer | None = None, driver: InstallerDriver | None = None
-    ):
-        self.preparer = preparer if preparer is not None else GraphifyPreparer()
+    def __init__(self, driver: InstallerDriver | None = None):
         self.driver = driver if driver is not None else InstallerDriver()
         self.verifier = InstallVerifier()
 
     def run_case(
         self,
         *,
-        subject_checkout: Path,
+        reference_sources: Path,
+        prepared_executable: Path,
         case_file: Path,
         work_directory: Path,
         output_directory: Path,
@@ -76,7 +73,7 @@ class InstallTestRunner:
         started = time.monotonic_ns()
         subject, case_path, work, output = (
             path.resolve()
-            for path in (subject_checkout, case_file, work_directory, output_directory)
+            for path in (reference_sources, case_file, work_directory, output_directory)
         )
         case = InstallTestCase.from_json(case_path.read_text(encoding="utf-8"))
         _check_directories(subject, case_path, work, output)
@@ -84,7 +81,7 @@ class InstallTestRunner:
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
         writer.append_log("journal.log", "Validated case; starting preparation\n")
-        self._run(case, subject, work, writer, result)
+        self._run(case, subject, prepared_executable, work, writer, result)
         with writer.measure("finalize"):
             writer.append_log("journal.log", f"Case status: {result.status}; saving result\n")
             writer.write_result(result)
@@ -95,21 +92,19 @@ class InstallTestRunner:
         self,
         case: InstallTestCase,
         subject: Path,
+        executable: Path,
         work: Path,
         writer: TestResultWriter,
         result: InstallTestResult,
     ) -> None:
-        prepared = self.preparer.prepare(subject, work / "software", writer)
-        if not prepared.ready or prepared.executable is None:
-            self._not_run(result, writer, prepared.reason or "Prepared command unavailable")
-            return
+        writer.append_log("preparation.log", "Package availability inherited from campaign\n")
         with writer.measure("initial"):
             initial = self._prepare_initial(case, subject, work, writer, result)
         if initial is None:
             return
         environment, expected, before = initial
         result.preparation["ready"] = True
-        self._run_steps(case, prepared.executable, environment, expected, before, writer, result)
+        self._run_steps(case, executable, environment, expected, before, writer, result)
 
     def _prepare_initial(
         self,

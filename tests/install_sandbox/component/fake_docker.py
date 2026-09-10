@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -33,7 +34,7 @@ def main(arguments: list[str]) -> int:
     if command == "image":
         return _image(state, mode, arguments)
     if command in {"stop", "kill", "rm"}:
-        if mode == "container_cleanup_fail":
+        if mode in {"container_cleanup_fail", "verify_cleanup_fail"}:
             print("container cleanup refused", file=sys.stderr)
             return 8
         _resource_marker(state, "container", arguments[-1]).unlink(missing_ok=True)
@@ -55,6 +56,18 @@ def _build(state: Path, mode: str, arguments: list[str]) -> int:
     if mode == "build_fail":
         print("build failed", file=sys.stderr)
         return 7
+    if os.environ.get("CONTROLLED_PREPARATION_FAIL") == "1":
+        print("controlled package preparation failed", file=sys.stderr)
+        return 9
+    context = Path(arguments[-1])
+    shutil.copytree(context / "subject", state / "reference", dirs_exist_ok=True)
+    (state / "captured-context.json").write_text(
+        json.dumps(sorted(p.name for p in context.iterdir()))
+    )
+    if os.environ.get("CONTROLLED_INSTALLER"):
+        shutil.copyfile(os.environ["CONTROLLED_INSTALLER"], state / "graphify")
+        (state / "graphify").chmod(0o755)
+    print("controlled package preparation", flush=True)
     tag = _option(arguments, "--tag")
     iidfile = Path(_option(arguments, "--iidfile"))
     _resource_marker(state, "image", tag).write_text(_IMAGE_ID, encoding="utf-8")
@@ -70,22 +83,15 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     name = _option(arguments, "--name")
     marker = _resource_marker(state, "container", name)
     marker.write_text("running", encoding="utf-8")
+    if "--help" in arguments:
+        return _verify(mode, marker)
     run_id = _environment(arguments, "INSTALL_SANDBOX_RUN_ID")
     output = _output_mount(arguments)
     if os.environ.get("FAKE_DOCKER_CASE_PROGRAM"):
-        code = _execute_case(arguments)
-        marker.unlink(missing_ok=True)
-        return 9 if mode == "run_fail" else code
+        return _case_program(state, mode, arguments, marker)
     (output / "journal.log").write_text("controlled container evidence\n", encoding="utf-8")
     print("container started", flush=True)
-    if mode == "run_interrupt":
-        os.kill(os.getppid(), signal.SIGTERM)
-        time.sleep(60)
-    if mode in {"hold", "run_timeout"}:
-        (state / f"ready-{run_id}").write_text("ready", encoding="utf-8")
-        if mode == "run_timeout":
-            _spawn_ignoring_child(state)
-        time.sleep(60)
+    _hold(state, mode, run_id)
     if mode == "run_fail":
         marker.unlink(missing_ok=True)
         print("run failed", file=sys.stderr)
@@ -97,7 +103,37 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     return 0
 
 
-def _execute_case(arguments: list[str]) -> int:
+def _hold(state: Path, mode: str, run_id: str) -> None:
+    if mode == "run_interrupt":
+        os.kill(os.getppid(), signal.SIGTERM)
+        time.sleep(60)
+    if mode in {"hold", "run_timeout"}:
+        (state / f"ready-{run_id}").write_text("ready", encoding="utf-8")
+        if mode == "run_timeout":
+            _spawn_ignoring_child(state)
+        time.sleep(60)
+
+
+def _case_program(state: Path, mode: str, arguments: list[str], marker: Path) -> int:
+    code = _execute_case(state, arguments)
+    if mode != "container_cleanup_fail":
+        marker.unlink(missing_ok=True)
+    return 9 if mode == "run_fail" else code
+
+
+def _verify(mode: str, marker: Path) -> int:
+    if mode == "verify_interrupt":
+        os.kill(os.getppid(), signal.SIGTERM)
+        time.sleep(60)
+    if mode == "verify_timeout":
+        time.sleep(60)
+    if mode != "verify_cleanup_fail":
+        marker.unlink(missing_ok=True)
+    print("controlled graphify help", flush=True)
+    return 8 if mode == "verify_fail" else 0
+
+
+def _execute_case(state: Path, arguments: list[str]) -> int:
     mounts: dict[str, str] = {}
     for index, argument in enumerate(arguments):
         if argument == "--mount":
@@ -109,10 +145,11 @@ def _execute_case(arguments: list[str]) -> int:
         [
             sys.executable,
             os.environ["FAKE_DOCKER_CASE_PROGRAM"],
-            mounts["/sandbox/subject"],
+            str(state / "reference"),
             mounts["/sandbox/case.json"],
             mounts["/sandbox/output"],
-        ]
+        ],
+        env={**os.environ, "CONTROLLED_INSTALLER": str(state / "graphify")},
     )
 
 

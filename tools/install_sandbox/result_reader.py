@@ -159,48 +159,68 @@ def _preparation(value: object, output: Path) -> PreparationEvidence:
     }
 
 
-def _check_passed_references(result: InstallTestResult) -> None:
-    if result.status != "passed":
-        return
-    step = result.steps[0]
+def _check_references(result: InstallTestResult, step: StepEvidence, index: int) -> None:
     command, observations = step["command"], step["observations"]
-    if command is None or observations is None:
-        raise ValueError("passed requires command and observation references")
+    assert command is not None and observations is not None
     references = [
         *result.evidence.values(),
         *observations.values(),
         command["stdout_file"],
         command["stderr_file"],
     ]
-    if any(reference is None for reference in references):
+    if result.status == "passed" and any(reference is None for reference in references):
         raise ValueError("passed requires all evidence references")
+    expected = {
+        "before": f"steps/{index}/before.json",
+        "after": f"steps/{index}/after.json",
+        "stdout_file": f"steps/{index}/stdout.txt",
+        "stderr_file": f"steps/{index}/stderr.txt",
+    }
+    actual = {
+        **observations,
+        "stdout_file": command["stdout_file"],
+        "stderr_file": command["stderr_file"],
+    }
+    if any(value is not None and value != expected[key] for key, value in actual.items()):
+        raise ValueError("Evidence references must belong to their own step")
+
+
+def _check_skipped(step: StepEvidence) -> None:
+    if step["skip_reason"] is None or any(
+        step[key] is not None for key in ("command", "verification", "observations")
+    ):
+        raise ValueError("An unattempted step requires a reason and no command or observations")
+
+
+def _check_attempted(step: StepEvidence) -> str:
+    command, verification = step["command"], step["verification"]
+    if step["skip_reason"] is not None:
+        raise ValueError("An attempted step cannot have a skip reason")
+    if command is None or verification is None or step["observations"] is None:
+        raise ValueError("An attempted case requires command, verification and observations")
+    if command["state"] != "completed" or not verification.complete:
+        return "incomplete"
+    if command["exit_code"] != 0 or verification.mismatches:
+        return "failed"
+    return "passed"
 
 
 def _check_consistency(result: InstallTestResult) -> None:
-    step = result.steps[0]
-    command, verification = step["command"], step["verification"]
-    if result.status == "not_run":
-        if (
-            result.preparation["ready"]
-            or any(step[key] is not None for key in ("command", "verification", "observations"))
-            or step["skip_reason"] is None
-        ):
-            raise ValueError("not_run requires preparation unavailable and an unattempted step")
+    if not result.preparation["ready"]:
+        for step in result.steps:
+            _check_skipped(step)
+        if result.status != "not_run" or result.preparation["reason"] is None:
+            raise ValueError("Unavailable preparation requires not_run and a reason")
         return
-    if not result.preparation["ready"] or step["skip_reason"] is not None:
-        raise ValueError("An attempted case requires ready preparation and no skip reason")
-    if command is None or verification is None or step["observations"] is None:
-        raise ValueError("An attempted case requires command, verification and observations")
-    if result.status == "passed" and (
-        command["state"] != "completed"
-        or command["exit_code"] != 0
-        or not verification.complete
-        or verification.mismatches
-        or verification.obstacles
-    ):
-        raise ValueError("passed contradicts command or verification facts")
-    if result.status == "failed" and (command["state"] != "completed" or not verification.complete):
-        raise ValueError("failed requires a completed command and complete verification")
+    status = "passed"
+    for index, step in enumerate(result.steps):
+        if status != "passed":
+            _check_skipped(step)
+            continue
+        status = _check_attempted(step)
+        _check_references(result, step, index)
+    if result.status != status:
+        raise ValueError("Case status contradicts command or verification facts")
 
 
 def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestResult:
@@ -231,5 +251,4 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         },
     )
     _check_consistency(result)
-    _check_passed_references(result)
     return result

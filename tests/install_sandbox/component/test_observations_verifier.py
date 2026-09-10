@@ -462,3 +462,34 @@ def test_removal_of_reference_entry_known_outside_source_inventory_is_reported(
     extra.unlink()
     result = run.verify()
     assert_mismatch(result, extra, run.environment.project)
+
+
+@pytest.mark.parametrize("defect", ["none", "internal_blank", "user_order", "json_order"])
+def test_repeated_shared_files_keep_user_text_and_order_with_boundary_tolerance(
+    tmp_path: Path, defect: str
+) -> None:
+    run = scenario(tmp_path)
+    # This focused comparison puts the installed section between two user sections.
+    run.effects()
+    path = run.path("markdown")
+    prefix = b"# Project\n\n## First\nUser text.\n"
+    suffix = b"## Last\nMore user text.\n"
+    put(path, prefix + b"\n" + _MARKDOWN + b"\n" + suffix)
+    config = run.path("json")
+    put(config, b'{"instructions":["first.md","skills/graphify/SKILL.md","second.md"],"n":1}')
+    run.before = run.environment.observe(run.writer, "before")
+    installed = prefix + b"\n\n\n" + _MARKDOWN + b"\n\n" + suffix
+    if defect == "internal_blank":
+        installed = installed.replace(b"## First\nUser", b"## First\n\nUser")
+    elif defect == "user_order":
+        installed = suffix + _MARKDOWN + prefix
+    put(path, installed)
+    entries = ["first.md", "second.md", "skills/graphify/SKILL.md"]
+    if defect == "json_order":
+        entries[:2] = ["second.md", "first.md"]
+    put(config, json.dumps({"n": 1, "instructions": entries}, indent=4).encode())
+    result = run.verify()
+    if defect == "none":
+        assert_passed(result)
+    else:
+        assert result.complete and any(m.type == "user_content_lost" for m in result.mismatches)

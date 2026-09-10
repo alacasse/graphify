@@ -150,6 +150,15 @@ def _user_markdown_preserved(before: str, prefix: str, suffix: str) -> bool:
     return end >= len(prefix) and not before[len(prefix) : end].strip("\n")
 
 
+def _markdown_preserved(before: str, prefix: str, suffix: str, marker: str) -> bool:
+    parts = _markdown_parts(before, marker)
+    if parts is None:
+        return _user_markdown_preserved(before, prefix, suffix)
+    return parts[0].rstrip("\n") == prefix.rstrip("\n") and parts[2].lstrip("\n") == suffix.lstrip(
+        "\n"
+    )
+
+
 def _markdown(
     case: InstallTestCase, expected: bytes, before: bytes, after: bytes, result: VerificationResult
 ) -> None:
@@ -180,7 +189,7 @@ def _markdown(
             "retained Markdown section",
             "different section content",
         )
-    if not _user_markdown_preserved(initial, prefix, suffix):
+    if not _markdown_preserved(initial, prefix, suffix, case.spec.markdown_marker):
         _mismatch(
             result,
             "user_content_lost",
@@ -237,6 +246,11 @@ def _json(case: InstallTestCase, before: bytes, after: bytes, result: Verificati
             f"{items.count(value)} skill instructions",
         )
     installed[case.spec.json_list] = [item for item in items if item != value]
+    initial_items = initial.get(case.spec.json_list)
+    if isinstance(initial_items, list):
+        initial[case.spec.json_list] = [
+            item for item in cast(list[object], initial_items) if item != value
+        ]
     if json.dumps(initial, sort_keys=True) != json.dumps(installed, sort_keys=True):
         _mismatch(
             result,
@@ -333,6 +347,54 @@ def _preserved_entry(
         )
 
 
+def _require_absent(snapshot: FilesystemSnapshot, path: str, result: VerificationResult) -> None:
+    entry = snapshot.entry("project", path)
+    if entry is not None:
+        _mismatch(result, "unexpected_entry", "project", path, "absent", entry["kind"])
+    elif not snapshot.absent("project", path):
+        result.obstacles.append(
+            {
+                "operation": "verify_absence",
+                "root": "project",
+                "path": path,
+                "reason": "Absence could not be established",
+            }
+        )
+
+
+def _reinstall_stability(
+    case: InstallTestCase,
+    before: FilesystemSnapshot,
+    after: FilesystemSnapshot,
+    result: VerificationResult,
+) -> None:
+    if case.name != "reinstall":
+        return
+    dest = destinations(case)
+    _require_absent(after, dest["skill"] + ".bak", result)
+    key = ("project", dest["version"])
+    previous, current = before.contents.get(key), after.contents.get(key)
+    if previous is not None and current is not None and previous != current:
+        _mismatch(
+            result,
+            "version_changed",
+            *key,
+            "same bytes as first installation",
+            "different version bytes",
+        )
+    for snapshot in (before, after):
+        entry = snapshot.entry(*key)
+        if entry is not None and entry["kind"] == "file" and key not in snapshot.contents:
+            result.obstacles.append(
+                {
+                    "operation": "read_file",
+                    "root": key[0],
+                    "path": key[1],
+                    "reason": "Version content unavailable",
+                }
+            )
+
+
 class InstallVerifier:
     def verify(
         self,
@@ -356,6 +418,7 @@ class InstallVerifier:
         _file(after, dest["version"], result)
         self._shared_files(case, expected, before, after, result)
         _preservation(case, expected, before, after, result)
+        _reinstall_stability(case, before, after, result)
         result.complete = not result.obstacles
         return result
 
@@ -389,6 +452,9 @@ class InstallVerifier:
                     "reason": "Expected references directory unavailable",
                 }
             )
+        dest = destinations(case)
+        for path in (dest["skill"], dest["references"], dest["version"], dest["skill"] + ".bak"):
+            _require_absent(before, path, result)
         result.complete = not result.obstacles
         return result
 

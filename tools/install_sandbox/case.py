@@ -64,7 +64,7 @@ def _initial_files(value: object) -> list[InitialFile]:
 def case_operations(name: str) -> list[str]:
     if name == "first-install":
         return ["install"]
-    if name in {"reinstall", "repair-references", "repair-skill"}:
+    if name in {"reinstall", "repair-references", "repair-skill", "preserve-skill-backup"}:
         return ["install", "install"]
     raise ValueError(f"Unsupported project case: {name}")
 

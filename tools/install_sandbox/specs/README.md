@@ -27,7 +27,8 @@ and derives target identities from their filename stems. This does not migrate
 the retained catalog or make its older format readable.
 
 `spec.py` validates the new facts. The common initial witnesses and the
-first-install, reinstall, repair-references, or repair-skill operations belong
+first-install, reinstall, repair-references, repair-skill, or preserve-skill-backup
+operations belong
 to the case, and `InstallTestCoordinator` assembles and writes
 the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
@@ -45,6 +46,17 @@ before the second installation. Backup creation is permitted only for that
 repair step; the initial state and first installation have no backup. Sources,
 version stability and user preservation remain independently verified.
 
+The preserve-skill-backup case prepares an exact backup witness after a fully
+verified first installation, leaving the installed skill intact. The witness
+is the retained skill source followed by `\nSandbox previous backup witness.\n`
+with LF line endings. A complete preparation check permits only this new file;
+a partial, incorrect or unobservable preparation prevents the second command.
+The second installation must preserve the backup bytes while satisfying all
+existing installation and user-preservation criteria. The plan, expected
+witness and both observed backup contents are retained separately. The host
+checks evidence bindings and continuation conditions without repeating the
+installation verdict. No additional YAML facts are needed.
+
 ## Current ownership
 
 | Concern | Current owner |
@@ -52,7 +64,7 @@ version stability and user preservation remain independently verified.
 | Catalog membership and target identity | `*.yaml` filename stems |
 | Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
 | Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, and repair-skill project cases are implemented |
+| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, and preserve-skill-backup project cases are implemented |
 
 ## Classify data before changing it
 

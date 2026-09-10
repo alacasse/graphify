@@ -26,6 +26,7 @@ def test_repair_skill_docker() -> None:
     preparation = reread.steps[1].get("preparation")
     assert preparation is not None and preparation["ready"]
     assert "deleted_path" not in preparation["plan"]
+    assert "altered_content_file" in preparation["plan"]
     dest = destinations(case)
     skill, version = dest["skill"], dest["version"]
     source = (output / "expected" / case.spec.skill_source).read_bytes()

@@ -1,11 +1,15 @@
 """Observed facts, verification diagnostics and durable local evidence."""
 
 import json
+import sys
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
 from tools.install_sandbox.driver import InstallerCommandResult
+from tools.install_sandbox.timings import Timing, case_timings, elapsed, measure, skip_pending
 
 
 class ObservationObstacle(TypedDict):
@@ -127,10 +131,51 @@ class TestResultWriter:
 
     def __init__(self, output_directory: Path):
         self.output_directory = output_directory
+        self.timings: list[Timing] = []
+        self.timing_diagnostics: list[str] = []
+        self.timing_duration: float | None = None
         try:
             output_directory.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             raise EvidenceWriteError(f"Cannot create evidence directory: {error}") from error
+
+    def initialize_timings(self, case_name: str, step_count: int) -> None:
+        self.timings = case_timings(case_name, step_count)
+
+    @contextmanager
+    def measure(self, phase: str, step: int | None = None) -> Generator[Timing]:
+        record = next(r for r in self.timings if (r.phase, r.step) == (phase, step))
+        record.state = "running"
+        self._save_timings()
+        try:
+            with measure(record):
+                yield record
+        finally:
+            self._save_timings()
+
+    def finish_timings(self, started_ns: int) -> None:
+        skip_pending(self.timings)
+        self.timing_duration = elapsed(started_ns)
+        self._save_timings()
+
+    def _save_timings(self) -> None:
+        if self.timing_diagnostics:
+            return
+        payload = {
+            "version": 1,
+            "duration_seconds": self.timing_duration,
+            "phases": [asdict(record) for record in self.timings],
+        }
+        try:
+            self._write_json("timings.json.tmp", payload)
+            (self.output_directory / "timings.json.tmp").replace(
+                self.output_directory / "timings.json"
+            )
+        except (EvidenceWriteError, OSError) as error:
+            diagnostic = f"Timing evidence unavailable: {error}"
+            self.timing_diagnostics.append(diagnostic)
+            with suppress(OSError):
+                print(diagnostic, file=sys.stderr)
 
     def write_snapshot(
         self, snapshot: FilesystemSnapshot, name: str, *, step_index: int = 0

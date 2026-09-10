@@ -37,21 +37,22 @@ class GraphifyPreparer:
     def _prepare(
         self, subject: Path, directory: Path, writer: TestResultWriter
     ) -> GraphifyPreparationResult:
-        directory.mkdir(parents=True, exist_ok=False)
-        source = directory / "source"
-        shutil.copytree(
-            subject,
-            source,
-            symlinks=True,
-            ignore=shutil.ignore_patterns(
-                ".git",
-                ".venv",
-                "__pycache__",
-                ".pytest_cache",
-                ".ruff_cache",
-                "graphify-out",
-            ),
-        )
+        with writer.measure("copy_sources"):
+            directory.mkdir(parents=True, exist_ok=False)
+            source = directory / "source"
+            shutil.copytree(
+                subject,
+                source,
+                symlinks=True,
+                ignore=shutil.ignore_patterns(
+                    ".git",
+                    ".venv",
+                    "__pycache__",
+                    ".pytest_cache",
+                    ".ruff_cache",
+                    "graphify-out",
+                ),
+            )
         home = directory / "home"
         home.mkdir()
         (directory / "tmp").mkdir()
@@ -61,9 +62,10 @@ class GraphifyPreparer:
             [sys.executable, "-m", "venv", str(directory / "venv")],
             [str(python), "-m", "pip", "install", "--disable-pip-version-check", str(source)],
         ]
-        for args in commands:
+        for phase, args in zip(("venv", "pip"), commands, strict=True):
             writer.append_log("preparation.log", f"Running {args!r}\n")
-            result = self.execute(args, source, environment, self.timeout)
+            with writer.measure(phase):
+                result = self.execute(args, source, environment, self.timeout)
             writer.append_log("preparation.log", result.stdout + b"\n" + result.stderr + b"\n")
             if result.state != "completed" or result.exit_code != 0:
                 reason = result.reason or f"Preparation command exited with code {result.exit_code}"

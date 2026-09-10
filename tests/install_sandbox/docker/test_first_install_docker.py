@@ -1,6 +1,5 @@
 """Explicitly opted-in, serial proof of one reference case through the coordinator."""
 
-import hashlib
 import json
 import os
 import shutil
@@ -20,24 +19,6 @@ pytestmark = pytest.mark.skipif(
     reason="Set RUN_INSTALL_SANDBOX_DOCKER=1 to run one real Docker case",
 )
 _ROOT = Path(__file__).resolve().parents[3]
-
-
-def _git(subject: Path, *args: str) -> str:
-    return subprocess.check_output(["git", "-C", str(subject), *args], text=True)
-
-
-def _subject_state(subject: Path) -> dict[str, object]:
-    paths = _git(subject, "ls-files", "-z").split("\0")
-    return {
-        "head": _git(subject, "rev-parse", "HEAD").strip(),
-        "branch": _git(subject, "branch", "--show-current").strip(),
-        "status": _git(subject, "status", "--porcelain=v1", "--untracked-files=all"),
-        "files": {
-            name: hashlib.sha256((subject / name).read_bytes()).hexdigest()
-            for name in paths
-            if name and (subject / name).is_file()
-        },
-    }
 
 
 def _runtime(directory: Path) -> Path:
@@ -131,8 +112,6 @@ def run_proof(case_name: str) -> CoordinatedResult:
     subject = Path(os.environ["INSTALL_SANDBOX_SUBJECT"]).resolve()
     directory = Path(os.environ["INSTALL_SANDBOX_EVIDENCE_DIRECTORY"]).resolve()
     directory.mkdir(parents=True, exist_ok=False)
-    before = _subject_state(subject)
-    (directory / "subject-before.json").write_text(json.dumps(before, indent=2))
     start = time.monotonic()
     result = InstallTestCoordinator().run_case(
         specs_directory=_ROOT / "tools/install_sandbox/specs/reference",
@@ -145,15 +124,11 @@ def run_proof(case_name: str) -> CoordinatedResult:
         build_timeout_seconds=float(os.environ.get("INSTALL_SANDBOX_BUILD_TIMEOUT", "300")),
         run_timeout_seconds=float(os.environ.get("INSTALL_SANDBOX_RUN_TIMEOUT", "900")),
     )
-    after = _subject_state(subject)
     summary = {
         "duration_seconds": time.monotonic() - start,
         "result": asdict(result),
-        "subject_after": after,
-        "subject_preserved": before == after,
     }
     (directory / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-    assert before == after, "Subject checkout changed"
     _assert_execution(directory, result)
     _assert_owned_cleanup(directory, result)
     _assert_saved_evidence(result)

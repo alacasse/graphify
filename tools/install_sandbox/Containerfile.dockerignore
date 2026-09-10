@@ -6,6 +6,7 @@
 !environment.py
 !preparer.py
 !results.py
+!timings.py
 !runner.py
 !verifier.py
 !container_main.py

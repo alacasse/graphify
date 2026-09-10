@@ -3,6 +3,7 @@
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.case import InstallTestCase
+from tools.install_sandbox.timings import elapsed
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class InstallerCommandResult:
     reason: str | None
     stdout: bytes = b""
     stderr: bytes = b""
+    duration_seconds: float | None = None
 
 
 CommandExecutor = Callable[[list[str], Path, dict[str, str], float], InstallerCommandResult]
@@ -49,6 +52,7 @@ def execute_command(
 ) -> InstallerCommandResult:
     if timeout <= 0:
         raise ValueError("Command timeout must be positive")
+    started = time.monotonic_ns()
     try:
         process = subprocess.Popen(
             args,
@@ -60,10 +64,14 @@ def execute_command(
             start_new_session=True,
         )
     except OSError as error:
-        return InstallerCommandResult(args, str(cwd), "not_started", None, str(error))
+        return InstallerCommandResult(
+            args, str(cwd), "not_started", None, str(error), duration_seconds=elapsed(started)
+        )
     stdout, stderr, reason = _collect(process, timeout)
     state = "interrupted" if reason else "completed"
-    return InstallerCommandResult(args, str(cwd), state, process.returncode, reason, stdout, stderr)
+    return InstallerCommandResult(
+        args, str(cwd), state, process.returncode, reason, stdout, stderr, elapsed(started)
+    )
 
 
 def command_environment(home: Path, temporary: Path) -> dict[str, str]:

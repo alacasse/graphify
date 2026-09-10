@@ -59,7 +59,9 @@ def reinstall_script(mode: str = "passed", step: int = 1) -> str:
     )
 
 
-def _arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, step: int) -> None:
+def arrange_reinstall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, step: int
+) -> None:
     LocalCase(tmp_path)
     (tmp_path / "case.json").unlink()
     executable = tmp_path / "controlled-installer"
@@ -69,7 +71,7 @@ def _arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, step: i
     monkeypatch.setenv("CONTROLLED_INSTALLER", str(executable))
 
 
-def _run(tmp_path: Path) -> CoordinatedResult:
+def run_reinstall(tmp_path: Path) -> CoordinatedResult:
     return InstallTestCoordinator().run_case(
         specs_directory=_SPECS,
         target="sandbox-reference",
@@ -87,8 +89,8 @@ def _run(tmp_path: Path) -> CoordinatedResult:
 def test_two_installs_share_preparation_and_preserve_distinct_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _arrange(tmp_path, monkeypatch, "passed", 1)
-    result = _run(tmp_path)
+    arrange_reinstall(tmp_path, monkeypatch, "passed", 1)
+    result = run_reinstall(tmp_path)
     assert result.passed and result.test is not None
     first, second = result.test.steps
     assert first["command"] is not None and second["command"] is not None
@@ -151,8 +153,8 @@ def _check_retained_snapshots(output: Path) -> None:
 def test_faults_stop_dependents_and_retain_both_diagnostics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index: int, mode: str, mismatch: str | None
 ) -> None:
-    _arrange(tmp_path, monkeypatch, mode, index)
-    result = _run(tmp_path)
+    arrange_reinstall(tmp_path, monkeypatch, mode, index)
+    result = run_reinstall(tmp_path)
     assert not result.passed and result.test is not None and result.result_error is None
     assert result.container.state == "completed" and result.container.cleanup_complete
     assert result.test.status == ("incomplete" if mode == "signal" else "failed")
@@ -174,8 +176,8 @@ def test_faults_stop_dependents_and_retain_both_diagnostics(
 def test_version_change_is_compared_to_first_installation_not_package_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _arrange(tmp_path, monkeypatch, "version", 1)
-    result = _run(tmp_path)
+    arrange_reinstall(tmp_path, monkeypatch, "version", 1)
+    result = run_reinstall(tmp_path)
     assert result.test is not None and result.test.status == "failed"
     verification = result.test.steps[1]["verification"]
     assert verification is not None
@@ -192,9 +194,9 @@ def test_version_change_is_compared_to_first_installation_not_package_metadata(
 def test_preparation_failure_skips_both_steps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _arrange(tmp_path, monkeypatch, "passed", 1)
+    arrange_reinstall(tmp_path, monkeypatch, "passed", 1)
     monkeypatch.setenv("CONTROLLED_PREPARATION_FAIL", "1")
-    result = _run(tmp_path)
+    result = run_reinstall(tmp_path)
     assert result.test is not None and result.test.status == "not_run"
     assert result.result_error is None
     for step in result.test.steps:

@@ -1,13 +1,14 @@
 """Conduct one validated local case and retain its established result and evidence."""
 
 import json
+import time
 from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.case import InstallTestCase
-from tools.install_sandbox.driver import InstallerDriver
+from tools.install_sandbox.driver import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.environment import (
     TestEnvironment,
     reference_repair_plan,
@@ -72,6 +73,7 @@ class InstallTestRunner:
         work_directory: Path,
         output_directory: Path,
     ) -> InstallTestResult:
+        started = time.monotonic_ns()
         subject, case_path, work, output = (
             path.resolve()
             for path in (subject_checkout, case_file, work_directory, output_directory)
@@ -79,11 +81,14 @@ class InstallTestRunner:
         case = InstallTestCase.from_json(case_path.read_text(encoding="utf-8"))
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
+        writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
         writer.append_log("journal.log", "Validated case; starting preparation\n")
         self._run(case, subject, work, writer, result)
-        writer.append_log("journal.log", f"Case status: {result.status}; saving result\n")
-        writer.write_result(result)
+        with writer.measure("finalize"):
+            writer.append_log("journal.log", f"Case status: {result.status}; saving result\n")
+            writer.write_result(result)
+        writer.finish_timings(started)
         return result
 
     def _run(
@@ -98,6 +103,22 @@ class InstallTestRunner:
         if not prepared.ready or prepared.executable is None:
             self._not_run(result, writer, prepared.reason or "Prepared command unavailable")
             return
+        with writer.measure("initial"):
+            initial = self._prepare_initial(case, subject, work, writer, result)
+        if initial is None:
+            return
+        environment, expected, before = initial
+        result.preparation["ready"] = True
+        self._run_steps(case, prepared.executable, environment, expected, before, writer, result)
+
+    def _prepare_initial(
+        self,
+        case: InstallTestCase,
+        subject: Path,
+        work: Path,
+        writer: TestResultWriter,
+        result: InstallTestResult,
+    ) -> tuple[TestEnvironment, FilesystemSnapshot, FilesystemSnapshot] | None:
         try:
             environment = TestEnvironment(case, work / "environment")
             environment.prepare()
@@ -107,22 +128,21 @@ class InstallTestRunner:
             before = environment.observe(writer, "before")
         except OSError as error:
             self._not_run(result, writer, f"Initial preparation failed: {error}")
-            return
+            return None
         initial = self.verifier.verify_initial(case, expected, before)
         writer.append_log("preparation.log", json.dumps(asdict(initial)) + "\n")
         if not initial.complete or initial.mismatches:
             self._not_run(
                 result, writer, "Initial verification failed: " + json.dumps(asdict(initial))
             )
-            return
+            return None
         if case.name == "repair-references":
             try:
                 reference_repair_plan(case, expected)
             except ValueError as error:
                 self._not_run(result, writer, str(error))
-                return
-        result.preparation["ready"] = True
-        self._run_steps(case, prepared.executable, environment, expected, before, writer, result)
+                return None
+        return environment, expected, before
 
     def _run_steps(
         self,
@@ -138,18 +158,19 @@ class InstallTestRunner:
         for index, step in enumerate(result.steps):
             installed = before
             if index:
-                if case.name in {"repair-references", "repair-skill", "preserve-skill-backup"}:
-                    before = self._prepare_step(
-                        case, environment, expected, installed, writer, step
-                    )
-                    preparation = step.get("preparation")
-                    assert preparation is not None
-                    if not preparation["ready"]:
-                        result.status = "incomplete"
-                        break
-                else:
-                    before = deepcopy(installed)
-                    writer.write_snapshot(before, "before", step_index=index)
+                with writer.measure("step_preparation", index):
+                    if case.name in {"repair-references", "repair-skill", "preserve-skill-backup"}:
+                        before = self._prepare_step(
+                            case, environment, expected, installed, writer, step
+                        )
+                        preparation = step.get("preparation")
+                        assert preparation is not None
+                        if not preparation["ready"]:
+                            result.status = "incomplete"
+                            break
+                    else:
+                        before = deepcopy(installed)
+                        writer.write_snapshot(before, "before", step_index=index)
             before = self._install(
                 case,
                 executable,
@@ -239,13 +260,34 @@ class InstallTestRunner:
         step: StepEvidence,
         index: int,
     ) -> FilesystemSnapshot:
-        command = self.driver.install(
-            case,
-            executable,
-            environment.project,
-            environment.home,
-            environment.project.parent.parent / "command-tmp",
-        )
+        with writer.measure("command", index) as timing:
+            command = self.driver.install(
+                case,
+                executable,
+                environment.project,
+                environment.home,
+                environment.project.parent.parent / "command-tmp",
+            )
+            timing.duration_seconds = command.duration_seconds
+            if command.duration_seconds is None:
+                timing.state = "unavailable"
+                timing.diagnostic = "Command executor did not supply a duration"
+        with writer.measure("checks", index):
+            return self._check_install(
+                case, environment, expected, before, writer, step, index, command
+            )
+
+    def _check_install(
+        self,
+        case: InstallTestCase,
+        environment: TestEnvironment,
+        expected: FilesystemSnapshot,
+        before: FilesystemSnapshot,
+        writer: TestResultWriter,
+        step: StepEvidence,
+        index: int,
+        command: InstallerCommandResult,
+    ) -> FilesystemSnapshot:
         step["skip_reason"] = None
         step["command"] = writer.write_command(command, step_index=index)
         writer.append_log(

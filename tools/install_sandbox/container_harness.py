@@ -622,6 +622,8 @@ def _wait_for_process(
     while process.poll() is None:
         if interrupts is not None and interrupts.event.wait(timeout=0.05):
             return False, interrupts.signal_number
+        if interrupts is None:
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         if time.monotonic() >= deadline:
             return True, None
     return False, None

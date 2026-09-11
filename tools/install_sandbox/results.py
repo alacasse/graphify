@@ -83,12 +83,12 @@ class CommandEvidence(TypedDict):
     stderr_file: str | None
 
 
-class SkillRepairPlan(TypedDict):
+class FileAlterationPlan(TypedDict):
     altered_path: str
     altered_content_file: str
 
 
-class ReferenceRepairPlan(SkillRepairPlan):
+class ReferenceRepairPlan(FileAlterationPlan):
     deleted_path: str
 
 
@@ -98,7 +98,7 @@ class SkillBackupPlan(TypedDict):
 
 
 class StepPreparationEvidence(TypedDict):
-    plan: ReferenceRepairPlan | SkillRepairPlan | SkillBackupPlan
+    plan: ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan
     ready: bool
     reason: str | None
     before: str
@@ -199,7 +199,7 @@ class TestResultWriter:
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
 
     def write_step_preparation_plan(
-        self, plan: ReferenceRepairPlan | SkillRepairPlan | SkillBackupPlan, content: bytes
+        self, plan: ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan, content: bytes
     ) -> None:
         self._write_json("steps/1/preparation/plan.json", plan)
         content_file = (

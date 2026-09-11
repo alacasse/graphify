@@ -5,15 +5,15 @@ from pathlib import Path
 from typing import cast
 
 from tools.install_sandbox.case import InstallTestCase
-from tools.install_sandbox.environment import destinations
+from tools.install_sandbox.environment import destinations, markdown_repair_plan
 from tools.install_sandbox.results import (
     CommandEvidence,
+    FileAlterationPlan,
     InstallTestResult,
     ObservationObstacle,
     PreparationEvidence,
     ReferenceRepairPlan,
     SkillBackupPlan,
-    SkillRepairPlan,
     StepEvidence,
     StepPreparationEvidence,
     VerificationMismatch,
@@ -161,7 +161,7 @@ def _step(value: object, output: Path) -> StepEvidence:
     return step
 
 
-def _step_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan | SkillBackupPlan:
+def _step_plan(value: object) -> ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan:
     if isinstance(value, dict) and "backup_path" in value:
         data = fields(cast(object, value), "backup_path backup_content_file")
         return {
@@ -171,13 +171,13 @@ def _step_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan | SkillBa
     return _repair_plan(cast(object, value))
 
 
-def _repair_plan(value: object) -> ReferenceRepairPlan | SkillRepairPlan:
+def _repair_plan(value: object) -> ReferenceRepairPlan | FileAlterationPlan:
     has_deleted = isinstance(value, dict) and "deleted_path" in value
     data = fields(
         cast(object, value),
         "altered_path altered_content_file" + (" deleted_path" if has_deleted else ""),
     )
-    common: SkillRepairPlan = {
+    common: FileAlterationPlan = {
         "altered_path": relative_path(data["altered_path"]),
         "altered_content_file": relative_path(data["altered_content_file"]),
     }
@@ -420,7 +420,12 @@ def _check_step_preparation_evidence(
     result: InstallTestResult, case: InstallTestCase, output: Path
 ) -> None:
     _check_preparation_location(result, case)
-    if case.name not in {"repair-references", "repair-skill", "preserve-skill-backup"}:
+    if case.name not in {
+        "repair-references",
+        "repair-skill",
+        "preserve-skill-backup",
+        "repair-markdown-section",
+    }:
         return
     first, second = result.steps
     preparation = second.get("preparation")
@@ -432,8 +437,8 @@ def _check_step_preparation_evidence(
     sources = _check_snapshot(output, "expected.json")
     _check_snapshot(output, "steps/0/before.json")
     _check_command_evidence(result, output)
-    if case.name == "preserve-skill-backup":
-        _check_skill_content_evidence(case, output)
+    if case.name in {"preserve-skill-backup", "repair-markdown-section"}:
+        _check_content_evidence(case, output)
     if preparation is None:
         return
     _check_snapshot(output, preparation["before"], complete=preparation["verification"].complete)
@@ -450,7 +455,7 @@ def _check_step_preparation_evidence(
 
 
 def _check_case_preparation_plan(
-    plan: ReferenceRepairPlan | SkillRepairPlan | SkillBackupPlan,
+    plan: ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan,
     case: InstallTestCase,
     output: Path,
     sources: list[dict[str, object]],
@@ -466,14 +471,20 @@ def _check_case_preparation_plan(
 
 
 def _check_case_repair_plan(
-    plan: ReferenceRepairPlan | SkillRepairPlan,
+    plan: ReferenceRepairPlan | FileAlterationPlan,
     case: InstallTestCase,
     output: Path,
     sources: list[dict[str, object]],
 ) -> None:
-    if case.name == "repair-skill":
+    if case.name == "repair-markdown-section":
+        expected_plan, content = markdown_repair_plan(case)
+        if plan != expected_plan:
+            raise ValueError("Markdown repair plan does not match the case")
+        if safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content:
+            raise ValueError("Altered Markdown content does not match the case witness")
+    elif case.name == "repair-skill":
         _check_skill_repair_plan(plan, case, output)
-        _check_skill_content_evidence(case, output)
+        _check_content_evidence(case, output)
     else:
         if "deleted_path" not in plan:
             raise ValueError("Reference repair requires a deletion")
@@ -531,7 +542,7 @@ def _check_repair_plan(
 
 
 def _check_skill_repair_plan(
-    plan: ReferenceRepairPlan | SkillRepairPlan, case: InstallTestCase, output: Path
+    plan: ReferenceRepairPlan | FileAlterationPlan, case: InstallTestCase, output: Path
 ) -> None:
     if "deleted_path" in plan or plan["altered_path"] != destinations(case)["skill"]:
         raise ValueError("Skill repair path does not match the case")
@@ -553,7 +564,13 @@ def _check_skill_backup_plan(plan: SkillBackupPlan, case: InstallTestCase, outpu
 def _check_preparation_location(result: InstallTestResult, case: InstallTestCase) -> None:
     for index, step in enumerate(result.steps):
         if "preparation" in step and (
-            case.name not in {"repair-references", "repair-skill", "preserve-skill-backup"}
+            case.name
+            not in {
+                "repair-references",
+                "repair-skill",
+                "preserve-skill-backup",
+                "repair-markdown-section",
+            }
             or index != 1
         ):
             raise ValueError("Unexpected step preparation")
@@ -568,9 +585,14 @@ def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
             )
 
 
-def _check_skill_content_evidence(case: InstallTestCase, output: Path) -> None:
-    """A skill or backup observed as a readable file must retain its actual bytes."""
-    skill = destinations(case)["skill"]
+def _check_content_evidence(case: InstallTestCase, output: Path) -> None:
+    """Files involved in preparation must retain actual bytes, not just digests."""
+    dest = destinations(case)
+    paths = (
+        {dest["markdown"]}
+        if case.name == "repair-markdown-section"
+        else {dest["skill"], dest["skill"] + ".bak"}
+    )
     for relative in ("steps/0/after.json", "steps/1/before.json", "steps/1/after.json"):
         path = safe_evidence_path(output, relative)
         if not path.exists():
@@ -579,12 +601,12 @@ def _check_skill_content_evidence(case: InstallTestCase, output: Path) -> None:
         obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
         for value in _list(snapshot["entries"]):
             entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
-            if entry["root"] == "project" and entry["path"] in {skill, skill + ".bak"}:
-                _check_retained_skill(entry, obstacles)
+            if entry["root"] == "project" and entry["path"] in paths:
+                _check_retained_content(entry, obstacles)
 
 
-def _check_retained_skill(entry: dict[str, object], obstacles: list[ObservationObstacle]) -> None:
+def _check_retained_content(entry: dict[str, object], obstacles: list[ObservationObstacle]) -> None:
     if entry["kind"] != "file" or entry.get("content_file") is not None:
         return
     if not any(o["root"] == "project" and o["path"] == entry["path"] for o in obstacles):
-        raise ValueError("Observed skill and backup require retained content, not only a digest")
+        raise ValueError("Observed file requires retained content, not only a digest")

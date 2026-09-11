@@ -21,9 +21,14 @@ _PERSONAL_INSTRUCTIONS = "# My instructions\nDo not modify my personal documents
 _PERSONAL_NOTES = "Personal document to preserve.\n"
 
 
-def first_install_files(spec: InstallTestSpec) -> list[InitialFile]:
+def first_install_files(
+    spec: InstallTestSpec, case_name: str = "first-install"
+) -> list[InitialFile]:
     """Place the common witnesses using target paths and the JSON list fact."""
     directory = PurePosixPath(spec.directory)
+    markdown = _PROJECT_INSTRUCTIONS
+    if case_name == "repair-markdown-section":
+        markdown = markdown.replace("## Changes", spec.markdown_marker + "\n\n## Changes")
     config_file = directory / spec.json_file
     settings = (
         '{\n  "theme": "dark",\n  ' + json.dumps(spec.json_list) + ': ["my-instructions.md"]\n}\n'
@@ -32,7 +37,7 @@ def first_install_files(spec: InstallTestSpec) -> list[InitialFile]:
         {
             "root": "project",
             "path": str(directory / spec.markdown_file),
-            "content": _PROJECT_INSTRUCTIONS,
+            "content": markdown,
         },
         {"root": "project", "path": str(config_file), "content": settings},
         {
@@ -64,7 +69,13 @@ def _initial_files(value: object) -> list[InitialFile]:
 def case_operations(name: str) -> list[str]:
     if name == "first-install":
         return ["install"]
-    if name in {"reinstall", "repair-references", "repair-skill", "preserve-skill-backup"}:
+    if name in {
+        "reinstall",
+        "repair-references",
+        "repair-skill",
+        "preserve-skill-backup",
+        "repair-markdown-section",
+    }:
         return ["install", "install"]
     raise ValueError(f"Unsupported project case: {name}")
 
@@ -89,7 +100,7 @@ class InstallTestCase:
         if data["scope"] != "project" or "project" not in spec.scopes:
             raise ValueError("Installation case requires a supported project scope")
         initial_files = _initial_files(data["initial_files"])
-        if initial_files != first_install_files(spec):
+        if initial_files != first_install_files(spec, name):
             raise ValueError("Initial files do not match the case definition")
         return cls(
             name,

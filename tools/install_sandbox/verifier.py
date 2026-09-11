@@ -8,11 +8,11 @@ from typing import cast
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.environment import destinations
 from tools.install_sandbox.results import (
+    FileAlterationPlan,
     FilesystemSnapshot,
     ObservationObstacle,
     ReferenceRepairPlan,
     SkillBackupPlan,
-    SkillRepairPlan,
     SnapshotEntry,
     VerificationMismatch,
     VerificationResult,
@@ -203,6 +203,32 @@ def _markdown(
         )
 
 
+def _check_markdown_alteration(
+    case: InstallTestCase, before: bytes, altered: bytes, result: VerificationResult
+) -> None:
+    marker = case.spec.markdown_marker
+    previous = _markdown_parts(before.decode("utf-8"), marker)
+    planned = _markdown_parts(altered.decode("utf-8"), marker)
+    if previous is None or planned is None or previous[1] == planned[1]:
+        _mismatch(
+            result,
+            "invalid_preparation",
+            "project",
+            destinations(case)["markdown"],
+            "one altered section with intact heading",
+            "section not altered as required",
+        )
+    elif previous[0] != planned[0] or previous[2] != planned[2]:
+        _mismatch(
+            result,
+            "user_content_lost",
+            "project",
+            destinations(case)["markdown"],
+            "personal sections unchanged during preparation",
+            "personal text changed",
+        )
+
+
 def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     data: dict[str, object] = {}
     for key, value in pairs:
@@ -374,7 +400,13 @@ def _reinstall_stability(
     after: FilesystemSnapshot,
     result: VerificationResult,
 ) -> None:
-    if case.name not in {"reinstall", "repair-references", "repair-skill", "preserve-skill-backup"}:
+    if case.name not in {
+        "reinstall",
+        "repair-references",
+        "repair-skill",
+        "preserve-skill-backup",
+        "repair-markdown-section",
+    }:
         return
     dest = destinations(case)
     key = ("project", dest["version"])
@@ -456,7 +488,7 @@ class InstallVerifier:
 
     def verify_skill_repair(
         self,
-        plan: SkillRepairPlan,
+        plan: FileAlterationPlan,
         content: bytes,
         installed: FilesystemSnapshot,
         degraded: FilesystemSnapshot,
@@ -467,6 +499,29 @@ class InstallVerifier:
         )
         _compare_bytes(degraded, plan["altered_path"], content, result)
         _require_absent(degraded, plan["altered_path"] + ".bak", result)
+        keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
+        for root, path in sorted(keys):
+            if (root, path) != ("project", plan["altered_path"]):
+                _preserved_entry(installed, degraded, root, path, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_markdown_repair(
+        self,
+        case: InstallTestCase,
+        plan: FileAlterationPlan,
+        content: bytes,
+        installed: FilesystemSnapshot,
+        degraded: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Require the exact shared document witness and no other changed entry."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
+        )
+        _compare_bytes(degraded, plan["altered_path"], content, result)
+        previous = installed.contents.get(("project", plan["altered_path"]))
+        if previous is not None:
+            _check_markdown_alteration(case, previous, content, result)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for root, path in sorted(keys):
             if (root, path) != ("project", plan["altered_path"]):

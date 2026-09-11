@@ -11,16 +11,21 @@ from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.driver import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.environment import (
     TestEnvironment,
+    markdown_repair_plan,
     reference_repair_plan,
     skill_backup_plan,
     skill_repair_plan,
 )
 from tools.install_sandbox.results import (
+    FileAlterationPlan,
     FilesystemSnapshot,
     InstallTestResult,
+    ReferenceRepairPlan,
+    SkillBackupPlan,
     StepEvidence,
     StepPreparationEvidence,
     TestResultWriter,
+    VerificationResult,
 )
 from tools.install_sandbox.verifier import InstallVerifier
 
@@ -154,7 +159,12 @@ class InstallTestRunner:
             installed = before
             if index:
                 with writer.measure("step_preparation", index):
-                    if case.name in {"repair-references", "repair-skill", "preserve-skill-backup"}:
+                    if case.name in {
+                        "repair-references",
+                        "repair-skill",
+                        "preserve-skill-backup",
+                        "repair-markdown-section",
+                    }:
                         before = self._prepare_step(
                             case, environment, expected, installed, writer, step
                         )
@@ -193,7 +203,16 @@ class InstallTestRunner:
         writer: TestResultWriter,
         step: StepEvidence,
     ) -> FilesystemSnapshot:
-        if case.name == "preserve-skill-backup":
+        if case.name == "repair-markdown-section":
+            plan, content = markdown_repair_plan(case)
+            writer.write_step_preparation_plan(plan, content)
+            writer.append_log("journal.log", "Preparing Markdown section alteration\n")
+            reason = environment.prepare_markdown_repair(plan, content)
+            prepared_state = environment.observe(writer, "before", step_index=1)
+            verification = self.verifier.verify_markdown_repair(
+                case, plan, content, installed, prepared_state
+            )
+        elif case.name == "preserve-skill-backup":
             plan, content = skill_backup_plan(case, expected)
             writer.write_step_preparation_plan(plan, content)
             writer.append_log("journal.log", "Preparing previous skill backup witness\n")
@@ -220,6 +239,17 @@ class InstallTestRunner:
             verification = self.verifier.verify_reference_repair(
                 plan, content, installed, prepared_state
             )
+        self._record_preparation(writer, step, plan, reason, verification)
+        return prepared_state
+
+    @staticmethod
+    def _record_preparation(
+        writer: TestResultWriter,
+        step: StepEvidence,
+        plan: FileAlterationPlan | ReferenceRepairPlan | SkillBackupPlan,
+        reason: str | None,
+        verification: VerificationResult,
+    ) -> None:
         if reason is None and (not verification.complete or verification.mismatches):
             reason = "Step preparation verification failed"
         evidence: StepPreparationEvidence = {
@@ -234,7 +264,6 @@ class InstallTestRunner:
         if reason is not None:
             step["skip_reason"] = reason
             writer.append_log("journal.log", reason + "; dependent installation not attempted\n")
-        return prepared_state
 
     @staticmethod
     def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:

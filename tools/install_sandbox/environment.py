@@ -6,10 +6,10 @@ from pathlib import Path
 
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.results import (
+    FileAlterationPlan,
     FilesystemSnapshot,
     ReferenceRepairPlan,
     SkillBackupPlan,
-    SkillRepairPlan,
     SnapshotEntry,
     TestResultWriter,
 )
@@ -53,13 +53,28 @@ def reference_repair_plan(
 
 def skill_repair_plan(
     case: InstallTestCase, expected: FilesystemSnapshot
-) -> tuple[SkillRepairPlan, bytes]:
+) -> tuple[FileAlterationPlan, bytes]:
     """Retain the exact skill alteration independently of installed contents."""
     content = expected.contents[("subject", case.spec.skill_source)]
     return {
         "altered_path": destinations(case)["skill"],
         "altered_content_file": "steps/1/preparation/altered-content.bin",
     }, content + b"\nSandbox skill repair witness.\n"
+
+
+def markdown_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, bytes]:
+    """Build the altered shared document from case witnesses, not installed output."""
+    path = destinations(case)["markdown"]
+    initial = next(f["content"] for f in case.initial_files if f["path"] == path)
+    content = initial.replace(
+        case.spec.markdown_marker + "\n",
+        case.spec.markdown_marker + "\nSandbox altered Markdown section.\n",
+        1,
+    )
+    return {
+        "altered_path": path,
+        "altered_content_file": "steps/1/preparation/altered-content.bin",
+    }, content.encode("utf-8")
 
 
 def skill_backup_plan(
@@ -107,12 +122,20 @@ class TestEnvironment:
             return f"Reference repair preparation failed: {error}"
         return None
 
-    def prepare_skill_repair(self, plan: SkillRepairPlan, content: bytes) -> str | None:
+    def prepare_skill_repair(self, plan: FileAlterationPlan, content: bytes) -> str | None:
         """Preserve a failed write's partial effects for observation."""
         try:
             (self.project / plan["altered_path"]).write_bytes(content)
         except OSError as error:
             return f"Skill repair preparation failed: {error}"
+        return None
+
+    def prepare_markdown_repair(self, plan: FileAlterationPlan, content: bytes) -> str | None:
+        """Keep partial writes observable when the shared document cannot be prepared."""
+        try:
+            (self.project / plan["altered_path"]).write_bytes(content)
+        except OSError as error:
+            return f"Markdown repair preparation failed: {error}"
         return None
 
     def prepare_skill_backup(self, plan: SkillBackupPlan, content: bytes) -> str | None:

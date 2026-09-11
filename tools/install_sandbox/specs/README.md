@@ -27,8 +27,8 @@ and derives target identities from their filename stems. This does not migrate
 the retained catalog or make its older format readable.
 
 `spec.py` validates the new facts. The common initial witnesses and the
-first-install, reinstall, repair-references, repair-skill, or preserve-skill-backup
-operations belong
+first-install, reinstall, repair-references, repair-skill, preserve-skill-backup,
+or repair-markdown-section operations belong
 to the case, and `InstallTestCoordinator` assembles and writes
 the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
@@ -57,6 +57,15 @@ witness and both observed backup contents are retained separately. The host
 checks evidence bindings and continuation conditions without repeating the
 installation verdict. No additional YAML facts are needed.
 
+The repair-markdown-section case starts with a Graphify heading between two
+personal sections. After a verified installation it replaces only the managed
+section body with a known incorrect witness, retaining the heading and personal
+text. Preparation must be fully observed, match that witness and preserve all
+other entries before the second command. Reinstallation must restore the retained
+Markdown source and preserve both personal sections and all existing criteria.
+The host requires retained shared-document bytes and checks the plan and evidence
+bindings. No additional YAML facts are needed.
+
 ## Current ownership
 
 | Concern | Current owner |
@@ -64,7 +73,7 @@ installation verdict. No additional YAML facts are needed.
 | Catalog membership and target identity | `*.yaml` filename stems |
 | Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
 | Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, and preserve-skill-backup project cases are implemented |
+| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, preserve-skill-backup, and repair-markdown-section project cases are implemented |
 
 ## Classify data before changing it
 

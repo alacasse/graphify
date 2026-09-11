@@ -97,6 +97,15 @@ def render_campaign(result: CampaignResult) -> str:
         "Common phases (counted once):",
         *[_line(record) for record in result.timings],
     ]
+    dependencies = preparation.dependency_preparation if preparation else None
+    lines.append(f"Dependency mode: {dependencies.mode if dependencies else 'unavailable'}")
+    if dependencies is not None and dependencies.warning is not None:
+        lines.extend(
+            [
+                f"Warning: {dependencies.warning}",
+                f"Dependency diagnostic: {dependencies.diagnostic_path}",
+            ]
+        )
     if result.error:
         lines.append(result.error)
     for entry in result.cases:

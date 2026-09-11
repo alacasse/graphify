@@ -123,12 +123,16 @@ def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> No
     embedded = tmp_path / "image/tools/install_sandbox"
     embedded.mkdir(parents=True)
     containerfile = (source / "Containerfile").read_text().replace("\\\n", " ")
-    copy = next(line for line in containerfile.splitlines() if line.startswith("COPY "))
+    copy = next(
+        line
+        for line in containerfile.splitlines()
+        if line.startswith("COPY ") and "container_main.py" in line
+    )
     payload = shlex.split(copy)[2:-1]
     rules = (source / "Containerfile.dockerignore").read_text().splitlines()
     candidates = [*source.iterdir(), source / "unrelated.py"]
     admitted = {path.name for path in candidates if _admitted(path.name, rules)}
-    assert admitted == {"Containerfile", *payload}
+    assert admitted == {"Containerfile", "prepare_dependencies.py", *payload}
     for filename in payload:
         shutil.copyfile(source / filename, embedded / filename)
     foreign = tmp_path / "foreign"

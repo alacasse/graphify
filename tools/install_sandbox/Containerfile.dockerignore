@@ -11,3 +11,7 @@
 !container_main.py
 !subject/
 !subject/**
+!metadata/
+!metadata/**
+!prepare_dependencies.py
+!verify_preparation.py

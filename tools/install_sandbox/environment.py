@@ -1,8 +1,11 @@
 """Prepare isolated witnesses and capture observations without running Graphify."""
 
 import hashlib
+import json
+import posixpath
 import stat
 from pathlib import Path
+from typing import cast
 
 from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.results import (
@@ -77,6 +80,18 @@ def markdown_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, byt
     }, content.encode("utf-8")
 
 
+def json_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, bytes]:
+    """Retain expected personal settings independently of the installed document."""
+    path = destinations(case)["json"]
+    content = next(
+        f["content"] for f in case.initial_files if f["root"] == "project" and f["path"] == path
+    )
+    return {
+        "altered_path": path,
+        "altered_content_file": "steps/1/preparation/altered-content.bin",
+    }, content.encode("utf-8")
+
+
 def skill_backup_plan(
     case: InstallTestCase, expected: FilesystemSnapshot
 ) -> tuple[SkillBackupPlan, bytes]:
@@ -136,6 +151,29 @@ class TestEnvironment:
             (self.project / plan["altered_path"]).write_bytes(content)
         except OSError as error:
             return f"Markdown repair preparation failed: {error}"
+        return None
+
+    def prepare_json_repair(self, plan: FileAlterationPlan) -> str | None:
+        """Remove only the registration from the installed JSON, retaining partial effects."""
+        try:
+            path = self.project / plan["altered_path"]
+            settings: object = json.loads(path.read_bytes())
+            if not isinstance(settings, dict):
+                raise ValueError("Expected JSON object")
+            settings = cast(dict[str, object], settings)
+            items = settings.get(self.case.spec.json_list)
+            if not isinstance(items, list):
+                raise ValueError("Expected instruction list")
+            items = cast(list[object], items)
+            entry = posixpath.relpath(
+                destinations(self.case)["skill"], posixpath.dirname(plan["altered_path"])
+            )
+            if items.count(entry) != 1:
+                raise ValueError("Expected exactly one skill instruction before deletion")
+            items.remove(entry)
+            path.write_bytes((json.dumps(settings, indent=2) + "\n").encode("utf-8"))
+        except (OSError, ValueError, UnicodeError) as error:
+            return f"JSON repair preparation failed: {error}"
         return None
 
     def prepare_skill_backup(self, plan: SkillBackupPlan, content: bytes) -> str | None:

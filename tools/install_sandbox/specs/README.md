@@ -28,7 +28,7 @@ the retained catalog or make its older format readable.
 
 `spec.py` validates the new facts. The common initial witnesses and the
 first-install, reinstall, repair-references, repair-skill, preserve-skill-backup,
-or repair-markdown-section operations belong
+repair-markdown-section, or repair-json-entry operations belong
 to the case, and `InstallTestCoordinator` assembles and writes
 the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
@@ -68,12 +68,22 @@ bindings. No additional YAML facts are needed.
 
 ## Current ownership
 
+The repair-json-entry case starts with two personal instruction entries and a
+personal setting in the shared JSON. After a fully verified installation it
+reads that JSON and removes only the exact Graphify registration. Preparation
+is checked against the independent case witnesses; all other entries must remain
+unchanged. Reinstallation must restore the registration exactly once and preserve
+personal JSON values, list order and files. JSON indentation is not prescribed.
+The three observed JSON documents and the independent preparation expectation
+are retained after cleanup. A failed or unobservable preparation blocks the
+second command. No additional YAML facts are needed.
+
 | Concern | Current owner |
 | --- | --- |
 | Catalog membership and target identity | `*.yaml` filename stems |
 | Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
 | Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, preserve-skill-backup, and repair-markdown-section project cases are implemented |
+| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, preserve-skill-backup, repair-markdown-section, and repair-json-entry project cases are implemented |
 
 ## Classify data before changing it
 

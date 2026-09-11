@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from tools.install_sandbox.case import InstallTestCase
-from tools.install_sandbox.environment import destinations, markdown_repair_plan
+from tools.install_sandbox.environment import destinations, json_repair_plan, markdown_repair_plan
 from tools.install_sandbox.results import (
     CommandEvidence,
     FileAlterationPlan,
@@ -425,6 +425,7 @@ def _check_step_preparation_evidence(
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-json-entry",
     }:
         return
     first, second = result.steps
@@ -437,8 +438,9 @@ def _check_step_preparation_evidence(
     sources = _check_snapshot(output, "expected.json")
     _check_snapshot(output, "steps/0/before.json")
     _check_command_evidence(result, output)
-    if case.name in {"preserve-skill-backup", "repair-markdown-section"}:
+    if case.name in {"preserve-skill-backup", "repair-markdown-section", "repair-json-entry"}:
         _check_content_evidence(case, output)
+    _check_json_observations(result, case, output)
     if preparation is None:
         return
     _check_snapshot(output, preparation["before"], complete=preparation["verification"].complete)
@@ -452,6 +454,33 @@ def _check_step_preparation_evidence(
         raise ValueError("Step preparation plan differs from its saved evidence")
     _check_case_preparation_plan(plan, case, output, sources)
     _check_repeated_command(first, second)
+
+
+def _check_json_observations(
+    result: InstallTestResult, case: InstallTestCase, output: Path
+) -> None:
+    """Successful JSON stages require their shared-document evidence to be present."""
+    if case.name != "repair-json-entry":
+        return
+    required: list[str] = []
+    for index, step in enumerate(result.steps):
+        if step["command"] is not None and _check_attempted(step) == "passed":
+            required.append(f"steps/{index}/after.json")
+        preparation = step.get("preparation")
+        if preparation is not None and preparation["ready"]:
+            required.append(preparation["before"])
+    for relative in required:
+        entries = _check_snapshot(output, relative)
+        entry = next(
+            (
+                e
+                for e in entries
+                if e["root"] == "project" and e["path"] == destinations(case)["json"]
+            ),
+            None,
+        )
+        if entry is None or entry["kind"] != "file" or entry.get("content_file") is None:
+            raise ValueError("Successful JSON stage requires retained settings content")
 
 
 def _check_case_preparation_plan(
@@ -476,12 +505,16 @@ def _check_case_repair_plan(
     output: Path,
     sources: list[dict[str, object]],
 ) -> None:
-    if case.name == "repair-markdown-section":
-        expected_plan, content = markdown_repair_plan(case)
+    if case.name in {"repair-markdown-section", "repair-json-entry"}:
+        expected_plan, content = (
+            json_repair_plan(case)
+            if case.name == "repair-json-entry"
+            else markdown_repair_plan(case)
+        )
         if plan != expected_plan:
-            raise ValueError("Markdown repair plan does not match the case")
+            raise ValueError("Shared file repair plan does not match the case")
         if safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content:
-            raise ValueError("Altered Markdown content does not match the case witness")
+            raise ValueError("Prepared shared file content does not match the case witness")
     elif case.name == "repair-skill":
         _check_skill_repair_plan(plan, case, output)
         _check_content_evidence(case, output)
@@ -570,6 +603,7 @@ def _check_preparation_location(result: InstallTestResult, case: InstallTestCase
                 "repair-skill",
                 "preserve-skill-backup",
                 "repair-markdown-section",
+                "repair-json-entry",
             }
             or index != 1
         ):
@@ -588,11 +622,10 @@ def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
 def _check_content_evidence(case: InstallTestCase, output: Path) -> None:
     """Files involved in preparation must retain actual bytes, not just digests."""
     dest = destinations(case)
-    paths = (
-        {dest["markdown"]}
-        if case.name == "repair-markdown-section"
-        else {dest["skill"], dest["skill"] + ".bak"}
-    )
+    paths = {
+        "repair-markdown-section": {dest["markdown"]},
+        "repair-json-entry": {dest["json"]},
+    }.get(case.name, {dest["skill"], dest["skill"] + ".bak"})
     for relative in ("steps/0/after.json", "steps/1/before.json", "steps/1/after.json"):
         path = safe_evidence_path(output, relative)
         if not path.exists():

@@ -78,7 +78,7 @@ def test_image_is_available_until_finalization_and_sources_are_captured_once(
     assert not (tmp_path / "runtime/reference/.venv").exists()
     calls = commands(tmp_path)
     runs = [c for c in calls if c[0] == "run"]
-    assert len(runs) == 3 and "--help" in runs[0]
+    assert len(runs) == 3 and any(a.endswith("/verify_preparation.py") for a in runs[0])
     for run in runs[1:]:
         mounts = [run[i + 1] for i, value in enumerate(run) if value == "--mount"]
         assert len(mounts) == 2 and sum("readonly" in m for m in mounts) == 1

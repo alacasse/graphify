@@ -48,7 +48,9 @@ def test_two_cases_share_image_but_not_state(
     builds = [c for c in calls if c[0] == "build"]
     runs = [c for c in calls if c[0] == "run"]
     assert len(builds) == 1 and len(runs) == 3
-    assert "--help" in runs[0] and all("--help" not in c for c in runs[1:])
+    assert any(a.endswith("/verify_preparation.py") for a in runs[0]) and all(
+        not any(a.endswith("/verify_preparation.py") for a in c) for c in runs[1:]
+    )
     assert result.preparation is not None
     assert all(result.preparation.image_id in c for c in runs)
     assert len({c[c.index("--name") + 1] for c in runs}) == 3
@@ -94,7 +96,10 @@ def test_common_failure_never_invents_case_verdicts(
     assert result.preparation.state != "completed"
     assert all(c.result is None and c.not_run_reason for c in result.cases)
     assert not list((tmp_path / "campaign").rglob("result.json"))
-    assert not any(c[0] == "run" and "--help" not in c for c in commands(tmp_path))
+    assert not any(
+        c[0] == "run" and not any(a.endswith("/verify_preparation.py") for a in c)
+        for c in commands(tmp_path)
+    )
     assert result.cleanup is not None
     assert (tmp_path / "campaign/preparation/build.log").is_file()
 

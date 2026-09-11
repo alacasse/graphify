@@ -1,7 +1,10 @@
 """Capture the candidate and the bounded sandbox payload for one image build."""
 
+import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
 from pathspec import GitIgnoreSpec
 
@@ -15,6 +18,7 @@ PAYLOAD = (
     "runner.py",
     "verifier.py",
     "container_main.py",
+    "verify_preparation.py",
 )
 
 
@@ -23,7 +27,12 @@ def prepare_context(subject: Path, directory: Path) -> Path:
     context = directory / "context"
     context.mkdir()
     sandbox = Path(__file__).resolve().parent
-    for filename in (*PAYLOAD, "Containerfile", "Containerfile.dockerignore"):
+    for filename in (
+        *PAYLOAD,
+        "prepare_dependencies.py",
+        "Containerfile",
+        "Containerfile.dockerignore",
+    ):
         shutil.copyfile(sandbox / filename, context / filename)
     shutil.copytree(
         subject,
@@ -31,6 +40,12 @@ def prepare_context(subject: Path, directory: Path) -> Path:
         symlinks=True,
         ignore=_SourceFilter(),
     )
+    metadata = context / "metadata"
+    metadata.mkdir()
+    for filename in ("pyproject.toml", "uv.lock"):
+        captured = context / "subject" / filename
+        if captured.exists():
+            shutil.copyfile(captured, metadata / filename)
     return context
 
 
@@ -71,3 +86,33 @@ def _matches_ignore(
         if match is not None:
             return match
     return False
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyPreparation:
+    """Image-layer selection, not a claim of fresh resolution in this campaign."""
+
+    mode: Literal["locked", "resolved"]
+    warning: str | None
+    diagnostic_path: Path | None
+
+
+def read_dependency_preparation(directory: Path) -> DependencyPreparation:
+    """Require complete evidence rather than infer a mode from build logs."""
+    value = cast(object, json.loads((directory / "dependencies.json").read_text(encoding="utf-8")))
+    if not isinstance(value, dict):
+        raise ValueError("Dependency preparation evidence must be an object")
+    payload = cast(dict[str, object], value)
+    mode, warning, diagnostic = (payload.get(key) for key in ("mode", "warning", "diagnostic"))
+    if set(payload) != {"mode", "warning", "diagnostic"}:
+        raise ValueError("Dependency preparation evidence has invalid fields")
+    if mode == "locked" and warning is None and diagnostic is None:
+        return DependencyPreparation("locked", None, None)
+    if mode != "resolved" or not isinstance(warning, str) or not warning.strip():
+        raise ValueError("Dependency preparation evidence has invalid mode or warning")
+    if diagnostic != "dependencies.log":
+        raise ValueError("Dependency preparation evidence has invalid diagnostic")
+    path = directory / "dependencies.log"
+    if path.is_symlink() or not path.is_file() or not path.read_text(encoding="utf-8").strip():
+        raise ValueError("Dependency preparation diagnostic is missing or empty")
+    return DependencyPreparation("resolved", warning, path)

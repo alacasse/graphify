@@ -91,7 +91,11 @@ class CampaignResult:
     def save(self) -> None:
         from tools.install_sandbox.timing_report import render_campaign
 
-        payload = {"version": 1, "passed": self.passed, **asdict(self)}
+        payload = {
+            "version": 1,
+            "passed": self.passed,
+            **asdict(self, dict_factory=_campaign_fields),
+        }
         documents = {
             "campaign.json": json.dumps(payload, indent=2, default=str) + "\n",
             "campaign.txt": render_campaign(self),
@@ -100,6 +104,12 @@ class CampaignResult:
             temporary = self.output_directory / f"{name}.tmp"
             temporary.write_text(content, encoding="utf-8")
             temporary.replace(self.output_directory / name)
+
+
+def _campaign_fields(fields: list[tuple[str, object]]) -> dict[str, object]:
+    return {
+        key: value for key, value in fields if key != "dependency_preparation" or value is not None
+    }
 
 
 class InstallTestCoordinator:

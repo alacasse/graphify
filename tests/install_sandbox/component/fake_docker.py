@@ -59,6 +59,7 @@ def _build(state: Path, mode: str, arguments: list[str]) -> int:
     if os.environ.get("CONTROLLED_PREPARATION_FAIL") == "1":
         print("controlled package preparation failed", file=sys.stderr)
         return 9
+    _dependency_evidence(state, mode)
     context = Path(arguments[-1])
     shutil.copytree(context / "subject", state / "reference", dirs_exist_ok=True)
     (state / "captured-context.json").write_text(
@@ -67,7 +68,8 @@ def _build(state: Path, mode: str, arguments: list[str]) -> int:
     if os.environ.get("CONTROLLED_INSTALLER"):
         shutil.copyfile(os.environ["CONTROLLED_INSTALLER"], state / "graphify")
         (state / "graphify").chmod(0o755)
-    print("controlled package preparation", flush=True)
+    if mode != "cached":
+        print("controlled package preparation", flush=True)
     tag = _option(arguments, "--tag")
     iidfile = Path(_option(arguments, "--iidfile"))
     _resource_marker(state, "image", tag).write_text(_IMAGE_ID, encoding="utf-8")
@@ -83,7 +85,8 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     name = _option(arguments, "--name")
     marker = _resource_marker(state, "container", name)
     marker.write_text("running", encoding="utf-8")
-    if "--help" in arguments:
+    if any(value.endswith("/verify_preparation.py") for value in arguments):
+        _retrieve_dependency_evidence(state, arguments)
         return _verify(mode, marker)
     run_id = _environment(arguments, "INSTALL_SANDBOX_RUN_ID")
     output = _output_mount(arguments)
@@ -119,6 +122,31 @@ def _case_program(state: Path, mode: str, arguments: list[str], marker: Path) ->
     if mode != "container_cleanup_fail":
         marker.unlink(missing_ok=True)
     return 9 if mode == "run_fail" else code
+
+
+def _retrieve_dependency_evidence(state: Path, arguments: list[str]) -> None:
+    mounts = [arguments[i + 1] for i, item in enumerate(arguments) if item == "--mount"]
+    mount = next(value for value in mounts if "dst=/sandbox/preparation" in value)
+    source = next(field[4:] for field in mount.split(",") if field.startswith("src="))
+    shutil.copytree(state / "dependency-layer", Path(source), dirs_exist_ok=True)
+
+
+def _dependency_evidence(state: Path, build_mode: str) -> None:
+    output = state / "dependency-layer"
+    if build_mode == "cached" and output.exists():
+        return
+    output.mkdir(exist_ok=True)
+    mode = os.environ.get("FAKE_DEPENDENCIES", "locked")
+    if mode == "missing":
+        return
+    value = {"mode": mode, "warning": None, "diagnostic": None}
+    if mode in {"resolved", "missing_diagnostic"}:
+        value.update(
+            mode="resolved", warning="Lock not validated offline", diagnostic="dependencies.log"
+        )
+        if mode == "resolved":
+            (output / "dependencies.log").write_text("Full retained uv diagnostic\n")
+    (output / "dependencies.json").write_text(json.dumps(value))
 
 
 def _verify(mode: str, marker: Path) -> int:

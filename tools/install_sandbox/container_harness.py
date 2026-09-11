@@ -14,12 +14,16 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import FrameType
 from typing import Literal, TextIO
 
-from tools.install_sandbox.preparer import prepare_context
+from tools.install_sandbox.preparer import (
+    DependencyPreparation,
+    prepare_context,
+    read_dependency_preparation,
+)
 from tools.install_sandbox.timings import Timing, measure, skip_pending
 
 __all__ = ["ContainerHarness", "ContainerRunResult"]
@@ -49,6 +53,7 @@ class ContainerRunResult:
     stderr_tail: str
     detail: str
     timings: list[Timing] = field(default_factory=list[Timing])
+    dependency_preparation: DependencyPreparation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +161,7 @@ class ContainerHarness:
         self.temporary: tempfile.TemporaryDirectory[str] | None = None
         self.logs: Path | None = None
         self.diagnostics = _DiagnosticTails()
+        self.dependency_preparation: DependencyPreparation | None = None
 
     def __enter__(self) -> ContainerHarness:
         self.interrupts.__enter__()
@@ -184,7 +190,10 @@ class ContainerHarness:
         except Exception as error:
             outcome = _Outcome("incomplete", "build", 2, f"Preparation failed: {error}")
         self.ready = outcome.state == "completed" and not self.pending_containers
-        return self._result(outcome, not self.pending_containers, records, self.run_id)
+        return replace(
+            self._result(outcome, not self.pending_containers, records, self.run_id),
+            dependency_preparation=self.dependency_preparation,
+        )
 
     def _prepare_image(self, subject: Path, records: list[Timing]) -> _Outcome:
         with measure(records[0]):
@@ -205,8 +214,23 @@ class ContainerHarness:
         if failure is not None:
             return failure
         with measure(records[3]):
-            verified = self._container(None, None, self.verify_timeout, "verify")
+            verified = self._verify_image()
         return _Outcome(verified.state, verified.phase, verified.exit_code, verified.detail)
+
+    def _verify_image(self) -> ContainerRunResult:
+        assert self.logs is not None
+        output = _prepare_output(self.logs / "dependencies")
+        if "," in str(output):
+            raise ValueError("Preparation evidence mount path must be comma-free")
+        verified = self._container(None, output, self.verify_timeout, "verify")
+        try:
+            self.dependency_preparation = read_dependency_preparation(output)
+        except (OSError, ValueError) as error:
+            detail = f"Dependency preparation evidence unavailable or invalid: {error}"
+            if verified.state != "completed":
+                return replace(verified, detail=f"{verified.detail}; {detail}")
+            return replace(verified, state="incomplete", phase="verify", exit_code=2, detail=detail)
+        return verified
 
     def _check_temporary_parent(self, subject: Path) -> None:
         assert self.logs is not None
@@ -328,15 +352,22 @@ class ContainerHarness:
             "--workdir",
             "/sandbox/work",
         ]
+        assert output is not None
         if case is None:
             return [
                 *command,
+                "--mount",
+                _mount(output, "/sandbox/preparation", False),
                 "--entrypoint",
-                "/opt/install-sandbox/venv/bin/graphify",
+                "python",
                 self.image_id,
-                "--help",
+                "-I",
+                "-B",
+                "/opt/install-sandbox/tools/install_sandbox/verify_preparation.py",
+                "/opt/install-sandbox/preparation",
+                "/sandbox/preparation",
+                "/opt/install-sandbox/venv/bin/graphify",
             ]
-        assert output is not None
         return [
             *command,
             "--mount",

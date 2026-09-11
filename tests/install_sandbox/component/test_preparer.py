@@ -1,6 +1,7 @@
 """Exercise source selection through the real filesystem copy boundary."""
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -173,3 +174,34 @@ def test_unreadable_ignore_file_is_a_copy_error(tmp_path: Path) -> None:
 
     with pytest.raises(UnicodeDecodeError):
         prepare_context(subject, tmp_path)
+
+
+@pytest.mark.parametrize("lock", [False, True])
+def test_metadata_comes_from_same_filtered_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lock: bool
+) -> None:
+    import shutil
+
+    subject = tmp_path / "subject"
+    files = {"pyproject.toml": '[project]\ndependencies=["original"]', "code.py": "original"}
+    if lock:
+        files["uv.lock"] = "original lock"
+    _write(subject, files)
+    copytree = shutil.copytree
+
+    def capture(
+        src: Path, dst: Path, *, symlinks: bool, ignore: Callable[[str, list[str]], set[str]]
+    ) -> Path:
+        result = copytree(src, dst, symlinks=symlinks, ignore=ignore)
+        _write(subject, {name: "checkout changed after capture" for name in files})
+        return result
+
+    monkeypatch.setattr(shutil, "copytree", capture)
+    context = prepare_context(subject, tmp_path)
+    for name in ("pyproject.toml", "uv.lock"):
+        if name in files:
+            assert (context / "metadata" / name).read_text() == files[name]
+            assert (context / "subject" / name).read_text() == files[name]
+        else:
+            assert not (context / "metadata" / name).exists()
+    assert (context / "subject/code.py").read_text() == "original"

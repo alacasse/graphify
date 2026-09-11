@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.install_sandbox.component import test_coordinator as first
-from tests.install_sandbox.component.test_campaign import campaign
+from tests.install_sandbox.component.test_campaign import campaign, commands
 from tests.install_sandbox.docker import test_first_install_docker as proof
 from tools.install_sandbox.coordinator import CampaignResult, CoordinatedResult
 from tools.install_sandbox.timing_reader import CaseTimingResult
@@ -94,3 +94,23 @@ def test_partial_report_distinguishes_zero_skipped_and_unavailable(
 
 def checked_image(*args: object) -> None:
     pass
+
+
+def test_shared_image_helper_checks_the_current_verification_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first.arrange_first(tmp_path, monkeypatch)
+    result = campaign(tmp_path, ("first-install",))
+    assert result.passed
+    calls = commands(tmp_path)
+    trace = tmp_path / "docker-commands.jsonl"
+    trace.write_text("".join(json.dumps(call) + "\n" for call in calls))
+    proof._assert_shared_image(tmp_path, result)  # pyright: ignore[reportPrivateUsage]
+    # A successful campaign object cannot stand in for the correct command trace.
+    verification = next(call for call in calls if call[0] == "run")
+    verification[:] = [
+        argument.replace("verify_preparation.py", "unrelated.py") for argument in verification
+    ]
+    trace.write_text("".join(json.dumps(call) + "\n" for call in calls))
+    with pytest.raises(AssertionError):
+        proof._assert_shared_image(tmp_path, result)  # pyright: ignore[reportPrivateUsage]

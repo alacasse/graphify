@@ -161,6 +161,17 @@ def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> No
         check=False,
     )
     assert result.returncode == 0, result.stderr.decode()
+    prefix = "INSTALL_SANDBOX_ENTRY_TIMINGS "
+    trace = next(line for line in result.stderr.decode().splitlines() if line.startswith(prefix))
+    timing = json.loads(trace.removeprefix(prefix))
+    assert timing["entry"] == "case" and timing["version"] == 1
+    assert set(timing["seconds"]) == {
+        "initial_imports",
+        "arguments",
+        "runner_import",
+        "runner_setup",
+    }
+    assert all(value >= 0 for value in timing["seconds"].values())
     saved = json.loads((tmp_path / "results/result.json").read_bytes())
     assert saved["status"] == "not_run"
     assert "Initial verification failed" in saved["preparation"]["reason"]
@@ -173,3 +184,21 @@ def _admitted(filename: str, rules: list[str]) -> bool:
         if fnmatch.fnmatchcase(filename, rule.removeprefix("!")):
             included = rule.startswith("!")
     return included
+
+
+def test_unwritable_timing_stderr_does_not_prevent_case_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = LocalCase(tmp_path)
+    local.prepare_executable()
+
+    class Unwritable:
+        def write(self, value: str) -> int:
+            raise OSError("Controlled timing output failure")
+
+        def flush(self) -> None:
+            raise OSError("Controlled timing flush failure")
+
+    monkeypatch.setattr(sys, "stderr", Unwritable())
+    assert main(_arguments(tmp_path)) == 0
+    assert json.loads((tmp_path / "results/result.json").read_text())["status"] == "passed"

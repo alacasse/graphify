@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -14,7 +15,7 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from types import FrameType
 from typing import Literal, TextIO
@@ -63,6 +64,7 @@ class _CommandResult:
     stderr_tail: str = ""
     timed_out: bool = False
     interrupted_by: int | None = None
+    process_timings: list[Timing] = field(default_factory=list[Timing])
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,6 +480,7 @@ class ContainerHarness:
                 self.interrupts if observe_interrupts else None,
                 log,
             )
+            _write_process_timings(log, result)
         self.diagnostics.add(phase, result)
         return result
 
@@ -594,21 +597,36 @@ def _execute_command(
     interrupts: _SignalCapture | None,
     log: TextIO | None = None,
 ) -> _CommandResult:
+    launch = Timing("client_launch")
     try:
-        process = subprocess.Popen(
-            list(command),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            start_new_session=True,
-        )
+        with measure(launch):
+            process = subprocess.Popen(
+                list(command),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                start_new_session=True,
+            )
     except FileNotFoundError as exc:
-        return _CommandResult(127, stderr_tail=str(exc))
+        return _CommandResult(127, stderr_tail=str(exc), process_timings=[launch])
     except OSError as exc:
-        return _CommandResult(2, stderr_tail=str(exc))
-    return _observe_process(process, timeout_seconds, graceful_termination_seconds, interrupts, log)
+        return _CommandResult(2, stderr_tail=str(exc), process_timings=[launch])
+    result = _observe_process(
+        process, timeout_seconds, graceful_termination_seconds, interrupts, log
+    )
+    return replace(result, process_timings=[launch, *result.process_timings])
+
+
+def _write_process_timings(log: TextIO, result: _CommandResult) -> None:
+    """Keep sub-durations out of phase totals; logging cannot change command success."""
+    payload = {"version": 1, "phases": [asdict(record) for record in result.process_timings]}
+    try:
+        log.write("INSTALL_SANDBOX_PROCESS_TIMINGS " + json.dumps(payload) + "\n")
+        log.flush()
+    except OSError:
+        pass
 
 
 def _observe_process(
@@ -629,18 +647,25 @@ def _observe_process(
     for reader in readers:
         reader.start()
     timed_out, interrupted_by = _wait_for_process(process, timeout_seconds, interrupts)
-    if timed_out or interrupted_by is not None:
-        _terminate_process_group(process, graceful_termination_seconds)
-    else:
-        process.wait()
-    for reader in readers:
-        reader.join(timeout=2.0)
+    records = [Timing(phase) for phase in ("post_detection_recovery", "stdout_join", "stderr_join")]
+    with measure(records[0]):
+        if timed_out or interrupted_by is not None:
+            records[0].diagnostic = "Includes forced process-group termination"
+            _terminate_process_group(process, graceful_termination_seconds)
+        else:
+            process.wait()
+    for reader, record in zip(readers, records[1:], strict=True):
+        with measure(record):
+            reader.join(timeout=2.0)
+        if reader.is_alive():
+            record.diagnostic = "Reader still alive after join timeout; output may be incomplete"
     return _CommandResult(
         process.returncode if process.returncode is not None else 2,
         stdout_tail.value,
         stderr_tail.value,
         timed_out,
         interrupted_by,
+        records,
     )
 
 

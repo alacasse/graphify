@@ -115,6 +115,7 @@ def _assert_owned_cleanup(directory: Path, result: CampaignResult) -> None:
     assert not subprocess.check_output(
         [runtime, "image", "ls", "--quiet", "--filter", f"reference={tag}"],
         text=True,
+        timeout=15,
     ).strip()
     commands = [
         json.loads(line) for line in (directory / "docker-commands.jsonl").read_text().splitlines()
@@ -133,6 +134,7 @@ def _assert_owned_cleanup(directory: Path, result: CampaignResult) -> None:
                     f"name=^/{name}$",
                 ],
                 text=True,
+                timeout=15,
             ).strip()
 
 
@@ -188,7 +190,8 @@ def _assert_shared_image(directory: Path, result: CampaignResult) -> None:
     ]
     runs = [c for c in commands if c[0] == "run"]
     assert len([c for c in commands if c[0] == "build"]) == 1
-    assert len(runs) == len(result.cases) + 1 and "--help" in runs[0]
+    assert len(runs) == len(result.cases) + 1
+    assert any(argument.endswith("/verify_preparation.py") for argument in runs[0])
     assert result.preparation is not None
     assert all(result.preparation.image_id in c for c in runs)
     assert len({c[c.index("--name") + 1] for c in runs}) == len(runs)

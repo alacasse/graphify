@@ -406,6 +406,7 @@ def _reinstall_stability(
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-json-entry",
     }:
         return
     dest = destinations(case)
@@ -526,6 +527,47 @@ class InstallVerifier:
         for root, path in sorted(keys):
             if (root, path) != ("project", plan["altered_path"]):
                 _preserved_entry(installed, degraded, root, path, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_json_repair(
+        self,
+        case: InstallTestCase,
+        plan: FileAlterationPlan,
+        content: bytes,
+        installed: FilesystemSnapshot,
+        degraded: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Compare personal JSON against the case and preserve every other entry."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
+        )
+        path = plan["altered_path"]
+        observed = _file(degraded, path, result)
+        if observed is not None:
+            try:
+                expected_json = json.dumps(_read_json(content), sort_keys=True)
+                observed_json = json.dumps(_read_json(observed), sort_keys=True)
+                if observed_json != expected_json:
+                    _mismatch(
+                        result,
+                        "invalid_preparation",
+                        "project",
+                        path,
+                        "personal JSON with only the skill entry removed",
+                        "different JSON",
+                    )
+            except (ValueError, UnicodeError):
+                _mismatch(
+                    result, "invalid_json", "project", path, "valid JSON object", "invalid JSON"
+                )
+        previous = _file(installed, path, result)
+        if previous is not None:
+            _json(case, content, previous, result)
+        keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
+        for root, entry_path in sorted(keys):
+            if (root, entry_path) != ("project", path):
+                _preserved_entry(installed, degraded, root, entry_path, result)
         result.complete = not result.obstacles
         return result
 

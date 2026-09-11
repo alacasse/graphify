@@ -11,6 +11,7 @@ from tools.install_sandbox.case import InstallTestCase
 from tools.install_sandbox.driver import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.environment import (
     TestEnvironment,
+    json_repair_plan,
     markdown_repair_plan,
     reference_repair_plan,
     skill_backup_plan,
@@ -164,6 +165,7 @@ class InstallTestRunner:
                         "repair-skill",
                         "preserve-skill-backup",
                         "repair-markdown-section",
+                        "repair-json-entry",
                     }:
                         before = self._prepare_step(
                             case, environment, expected, installed, writer, step
@@ -203,16 +205,9 @@ class InstallTestRunner:
         writer: TestResultWriter,
         step: StepEvidence,
     ) -> FilesystemSnapshot:
-        if case.name == "repair-markdown-section":
-            plan, content = markdown_repair_plan(case)
-            writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing Markdown section alteration\n")
-            reason = environment.prepare_markdown_repair(plan, content)
-            prepared_state = environment.observe(writer, "before", step_index=1)
-            verification = self.verifier.verify_markdown_repair(
-                case, plan, content, installed, prepared_state
-            )
-        elif case.name == "preserve-skill-backup":
+        if case.name in {"repair-markdown-section", "repair-json-entry"}:
+            return self._prepare_shared_file(case, environment, installed, writer, step)
+        if case.name == "preserve-skill-backup":
             plan, content = skill_backup_plan(case, expected)
             writer.write_step_preparation_plan(plan, content)
             writer.append_log("journal.log", "Preparing previous skill backup witness\n")
@@ -241,6 +236,35 @@ class InstallTestRunner:
             )
         self._record_preparation(writer, step, plan, reason, verification)
         return prepared_state
+
+    def _prepare_shared_file(
+        self,
+        case: InstallTestCase,
+        environment: TestEnvironment,
+        installed: FilesystemSnapshot,
+        writer: TestResultWriter,
+        step: StepEvidence,
+    ) -> FilesystemSnapshot:
+        if case.name == "repair-json-entry":
+            plan, content = json_repair_plan(case)
+            writer.write_step_preparation_plan(plan, content)
+            writer.append_log("journal.log", "Preparing JSON entry deletion\n")
+            reason = environment.prepare_json_repair(plan)
+            prepared = environment.observe(writer, "before", step_index=1)
+            verification = self.verifier.verify_json_repair(
+                case, plan, content, installed, prepared
+            )
+        else:
+            plan, content = markdown_repair_plan(case)
+            writer.write_step_preparation_plan(plan, content)
+            writer.append_log("journal.log", "Preparing Markdown section alteration\n")
+            reason = environment.prepare_markdown_repair(plan, content)
+            prepared = environment.observe(writer, "before", step_index=1)
+            verification = self.verifier.verify_markdown_repair(
+                case, plan, content, installed, prepared
+            )
+        self._record_preparation(writer, step, plan, reason, verification)
+        return prepared
 
     @staticmethod
     def _record_preparation(

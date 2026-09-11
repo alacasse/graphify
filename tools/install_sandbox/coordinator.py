@@ -284,7 +284,7 @@ class InstallTestCoordinator:
             target=target,
             scope="project",
             spec=spec,
-            initial_files=first_install_files(spec),
+            initial_files=first_install_files(spec, case_name),
             operations=case_operations(case_name),
         )
 

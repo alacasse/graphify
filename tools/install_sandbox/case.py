@@ -33,7 +33,7 @@ def first_install_files(
     settings = (
         '{\n  "theme": "dark",\n  ' + json.dumps(spec.json_list) + ': ["my-instructions.md"]\n}\n'
     )
-    return [
+    files: list[InitialFile] = [
         {
             "root": "project",
             "path": str(directory / spec.markdown_file),
@@ -47,6 +47,22 @@ def first_install_files(
         },
         {"root": "home", "path": "personal-notes.txt", "content": _PERSONAL_NOTES},
     ]
+    if case_name == "repair-json-entry":
+        files[1]["content"] = (
+            json.dumps(
+                {"theme": "dark", spec.json_list: ["my-instructions.md", "team-guidelines.md"]},
+                indent=2,
+            )
+            + "\n"
+        )
+        files.append(
+            {
+                "root": "project",
+                "path": str(config_file.parent / "team-guidelines.md"),
+                "content": "# Team guidelines\nExplain changes before applying them.\n",
+            }
+        )
+    return files
 
 
 def _initial_files(value: object) -> list[InitialFile]:
@@ -75,6 +91,7 @@ def case_operations(name: str) -> list[str]:
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-json-entry",
     }:
         return ["install", "install"]
     raise ValueError(f"Unsupported project case: {name}")

@@ -444,8 +444,8 @@ def _check_step_preparation_evidence(
         return
     sources = _check_snapshot(output, "expected.json")
     _check_snapshot(output, "steps/0/before.json")
-    if case.name in {"preserve-skill-backup", "repair-markdown-section", "repair-json-entry"}:
-        _check_content_evidence(case, output)
+    if case.name != "repair-references":
+        _check_content_evidence(result, case, output)
     if preparation is None:
         return
     _check_snapshot(output, preparation["before"], complete=preparation["verification"].complete)
@@ -540,7 +540,6 @@ def _check_case_repair_plan(
             raise ValueError("Prepared shared file content does not match the case witness")
     elif case.name == "repair-skill":
         _check_skill_repair_plan(plan, case, output)
-        _check_content_evidence(case, output)
     else:
         if "deleted_path" not in plan:
             raise ValueError("Reference repair requires a deletion")
@@ -554,6 +553,7 @@ def _presence_only(case: InstallTestCase) -> str | None:
 def _check_command_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
     if result.evidence != {"journal": "journal.log", "expected_contents": "expected/"}:
         raise ValueError("Prepared step result requires its retained source and journal references")
+    _check_expected_sources(case, output)
     for relative in (result.preparation["log"], "journal.log"):
         safe_evidence_path(output, relative).read_bytes()
     for index, step in enumerate(result.steps):
@@ -575,6 +575,23 @@ def _check_command_evidence(result: InstallTestResult, case: InstallTestCase, ou
             if not isinstance(reference, str):
                 raise ValueError("Missing command evidence")
             safe_evidence_path(output, reference).read_bytes()
+
+
+def _check_expected_sources(case: InstallTestCase, output: Path) -> None:
+    """Require the announced source inventory and bytes without rechecking installation."""
+    entries = _check_snapshot(output, "expected.json")
+    sources = {text(entry["path"]): entry for entry in entries}
+    required = {
+        case.spec.skill_source: "file",
+        case.spec.markdown_source: "file",
+        case.spec.references_source: "directory",
+    }
+    for path, kind in required.items():
+        if path not in sources or sources[path]["kind"] != kind:
+            raise ValueError(f"Missing retained source inventory entry: {path}")
+    for entry in entries:
+        if entry["kind"] == "file" and entry.get("content_file") is None:
+            raise ValueError(f"Source requires retained content: {entry['path']}")
 
 
 def _check_repair_plan(
@@ -651,7 +668,7 @@ def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
             )
 
 
-def _check_content_evidence(case: InstallTestCase, output: Path) -> None:
+def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
     """Files involved in preparation must retain actual bytes, not just digests."""
     dest = destinations(case)
     paths = {
@@ -662,12 +679,50 @@ def _check_content_evidence(case: InstallTestCase, output: Path) -> None:
         path = safe_evidence_path(output, relative)
         if not path.exists():
             continue  # A blocked preparation has no second command observation.
-        snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
-        obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
-        for value in _list(snapshot["entries"]):
-            entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
-            if entry["root"] == "project" and entry["path"] in paths:
-                _check_retained_content(entry, obstacles)
+        required: set[str] = (
+            _required_content_paths(case, relative)
+            if _successful_stage(result, relative)
+            else set()
+        )
+        _check_content_snapshot(output, relative, paths, required)
+
+
+def _successful_stage(result: InstallTestResult, relative: str) -> bool:
+    if relative == "steps/1/before.json":
+        preparation = result.steps[1].get("preparation")
+        return preparation is not None and preparation["ready"]
+    step = result.steps[0 if relative == "steps/0/after.json" else 1]
+    return step["command"] is not None and _check_attempted(step) == "passed"
+
+
+def _required_content_paths(case: InstallTestCase, relative: str) -> set[str]:
+    dest = destinations(case)
+    if case.name in {"repair-markdown-section", "repair-json-entry"}:
+        return {dest["json" if case.name == "repair-json-entry" else "markdown"]}
+    paths = {dest["skill"]}
+    if relative == "steps/1/after.json" or (
+        case.name == "preserve-skill-backup" and relative == "steps/1/before.json"
+    ):
+        paths.add(dest["skill"] + ".bak")
+    return paths
+
+
+def _check_content_snapshot(
+    output: Path, relative: str, paths: set[str], required: set[str]
+) -> None:
+    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
+    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
+    retained: set[str] = set()
+    for value in _list(snapshot["entries"]):
+        entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
+        if entry["root"] == "project" and entry["path"] in paths:
+            _check_retained_content(entry, obstacles)
+            if entry["kind"] == "file" and entry.get("content_file") is not None:
+                retained.add(text(entry["path"]))
+    if missing := required - retained:
+        raise ValueError(
+            f"Successful stage {relative} requires retained content: {sorted(missing)}"
+        )
 
 
 def _check_retained_content(entry: dict[str, object], obstacles: list[ObservationObstacle]) -> None:

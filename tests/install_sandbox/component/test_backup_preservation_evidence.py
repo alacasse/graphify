@@ -135,3 +135,31 @@ def test_malformed_preparation_snapshot_is_a_host_error(
     result = run_backup(tmp_path)
     assert result.test is None and result.result_error and not result.passed, asdict(result)
     assert result.container.state == "completed" and result.container.cleanup_complete
+
+
+@pytest.mark.parametrize(
+    "phase,path",
+    [
+        ("steps/0/after", SKILL),
+        ("steps/1/before", SKILL),
+        ("steps/1/after", SKILL),
+        ("steps/1/before", SKILL + ".bak"),
+        ("steps/1/after", SKILL + ".bak"),
+    ],
+)
+def test_success_requires_skill_and_backup_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, path: str
+) -> None:
+    arrange_backup(tmp_path, monkeypatch)
+    _corrupt(
+        tmp_path,
+        monkeypatch,
+        f'snapshot_path = output / "{phase}.json"\n'
+        "snapshot = json.loads(snapshot_path.read_bytes())\n"
+        f'snapshot["entries"] = [e for e in snapshot["entries"] if e["path"] != {path!r}]\n'
+        "snapshot_path.write_text(json.dumps(snapshot))\n"
+        f'(output / "{phase}/project/{path}").unlink()',
+    )
+    result = run_backup(tmp_path)
+    assert result.test is None and result.result_error and not result.passed, asdict(result)
+    assert result.container.state == "completed" and result.container.cleanup_complete

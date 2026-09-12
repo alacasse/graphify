@@ -26,9 +26,9 @@ def reinstall_script(mode: str = "passed", step: int = 1) -> str:
             f"Path({_MARKDOWN!r}).open('a').write('\\n## graphify\\nUse the graph.\\n')"
         ),
         "duplicate_json": (
-            f"p = Path({_JSON!r}); "
-            "p.write_text(p.read_text().replace(']}', "
-            "',\"skills/graphify/SKILL.md\"]}'))"
+            f"p = Path({_JSON!r}); import json; data = json.loads(p.read_text()); "
+            "data['instructions'].append('skills/graphify/SKILL.md'); "
+            "p.write_text(json.dumps(data))"
         ),
         "user_markdown": (
             f"p = Path({_MARKDOWN!r}); p.write_text(p.read_text().replace("

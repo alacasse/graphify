@@ -33,6 +33,31 @@ def first_install_files(
     settings = (
         '{\n  "theme": "dark",\n  ' + json.dumps(spec.json_list) + ': ["my-instructions.md"]\n}\n'
     )
+    if case_name in {"first-install", "reinstall"}:
+        settings = (
+            json.dumps(
+                {
+                    "theme": "dark",
+                    spec.json_list: ["my-instructions.md"],
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash|Grep",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": "python personal_graphify_audit.py",
+                                        "timeout": 17,
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                },
+                indent=2,
+            )
+            + "\n"
+        )
     files: list[InitialFile] = [
         {
             "root": "project",

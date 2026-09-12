@@ -4,6 +4,7 @@ import json
 import shutil
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,19 @@ _SPECS = Path(__file__).resolve().parents[3] / "tools/install_sandbox/specs/refe
 SETTINGS = ".sandbox-reference/settings.json"
 ENTRY = "skills/graphify/SKILL.md"
 PERSONAL = {"theme": "dark", "instructions": ["my-instructions.md", "team-guidelines.md"]}
-CONFORMING = {"theme": "dark", "instructions": ["my-instructions.md", "team-guidelines.md", ENTRY]}
+CONFORMING: dict[str, Any] = {
+    "theme": "dark",
+    "instructions": ["my-instructions.md", "team-guidelines.md", ENTRY],
+}
+
+CONFORMING["hooks"] = {
+    "PreToolUse": [
+        {
+            "matcher": "Bash|Grep",
+            "hooks": [{"type": "command", "command": "graphify hook-guard search"}],
+        }
+    ]
+}
 
 
 def _second(mode: str, repaired: str) -> str:
@@ -162,6 +175,8 @@ def test_bad_reinstallation_keeps_diagnostics(
         "reverse",
         "theme",
         "extra_change",
+        "hooks",
+        "hook_extra",
         "read_failure",
         "unreadable",
     ],

@@ -102,3 +102,22 @@ def test_matching_saved_documents_do_not_hide_invalid_bindings(
     result = run_markdown(tmp_path)
     assert result.test is None and result.result_error and not result.passed, asdict(result)
     assert result.container.cleanup_complete
+
+
+@pytest.mark.parametrize("phase", ["steps/0/after", "steps/1/before", "steps/1/after"])
+def test_success_requires_markdown_entry_in_each_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    arrange_markdown(tmp_path, monkeypatch)
+    _corrupt(
+        tmp_path,
+        monkeypatch,
+        f'path = output / "{phase}.json"\n'
+        "snapshot = json.loads(path.read_bytes())\n"
+        f'snapshot["entries"] = [e for e in snapshot["entries"] if e["path"] != {MARKDOWN!r}]\n'
+        "path.write_text(json.dumps(snapshot))\n"
+        f'(output / "{phase}/project/{MARKDOWN}").unlink()',
+    )
+    result = run_markdown(tmp_path)
+    assert result.test is None and result.result_error and not result.passed, asdict(result)
+    assert result.container.state == "completed" and result.container.cleanup_complete

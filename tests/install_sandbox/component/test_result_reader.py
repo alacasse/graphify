@@ -58,6 +58,29 @@ def _document() -> dict[str, object]:
 
 def _write(output: Path, document: dict[str, object]) -> None:
     """Provide transport evidence without deriving any installation verdict."""
+    spec = _case().spec
+    sources = {
+        spec.skill_source: b"Transport skill source\n",
+        spec.markdown_source: b"Transport Markdown source\n",
+        spec.references_source + "/one.md": b"Transport reference source\n",
+    }
+    entries: list[dict[str, object]] = [
+        {
+            "root": "subject",
+            "path": spec.references_source,
+            "kind": "directory",
+            "listing_complete": True,
+        }
+    ]
+    for relative, content in sources.items():
+        binding = "expected/" + relative
+        path = output / binding
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        entries.append(
+            {"root": "subject", "path": relative, "kind": "file", "content_file": binding}
+        )
+    (output / "expected.json").write_text(json.dumps({"entries": entries, "obstacles": []}))
     for name in ("preparation.log", "journal.log", "steps/0/stdout.txt", "steps/0/stderr.txt"):
         path = output / name
         path.parent.mkdir(parents=True, exist_ok=True)

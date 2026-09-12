@@ -336,6 +336,9 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         },
     )
     _check_consistency(result)
+    if result.preparation["ready"]:
+        _check_command_evidence(result, case, output_directory)
+        _check_json_observations(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
     return result
 
@@ -347,7 +350,7 @@ def _read_json_evidence(output: Path, relative: str) -> object:
 
 
 def _check_snapshot(
-    output: Path, relative: str, *, complete: bool = True
+    output: Path, relative: str, *, complete: bool = True, presence_only: str | None = None
 ) -> list[dict[str, object]]:
     """Validate inventory and content bindings, without deciding file conformance."""
     data = fields(_read_json_evidence(output, relative), "entries obstacles")
@@ -364,15 +367,19 @@ def _check_snapshot(
         seen.add(key)
         entries.append(entry)
     if complete:
-        _check_complete_snapshot(entries, _list(data["obstacles"]))
+        _check_complete_snapshot(entries, _list(data["obstacles"]), presence_only)
     return entries
 
 
-def _check_complete_snapshot(entries: list[dict[str, object]], obstacles: list[object]) -> None:
+def _check_complete_snapshot(
+    entries: list[dict[str, object]], obstacles: list[object], presence_only: str | None = None
+) -> None:
     if obstacles or not entries:
         raise ValueError("Complete verification requires observable snapshot evidence")
     for entry in entries:
         kind = entry["kind"]
+        if kind == "file" and entry["root"] == "project" and entry["path"] == presence_only:
+            continue
         if kind == "file" and entry.get("content_file") is None and entry.get("sha256") is None:
             raise ValueError("Complete verification requires file content evidence")
         if kind == "directory" and entry.get("listing_complete") is not True:
@@ -437,10 +444,8 @@ def _check_step_preparation_evidence(
         return
     sources = _check_snapshot(output, "expected.json")
     _check_snapshot(output, "steps/0/before.json")
-    _check_command_evidence(result, output)
     if case.name in {"preserve-skill-backup", "repair-markdown-section", "repair-json-entry"}:
         _check_content_evidence(case, output)
-    _check_json_observations(result, case, output)
     if preparation is None:
         return
     _check_snapshot(output, preparation["before"], complete=preparation["verification"].complete)
@@ -459,28 +464,46 @@ def _check_step_preparation_evidence(
 def _check_json_observations(
     result: InstallTestResult, case: InstallTestCase, output: Path
 ) -> None:
-    """Successful JSON stages require their shared-document evidence to be present."""
-    if case.name != "repair-json-entry":
-        return
-    required: list[str] = []
+    """Retain observable JSON at every attempted stage, including failed stages."""
+    _check_json_snapshot(output, "steps/0/before.json", case, required=True, complete=True)
     for index, step in enumerate(result.steps):
-        if step["command"] is not None and _check_attempted(step) == "passed":
-            required.append(f"steps/{index}/after.json")
-        preparation = step.get("preparation")
-        if preparation is not None and preparation["ready"]:
-            required.append(preparation["before"])
-    for relative in required:
-        entries = _check_snapshot(output, relative)
-        entry = next(
-            (
-                e
-                for e in entries
-                if e["root"] == "project" and e["path"] == destinations(case)["json"]
-            ),
-            None,
+        verification = step["verification"]
+        if step["command"] is None or verification is None:
+            continue
+        if index:
+            _check_json_snapshot(
+                output, f"steps/{index}/before.json", case, required=True, complete=True
+            )
+        _check_json_snapshot(
+            output,
+            f"steps/{index}/after.json",
+            case,
+            required=_check_attempted(step) == "passed",
+            complete=verification.complete,
         )
-        if entry is None or entry["kind"] != "file" or entry.get("content_file") is None:
-            raise ValueError("Successful JSON stage requires retained settings content")
+
+
+def _check_json_snapshot(
+    output: Path,
+    relative: str,
+    case: InstallTestCase,
+    *,
+    required: bool,
+    complete: bool,
+) -> None:
+    entries = _check_snapshot(
+        output, relative, complete=complete, presence_only=_presence_only(case)
+    )
+    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
+    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
+    entry = next(
+        (e for e in entries if e["root"] == "project" and e["path"] == destinations(case)["json"]),
+        None,
+    )
+    if required and (entry is None or entry["kind"] != "file" or entry.get("content_file") is None):
+        raise ValueError("Successful JSON stage requires retained settings content")
+    if entry is not None:
+        _check_retained_content(entry, obstacles)
 
 
 def _check_case_preparation_plan(
@@ -524,7 +547,11 @@ def _check_case_repair_plan(
         _check_repair_plan(plan, case, output, sources)
 
 
-def _check_command_evidence(result: InstallTestResult, output: Path) -> None:
+def _presence_only(case: InstallTestCase) -> str | None:
+    return destinations(case)["version"] if case.name == "first-install" else None
+
+
+def _check_command_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
     if result.evidence != {"journal": "journal.log", "expected_contents": "expected/"}:
         raise ValueError("Prepared step result requires its retained source and journal references")
     for relative in (result.preparation["log"], "journal.log"):
@@ -534,7 +561,12 @@ def _check_command_evidence(result: InstallTestResult, output: Path) -> None:
             continue
         verification = step["verification"]
         assert verification is not None
-        _check_snapshot(output, f"steps/{index}/after.json", complete=verification.complete)
+        _check_snapshot(
+            output,
+            f"steps/{index}/after.json",
+            complete=verification.complete,
+            presence_only=_presence_only(case),
+        )
         saved = _verification(_read_json_evidence(output, f"steps/{index}/verification.json"))
         if saved != step["verification"]:
             raise ValueError("Step verification differs from its saved evidence")

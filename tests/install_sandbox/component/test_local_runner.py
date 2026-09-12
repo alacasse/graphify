@@ -17,16 +17,32 @@ _CASE = Path(__file__).with_name("fixtures") / "first-install.json"
 _INITIAL = (
     "# My project\n\n## Language\nRespond in English.\n\n## Changes\nExplain proposed changes.\n"
 )
-# Literal effects only: no installer parsing, merging, reference discovery or spec interpretation.
+# Literal effects only: no product imports, reference discovery or spec interpretation.
 _FILES = {
     ".sandbox-reference/skills/graphify/SKILL.md": "# Local skill\n",
     ".sandbox-reference/skills/graphify/references/one.md": "Reference one.\n",
     ".sandbox-reference/skills/graphify/.graphify_version": "Any version\n",
     ".sandbox-reference/instructions.md": _INITIAL + "\n## graphify\nUse the graph.\n",
-    ".sandbox-reference/settings.json": (
-        '{"theme":"dark","instructions":["my-instructions.md","skills/graphify/SKILL.md"]}\n'
-    ),
 }
+
+
+def settings_script() -> str:
+    return (
+        "import json\n"
+        "p = Path('.sandbox-reference/settings.json')\n"
+        "data = json.loads(p.read_text())\n"
+        "data['theme'] = 'dark'\n"
+        "data['instructions'] = ['my-instructions.md', 'skills/graphify/SKILL.md']\n"
+        "groups = data.setdefault('hooks', {}).setdefault('PreToolUse', [])\n"
+        "group = next((g for g in groups if g['matcher'] == 'Bash|Grep'), None)\n"
+        "if group is None:\n"
+        "    group = {'matcher': 'Bash|Grep', 'hooks': []}\n"
+        "    groups.append(group)\n"
+        "hook = {'type': 'command', 'command': 'graphify hook-guard search'}\n"
+        "if hook not in group['hooks']:\n"
+        "    group['hooks'].append(hook)\n"
+        "p.write_text(json.dumps(data))\n"
+    )
 
 
 def controlled_script(mode: str) -> str:
@@ -45,7 +61,8 @@ def controlled_script(mode: str) -> str:
         f"for name, content in {effects!r}.items():\n"
         "    path = Path(name)\n    path.parent.mkdir(parents=True, exist_ok=True)\n"
         "    path.write_text(content, encoding='utf-8')\n"
-        "print('controlled stdout', flush=True)\n"
+        + (settings_script() if mode != "no_effects" else "")
+        + "print('controlled stdout', flush=True)\n"
         "print('controlled stderr', file=__import__('sys').stderr, flush=True)\n" + ending + "\n"
     )
 

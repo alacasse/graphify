@@ -56,7 +56,35 @@ def _document() -> dict[str, object]:
     )
 
 
-def _write(output: Path, document: object) -> None:
+def _write(output: Path, document: dict[str, object]) -> None:
+    """Provide transport evidence without deriving any installation verdict."""
+    for name in ("preparation.log", "journal.log", "steps/0/stdout.txt", "steps/0/stderr.txt"):
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Transport fixture\n")
+    for phase in ("before", "after"):
+        prefix = f"steps/0/{phase}"
+        content = f"{prefix}/project/.sandbox-reference/settings.json"
+        path = output / content
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"transport": "not an installation verdict"}\n')
+        snapshot = {
+            "entries": [
+                {
+                    "root": "project",
+                    "path": ".sandbox-reference/settings.json",
+                    "kind": "file",
+                    "content_file": content,
+                }
+            ],
+            "obstacles": [],
+        }
+        (output / f"{prefix}.json").write_text(json.dumps(snapshot))
+    steps = document.get("steps")
+    if isinstance(steps, list) and steps and isinstance(steps[0], dict):
+        (output / "steps/0/verification.json").write_text(
+            json.dumps(cast(dict[str, object], steps[0]).get("verification"))
+        )
     (output / "result.json").write_text(json.dumps(document), encoding="utf-8")
 
 
@@ -74,7 +102,7 @@ def test_valid_passed_document_round_trips_without_recomputing_verification(tmp_
     result = read_result(tmp_path, _case())
     assert asdict(result) == document
     assert isinstance(result.steps[0]["verification"], VerificationResult)
-    assert list(tmp_path.iterdir()) == [tmp_path / "result.json"]
+    assert (tmp_path / "steps/0/after/project/.sandbox-reference/settings.json").is_file()
 
 
 @pytest.mark.parametrize("status", ["failed", "incomplete"])

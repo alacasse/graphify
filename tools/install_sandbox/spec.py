@@ -1,6 +1,7 @@
 """Target facts and validation for the reference YAML format."""
 
-from dataclasses import dataclass
+import math
+from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import cast
 
@@ -30,6 +31,49 @@ def relative_path(value: object) -> str:
     return result
 
 
+def _json_value(value: object) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float) and math.isfinite(value):
+        return
+    if isinstance(value, list):
+        for item in cast(list[object], value):
+            _json_value(item)
+        return
+    if isinstance(value, dict):
+        for key, item in cast(dict[object, object], value).items():
+            if not isinstance(key, str):
+                raise ValueError("JSON object keys must be strings")
+            _json_value(item)
+        return
+    raise ValueError("Expected a finite JSON value")
+
+
+@dataclass(frozen=True)
+class HookExpectation:
+    event: str
+    matcher: str
+    content: dict[str, object]
+
+    @classmethod
+    def from_data(cls, value: object) -> "HookExpectation":
+        data = fields(value, "event matcher content")
+        content = data["content"]
+        if not isinstance(content, dict) or not content:
+            raise ValueError("Hook content must be a non-empty JSON object")
+        try:
+            _json_value(cast(dict[object, object], content))
+        except RecursionError as error:
+            raise ValueError("Hook content must be an acyclic JSON value") from error
+        return cls(text(data["event"]), text(data["matcher"]), cast(dict[str, object], content))
+
+
+def _hooks(value: object) -> tuple[HookExpectation, ...]:
+    if not isinstance(value, list):
+        raise ValueError("Expected a hooks list")
+    return tuple(HookExpectation.from_data(item) for item in cast(list[object], value))
+
+
 @dataclass(frozen=True)
 class InstallTestSpec:
     """Validated target facts; source paths remain relative to the subject."""
@@ -44,6 +88,7 @@ class InstallTestSpec:
     markdown_source: str
     json_file: str
     json_list: str
+    json_hooks: tuple[HookExpectation, ...]
 
     @classmethod
     def from_data(cls, value: object) -> "InstallTestSpec":
@@ -58,7 +103,7 @@ class InstallTestSpec:
             raise ValueError("Duplicate scopes")
         skill = fields(data["skill"], "file source references")
         markdown = fields(data["markdown"], "file marker source")
-        config = fields(data["json"], "file list")
+        config = fields(data["json"], "file list hooks")
         return cls(
             tuple(cast(list[str], scopes)),
             relative_path(data["directory"]),
@@ -70,6 +115,7 @@ class InstallTestSpec:
             relative_path(markdown["source"]),
             relative_path(config["file"]),
             text(config["list"]),
+            _hooks(config["hooks"]),
         )
 
     def to_data(self) -> dict[str, object]:
@@ -86,5 +132,9 @@ class InstallTestSpec:
                 "marker": self.markdown_marker,
                 "source": self.markdown_source,
             },
-            "json": {"file": self.json_file, "list": self.json_list},
+            "json": {
+                "file": self.json_file,
+                "list": self.json_list,
+                "hooks": [asdict(hook) for hook in self.json_hooks],
+            },
         }

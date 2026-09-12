@@ -34,6 +34,19 @@ the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
 The local Python environment needs PyYAML for YAML reading.
 
+The reference format requires `json.hooks`, an explicit list of expectations
+with `event`, `matcher`, and non-empty JSON `content`. An empty list means no
+expected hooks. Declared content fields are compared in full; additional hook
+fields are allowed. Matching occurrences are counted across all groups with
+the same event and matcher, and each expectation must occur exactly once.
+
+The first-install and reinstall cases add an independent personal hook witness
+before the first command. Its entire content, context and count must survive;
+it is never recreated between commands. The verifier reads retained JSON and
+does not execute hooks. Hook positions may change; internal list order may not.
+All seven cases check the spec's hook expectations. The five other cases retain
+their existing witnesses and preparation responsibilities.
+
 The repair-references case prepares a deletion and an alteration between two
 verified project installations. Selection comes from the retained source
 inventory, and preparation diagnostics remain separate from product commands.
@@ -74,8 +87,12 @@ reads that JSON and removes only the exact Graphify registration. Preparation
 is checked against the independent case witnesses; all other entries must remain
 unchanged. Reinstallation must restore the registration exactly once and preserve
 personal JSON values, list order and files. JSON indentation is not prescribed.
-The three observed JSON documents and the independent preparation expectation
-are retained after cleanup. A failed or unobservable preparation blocks the
+During JSON-entry repair, the independent preparation expectation describes
+personal values outside `hooks`. The complete observed hooks branch must remain
+identical between the verified installation and preparation, including extra
+fields; it is not reconstructed from the expected Graphify command. The three
+observed JSON documents and the independent preparation expectation are retained
+after cleanup. A failed or unobservable preparation blocks the
 second command. No additional YAML facts are needed.
 
 | Concern | Current owner |

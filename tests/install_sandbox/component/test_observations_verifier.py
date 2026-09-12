@@ -54,6 +54,12 @@ class Scenario:
         config = self.path("json")
         data = json.loads(config.read_bytes())
         data[self.case.spec.json_list].append(posixpath.relpath(skill, config.parent))
+        data.setdefault("hooks", {}).setdefault("PreToolUse", []).append(
+            {
+                "matcher": "Bash|Grep",
+                "hooks": [{"type": "command", "command": "graphify hook-guard search"}],
+            }
+        )
         put(config, json.dumps(data, indent=4).encode())
 
     def verify(self) -> VerificationResult:
@@ -311,7 +317,9 @@ def test_evidence_is_consultable_after_all_observed_roots_are_deleted(tmp_path: 
 def test_json_reformatting_preserves_multiple_user_entries(tmp_path: Path) -> None:
     run = scenario(tmp_path)
     path = run.path("json")
-    put(path, b'{"theme":"dark","instructions":["first.md","second.md"],"nested":{"n":1}}')
+    data = json.loads(path.read_bytes())
+    data.update({"instructions": ["first.md", "second.md"], "nested": {"n": 1}})
+    put(path, json.dumps(data).encode())
     run.before = run.environment.observe(run.writer, "before")
     run.effects()
     assert_passed(run.verify())
@@ -476,7 +484,17 @@ def test_repeated_shared_files_keep_user_text_and_order_with_boundary_tolerance(
     suffix = b"## Last\nMore user text.\n"
     put(path, prefix + b"\n" + _MARKDOWN + b"\n" + suffix)
     config = run.path("json")
-    put(config, b'{"instructions":["first.md","skills/graphify/SKILL.md","second.md"],"n":1}')
+    hooks = json.loads(config.read_bytes())["hooks"]
+    put(
+        config,
+        json.dumps(
+            {
+                "instructions": ["first.md", "skills/graphify/SKILL.md", "second.md"],
+                "n": 1,
+                "hooks": hooks,
+            }
+        ).encode(),
+    )
     run.before = run.environment.observe(run.writer, "before")
     installed = prefix + b"\n\n\n" + _MARKDOWN + b"\n\n" + suffix
     if defect == "internal_blank":
@@ -487,7 +505,7 @@ def test_repeated_shared_files_keep_user_text_and_order_with_boundary_tolerance(
     entries = ["first.md", "second.md", "skills/graphify/SKILL.md"]
     if defect == "json_order":
         entries[:2] = ["second.md", "first.md"]
-    put(config, json.dumps({"n": 1, "instructions": entries}, indent=4).encode())
+    put(config, json.dumps({"n": 1, "instructions": entries, "hooks": hooks}, indent=4).encode())
     result = run.verify()
     if defect == "none":
         assert_passed(result)

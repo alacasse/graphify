@@ -3,7 +3,10 @@
   "target": "sandbox-reference",
   "scope": "project",
   "spec": {
-    "scopes": ["user", "project"],
+    "scopes": [
+      "user",
+      "project"
+    ],
     "directory": ".sandbox-reference",
     "skill": {
       "file": "skills/graphify/SKILL.md",
@@ -17,7 +20,17 @@
     },
     "json": {
       "file": "settings.json",
-      "list": "instructions"
+      "list": "instructions",
+      "hooks": [
+        {
+          "event": "PreToolUse",
+          "matcher": "Bash|Grep",
+          "content": {
+            "type": "command",
+            "command": "graphify hook-guard search"
+          }
+        }
+      ]
     }
   },
   "initial_files": [
@@ -29,7 +42,7 @@
     {
       "root": "project",
       "path": ".sandbox-reference/settings.json",
-      "content": "{\n  \"theme\": \"dark\",\n  \"instructions\": [\"my-instructions.md\"]\n}\n"
+      "content": "{\n  \"theme\": \"dark\",\n  \"instructions\": [\n    \"my-instructions.md\"\n  ],\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"matcher\": \"Bash|Grep\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"python personal_graphify_audit.py\",\n            \"timeout\": 17\n          }\n        ]\n      }\n    ]\n  }\n}\n"
     },
     {
       "root": "project",
@@ -42,5 +55,7 @@
       "content": "Personal document to preserve.\n"
     }
   ],
-  "operations": ["install"]
+  "operations": [
+    "install"
+  ]
 }

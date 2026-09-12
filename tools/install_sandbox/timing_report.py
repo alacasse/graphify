@@ -1,6 +1,7 @@
 """Plain-language duration report; container details are never added to host totals."""
 
 from tools.install_sandbox.coordinator import CampaignResult, CoordinatedResult
+from tools.install_sandbox.results import InstallTestResult
 from tools.install_sandbox.timings import Timing
 
 _LABELS = {
@@ -90,9 +91,16 @@ def render_campaign(result: CampaignResult) -> str:
     cleanup = result.cleanup
     lines = [
         f"Campaign passed: {result.passed}",
+        f"Interrupted: {result.interrupted}",
+        f"Selection origin: {result.selection_origin}",
+        f"Selected cases ({len(result.cases)}): {', '.join(result.selected_cases)}",
+        f"Not selected: {', '.join(result.not_selected_cases) or 'none'}",
+        f"Evidence: {result.output_directory}",
         f"Preparation: {preparation.state if preparation else 'not completed'}",
+        f"Preparation diagnostic: {preparation.detail if preparation else 'unavailable'}",
         f"Image: {preparation.image_id if preparation else 'unavailable'}",
         f"Final cleanup: {cleanup.cleanup_complete if cleanup else 'not completed'}",
+        f"Cleanup diagnostic: {cleanup.detail if cleanup else 'unavailable'}",
         f"Campaign total: {format_duration(result.duration_seconds)}",
         "Common phases (counted once):",
         *[_line(record) for record in result.timings],
@@ -119,7 +127,10 @@ def render_campaign(result: CampaignResult) -> str:
             lines.extend(
                 [
                     f"  Passed: {case.passed}; total: {format_duration(case.duration_seconds)}",
+                    f"  Container: {case.container.state}; {case.container.detail}",
+                    f"  Test: {case.test.status if case.test else 'unavailable'}",
                     f"  Evidence error: {case.result_error or 'none'}",
+                    *_test_diagnostics(case.test),
                     *[_line(record) for record in case.timings],
                     "  Container details (included in run, never added to totals):",
                     *[_line(record) for record in case.container_timings.phases],
@@ -127,3 +138,25 @@ def render_campaign(result: CampaignResult) -> str:
                 ]
             )
     return "\n".join(lines) + "\n"
+
+
+def _test_diagnostics(test: InstallTestResult | None) -> list[str]:
+    if test is None:
+        return []
+    lines = (
+        [f"  Preparation reason: {test.preparation['reason']}"]
+        if test.preparation["reason"]
+        else []
+    )
+    for index, step in enumerate(test.steps):
+        command = step["command"]
+        reason = step["skip_reason"] or (command["reason"] if command else None)
+        if reason:
+            lines.append(f"  Step {index + 1}: {reason}")
+        verification = step["verification"]
+        if verification is not None:
+            lines.extend(
+                f"  Step {index + 1}: {m.type}: {m.root}/{m.path}" for m in verification.mismatches
+            )
+            lines.extend(f"  Step {index + 1}: {o['reason']}" for o in verification.obstacles)
+    return lines

@@ -22,6 +22,10 @@ PERSONAL = "# My instructions\nDo not modify my personal documents.\n"
 NOTES = "Personal document to preserve.\n"
 ENTRY = "skills/graphify/SKILL.md"
 
+HOOK = {"type": "command", "command": "graphify hook-guard search"}
+PERSONAL_HOOK = {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
+HOOKS = {"PreToolUse": [{"matcher": "Bash|Grep", "hooks": [HOOK]}]}
+
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +155,7 @@ def test_first_project_install_preserves_user_files_and_home(isolated_project):
     assert json.loads((directory / "settings.json").read_text()) == {
         "theme": "dark",
         "instructions": ["my-instructions.md", ENTRY],
+        "hooks": HOOKS,
     }
     assert (directory / "my-instructions.md").read_bytes() == PERSONAL.encode()
 
@@ -184,7 +189,7 @@ def test_json_registration_preserves_values_and_order_without_duplicate(
     result = _run_cli(project, env, "install", "--platform", "sandbox-reference", "--project")
 
     assert result.returncode == 0, result.stderr
-    expected = original | {"instructions": entries if has_entry else [*entries, ENTRY]}
+    expected = original | {"instructions": entries if has_entry else [*entries, ENTRY], "hooks": HOOKS}
     assert json.loads(settings_path.read_text()) == expected
     assert json.loads(settings_path.read_text())["instructions"].count(ENTRY) == 1
 
@@ -232,3 +237,30 @@ def test_existing_project_cleanup_remains_available(isolated_project):
     assert not (project / ".cursor/rules/graphify.mdc").exists()
     assert not (project / ".claude/skills/graphify/SKILL.md").exists()
     assert _snapshot(home) == home_before
+
+
+@pytest.mark.parametrize("existing_group", [False, True])
+def test_reference_hooks_preserved_across_two_installations(isolated_project, existing_group):
+    project, home, env = isolated_project
+    settings_path = project / ".sandbox-reference/settings.json"
+    groups = [{"matcher": "Bash|Grep", "hooks": [PERSONAL_HOOK]}]
+    if existing_group:
+        groups.append({"matcher": "Bash|Grep", "hooks": [HOOK | {"timeout": 23}]})
+    original = {"theme": "dark", "instructions": ["my-instructions.md", ENTRY],
+                "hooks": {"PreToolUse": groups}}
+    settings_path.write_text(json.dumps(original), encoding="utf-8")
+    home_before = _snapshot(home)
+    installed = None
+    for _ in range(2):
+        result = _run_cli(project, env, "install", "--platform", "sandbox-reference", "--project")
+        assert result.returncode == 0, result.stderr
+        observed = json.loads(settings_path.read_bytes())
+        hooks = [hook for group in observed["hooks"]["PreToolUse"] for hook in group["hooks"]]
+        assert hooks.count(PERSONAL_HOOK) == 1
+        assert sum(all(hook.get(k) == v for k, v in HOOK.items()) for hook in hooks) == 1
+        assert observed["instructions"] == original["instructions"]
+        assert observed["theme"] == "dark"
+        assert _snapshot(home) == home_before
+        if installed is not None:
+            assert observed == installed
+        installed = observed

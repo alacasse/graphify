@@ -723,6 +723,7 @@ def _sandbox_reference_configure(project_dir: Path) -> None:
     directory = project_dir / ".sandbox-reference"
     settings_path = directory / "settings.json"
     settings = _read_settings_for_merge(settings_path)
+    original = json.dumps(settings, sort_keys=True)
     instructions = settings.setdefault("instructions", [])
     if not isinstance(instructions, list):
         print(
@@ -733,6 +734,8 @@ def _sandbox_reference_configure(project_dir: Path) -> None:
     entry = "skills/graphify/SKILL.md"
     if entry not in instructions:
         instructions.append(entry)
+    _sandbox_reference_hooks(settings)
+    if json.dumps(settings, sort_keys=True) != original:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
     target = directory / "instructions.md"
@@ -741,6 +744,23 @@ def _sandbox_reference_configure(project_dir: Path) -> None:
     if content != new_content:
         target.write_text(new_content, encoding="utf-8")
     print(f"  project configured ->  {directory}")
+
+
+def _sandbox_reference_hooks(settings: dict) -> None:
+    """Add the reference command without replacing any existing hook."""
+    command = {"type": "command", "command": "graphify hook-guard search"}
+    groups = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
+    matching = [group for group in groups if group.get("matcher") == "Bash|Grep"]
+    if any(
+        all(hook.get(key) == value for key, value in command.items())
+        for group in matching for hook in group.get("hooks", [])
+    ):
+        return
+    if not matching:
+        group = {"matcher": "Bash|Grep", "hooks": []}
+        groups.append(group)
+        matching.append(group)
+    matching[0].setdefault("hooks", []).append(command)
 
 
 def _print_install_usage() -> None:

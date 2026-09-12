@@ -251,19 +251,139 @@ def _read_json(content: bytes) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _json(case: InstallTestCase, before: bytes, after: bytes, result: VerificationResult) -> None:
+def _json_equal(left: object, right: object) -> bool:
+    return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+
+
+def _hook_entries(
+    document: dict[str, object], event: str, matcher: str
+) -> list[tuple[str, dict[str, object]]]:
+    hooks = document.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("hooks must be an object")
+    groups = cast(dict[str, object], hooks).get(event, [])
+    if not isinstance(groups, list):
+        raise ValueError(f"hooks.{event} must be a list")
+    found: list[tuple[str, dict[str, object]]] = []
+    for index, group in enumerate(cast(list[object], groups)):
+        if not isinstance(group, dict):
+            raise ValueError(f"hooks.{event}[{index}] must be an object")
+        group = cast(dict[str, object], group)
+        if group.get("matcher") == matcher:
+            found.extend(_group_hooks(group, f"hooks.{event}[{index}].hooks"))
+    return found
+
+
+def _group_hooks(group: dict[str, object], path: str) -> list[tuple[str, dict[str, object]]]:
+    values = group.get("hooks", [])
+    if not isinstance(values, list):
+        raise ValueError(f"{path} must be a list")
+    found: list[tuple[str, dict[str, object]]] = []
+    for index, value in enumerate(cast(list[object], values)):
+        if not isinstance(value, dict):
+            raise ValueError(f"{path}[{index}] must be an object")
+        found.append((f"{path}[{index}]", cast(dict[str, object], value)))
+    return found
+
+
+def _hook_positions(
+    document: dict[str, object],
+    event: str,
+    matcher: str,
+    content: dict[str, object],
+    *,
+    exact: bool,
+) -> list[str]:
+    return [
+        path
+        for path, hook in _hook_entries(document, event, matcher)
+        if (
+            _json_equal(hook, content)
+            if exact
+            else all(
+                key in hook and _json_equal(hook[key], value) for key, value in content.items()
+            )
+        )
+    ]
+
+
+def _hook_count(
+    path: str,
+    context: tuple[str, str, dict[str, object]],
+    count: int,
+    installed: dict[str, object],
+    result: VerificationResult,
+    *,
+    personal: bool = False,
+) -> None:
+    event, matcher, content = context
+    description = {"event": event, "matcher": matcher, "content": content, "count": count}
+    try:
+        positions = _hook_positions(installed, event, matcher, content, exact=personal)
+    except ValueError as error:
+        _mismatch(
+            result,
+            "invalid_json_hooks",
+            "project",
+            path,
+            json.dumps(description, sort_keys=True),
+            str(error),
+        )
+        return
+    if len(positions) != count:
+        _mismatch(
+            result,
+            "personal_hook_count" if personal else "hook_count",
+            "project",
+            path,
+            json.dumps(description, sort_keys=True),
+            json.dumps({"count": len(positions), "positions": positions}, sort_keys=True),
+        )
+
+
+def _personal_hook_contexts(
+    initial: dict[str, object],
+) -> list[tuple[str, str, dict[str, object]]]:
+    # These are known case witnesses, never hooks inferred from installed output.
+    contexts: dict[tuple[str, str, str], tuple[str, str, dict[str, object]]] = {}
+    hooks = cast(dict[str, list[dict[str, object]]], initial.get("hooks", {}))
+    for event, groups in hooks.items():
+        for group in groups:
+            matcher = cast(str, group["matcher"])
+            for _, content in _group_hooks(group, f"hooks.{event}"):
+                key = (event, matcher, json.dumps(content, sort_keys=True))
+                contexts[key] = (event, matcher, content)
+    return list(contexts.values())
+
+
+def _json_hooks(
+    case: InstallTestCase, installed: dict[str, object], result: VerificationResult
+) -> None:
+    path = destinations(case)["json"]
+    for hook in case.spec.json_hooks:
+        _hook_count(path, (hook.event, hook.matcher, hook.content), 1, installed, result)
+    content = next(
+        f["content"] for f in case.initial_files if f["root"] == "project" and f["path"] == path
+    )
+    initial = _read_json(content.encode("utf-8"))
+    for context in _personal_hook_contexts(initial):
+        count = len(_hook_positions(initial, *context, exact=True))
+        _hook_count(path, context, count, installed, result, personal=True)
+
+
+def _json_instructions(
+    case: InstallTestCase,
+    initial: dict[str, object],
+    installed: dict[str, object],
+    result: VerificationResult,
+) -> bool:
     dest = destinations(case)
     path = dest["json"]
-    try:
-        initial, installed = _read_json(before), _read_json(after)
-    except (ValueError, UnicodeDecodeError):
-        _mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
-        return
     value = posixpath.relpath(dest["skill"], posixpath.dirname(path))
     items = installed.get(case.spec.json_list)
     if not isinstance(items, list):
         _mismatch(result, "json_list", "project", path, "instruction list", "list unavailable")
-        return
+        return False
     items = cast(list[object], items)
     if items.count(value) != 1:
         _mismatch(
@@ -280,7 +400,24 @@ def _json(case: InstallTestCase, before: bytes, after: bytes, result: Verificati
         initial[case.spec.json_list] = [
             item for item in cast(list[object], initial_items) if item != value
         ]
-    if json.dumps(initial, sort_keys=True) != json.dumps(installed, sort_keys=True):
+    return True
+
+
+def _without_hooks(document: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in document.items() if key != "hooks"}
+
+
+def _json(case: InstallTestCase, before: bytes, after: bytes, result: VerificationResult) -> None:
+    path = destinations(case)["json"]
+    try:
+        initial, installed = _read_json(before), _read_json(after)
+    except (ValueError, UnicodeDecodeError):
+        _mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
+        return
+    _json_hooks(case, installed, result)
+    if not _json_instructions(case, initial, installed, result):
+        return
+    if not _json_equal(_without_hooks(initial), _without_hooks(installed)):
         _mismatch(
             result,
             "user_content_lost",
@@ -289,6 +426,42 @@ def _json(case: InstallTestCase, before: bytes, after: bytes, result: Verificati
             "user JSON values and list order preserved",
             "user values changed",
         )
+
+
+def _json_preparation(
+    expected: bytes,
+    observed: bytes,
+    previous: bytes | None,
+    path: str,
+    result: VerificationResult,
+) -> None:
+    try:
+        expected_json, observed_json = _read_json(expected), _read_json(observed)
+        if not _json_equal(_without_hooks(expected_json), _without_hooks(observed_json)):
+            _mismatch(
+                result,
+                "invalid_preparation",
+                "project",
+                path,
+                "personal JSON with only the skill entry removed",
+                "different JSON",
+            )
+        if previous is not None:
+            installed = _read_json(previous)
+            # Keep absence distinct from a newly introduced empty branch.
+            left = {k: v for k, v in installed.items() if k == "hooks"}
+            right = {k: v for k, v in observed_json.items() if k == "hooks"}
+            if not _json_equal(left, right):
+                _mismatch(
+                    result,
+                    "invalid_preparation",
+                    "project",
+                    path,
+                    "hooks unchanged during preparation",
+                    "different hooks",
+                )
+    except (ValueError, UnicodeError):
+        _mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
 
 
 def _allowed(case: InstallTestCase, expected: FilesystemSnapshot) -> set[str]:
@@ -544,24 +717,9 @@ class InstallVerifier:
         )
         path = plan["altered_path"]
         observed = _file(degraded, path, result)
-        if observed is not None:
-            try:
-                expected_json = json.dumps(_read_json(content), sort_keys=True)
-                observed_json = json.dumps(_read_json(observed), sort_keys=True)
-                if observed_json != expected_json:
-                    _mismatch(
-                        result,
-                        "invalid_preparation",
-                        "project",
-                        path,
-                        "personal JSON with only the skill entry removed",
-                        "different JSON",
-                    )
-            except (ValueError, UnicodeError):
-                _mismatch(
-                    result, "invalid_json", "project", path, "valid JSON object", "invalid JSON"
-                )
         previous = _file(installed, path, result)
+        if observed is not None:
+            _json_preparation(content, observed, previous, path, result)
         if previous is not None:
             _json(case, content, previous, result)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}

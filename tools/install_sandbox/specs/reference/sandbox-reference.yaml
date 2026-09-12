@@ -14,3 +14,9 @@ markdown:
 json:
   file: settings.json
   list: instructions
+  hooks:
+    - event: PreToolUse
+      matcher: Bash|Grep
+      content:
+        type: command
+        command: graphify hook-guard search

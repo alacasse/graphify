@@ -78,6 +78,10 @@ def _json_change(mode: str, content: bytes) -> bytes:
         data["instructions"].reverse()
     if mode == "theme":
         data["theme"] = "light"
+    if mode == "hooks":
+        data["hooks"] = {}
+    if mode == "hook_extra":
+        data["hooks"]["PreToolUse"][0]["hooks"][0]["extra"] = True
     if mode == "format":
         return json.dumps(data, sort_keys=True, indent=4).encode()
     return json.dumps(data).encode()

@@ -36,11 +36,12 @@ def check_case(result: CoordinatedResult) -> None:
     phases = ("steps/0/after", "steps/1/before", "steps/1/after")
     documents = [json.loads((output / p / "project" / dest["json"]).read_bytes()) for p in phases]
     personal = {"theme": "dark", "instructions": ["my-instructions.md", "team-guidelines.md"]}
-    assert documents[1] == personal
+    hooks = documents[0]["hooks"]
+    assert documents[1] == {**personal, "hooks": hooks}
     for installed in (documents[0], documents[2]):
         assert installed["instructions"].count("skills/graphify/SKILL.md") == 1
         installed["instructions"].remove("skills/graphify/SKILL.md")
-        assert installed == personal
+        assert installed == {**personal, "hooks": hooks}
     assert (
         json.loads((output / preparation["plan"]["altered_content_file"]).read_bytes()) == personal
     )

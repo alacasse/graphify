@@ -82,19 +82,21 @@ def _initial_files(value: object) -> list[InitialFile]:
     return result
 
 
+CASE_NAMES = (
+    "first-install",
+    "reinstall",
+    "repair-references",
+    "repair-skill",
+    "preserve-skill-backup",
+    "repair-markdown-section",
+    "repair-json-entry",
+)
+
+
 def case_operations(name: str) -> list[str]:
-    if name == "first-install":
-        return ["install"]
-    if name in {
-        "reinstall",
-        "repair-references",
-        "repair-skill",
-        "preserve-skill-backup",
-        "repair-markdown-section",
-        "repair-json-entry",
-    }:
-        return ["install", "install"]
-    raise ValueError(f"Unsupported project case: {name}")
+    if name not in CASE_NAMES:
+        raise ValueError(f"Unsupported project case: {name}")
+    return ["install"] if name == "first-install" else ["install", "install"]
 
 
 @dataclass(frozen=True)

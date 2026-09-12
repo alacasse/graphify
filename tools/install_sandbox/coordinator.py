@@ -5,13 +5,20 @@ import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-from tools.install_sandbox.case import InstallTestCase, case_operations, first_install_files
+import yaml
+
+from tools.install_sandbox.case import (
+    CASE_NAMES,
+    InstallTestCase,
+    case_operations,
+    first_install_files,
+)
 from tools.install_sandbox.container_harness import ContainerHarness, ContainerRunResult
 from tools.install_sandbox.result_reader import read_result
-from tools.install_sandbox.results import InstallTestResult
-from tools.install_sandbox.spec import InstallTestSpec
+from tools.install_sandbox.results import EvidenceWriteError, InstallTestResult
+from tools.install_sandbox.spec import InstallTestSpec, fields, text
 from tools.install_sandbox.spec_reader import InstallSpecReader
 from tools.install_sandbox.timing_reader import CaseTimingResult, read_timings
 from tools.install_sandbox.timings import Timing, elapsed, measure
@@ -68,6 +75,10 @@ class CampaignCase:
 class CampaignResult:
     output_directory: Path
     cases: list[CampaignCase]
+    selection_origin: Literal["default", "explicit"] = "explicit"
+    selected_cases: list[str] = field(default_factory=list[str])
+    not_selected_cases: list[str] = field(default_factory=list[str])
+    interrupted: bool = False
     preparation: ContainerRunResult | None = None
     cleanup: ContainerRunResult | None = None
     error: str | None = None
@@ -77,7 +88,8 @@ class CampaignResult:
     @property
     def passed(self) -> bool:
         return (
-            self.error is None
+            not self.interrupted
+            and self.error is None
             and self.preparation is not None
             and self.preparation.state == "completed"
             and self.preparation.cleanup_complete
@@ -100,10 +112,13 @@ class CampaignResult:
             "campaign.json": json.dumps(payload, indent=2, default=str) + "\n",
             "campaign.txt": render_campaign(self),
         }
-        for name, content in documents.items():
-            temporary = self.output_directory / f"{name}.tmp"
-            temporary.write_text(content, encoding="utf-8")
-            temporary.replace(self.output_directory / name)
+        try:
+            for name, content in documents.items():
+                temporary = self.output_directory / f"{name}.tmp"
+                temporary.write_text(content, encoding="utf-8")
+                temporary.replace(self.output_directory / name)
+        except OSError as error:
+            raise EvidenceWriteError(f"Cannot save campaign evidence: {error}") from error
 
 
 def _campaign_fields(fields: list[tuple[str, object]]) -> dict[str, object]:
@@ -118,7 +133,7 @@ class InstallTestCoordinator:
         *,
         specs_directory: Path,
         target: str,
-        case_names: Sequence[str],
+        case_names: Sequence[str] | None = None,
         subject_checkout: Path,
         output_directory: Path,
         runtime_executable: str | Path = "docker",
@@ -138,16 +153,20 @@ class InstallTestCoordinator:
                 run_timeout_seconds=run_timeout_seconds,
                 graceful_termination_seconds=graceful_termination_seconds,
             )
+            names = self._select_cases(case_names)
             subject, output, cases = self._prepare_campaign(
                 specs_directory,
                 target,
-                case_names,
+                names,
                 subject_checkout,
                 output_directory,
             )
         result = CampaignResult(
             output,
             [CampaignCase(c.name, output / "cases" / c.name) for c in cases],
+            selection_origin="default" if case_names is None else "explicit",
+            selected_cases=names,
+            not_selected_cases=[name for name in CASE_NAMES if name not in names],
             timings=[inputs],
         )
         with harness:
@@ -158,14 +177,39 @@ class InstallTestCoordinator:
                 result.save()
                 self._conduct_cases(harness, cases, result)
             except (Exception, KeyboardInterrupt) as error:
+                result.interrupted = isinstance(error, KeyboardInterrupt)
                 result.error = f"Campaign stopped: {type(error).__name__}: {error}"
                 self._skip_remaining(result, result.error)
             finally:
                 result.cleanup = harness.cleanup()
+                result.interrupted = result.interrupted or harness.interrupted
                 result.timings.extend(result.cleanup.timings)
                 result.duration_seconds = elapsed(started)
-                result.save()
+                try:
+                    result.save()
+                except EvidenceWriteError as error:
+                    result.error = f"{result.error or 'Campaign evidence incomplete'}; {error}"
         return result
+
+    @staticmethod
+    def _select_cases(names: Sequence[str] | None) -> list[str]:
+        if names is None:
+            path = Path(__file__).with_name("campaign-defaults.yaml")
+            try:
+                data = fields(yaml.safe_load(path.read_text(encoding="utf-8")), "default_cases")
+                configured = data["default_cases"]
+                if not isinstance(configured, list):
+                    raise ValueError("default_cases must be an ordered list")
+                names = [text(item) for item in cast(list[object], configured)]
+            except (OSError, ValueError, yaml.YAMLError) as error:
+                raise ValueError(f"Cannot load campaign defaults {path}: {error}") from error
+        if isinstance(names, str) or not names:
+            raise ValueError("Select a nonempty ordered list of case names")
+        if len(set(names)) != len(names):
+            raise ValueError("Duplicate case names are not allowed")
+        for name in names:
+            case_operations(name)
+        return list(names)
 
     def _prepare_campaign(
         self,
@@ -179,8 +223,6 @@ class InstallTestCoordinator:
         destination = output.expanduser()
         output = destination.resolve()
         _check_campaign_paths(subject, destination, output)
-        if isinstance(names, str) or not names or len(set(names)) != len(names):
-            raise ValueError("Select a nonempty ordered list of distinct case names")
         catalog = InstallSpecReader().read(specs)
         if target not in catalog:
             raise ValueError(f"Target not found in {specs}: {target}")
@@ -279,6 +321,8 @@ class InstallTestCoordinator:
     def build_case(
         self, target: str, spec: InstallTestSpec, *, case_name: str = "first-install"
     ) -> InstallTestCase:
+        if "project" not in spec.scopes:
+            raise ValueError("Installation case requires a supported project scope")
         return InstallTestCase(
             name=case_name,
             target=target,

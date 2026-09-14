@@ -6,10 +6,9 @@ from dataclasses import asdict
 import pytest
 
 from tests.install_sandbox.docker.test_first_install_docker import run_proof
-from tools.install_sandbox.case import InstallTestCase
-from tools.install_sandbox.coordinator import CoordinatedResult
-from tools.install_sandbox.environment import destinations
-from tools.install_sandbox.result_reader import read_result
+from tools.install_sandbox.contracts.case import InstallTestCase, destinations
+from tools.install_sandbox.host.coordinator import CoordinatedResult
+from tools.install_sandbox.host.result_reader import read_result
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_INSTALL_SANDBOX_DOCKER") != "1",

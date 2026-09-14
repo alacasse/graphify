@@ -4,8 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from tools.install_sandbox.coordinator import InstallTestCoordinator
-from tools.install_sandbox.timing_report import render_campaign
+from tools.install_sandbox.host.coordinator import InstallTestCoordinator
+from tools.install_sandbox.host.timing_report import render_campaign
 
 
 def main(arguments: list[str] | None = None) -> int:

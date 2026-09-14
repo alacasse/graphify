@@ -2,7 +2,7 @@
 
 from tests.install_sandbox.docker.test_first_install_docker import pytestmark, run_campaign_proof
 from tests.install_sandbox.docker.test_preserve_skill_backup_docker import check_case
-from tools.install_sandbox.coordinator import CoordinatedResult
+from tools.install_sandbox.host.coordinator import CoordinatedResult
 
 __all__ = ["pytestmark"]
 

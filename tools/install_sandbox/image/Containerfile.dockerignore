@@ -1,0 +1,11 @@
+**
+!Containerfile
+!contracts/
+!contracts/**
+!container/
+!container/**
+!subject/
+!subject/**
+!metadata/
+!metadata/**
+!prepare_dependencies.py

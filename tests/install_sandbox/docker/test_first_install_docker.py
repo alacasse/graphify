@@ -11,14 +11,14 @@ from typing import cast
 
 import pytest
 
-from tools.install_sandbox.coordinator import (
+from tools.install_sandbox.contracts.timings import Timing, measure
+from tools.install_sandbox.host.coordinator import (
     CampaignResult,
     CoordinatedResult,
     InstallTestCoordinator,
 )
-from tools.install_sandbox.result_reader import safe_evidence_path
-from tools.install_sandbox.timing_report import format_duration, render_campaign
-from tools.install_sandbox.timings import Timing, measure
+from tools.install_sandbox.host.result_reader import safe_evidence_path
+from tools.install_sandbox.host.timing_report import format_duration, render_campaign
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_INSTALL_SANDBOX_DOCKER") != "1",

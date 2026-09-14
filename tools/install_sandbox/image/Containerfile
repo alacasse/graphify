@@ -1,0 +1,29 @@
+FROM python:3.12-slim@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217
+
+ENV HOME=/sandbox/home \
+    XDG_CONFIG_HOME=/sandbox/xdg \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN mkdir -p /opt/install-sandbox/tools/install_sandbox \
+        /sandbox/home /sandbox/xdg /sandbox/output /sandbox/work \
+    && chmod 1777 /sandbox/home /sandbox/xdg /sandbox/work
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.6@sha256:b1e699368d24c57cda93c338a57a8c5a119009ba809305cc8e86986d4a006754 /uv /usr/local/bin/uv
+RUN python -m venv /opt/install-sandbox/venv
+COPY metadata/ /opt/install-sandbox/metadata/
+COPY --chmod=0444 prepare_dependencies.py /opt/install-sandbox/prepare_dependencies.py
+RUN python -I -B /opt/install-sandbox/prepare_dependencies.py \
+        /opt/install-sandbox/metadata /opt/install-sandbox/preparation \
+        /opt/install-sandbox/venv/bin/python
+COPY subject/ /opt/install-sandbox/reference/
+RUN cp -a /opt/install-sandbox/reference /tmp/package \
+    && /opt/install-sandbox/venv/bin/python -m pip install --disable-pip-version-check --no-deps /tmp/package \
+    && /opt/install-sandbox/venv/bin/python -m pip check \
+    && rm -rf /tmp/package \
+    && chmod -R a+rX /opt/install-sandbox
+COPY --chmod=0555 contracts/ /opt/install-sandbox/tools/install_sandbox/contracts/
+COPY --chmod=0555 container/ /opt/install-sandbox/tools/install_sandbox/container/
+
+WORKDIR /sandbox/work
+ENTRYPOINT ["python", "-I", "-B", "-u", "/opt/install-sandbox/tools/install_sandbox/container/__main__.py"]

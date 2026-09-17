@@ -9,6 +9,18 @@ from typing import Literal, cast
 from pathspec import GitIgnoreSpec
 
 
+def validate_evidence_location(subject: Path, output: Path) -> None:
+    """Only reserved, uncaptured run directories may live inside the product."""
+    output_root = subject / "tools/install_sandbox/out"
+    if subject.is_relative_to(output) or (
+        output.is_relative_to(subject)
+        and (output == output_root or not output.is_relative_to(output_root))
+    ):
+        raise ValueError(
+            "Evidence inside the subject must use a run directory under tools/install_sandbox/out"
+        )
+
+
 def prepare_context(subject: Path, directory: Path) -> Path:
     """Copy local changes once; callers must keep the candidate stable during capture."""
     context = directory / "context"
@@ -30,7 +42,7 @@ def prepare_context(subject: Path, directory: Path) -> Path:
         subject,
         context / "subject",
         symlinks=True,
-        ignore=_SourceFilter(),
+        ignore=_SourceFilter(subject),
     )
     metadata = context / "metadata"
     metadata.mkdir()
@@ -44,7 +56,8 @@ def prepare_context(subject: Path, directory: Path) -> Path:
 class _SourceFilter:
     """Apply directory-local ignore rules during copytree's existing traversal."""
 
-    def __init__(self) -> None:
+    def __init__(self, subject: Path) -> None:
+        self.output_root = subject / "tools/install_sandbox/out"
         self.rules: dict[Path, tuple[tuple[Path, GitIgnoreSpec], ...]] = {}
 
     def __call__(self, directory: str, names: list[str]) -> set[str]:
@@ -64,7 +77,11 @@ class _SourceFilter:
             excluded_directory = is_directory and (
                 name.startswith(".") or name in {"__pycache__", "graphify-out"}
             )
-            if excluded_directory or _matches_ignore(path, is_directory, rules):
+            if (
+                path == self.output_root
+                or excluded_directory
+                or _matches_ignore(path, is_directory, rules)
+            ):
                 ignored.add(name)
         return ignored
 

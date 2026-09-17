@@ -318,3 +318,33 @@ def test_expected_contents_come_from_captured_sources_after_checkout_changes(
         (entry.output_directory / "expected/graphify/skill.md").read_bytes() == original
         for entry in result.cases
     )
+
+
+@pytest.mark.parametrize("ignore_rules", [None, "!tools/**\n"])
+def test_runs_inside_subject_keep_all_evidence_out_of_captured_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ignore_rules: str | None
+) -> None:
+    arrange_backup(tmp_path, monkeypatch)
+    subject = tmp_path / "subject"
+    if ignore_rules is not None:
+        (subject / ".gitignore").write_text(ignore_rules)
+    output_root = subject / "tools/install_sandbox/out"
+    previous = output_root / "previous/log.txt"
+    previous.parent.mkdir(parents=True)
+    previous.write_text("Keep previous evidence")
+    result = InstallTestCoordinator().run_campaign(
+        specs_directory=SPECS,
+        target="sandbox-reference",
+        case_names=["first-install"],
+        subject_checkout=subject,
+        output_directory=output_root / "current",
+        runtime_executable=COMPONENT / "fake_docker.py",
+        build_timeout_seconds=10,
+        run_timeout_seconds=10,
+        graceful_termination_seconds=0.1,
+    )
+    assert result.passed and result.cleanup is not None and result.cleanup.cleanup_complete
+    assert (output_root / "current/cases/first-install/result.json").is_file()
+    assert previous.read_text() == "Keep previous evidence"
+    assert not (tmp_path / "runtime/reference/tools/install_sandbox/out").exists()
+    assert (tmp_path / "runtime/reference/graphify/skill.md").is_file()

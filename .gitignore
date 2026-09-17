@@ -45,3 +45,5 @@ paper/
 # .csproj files on open
 tests/fixtures/**/obj/
 tests/fixtures/**/bin/
+# Local install-sandbox runs and retained evidence.
+/tools/install_sandbox/out/

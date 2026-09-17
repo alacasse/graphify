@@ -18,6 +18,7 @@ from tools.install_sandbox.contracts.case import (
 from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
 from tools.install_sandbox.contracts.spec import InstallTestSpec, fields, text
 from tools.install_sandbox.contracts.timings import Timing, elapsed, measure
+from tools.install_sandbox.host.build_context import validate_evidence_location
 from tools.install_sandbox.host.docker_runtime import ContainerHarness, ContainerRunResult
 from tools.install_sandbox.host.result_reader import read_result
 from tools.install_sandbox.host.spec_reader import InstallSpecReader
@@ -336,8 +337,7 @@ class InstallTestCoordinator:
 def _check_campaign_paths(subject: Path, destination: Path, output: Path) -> None:
     if not subject.is_dir():
         raise ValueError("subject_checkout must be a directory")
-    if subject.is_relative_to(output) or output.is_relative_to(subject):
-        raise ValueError("Subject and campaign evidence directories must be separate")
+    validate_evidence_location(subject, output)
     if destination.is_symlink() or "," in str(output):
         raise ValueError("Campaign evidence must not be a symlink or contain commas")
     if output.exists() and (not output.is_dir() or any(output.iterdir())):

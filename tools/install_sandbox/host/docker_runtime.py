@@ -25,6 +25,7 @@ from tools.install_sandbox.host.build_context import (
     DependencyPreparation,
     prepare_context,
     read_dependency_preparation,
+    validate_evidence_location,
 )
 
 __all__ = ["ContainerHarness", "ContainerRunResult"]
@@ -180,10 +181,9 @@ class ContainerHarness:
         if self.logs is not None:
             raise ValueError("A harness prepares exactly one campaign image")
         subject_checkout = subject_checkout.expanduser().resolve(strict=True)
-        if not subject_checkout.is_dir() or _paths_overlap(
-            subject_checkout, output_directory.expanduser().resolve()
-        ):
-            raise ValueError("Preparation evidence must be separate from the subject directory")
+        if not subject_checkout.is_dir():
+            raise ValueError("subject_checkout must be a directory")
+        validate_evidence_location(subject_checkout, output_directory.expanduser().resolve())
         self.logs = _prepare_output(output_directory)
         records = [Timing(p) for p in ("copy_sources", "preflight", "build", "verify")]
         outcome = _Outcome("incomplete", "preflight", 2, "Preparation did not complete")

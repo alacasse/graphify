@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import uuid
 from pathlib import Path
 
 from tools.install_sandbox.host.coordinator import InstallTestCoordinator
@@ -13,7 +14,12 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--specs", type=Path, required=True)
     parser.add_argument("--target", required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(__file__).resolve().parent / "out" / f"run-{uuid.uuid4().hex}",
+        help="Evidence directory (default: a fresh run under tools/install_sandbox/out)",
+    )
     parser.add_argument("--case", action="append", dest="cases", metavar="NAME")
     args = parser.parse_args(arguments)
     try:

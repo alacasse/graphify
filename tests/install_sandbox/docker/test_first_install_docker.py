@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
@@ -153,7 +154,12 @@ def run_campaign_proof(
     check_case: Callable[[CoordinatedResult], None] | None = None,
 ) -> CampaignResult:
     subject = Path(os.environ["INSTALL_SANDBOX_SUBJECT"]).resolve()
-    directory = Path(os.environ["INSTALL_SANDBOX_EVIDENCE_DIRECTORY"]).resolve()
+    directory = Path(
+        os.environ.get(
+            "INSTALL_SANDBOX_EVIDENCE_DIRECTORY",
+            str(_ROOT / "tools/install_sandbox/out" / f"docker-{uuid.uuid4().hex}"),
+        )
+    ).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     result = InstallTestCoordinator().run_campaign(
         specs_directory=_ROOT / "tools/install_sandbox/specs/reference",

@@ -210,3 +210,14 @@ def test_metadata_comes_from_same_filtered_capture(
         else:
             assert not (context / "metadata" / name).exists()
     assert (context / "subject/code.py").read_text() == "original"
+
+
+def test_reserved_output_symlink_is_not_captured(tmp_path: Path) -> None:
+    subject = tmp_path / "subject"
+    _write(subject, {"tools/install_sandbox/keep.py": "pass", ".gitignore": "!**\n"})
+    _write(tmp_path, {"external-evidence/log.txt": "Not a product input"})
+    (subject / "tools/install_sandbox/out").symlink_to(tmp_path / "external-evidence")
+    copied = prepare_context(subject, tmp_path) / "subject"
+    assert not (copied / "tools/install_sandbox/out").is_symlink()
+    assert not (copied / "tools/install_sandbox/out").exists()
+    assert (copied / "tools/install_sandbox/keep.py").read_text() == "pass"

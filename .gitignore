@@ -40,3 +40,6 @@ paper/
 
 # macOS Finder metadata
 .DS_Store
+
+# Local install-sandbox runs and retained evidence.
+/tools/install_sandbox/out/

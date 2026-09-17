@@ -19,7 +19,7 @@ _DEFAULTS = _ROOT / "tools/install_sandbox/host/campaign-defaults.yaml"
 
 
 def run_cli(
-    root: Path, arguments: list[str], cwd: Path = _ROOT
+    root: Path, arguments: list[str], cwd: Path = _ROOT, *, explicit_output: bool = True
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -32,8 +32,7 @@ def run_cli(
             str(root / "specs"),
             "--target",
             "another-target",
-            "--output",
-            str(root / "campaign"),
+            *(["--output", str(root / "campaign")] if explicit_output else []),
             *arguments,
         ],
         cwd=cwd,
@@ -291,3 +290,21 @@ def test_failed_report_write_keeps_cleanup_and_returns_campaign_failure(
     assert not list((tmp_path / "runtime").glob("image-*"))
     assert not list((tmp_path / "runtime").glob("container-*"))
     assert (tmp_path / "campaign/cases/first-install/result.json").is_file()
+
+
+def test_cli_defaults_to_distinct_local_run_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arrange(tmp_path, monkeypatch)
+    copied = sandbox_copy(tmp_path)
+    for _ in range(2):
+        completed = run_cli(tmp_path, ["--case", "first-install"], copied, explicit_output=False)
+        assert completed.returncode == 0, completed.stderr + completed.stdout
+        # The controlled case runs on the host; emulate the fresh Docker workspace.
+        shutil.rmtree(copied / "tools/install_sandbox/out/work")
+    runs = list((copied / "tools/install_sandbox/out").iterdir())
+    assert len(runs) == 2
+    for run in runs:
+        saved = json.loads((run / "campaign.json").read_text())
+        assert saved["passed"]
+        assert (run / "cases/first-install/result.json").is_file()

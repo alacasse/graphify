@@ -2,7 +2,7 @@
 
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
@@ -19,7 +19,12 @@ from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallT
 from tools.install_sandbox.contracts.spec import InstallTestSpec, fields, text
 from tools.install_sandbox.contracts.timings import Timing, elapsed, measure
 from tools.install_sandbox.host.build_context import validate_evidence_location
-from tools.install_sandbox.host.docker_runtime import ContainerHarness, ContainerRunResult
+from tools.install_sandbox.host.docker_runtime import (
+    ContainerHarness,
+    ContainerRunResult,
+    SignalCapture,
+    WriterObserver,
+)
 from tools.install_sandbox.host.result_reader import read_result
 from tools.install_sandbox.host.spec_reader import InstallSpecReader
 from tools.install_sandbox.host.timing_reader import CaseTimingResult, read_timings
@@ -101,14 +106,13 @@ class CampaignResult:
             and self.cleanup.cleanup_complete
         )
 
+    def payload(self) -> dict[str, object]:
+        return {"version": 1, "passed": self.passed, **asdict(self, dict_factory=_campaign_fields)}
+
     def save(self) -> None:
         from tools.install_sandbox.host.timing_report import render_campaign
 
-        payload = {
-            "version": 1,
-            "passed": self.passed,
-            **asdict(self, dict_factory=_campaign_fields),
-        }
+        payload = self.payload()
         documents = {
             "campaign.json": json.dumps(payload, indent=2, default=str) + "\n",
             "campaign.txt": render_campaign(self),
@@ -142,6 +146,9 @@ class InstallTestCoordinator:
         verify_timeout_seconds: float = 60,
         run_timeout_seconds: float = 900,
         graceful_termination_seconds: float = 10,
+        interrupts: SignalCapture | None = None,
+        observer: WriterObserver | None = None,
+        progress: Callable[[CampaignResult], None] | None = None,
     ) -> CampaignResult:
         """Prepare once, conduct ordered isolated cases, and always finalize owned resources."""
         started = time.monotonic_ns()
@@ -153,6 +160,8 @@ class InstallTestCoordinator:
                 verify_timeout_seconds=verify_timeout_seconds,
                 run_timeout_seconds=run_timeout_seconds,
                 graceful_termination_seconds=graceful_termination_seconds,
+                interrupts=interrupts,
+                observer=observer,
             )
             names = self._select_cases(case_names)
             subject, output, cases = self._prepare_campaign(
@@ -172,11 +181,11 @@ class InstallTestCoordinator:
         )
         with harness:
             try:
-                result.save()
+                _save_progress(result, progress)
                 result.preparation = harness.prepare(subject, output / "preparation")
                 result.timings.extend(result.preparation.timings)
-                result.save()
-                self._conduct_cases(harness, cases, result)
+                _save_progress(result, progress)
+                self._conduct_cases(harness, cases, result, progress)
             except (Exception, KeyboardInterrupt) as error:
                 result.interrupted = isinstance(error, KeyboardInterrupt)
                 result.error = f"Campaign stopped: {type(error).__name__}: {error}"
@@ -187,7 +196,7 @@ class InstallTestCoordinator:
                 result.timings.extend(result.cleanup.timings)
                 result.duration_seconds = elapsed(started)
                 try:
-                    result.save()
+                    _save_progress(result, progress)
                 except EvidenceWriteError as error:
                     result.error = f"{result.error or 'Campaign evidence incomplete'}; {error}"
         return result
@@ -241,23 +250,24 @@ class InstallTestCoordinator:
         harness: ContainerHarness,
         cases: list[InstallTestCase],
         result: CampaignResult,
+        progress: Callable[[CampaignResult], None] | None,
     ) -> None:
         assert result.preparation is not None
         if result.preparation.state != "completed" or not result.preparation.cleanup_complete:
             self._skip_remaining(
                 result, "Common preparation unavailable: " + result.preparation.detail
             )
-            result.save()
+            _save_progress(result, progress)
             return
         for case, entry in zip(cases, result.cases, strict=True):
             if harness.interrupted:
                 self._skip_remaining(result, "Campaign interrupted")
                 break
             entry.state = "running"
-            result.save()
+            _save_progress(result, progress)
             entry.result = self._run_and_read(harness, case, entry.output_directory, result)
             entry.state = "finished"
-            result.save()
+            _save_progress(result, progress)
             if (
                 not entry.result.container.cleanup_complete
                 or harness.interrupted
@@ -270,7 +280,7 @@ class InstallTestCoordinator:
                     else "Campaign interrupted",
                 )
                 break
-        result.save()
+        _save_progress(result, progress)
 
     def _run_and_read(
         self,
@@ -342,3 +352,11 @@ def _check_campaign_paths(subject: Path, destination: Path, output: Path) -> Non
         raise ValueError("Campaign evidence must not be a symlink or contain commas")
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError("Campaign evidence directory must be fresh or empty")
+
+
+def _save_progress(
+    result: CampaignResult, progress: Callable[[CampaignResult], None] | None
+) -> None:
+    result.save()
+    if progress is not None:
+        progress(result)

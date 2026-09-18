@@ -23,8 +23,8 @@ def main(arguments: list[str]) -> int:
     _record_command(state, arguments)
     mode = os.environ.get("FAKE_DOCKER_MODE", "success")
     command = arguments[0] if arguments else ""
-    if command == "version":
-        return _version(mode)
+    if command in {"info", "version"}:
+        return _identity(mode, command)
     if command == "build":
         return _build(state, mode, arguments)
     if command == "run":
@@ -40,6 +40,15 @@ def main(arguments: list[str]) -> int:
         _resource_marker(state, "container", arguments[-1]).unlink(missing_ok=True)
         return 0
     return 2
+
+
+def _identity(mode: str, command: str) -> int:
+    if command == "info":
+        if mode == "daemon_fail":
+            return 3
+        print(os.environ.get("FAKE_DOCKER_DAEMON_ID", "controlled-daemon"))
+        return 0
+    return _version(mode)
 
 
 def _version(mode: str) -> int:
@@ -119,6 +128,8 @@ def _hold(state: Path, mode: str, run_id: str) -> None:
 
 def _case_program(state: Path, mode: str, arguments: list[str], marker: Path) -> int:
     code = _execute_case(state, arguments)
+    if os.environ.get("FAKE_DOCKER_DISCARD_WORK") == "1":
+        shutil.rmtree(_output_mount(arguments).parents[2] / "work", ignore_errors=True)
     if mode != "container_cleanup_fail":
         marker.unlink(missing_ok=True)
     return 9 if mode == "run_fail" else code

@@ -2,11 +2,9 @@
 
 import argparse
 import sys
-import uuid
 from pathlib import Path
 
-from tools.install_sandbox.host.coordinator import InstallTestCoordinator
-from tools.install_sandbox.host.timing_report import render_campaign
+from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -17,30 +15,31 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).resolve().parent / "out" / f"run-{uuid.uuid4().hex}",
-        help="Evidence directory (default: a fresh run under tools/install_sandbox/out)",
+        help=(
+            "Final result directory. Defaults to a UTC-named campaign under "
+            "tools/install_sandbox/out (14-day retention). Managed destinations must "
+            "be absent; outside out, retention belongs to the caller."
+        ),
     )
     parser.add_argument("--case", action="append", dest="cases", metavar="NAME")
     args = parser.parse_args(arguments)
-    try:
-        result = InstallTestCoordinator().run_campaign(
-            specs_directory=args.specs,
-            target=args.target,
-            case_names=args.cases,
-            subject_checkout=args.repo,
-            output_directory=args.output,
-        )
-    except (OSError, ValueError) as error:
-        print(f"Campaign request refused: {error}", file=sys.stderr)
-        print(f"Evidence destination: {args.output}", file=sys.stderr)
-        return 2
-    except KeyboardInterrupt:
-        print(f"Campaign interrupted; evidence destination: {args.output}", file=sys.stderr)
-        return 130
-    print(render_campaign(result), end="")
-    if result.interrupted:
-        return 130
-    return 0 if result.passed else 1
+    result = CampaignOutput().run(
+        specs_directory=args.specs,
+        target=args.target,
+        case_names=args.cases,
+        subject_checkout=args.repo,
+        output_directory=args.output,
+    )
+    report = result.report.render()
+    if result.exit_code:
+        for diagnostic in result.report.diagnostics:
+            print(diagnostic, file=sys.stderr)
+    if result.output_directory is not None:
+        print(f"Result available at: {result.output_directory}")
+    else:
+        print("No output directory allocated.", file=sys.stderr)
+    print(report, end="")
+    return result.exit_code
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from types import FrameType
-from typing import Literal, TextIO
+from typing import Literal, Protocol, TextIO
 
 from tools.install_sandbox.contracts.timings import Timing, measure, skip_pending
 from tools.install_sandbox.host.build_context import (
@@ -105,7 +105,24 @@ class _DiagnosticTails:
             self.stderr.append(f"[{phase}]\n{result.stderr_tail}")
 
 
-class _SignalCapture:
+class WriterObserver(Protocol):
+    """Persist a writer intent before launch; failures must prevent that launch."""
+
+    def before_launch(self, name: str, role: str, runtime: str, daemon_id: str) -> None: ...
+
+    def client_returned(self, name: str) -> None: ...
+
+    def stopped(self, name: str) -> None: ...
+
+
+def runtime_identity(runtime: str) -> str:
+    import shutil
+
+    executable = shutil.which(runtime)
+    return str(Path(executable).resolve()) if executable else runtime
+
+
+class SignalCapture:
     def __init__(self) -> None:
         self.event = threading.Event()
         self.signal_number: int | None = None
@@ -114,7 +131,7 @@ class _SignalCapture:
             int | Callable[[int, FrameType | None], None] | None,
         ] = {}
 
-    def __enter__(self) -> _SignalCapture:
+    def __enter__(self) -> SignalCapture:
         for caught_signal in (signal.SIGINT, signal.SIGTERM):
             self._previous[caught_signal] = signal.signal(caught_signal, self._handle)
         return self
@@ -140,6 +157,8 @@ class ContainerHarness:
         verify_timeout_seconds: float = 60,
         run_timeout_seconds: float = 900,
         graceful_termination_seconds: float = 10,
+        interrupts: SignalCapture | None = None,
+        observer: WriterObserver | None = None,
     ) -> None:
         self.runtime = _validate_runtime(
             runtime_executable,
@@ -160,18 +179,24 @@ class ContainerHarness:
         self.build_attempted = False
         self.ready = False
         self.pending_containers: set[str] = set()
-        self.interrupts = _SignalCapture()
+        self.interrupts = interrupts or SignalCapture()
+        self._owns_interrupts = interrupts is None
+        self.observer = observer
+        self._settled_clients: set[str] = set()
+        self._daemon_id: str | None = None
         self.temporary: tempfile.TemporaryDirectory[str] | None = None
         self.logs: Path | None = None
         self.diagnostics = _DiagnosticTails()
         self.dependency_preparation: DependencyPreparation | None = None
 
     def __enter__(self) -> ContainerHarness:
-        self.interrupts.__enter__()
+        if self._owns_interrupts:
+            self.interrupts.__enter__()
         return self
 
     def __exit__(self, *_args: object) -> None:
-        self.interrupts.__exit__()
+        if self._owns_interrupts:
+            self.interrupts.__exit__()
 
     @property
     def interrupted(self) -> bool:
@@ -322,14 +347,29 @@ class ContainerHarness:
     ) -> _Outcome:
         if self.interrupted:
             return _interrupted(phase, self.interrupts.signal_number or signal.SIGINT)
+        self._record_launch(name, phase)
         self.pending_containers.add(name)
         result = self._command(self._run_command(name, run_id, case, output), timeout, phase)
+        if 0 <= result.exit_code < 125 and not result.timed_out and result.interrupted_by is None:
+            self._settled_clients.add(name)
+            if self.observer is not None:
+                self.observer.client_returned(name)
         return _command_failure(result, phase, "Container failed") or _Outcome(
             "completed",
             "complete",
             0,
             "Container completed",
         )
+
+    def _record_launch(self, name: str, phase: RunPhase) -> None:
+        if self.observer is None:
+            return
+        if self._daemon_id is None:
+            identity = self._command([self.runtime, "info", "--format", "{{.ID}}"], 10, "preflight")
+            if identity.exit_code != 0 or not identity.stdout_tail.strip():
+                raise ValueError("Cannot identify the Docker daemon before writer launch")
+            self._daemon_id = identity.stdout_tail.strip()
+        self.observer.before_launch(name, phase, runtime_identity(self.runtime), self._daemon_id)
 
     def _run_command(
         self,
@@ -422,6 +462,8 @@ class ContainerHarness:
             return False
         if clean:
             self.pending_containers.discard(name)
+            if self.observer is not None and name in self._settled_clients:
+                self.observer.stopped(name)
         return clean
 
     def _cleanup_container(self, name: str) -> bool:
@@ -594,7 +636,7 @@ def _execute_command(
     command: Sequence[str],
     timeout_seconds: float,
     graceful_termination_seconds: float,
-    interrupts: _SignalCapture | None,
+    interrupts: SignalCapture | None,
     log: TextIO | None = None,
 ) -> _CommandResult:
     launch = Timing("client_launch")
@@ -633,7 +675,7 @@ def _observe_process(
     process: subprocess.Popen[str],
     timeout_seconds: float,
     graceful_termination_seconds: float,
-    interrupts: _SignalCapture | None,
+    interrupts: SignalCapture | None,
     log: TextIO | None = None,
 ) -> _CommandResult:
     assert process.stdout is not None
@@ -672,7 +714,7 @@ def _observe_process(
 def _wait_for_process(
     process: subprocess.Popen[str],
     timeout_seconds: float,
-    interrupts: _SignalCapture | None,
+    interrupts: SignalCapture | None,
 ) -> tuple[bool, int | None]:
     deadline = time.monotonic() + timeout_seconds
     while process.poll() is None:

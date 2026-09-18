@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,7 @@ def run_cli(
 
 def arrange(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     arrange_backup(root, monkeypatch)
+    monkeypatch.setenv("FAKE_DOCKER_DISCARD_WORK", "1")
     (root / "bin").mkdir()
     (root / "bin/docker").symlink_to(_COMPONENT.parent / "host/fake_docker.py")
     monkeypatch.setenv("PATH", str(root / "bin") + os.pathsep + os.environ["PATH"])
@@ -139,8 +141,8 @@ def test_spec_applicability_before_docker(
         ("run_fail", 1, 3),
         ("invalid_result", 1, 3),
         ("container_cleanup_fail", 1, 2),
-        ("run_interrupt", 130, 2),
-        ("verify_interrupt", 130, 1),
+        ("run_interrupt", 143, 2),
+        ("verify_interrupt", 143, 1),
         ("cleanup_fail", 1, 3),
     ],
 )
@@ -159,7 +161,7 @@ def test_cli_failure_continuation_cleanup_and_interrupt(
     assert completed.returncode == code, completed.stderr + completed.stdout
     saved = json.loads((tmp_path / "campaign/campaign.json").read_text())
     assert not saved["passed"] and saved["cleanup"] is not None
-    assert saved["interrupted"] == (code == 130)
+    assert saved["interrupted"] == (code == 143)
     assert completed.stdout.endswith((tmp_path / "campaign/campaign.txt").read_text())
     assert len([c for c in commands(tmp_path) if c[0] == "run"]) == runs
 
@@ -216,9 +218,14 @@ def test_copied_configuration_refusal_and_explicit_bypass(
         refused = run_cli(tmp_path, [], copy)
         assert refused.returncode == 2, refused.stdout + refused.stderr
         assert not commands(tmp_path)
-        completed = run_cli(tmp_path, ["--case", "preserve-skill-backup"], copy)
+        # A refused request now has its own retained report; choose a fresh destination.
+        completed = run_cli(
+            tmp_path,
+            ["--case", "preserve-skill-backup", "--output", str(tmp_path / "accepted")],
+            copy,
+        )
         assert completed.returncode == 0, completed.stdout + completed.stderr
-        saved = json.loads((tmp_path / "campaign/campaign.json").read_text())
+        saved = json.loads((tmp_path / "accepted/campaign.json").read_text())
         assert saved["selected_cases"] == ["preserve-skill-backup"]
         assert saved["selection_origin"] == "explicit"
     finally:
@@ -263,7 +270,8 @@ def test_all_seven_cases_apply_to_renamed_reference(
     assert saved["selected_cases"] == names and saved["not_selected_cases"] == []
     assert all(c["state"] == "not_run" and c["not_run_reason"] for c in saved["cases"])
     for name in names:
-        case = json.loads((tmp_path / f"campaign/inputs/{name}.json").read_text())
+        with zipfile.ZipFile(tmp_path / "campaign/evidence.zip") as archive:
+            case = json.loads(archive.read(f"evidence/inputs/{name}.json"))
         assert case["target"] == "another-target" and case["scope"] == "project"
         assert len(case["operations"]) == (1 if name == "first-install" else 2)
 
@@ -289,7 +297,7 @@ def test_failed_report_write_keeps_cleanup_and_returns_campaign_failure(
     assert "reinstall" in completed.stdout and "not_run" in completed.stdout
     assert not list((tmp_path / "runtime").glob("image-*"))
     assert not list((tmp_path / "runtime").glob("container-*"))
-    assert (tmp_path / "campaign/cases/first-install/result.json").is_file()
+    assert (tmp_path / "campaign/evidence/cases/first-install/result.json").is_file()
 
 
 def test_cli_defaults_to_distinct_local_run_directories(
@@ -300,11 +308,15 @@ def test_cli_defaults_to_distinct_local_run_directories(
     for _ in range(2):
         completed = run_cli(tmp_path, ["--case", "first-install"], copied, explicit_output=False)
         assert completed.returncode == 0, completed.stderr + completed.stdout
-        # The controlled case runs on the host; emulate the fresh Docker workspace.
-        shutil.rmtree(copied / "tools/install_sandbox/out/work")
-    runs = list((copied / "tools/install_sandbox/out").iterdir())
+
+    runs = [
+        p
+        for p in (copied / "tools/install_sandbox/out").iterdir()
+        if (p / "campaign.json").is_file()
+    ]
     assert len(runs) == 2
     for run in runs:
         saved = json.loads((run / "campaign.json").read_text())
         assert saved["passed"]
-        assert (run / "cases/first-install/result.json").is_file()
+        with zipfile.ZipFile(run / "evidence.zip") as archive:
+            assert json.loads(archive.read("evidence/cases/first-install/result.json"))

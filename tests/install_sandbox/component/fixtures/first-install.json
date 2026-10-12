@@ -9,6 +9,7 @@
     ],
     "directory": ".sandbox-reference",
     "skill": {
+      "lock": "persistent",
       "file": "skills/graphify/SKILL.md",
       "source": "graphify/skill.md",
       "references": "graphify/skills/claude/references"

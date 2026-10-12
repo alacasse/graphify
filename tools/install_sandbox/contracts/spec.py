@@ -74,6 +74,18 @@ def _hooks(value: object) -> tuple[HookExpectation, ...]:
     return tuple(HookExpectation.from_data(item) for item in cast(list[object], value))
 
 
+def _skill(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected skill fields")
+    data = cast(dict[str, object], value)
+    result = fields(
+        data, "file source references lock" if "lock" in data else "file source references"
+    )
+    if "lock" in result and result["lock"] != "persistent":
+        raise ValueError("Skill lock must be persistent")
+    return result
+
+
 @dataclass(frozen=True)
 class InstallTestSpec:
     """Validated target facts; source paths remain relative to the subject."""
@@ -89,6 +101,7 @@ class InstallTestSpec:
     json_file: str
     json_list: str
     json_hooks: tuple[HookExpectation, ...]
+    skill_lock: str | None = None
 
     @classmethod
     def from_data(cls, value: object) -> "InstallTestSpec":
@@ -101,7 +114,7 @@ class InstallTestSpec:
             raise ValueError("Scopes must be user or project")
         if len(set(cast(list[str], scopes))) != len(scopes):
             raise ValueError("Duplicate scopes")
-        skill = fields(data["skill"], "file source references")
+        skill = _skill(data["skill"])
         markdown = fields(data["markdown"], "file marker source")
         config = fields(data["json"], "file list hooks")
         return cls(
@@ -116,6 +129,7 @@ class InstallTestSpec:
             relative_path(config["file"]),
             text(config["list"]),
             _hooks(config["hooks"]),
+            cast(str | None, skill.get("lock")),
         )
 
     def to_data(self) -> dict[str, object]:
@@ -126,6 +140,7 @@ class InstallTestSpec:
                 "file": self.skill_file,
                 "source": self.skill_source,
                 "references": self.references_source,
+                **({"lock": self.skill_lock} if self.skill_lock is not None else {}),
             },
             "markdown": {
                 "file": self.markdown_file,

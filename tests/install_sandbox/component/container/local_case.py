@@ -65,6 +65,16 @@ def controlled_script(mode: str) -> str:
         "    path = Path(name)\n    path.parent.mkdir(parents=True, exist_ok=True)\n"
         "    path.write_text(content, encoding='utf-8')\n"
         + (settings_script() if mode != "no_effects" else "")
+        + (
+            "import hashlib\n"
+            "skill = Path('.sandbox-reference/skills/graphify').resolve()\n"
+            "digest = hashlib.sha256(str(skill).encode('utf-8')).hexdigest()[:16]\n"
+            "lock = Path(os.environ['HOME']) / '.cache/graphify/skill-locks' / (digest + '.lock')\n"
+            "lock.parent.mkdir(parents=True, exist_ok=True)\n"
+            "if not lock.exists():\n    lock.write_bytes(b'')\n"
+            if mode != "no_effects"
+            else ""
+        )
         + "print('controlled stdout', flush=True)\n"
         "print('controlled stderr', file=__import__('sys').stderr, flush=True)\n" + ending + "\n"
     )

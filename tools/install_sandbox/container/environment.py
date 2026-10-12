@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class FilesystemSnapshot:
+    skill_lock: str | None = None
     entries: list[SnapshotEntry] = field(default_factory=list[SnapshotEntry])
     obstacles: list[ObservationObstacle] = field(default_factory=list[ObservationObstacle])
     contents: dict[tuple[str, str], bytes] = field(default_factory=dict[tuple[str, str], bytes])
@@ -107,6 +108,16 @@ class TestEnvironment:
         self.home = directory / "home"
         self.project.mkdir(parents=True, exist_ok=False)
         self.home.mkdir(parents=True, exist_ok=False)
+        self.skill_lock = None
+        if self.case.spec.skill_lock is not None:
+            skill = (self.project / destinations(self.case)["skill"]).parent.resolve()
+            digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
+            self.skill_lock = f".cache/graphify/skill-locks/{digest}.lock"
+            self.lock_expectation = {
+                "home": str(self.home.resolve()),
+                "skill_directory": str(skill),
+                "path": self.skill_lock,
+            }
 
     def prepare(self) -> None:
         for initial in self.case.initial_files:
@@ -183,7 +194,9 @@ class TestEnvironment:
         return snapshot
 
     def preserve_expected(self, subject: Path, writer: TestResultWriter) -> FilesystemSnapshot:
-        snapshot = FilesystemSnapshot()
+        snapshot = FilesystemSnapshot(skill_lock=self.skill_lock)
+        if self.skill_lock is not None:
+            writer.write_lock_expectation(self.lock_expectation)
         spec = self.case.spec
         for path in (spec.skill_source, spec.markdown_source, spec.references_source):
             self._capture(snapshot, "subject", subject, path, expected=True)
@@ -263,6 +276,8 @@ class TestEnvironment:
             entry["sha256"] = hashlib.sha256(content).hexdigest()
 
     def _keep_content(self, entry: SnapshotEntry, dest: dict[str, str]) -> bool:
+        if entry["root"] == "home" and entry["path"] == self.skill_lock:
+            return True
         witnesses = {(f["root"], f["path"]) for f in self.case.initial_files}
         if (entry["root"], entry["path"]) in witnesses:
             return True

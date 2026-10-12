@@ -1,8 +1,9 @@
 """Transport-only validation tests; these documents do not prove installation."""
 
+import hashlib
 import json
 from dataclasses import asdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 import pytest
@@ -102,6 +103,8 @@ def _write(output: Path, document: dict[str, object]) -> None:
             ],
             "obstacles": [],
         }
+        if phase == "after":
+            snapshot["entries"].append(_write_lock(output, prefix))
         (output / f"{prefix}.json").write_text(json.dumps(snapshot))
     steps = document.get("steps")
     if isinstance(steps, list) and steps and isinstance(steps[0], dict):
@@ -109,6 +112,21 @@ def _write(output: Path, document: dict[str, object]) -> None:
             json.dumps(cast(dict[str, object], steps[0]).get("verification"))
         )
     (output / "result.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def _write_lock(output: Path, prefix: str) -> dict[str, str]:
+    skill = str(
+        PurePosixPath("/work/project", _case().spec.directory, _case().spec.skill_file).parent
+    )
+    digest = hashlib.sha256(skill.encode("utf-8")).hexdigest()[:16]
+    relative = f".cache/graphify/skill-locks/{digest}.lock"
+    expectation = {"home": "/work/home", "skill_directory": skill, "path": relative}
+    (output / "skill-lock.json").write_text(json.dumps(expectation))
+    binding = f"{prefix}/home/{relative}"
+    path = output / binding
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    return {"root": "home", "path": relative, "kind": "file", "content_file": binding}
 
 
 def _object(value: object) -> dict[str, object]:

@@ -48,6 +48,10 @@ class Scenario:
         return self.environment.project / spec.directory / relative
 
     def effects(self) -> None:
+        if self.environment.skill_lock is not None:
+            lock = self.environment.home / self.environment.skill_lock
+            if not lock.exists():
+                put(lock, b"")
         skill = self.path("skill")
         put(skill, SKILL)
         put(skill.parent / ".graphify_version", b"Arbitrary version, presence only\n")

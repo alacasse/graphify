@@ -1,3 +1,21 @@
+# These retained facts describe the generic `graphify install --platform opencode`
+# interface, with --project for project scope. The dedicated `graphify opencode
+# install` command without --project installs AGENTS.md and the plugin at cwd,
+# but does not install the user skill.
+#
+# The plugin is auto-discovered from .opencode/plugins/graphify.js. Installation
+# must not create opencode.json or add a registration. In an existing plain-JSON
+# object at .opencode/opencode.json (user_cwd or project, respectively), migration
+# removes every exact string ".opencode/plugins/graphify.js" from the `plugin`
+# and `plugins` lists, deleting a key only when that removal empties its list.
+# Other values and the order of retained list entries must be preserved;
+# formatting may change only when migration occurs. Without an obsolete entry,
+# preserve the existing bytes, including an already-empty list.
+# Non-object JSON and non-list plugin values are left alone. JSONC/non-JSON is
+# preserved byte-for-byte, with a manual-removal diagnostic when the quoted
+# obsolete string is present. Do not require automatic migration in that case.
+# These migration facts are retained here as comments, not a new executable
+# schema or a declaration that the current sandbox reader supports this target.
 universal_uninstall_scopes: [user]
 scopes:
   user:
@@ -12,11 +30,6 @@ scopes:
         path: .opencode/plugins/graphify.js
         required_text: ["[graphify]", "run graphify query with your question"]
         forbidden_text: ["`", "$(", "&&"]
-      - kind: json
-        root: user_cwd
-        path: .opencode/opencode.json
-        entries:
-          plugin: [.opencode/plugins/graphify.js]
   project:
     effects:
       - kind: skill
@@ -34,8 +47,3 @@ scopes:
         path: .opencode/plugins/graphify.js
         required_text: ["[graphify]", "run graphify query with your question"]
         forbidden_text: ["`", "$(", "&&"]
-      - kind: json
-        root: project
-        path: .opencode/opencode.json
-        entries:
-          plugin: [.opencode/plugins/graphify.js]

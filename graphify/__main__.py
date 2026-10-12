@@ -303,9 +303,11 @@ def _refresh_stale_skills() -> None:
     else:
         other_os = {"windows", "antigravity-windows"}
     candidates = [("vscode", _vscode_skill_destination)]
+    # The project-only reference target must never refresh a user-scope copy.
     candidates += [
         (name, functools.partial(_platform_skill_destination, name))
-        for name in _skill_platforms() if name not in other_os
+        for name in _skill_platforms()
+        if name not in other_os and name != "sandbox-reference"
     ]
     writers: dict[Path, list[tuple[str, Path]]] = {}
     for name, destination in candidates:

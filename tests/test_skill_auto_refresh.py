@@ -465,6 +465,46 @@ def test_a_stale_gemini_skill_gets_the_warning_too(monkeypatch, capsys):
     assert "graphify install --platform gemini" in err
 
 
+def _snapshot(root: Path) -> dict[str, tuple[int, bytes | None]]:
+    return {
+        path.relative_to(root).as_posix(): (
+            path.lstat().st_mode,
+            None if path.is_dir() else path.read_bytes(),
+        )
+        for path in root.rglob("*")
+    }
+
+
+def test_an_ordinary_command_preserves_a_stale_user_reference(monkeypatch, capsys):
+    dst = _stale("sandbox-reference")
+    references = dst.parent / "references"
+    references.mkdir()
+    (references / "personal.md").write_bytes(b"Keep this reference fragment.\n")
+    (Path.home() / "personal-notes.txt").write_bytes(b"Keep my notes.\n")
+    before = _snapshot(Path.home())
+    monkeypatch.setattr(sys, "argv", ["graphify", "--version"])
+
+    mainmod._run_cli()
+
+    assert capsys.readouterr().out.strip() == f"graphify {__version__}"
+    assert _snapshot(Path.home()) == before
+
+
+def test_an_ordinary_command_refreshes_codex_beside_a_stale_reference(monkeypatch, capsys):
+    reference = _stale("sandbox-reference")
+    before = _snapshot(reference.parent)
+    codex = _stale("codex")
+    monkeypatch.setattr(sys, "argv", ["graphify", "--version"])
+
+    mainmod._run_cli()
+
+    assert capsys.readouterr().out.strip() == f"graphify {__version__}"
+    assert _snapshot(reference.parent) == before
+    assert codex.read_bytes() == _packaged("codex")
+    assert _stamp(codex) == __version__
+    assert codex.with_suffix(".md.bak").read_text(encoding="utf-8") == OLD_BODY
+
+
 def test_the_first_cli_run_after_an_upgrade_refreshes_and_stays_quiet(monkeypatch, capsys):
     dsts = [_stale(name) for name in ("claude", "codex")]
     monkeypatch.setattr(sys, "argv", ["graphify", "--version"])

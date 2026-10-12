@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -40,6 +41,29 @@ def _snapshot(root: Path) -> dict[str, tuple[int, bytes | None]]:
         )
         for path in sorted(root.rglob("*"))
     }
+
+
+def _expected_lock(home: Path, skill_directory: Path) -> Path:
+    # CACHE-02: hash the canonical directory, independently of installer helpers.
+    identity = hashlib.sha256(str(skill_directory.resolve()).encode("utf-8")).hexdigest()[:16]
+    return home / ".cache/graphify/skill-locks" / f"{identity}.lock"
+
+
+def _assert_home_with_locks(home, before, locks):
+    after = _snapshot(home)
+    allowed = set(before)
+    for lock in locks:
+        allowed.add(lock.relative_to(home).as_posix())
+        for parent in lock.parents:
+            if parent == home:
+                break
+            allowed.add(parent.relative_to(home).as_posix())
+            assert stat.S_ISDIR(parent.lstat().st_mode)
+        assert stat.S_ISREG(lock.lstat().st_mode)
+        prior = before.get(lock.relative_to(home).as_posix())
+        assert lock.read_bytes() == (prior[1] if prior is not None else b"")
+    assert set(after) == allowed
+    assert {name: after[name] for name in before} == before
 
 
 def _run_cli(project: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
@@ -133,6 +157,7 @@ def test_first_project_install_preserves_user_files_and_home(isolated_project):
     home_before = _snapshot(home)
     config = Path(env["XDG_CONFIG_HOME"]).parent
     config_before = _snapshot(config)
+    locks = [_expected_lock(home, project / ".sandbox-reference/skills/graphify")]
     skill = (PACKAGE / "skill.md").read_bytes()
     references = _snapshot(PACKAGE / "skills/claude/references")
     section = (PACKAGE / "always_on/agents-md.md").read_text(encoding="utf-8")
@@ -172,7 +197,7 @@ def test_first_project_install_preserves_user_files_and_home(isolated_project):
         *(f".sandbox-reference/skills/graphify/references/{name}" for name in references),
     }
     assert changed == expected_changes
-    assert _snapshot(home) == home_before
+    _assert_home_with_locks(home, home_before, locks)
     assert _snapshot(config) == config_before
 
 
@@ -230,13 +255,27 @@ def test_existing_project_cleanup_remains_available(isolated_project):
     _write(project / ".cursor/rules/graphify.mdc", "Installed Cursor rule.\n")
     _write(project / ".claude/skills/graphify/SKILL.md", "Installed Claude skill.\n")
     home_before = _snapshot(home)
+    # All-platform cleanup locks even absent skill destinations. Aliases share
+    # directories; Cursor removes a rule without taking a skill lock.
+    destinations = (
+        ".claude/skills/graphify", ".codex/skills/graphify",
+        ".opencode/skills/graphify", ".config/kilo/skills/graphify",
+        ".aider/graphify", ".copilot/skills/graphify",
+        ".openclaw/skills/graphify", ".factory/skills/graphify",
+        ".trae/skills/graphify", ".trae-cn/skills/graphify",
+        ".hermes/skills/graphify", ".kiro/skills/graphify",
+        ".pi/agent/skills/graphify", ".codebuddy/skills/graphify",
+        ".agents/skills/graphify", ".kimi/skills/graphify",
+        ".devin/skills/graphify", ".gemini/skills/graphify",
+    )
+    locks = [_expected_lock(home, project / destination) for destination in destinations]
 
     result = _run_cli(project, env, "uninstall", "--project")
 
     assert result.returncode == 0, result.stderr
     assert not (project / ".cursor/rules/graphify.mdc").exists()
     assert not (project / ".claude/skills/graphify/SKILL.md").exists()
-    assert _snapshot(home) == home_before
+    _assert_home_with_locks(home, home_before, locks)
 
 
 @pytest.mark.parametrize("existing_group", [False, True])
@@ -249,6 +288,11 @@ def test_reference_hooks_preserved_across_two_installations(isolated_project, ex
     original = {"theme": "dark", "instructions": ["my-instructions.md", ENTRY],
                 "hooks": {"PreToolUse": groups}}
     settings_path.write_text(json.dumps(original), encoding="utf-8")
+    locks = [_expected_lock(home, project / ".sandbox-reference/skills/graphify")]
+    if existing_group:
+        _write(locks[0], "Existing lock bytes to preserve.\n")
+        _write(locks[0].parent / "unrelated.lock", "Unrelated lock bytes.\n")
+        _write(locks[0].parent / "personal.txt", "Personal cache neighbor.\n")
     home_before = _snapshot(home)
     installed = None
     for _ in range(2):
@@ -260,7 +304,7 @@ def test_reference_hooks_preserved_across_two_installations(isolated_project, ex
         assert sum(all(hook.get(k) == v for k, v in HOOK.items()) for hook in hooks) == 1
         assert observed["instructions"] == original["instructions"]
         assert observed["theme"] == "dark"
-        assert _snapshot(home) == home_before
+        _assert_home_with_locks(home, home_before, locks)
         if installed is not None:
             assert observed == installed
         installed = observed

@@ -143,3 +143,14 @@ Before adding or changing target data:
 - treat a failing product observation as a defect instead of weakening the
   oracle; and
 - update this guide when the ownership boundary changes.
+
+The reference `skill.lock: persistent` declaration permits only the Linux persistent
+lock at `HOME/.cache/graphify/skill-locks/<digest>.lock`, even when XDG_CACHE_HOME
+differs. The digest is the first 16 hexadecimal characters of SHA-256 over the
+canonical absolute skill directory encoded as UTF-8. Its missing parents may be
+created; a new lock must be empty and an existing lock must retain exact bytes.
+Without the declaration no lock effect is permitted; other values are rejected.
+The runner retains the independent expectation and observed lock bytes. Cache
+neighbors remain covered by preservation checks. Observation obstacles prevent
+success. Symlink installation paths, transient writes, concurrency and native
+Windows/macOS behavior are outside this contract.

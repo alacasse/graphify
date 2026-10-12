@@ -104,6 +104,9 @@ class TestResultWriter:
         relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
 
+    def write_lock_expectation(self, expectation: dict[str, str]) -> None:
+        self._write_json("skill-lock.json", expectation)
+
     def write_step_preparation_plan(
         self, plan: ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan, content: bytes
     ) -> None:

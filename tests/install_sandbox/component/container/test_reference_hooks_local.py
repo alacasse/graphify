@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from tools.install_sandbox.container.environment import TestEnvironment as Environment
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.case import InstallTestCase
 from tools.install_sandbox.host.coordinator import InstallTestCoordinator
@@ -46,8 +47,41 @@ def _launcher(subject: Path, path: Path) -> None:
     path.chmod(0o755)
 
 
+def _seed_cache(monkeypatch: pytest.MonkeyPatch, name: str) -> dict[Path, bytes]:
+    original_prepare = Environment.prepare
+    witnesses: dict[Path, bytes] = {}
+
+    def prepare(environment: Environment) -> None:
+        original_prepare(environment)
+        assert environment.skill_lock is not None
+        lock = environment.home / environment.skill_lock
+        witnesses[lock.parent / "foreign.lock"] = b"Foreign lock bytes.\n"
+        witnesses[lock.parent / "personal.txt"] = b"Personal cache document.\n"
+        if name == "reinstall":
+            witnesses[lock] = b"\x00Previous persistent lock.\xff"
+        for path, content in witnesses.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+    monkeypatch.setattr(Environment, "prepare", prepare)
+    return witnesses
+
+
+def _assert_cache(output: Path, witnesses: dict[Path, bytes], steps: int) -> None:
+    assert all(path.read_bytes() == content for path, content in witnesses.items())
+    expectation = json.loads((output / "skill-lock.json").read_bytes())
+    lock = Path(expectation["home"]) / expectation["path"]
+    expected_lock = witnesses.get(lock, b"")
+    for index in range(steps):
+        assert (
+            output / f"steps/{index}/after/home" / expectation["path"]
+        ).read_bytes() == expected_lock
+
+
 @pytest.mark.parametrize("name", ["first-install", "reinstall"])
-def test_real_reference_installer_retains_hooks_and_evidence(tmp_path: Path, name: str) -> None:
+def test_real_reference_installer_retains_hooks_and_evidence(
+    tmp_path: Path, name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert _SUBJECT is not None
     subject = Path(_SUBJECT).resolve()
     assert (subject / "graphify/install.py").is_file()
@@ -57,6 +91,7 @@ def test_real_reference_installer_retains_hooks_and_evidence(tmp_path: Path, nam
     case = InstallTestCoordinator().write_case(
         _SPECS, "sandbox-reference", case_file, case_name=name
     )
+    witnesses = _seed_cache(monkeypatch, name)
     output = tmp_path / "evidence"
     work = tmp_path / "work"
     result = InstallTestRunner().run_case(
@@ -85,6 +120,7 @@ def test_real_reference_installer_retains_hooks_and_evidence(tmp_path: Path, nam
         assert documents[0] == documents[1]
         before = output / "steps/1/before/project/.sandbox-reference/settings.json"
         assert json.loads(before.read_bytes()) == documents[0]
+    _assert_cache(output, witnesses, len(case.operations))
     shutil.rmtree(work)
     executable.unlink()
     assert read_result(output, InstallTestCase.from_json(case_file.read_text())) == result

@@ -1,7 +1,8 @@
 """Validate the received case result independently of container execution."""
 
+import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 from tools.install_sandbox.contracts.case import (
@@ -343,8 +344,65 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
     if result.preparation["ready"]:
         _check_command_evidence(result, case, output_directory)
         _check_json_observations(result, case, output_directory)
+        _check_lock_evidence(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
     return result
+
+
+def _check_lock_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
+    if case.spec.skill_lock is None:
+        if (output / "skill-lock.json").exists():
+            raise ValueError("Undeclared lock expectation")
+        return
+    home, skill, path = _lock_expectation(output)
+    for index, step in enumerate(result.steps):
+        command = step["command"]
+        if command is None:
+            continue
+        if skill != PurePosixPath(command["cwd"], destinations(case)["skill"]).parent:
+            raise ValueError("Lock skill directory contradicts installation directory")
+        if home.parent != PurePosixPath(command["cwd"]).parent or home.name != "home":
+            raise ValueError("Lock home contradicts isolated installation roots")
+        for phase in ("before", "after"):
+            _check_lock_snapshot(
+                output,
+                f"steps/{index}/{phase}.json",
+                path,
+                required=(phase == "before" and index > 0)
+                or (phase == "after" and _check_attempted(step) == "passed"),
+            )
+
+
+def _lock_expectation(output: Path) -> tuple[PurePosixPath, PurePosixPath, str]:
+    expectation = fields(
+        _read_json_evidence(output, "skill-lock.json"), "home skill_directory path"
+    )
+    home, skill = (PurePosixPath(text(expectation[k])) for k in ("home", "skill_directory"))
+    if not home.is_absolute() or not skill.is_absolute() or ".." in home.parts + skill.parts:
+        raise ValueError("Lock expectation requires canonical absolute roots")
+    if str(home) != expectation["home"] or str(skill) != expectation["skill_directory"]:
+        raise ValueError("Lock roots must retain their canonical spelling")
+    digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
+    path = f".cache/graphify/skill-locks/{digest}.lock"
+    if expectation["path"] != path:
+        raise ValueError("Lock path does not match retained skill directory")
+    return home, skill, path
+
+
+def _check_lock_snapshot(output: Path, relative: str, path: str, *, required: bool) -> None:
+    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
+    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
+    retained = False
+    for value in _list(snapshot["entries"]):
+        entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
+        if entry["root"] == "home" and entry["path"] == path and entry["kind"] == "file":
+            if entry.get("content_file") is None and not any(
+                o["root"] == "home" and o["path"] == path for o in obstacles
+            ):
+                raise ValueError("Observed lock requires retained bytes")
+            retained = entry.get("content_file") is not None
+    if required and not retained:
+        raise ValueError("Successful installation requires observed lock bytes")
 
 
 def _read_json_evidence(output: Path, relative: str) -> object:

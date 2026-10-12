@@ -510,6 +510,8 @@ def _preservation(
         ):
             continue
         left, right = before.entry(root, path), after.entry(root, path)
+        if root == "home" and _lock_creation(expected.skill_lock, before, after, path):
+            continue
         if root == "project" and path in allowed:
             # Only creation of required directories is authorized, never their removal/type change.
             if left is None or (
@@ -605,6 +607,60 @@ def _reinstall_stability(
             )
 
 
+def _lock_creation(
+    lock: str | None, before: FilesystemSnapshot, after: FilesystemSnapshot, path: str
+) -> bool:
+    if lock is None or not before.absent("home", path):
+        return False
+    if path == lock:
+        return True
+    entry = after.entry("home", path)
+    return (
+        path in {str(p) for p in PurePosixPath(lock).parents}
+        and entry is not None
+        and entry["kind"] == "directory"
+    )
+
+
+def _skill_lock(
+    path: str | None,
+    before: FilesystemSnapshot,
+    after: FilesystemSnapshot,
+    result: VerificationResult,
+) -> None:
+    if path is None:
+        return
+    entry = after.entry("home", path)
+    if entry is None:
+        if after.absent("home", path):
+            _mismatch(result, "missing_file", "home", path, "persistent lock", "absent")
+        return
+    if entry["kind"] != "file":
+        _mismatch(result, "entry_kind", "home", path, "ordinary file", entry["kind"])
+        return
+    key = ("home", path)
+    previous = b"" if before.absent(*key) else before.contents.get(key)
+    current = after.contents.get(key)
+    if previous is None or current is None:
+        result.obstacles.append(
+            {
+                "operation": "read_lock",
+                "root": "home",
+                "path": path,
+                "reason": "Persistent lock bytes unavailable",
+            }
+        )
+    elif previous != current:
+        _mismatch(
+            result,
+            "content_mismatch",
+            "home",
+            path,
+            "preserved bytes or empty new lock",
+            "different bytes",
+        )
+
+
 class InstallVerifier:
     def verify(
         self,
@@ -634,6 +690,16 @@ class InstallVerifier:
             _compare_bytes(after, dest["skill"] + ".bak", skill_backup, result)
         elif case.name != "first-install":
             _require_absent(after, dest["skill"] + ".bak", result)
+        if case.spec.skill_lock is not None and expected.skill_lock is None:
+            result.obstacles.append(
+                {
+                    "operation": "resolve_lock",
+                    "root": "home",
+                    "path": ".",
+                    "reason": "Independent lock expectation unavailable",
+                }
+            )
+        _skill_lock(expected.skill_lock, before, after, result)
         _reinstall_stability(case, before, after, result)
         result.complete = not result.obstacles
         return result

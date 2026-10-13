@@ -10,6 +10,7 @@ dir-copy, version-stamp, reinstall, and uninstall flow can be exercised with
 fixed, asserted content. The fixture backs up the real committed bundle and
 restores it on teardown, so the working tree is never disturbed.
 """
+
 from __future__ import annotations
 
 import os
@@ -306,6 +307,7 @@ def test_gemini_install_references_all_resolve(tmp_path):
     real claude bundle must leave no dead pointer on disk.
     """
     import re
+
     _install(tmp_path, "gemini")
     skill = tmp_path / ".gemini" / "skills" / "graphify" / "SKILL.md"
     assert skill.exists()
@@ -375,16 +377,37 @@ _EXPECTED_SKILL_BODIES = (
     "skill-devin.md",
 )
 _SPLIT_HOSTS = (
-    "claude", "codex", "windows", "opencode", "kilo", "copilot",
-    "claw", "droid", "amp", "trae", "kiro", "pi", "vscode",
+    "claude",
+    "codex",
+    "windows",
+    "opencode",
+    "kilo",
+    "copilot",
+    "claw",
+    "droid",
+    "amp",
+    "trae",
+    "kiro",
+    "pi",
+    "vscode",
 )
 _REFERENCE_NAMES = (
-    "add-watch.md", "exports.md", "extraction-spec.md", "github-and-merge.md",
-    "hooks.md", "query.md", "transcribe.md", "update.md",
+    "add-watch.md",
+    "exports.md",
+    "extraction-spec.md",
+    "github-and-merge.md",
+    "hooks.md",
+    "query.md",
+    "transcribe.md",
+    "update.md",
 )
 _ALWAYS_ON_NAMES = (
-    "agents-md.md", "antigravity-rules.md", "claude-md.md",
-    "gemini-md.md", "kiro-steering.md", "vscode-instructions.md",
+    "agents-md.md",
+    "antigravity-rules.md",
+    "claude-md.md",
+    "gemini-md.md",
+    "kiro-steering.md",
+    "vscode-instructions.md",
 )
 
 
@@ -410,7 +433,16 @@ def _build_wheel_names(repo_root):
 
     with tempfile.TemporaryDirectory() as outdir:
         result = subprocess.run(
-            [sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", outdir, str(repo_root)],
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--wheel",
+                "--no-isolation",
+                "--outdir",
+                outdir,
+                str(repo_root),
+            ],
             capture_output=True,
             text=True,
         )

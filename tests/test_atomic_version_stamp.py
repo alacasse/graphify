@@ -1,4 +1,5 @@
 """Regression tests for atomic `.graphify_version` stamp writes (#3286)."""
+
 from __future__ import annotations
 
 import os

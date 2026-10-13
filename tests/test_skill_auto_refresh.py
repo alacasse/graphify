@@ -7,6 +7,7 @@ other agent kept the old instructions. The CLI now refreshes every stale
 user-scope copy on its first run after an upgrade, and leaves alone the copies
 it cannot refresh safely.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -53,6 +54,7 @@ def _stamp(dst: Path) -> str:
 # ---------------------------------------------------------------------------
 # What gets refreshed
 # ---------------------------------------------------------------------------
+
 
 def test_every_stale_platform_is_refreshed_not_only_the_detected_one(capsys):
     dsts = {name: _stale(name) for name in ("claude", "codex", "opencode", "gemini")}
@@ -101,6 +103,7 @@ def test_a_stamp_without_skill_md_is_left_for_the_repair_warning():
 # ---------------------------------------------------------------------------
 # What is left alone
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("value", ["1", "true", "YES"])
 def test_the_env_opt_out_disables_it(monkeypatch, capsys, value):
@@ -200,6 +203,7 @@ def test_the_claude_dir_gets_the_host_variant(monkeypatch, system, variant):
 # Failure and the CLI entry point
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("failure", [OSError("read-only file system"), SystemExit(1)])
 def test_a_failed_refresh_never_breaks_the_command(monkeypatch, capsys, failure):
     def boom(*_args, **_kwargs):
@@ -246,6 +250,7 @@ def test_a_refresh_reports_only_the_result_and_the_backup(capsys):
 # Concurrent CLI processes
 # ---------------------------------------------------------------------------
 
+
 def _lock(dst: Path) -> Path:
     return installmod._skill_lock_path(dst.parent)
 
@@ -274,7 +279,9 @@ sys.stdin.read()
 def _hold_lock(dst: Path, mode: str) -> subprocess.Popen:
     proc = subprocess.Popen(
         [sys.executable, "-c", _HOLD_LOCK, str(dst.parent), mode],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
     )
     assert proc.stdout.readline().strip() == "locked"
     return proc
@@ -346,10 +353,14 @@ def test_a_skill_uninstalled_meanwhile_is_not_brought_back(monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
-@pytest.mark.parametrize("write", [
-    lambda: installmod._remove_skill_file("codex"),
-    lambda: installmod._copy_skill_file("codex"),
-], ids=["uninstall", "install"])
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda: installmod._remove_skill_file("codex"),
+        lambda: installmod._copy_skill_file("codex"),
+    ],
+    ids=["uninstall", "install"],
+)
 def test_install_and_uninstall_wait_for_a_refresh_in_progress(write):
     """Install and uninstall take the same lock as the refresh, but wait for
     it instead of skipping: they only go ahead once the refresh is done."""
@@ -421,11 +432,14 @@ def test_the_lock_is_released_after_a_failed_refresh(monkeypatch):
     assert _lock_is_free(dst)
 
 
-@pytest.mark.parametrize("name, uninstall", [
-    ("codex", lambda _project: installmod._remove_skill_file("codex")),
-    ("kilo", lambda _project: installmod._kilo_uninstall_global()),
-    ("antigravity", installmod._antigravity_uninstall),
-])
+@pytest.mark.parametrize(
+    "name, uninstall",
+    [
+        ("codex", lambda _project: installmod._remove_skill_file("codex")),
+        ("kilo", lambda _project: installmod._kilo_uninstall_global()),
+        ("antigravity", installmod._antigravity_uninstall),
+    ],
+)
 def test_uninstall_after_the_lock_was_taken_leaves_no_directory_behind(tmp_path, name, uninstall):
     """The lock file lives outside the skill directory and is never deleted,
     so it cannot keep the directory alive after an uninstall."""

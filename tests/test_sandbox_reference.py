@@ -214,7 +214,10 @@ def test_json_registration_preserves_values_and_order_without_duplicate(
     result = _run_cli(project, env, "install", "--platform", "sandbox-reference", "--project")
 
     assert result.returncode == 0, result.stderr
-    expected = original | {"instructions": entries if has_entry else [*entries, ENTRY], "hooks": HOOKS}
+    expected = original | {
+        "instructions": entries if has_entry else [*entries, ENTRY],
+        "hooks": HOOKS,
+    }
     assert json.loads(settings_path.read_text()) == expected
     assert json.loads(settings_path.read_text())["instructions"].count(ENTRY) == 1
 
@@ -258,15 +261,24 @@ def test_existing_project_cleanup_remains_available(isolated_project):
     # All-platform cleanup locks even absent skill destinations. Aliases share
     # directories; Cursor removes a rule without taking a skill lock.
     destinations = (
-        ".claude/skills/graphify", ".codex/skills/graphify",
-        ".opencode/skills/graphify", ".config/kilo/skills/graphify",
-        ".aider/graphify", ".copilot/skills/graphify",
-        ".openclaw/skills/graphify", ".factory/skills/graphify",
-        ".trae/skills/graphify", ".trae-cn/skills/graphify",
-        ".hermes/skills/graphify", ".kiro/skills/graphify",
-        ".pi/agent/skills/graphify", ".codebuddy/skills/graphify",
-        ".agents/skills/graphify", ".kimi/skills/graphify",
-        ".devin/skills/graphify", ".gemini/skills/graphify",
+        ".claude/skills/graphify",
+        ".codex/skills/graphify",
+        ".opencode/skills/graphify",
+        ".config/kilo/skills/graphify",
+        ".aider/graphify",
+        ".copilot/skills/graphify",
+        ".openclaw/skills/graphify",
+        ".factory/skills/graphify",
+        ".trae/skills/graphify",
+        ".trae-cn/skills/graphify",
+        ".hermes/skills/graphify",
+        ".kiro/skills/graphify",
+        ".pi/agent/skills/graphify",
+        ".codebuddy/skills/graphify",
+        ".agents/skills/graphify",
+        ".kimi/skills/graphify",
+        ".devin/skills/graphify",
+        ".gemini/skills/graphify",
     )
     locks = [_expected_lock(home, project / destination) for destination in destinations]
 
@@ -285,8 +297,11 @@ def test_reference_hooks_preserved_across_two_installations(isolated_project, ex
     groups = [{"matcher": "Bash|Grep", "hooks": [PERSONAL_HOOK]}]
     if existing_group:
         groups.append({"matcher": "Bash|Grep", "hooks": [HOOK | {"timeout": 23}]})
-    original = {"theme": "dark", "instructions": ["my-instructions.md", ENTRY],
-                "hooks": {"PreToolUse": groups}}
+    original = {
+        "theme": "dark",
+        "instructions": ["my-instructions.md", ENTRY],
+        "hooks": {"PreToolUse": groups},
+    }
     settings_path.write_text(json.dumps(original), encoding="utf-8")
     locks = [_expected_lock(home, project / ".sandbox-reference/skills/graphify")]
     if existing_group:

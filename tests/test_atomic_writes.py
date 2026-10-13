@@ -4,6 +4,7 @@ A crash, kill, or disk-full mid-write must not leave a truncated/corrupt file
 that a later load chokes on. `write_text_atomic` writes a temp file in the same
 directory then `os.replace`s it into place; on failure the original is untouched.
 """
+
 import json
 import os
 import sys
@@ -40,8 +41,8 @@ def test_write_text_atomic_preserves_existing_on_failure(tmp_path, monkeypatch):
 @pytest.mark.skipif(
     os.name == "nt",
     reason="Windows has no POSIX mode bits: chmod only toggles the read-only "
-           "attribute, and st_mode reports 0o666 for any writable file, so "
-           "chmod(0o644) followed by an equality check can never hold",
+    "attribute, and st_mode reports 0o666 for any writable file, so "
+    "chmod(0o644) followed by an equality check can never hold",
 )
 def test_write_text_atomic_preserves_existing_mode(tmp_path):
     # An atomic replace must not tighten a 0644 file to mkstemp's 0600 default.
@@ -140,8 +141,9 @@ def test_save_manifest_writes_atomically(tmp_path):
 
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     mpath = tmp_path / "graphify-out" / "manifest.json"
-    save_manifest({"code": [str(tmp_path / "a.py")]}, manifest_path=str(mpath),
-                  kind="both", root=tmp_path)
+    save_manifest(
+        {"code": [str(tmp_path / "a.py")]}, manifest_path=str(mpath), kind="both", root=tmp_path
+    )
     assert json.loads(mpath.read_text())  # non-empty, valid JSON
     assert not any(x.name.endswith(".tmp") for x in mpath.parent.iterdir())
 
@@ -227,7 +229,9 @@ def test_os_replace_with_fallback_replaces_a_symlink_destination_in_place(tmp_pa
     assert not src.exists()
 
 
-def test_os_replace_with_fallback_restores_destination_on_final_rename_failure(tmp_path, monkeypatch):
+def test_os_replace_with_fallback_restores_destination_on_final_rename_failure(
+    tmp_path, monkeypatch
+):
     """The fallback removes the existing destination before renaming the new
     content into place; if that final rename then fails for any reason, the
     original content must be restored rather than leaving the destination
@@ -302,7 +306,9 @@ def test_write_json_atomic_ensure_ascii_false_preserves_utf8(tmp_path):
     assert json.loads(raw) == {"label": "Wörker 数据"}
 
 
-def test_atomic_replace_temp_name_is_bounded_and_does_not_embed_long_filename(tmp_path, monkeypatch):
+def test_atomic_replace_temp_name_is_bounded_and_does_not_embed_long_filename(
+    tmp_path, monkeypatch
+):
     """Regression #3351: temp filename must not grow with destination filename."""
     import tempfile
     from pathlib import Path

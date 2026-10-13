@@ -7,6 +7,7 @@ SKILL.md was left untouched carried a current stamp and its "skill is from
 graphify A, package is B" staleness warning was suppressed even though the
 content really was stale.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch

@@ -7,6 +7,7 @@ to it. Upgrading graphify did not touch either file, so the user had to know to
 run the install again in every project. The CLI now rewrites such a plugin on
 its next run.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -21,7 +22,7 @@ import graphify.__main__ as mainmod
 from graphify.install import __version__, _OPENCODE_PLUGIN_JS
 
 # The plugin exactly as 0.9.74 wrote it.
-V1_PLUGIN = '''\
+V1_PLUGIN = """\
 // graphify OpenCode plugin
 // Injects a knowledge graph reminder before bash tool calls when the graph exists.
 //
@@ -52,7 +53,7 @@ export const GraphifyPlugin = async ({ directory }) => {
     },
   };
 };
-'''
+"""
 ENTRY = ".opencode/plugins/graphify.js"
 
 
@@ -290,15 +291,18 @@ def test_an_opencode_too_old_for_the_new_plugin_keeps_its_plugin(tmp_path, monke
     assert capsys.readouterr().err == ""
 
 
-@pytest.mark.parametrize("output, loads", [
-    ("1.3.3\n", False),
-    ("1.3.4\n", True),
-    ("1.18.34\n", True),
-    ("opencode v2.0.22\n", True),
-    ("0.15.31\n", False),
-    ("", False),
-    ("command not understood\n", False),
-])
+@pytest.mark.parametrize(
+    "output, loads",
+    [
+        ("1.3.3\n", False),
+        ("1.3.4\n", True),
+        ("1.18.34\n", True),
+        ("opencode v2.0.22\n", True),
+        ("0.15.31\n", False),
+        ("", False),
+        ("command not understood\n", False),
+    ],
+)
 def test_the_installed_opencode_version_decides(monkeypatch, output, loads):
     calls = []
 

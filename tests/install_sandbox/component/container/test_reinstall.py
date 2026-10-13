@@ -23,7 +23,7 @@ def test_two_installs_share_preparation_and_preserve_distinct_evidence(
     assert result.passed and result.test is not None
     first, second = result.test.steps
     assert first["command"] is not None and second["command"] is not None
-    assert first["command"]["args"] == second["command"]["args"]
+    assert first["command"]["args"][:-2] == second["command"]["args"]
     assert first["command"]["cwd"] == second["command"]["cwd"]
     assert (tmp_path / "work/reinstall/command-tmp/attempts").read_text() == "2"
     output = result.output_directory

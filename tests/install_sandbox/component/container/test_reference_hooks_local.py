@@ -11,7 +11,7 @@ import pytest
 
 from tools.install_sandbox.container.environment import TestEnvironment as Environment
 from tools.install_sandbox.container.runner import InstallTestRunner
-from tools.install_sandbox.contracts.case import InstallTestCase
+from tools.install_sandbox.contracts.case import CASE_NAMES, InstallTestCase
 from tools.install_sandbox.host.coordinator import InstallTestCoordinator
 from tools.install_sandbox.host.result_reader import read_result
 
@@ -78,7 +78,7 @@ def _assert_cache(output: Path, witnesses: dict[Path, bytes], steps: int) -> Non
         ).read_bytes() == expected_lock
 
 
-@pytest.mark.parametrize("name", ["first-install", "reinstall"])
+@pytest.mark.parametrize("name", CASE_NAMES)
 def test_real_reference_installer_retains_hooks_and_evidence(
     tmp_path: Path, name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -108,12 +108,9 @@ def test_real_reference_installer_retains_hooks_and_evidence(
         data = json.loads(path.read_bytes())
         hooks = [hook for group in data["hooks"]["PreToolUse"] for hook in group["hooks"]]
         assert hooks.count({"type": "command", "command": "graphify hook-guard search"}) == 1
-        assert (
-            hooks.count(
-                {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
-            )
-            == 1
-        )
+        assert hooks.count(
+            {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
+        ) == (1 if name in {"first-install", "reinstall"} else 0)
         assert "Reference import origins:" in (output / f"steps/{index}/stdout.txt").read_text()
         documents.append(data)
     if name == "reinstall":

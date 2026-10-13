@@ -38,6 +38,8 @@ def test_passed_result_and_all_contents_survive_workspace_removal(tmp_path: Path
         "--platform",
         "sandbox-reference",
         "--project",
+        "--managed-hooks-resolution",
+        str(tmp_path / "results/managed-hooks-resolution.json"),
     ]
     assert command["cwd"] == str(tmp_path / "work/environment/project")
     shutil.rmtree(tmp_path / "work")

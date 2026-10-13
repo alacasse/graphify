@@ -15,8 +15,10 @@ markdown:
 json:
   file: settings.json
   list: instructions
+  hook_management: registry
   hooks:
-    - event: PreToolUse
+    - id: graphify.search
+      event: PreToolUse
       matcher: Bash|Grep
       content:
         type: command

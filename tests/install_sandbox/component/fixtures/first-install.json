@@ -29,9 +29,11 @@
           "content": {
             "type": "command",
             "command": "graphify hook-guard search"
-          }
+          },
+          "id": "graphify.search"
         }
-      ]
+      ],
+      "hook_management": "registry"
     }
   },
   "initial_files": [

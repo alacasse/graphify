@@ -34,8 +34,10 @@ the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
 The local Python environment needs PyYAML for YAML reading.
 
-The reference format requires `json.hooks`, an explicit list of expectations
-with `event`, `matcher`, and non-empty JSON `content`. An empty list means no
+The reference format requires `json.hook_management: registry` and `json.hooks`,
+an explicit list of expectations with a unique stable `id`, `event`, `matcher`,
+and non-empty JSON `content`. Missing registry declarations or identities are
+rejected; the reader supplies no fallback for the former format. An empty list means no
 expected hooks. Declared content fields are compared in full; additional hook
 fields are allowed. Matching occurrences are counted across all groups with
 the same event and matcher, and each expectation must occur exactly once.
@@ -154,3 +156,22 @@ The runner retains the independent expectation and observed lock bytes. Cache
 neighbors remain covered by preservation checks. Observation obstacles prevent
 success. Symlink installation paths, transient writes, concurrency and native
 Windows/macOS behavior are outside this contract.
+
+The managed JSON registry oracle derives the complete expected state from these
+independent hook facts. It separately requires one entire matching managed hook,
+an empty persistent JSON lock, an absent transaction journal after success, and
+no JSON backup. All sidecars retain observable bytes after every attempted
+command, including failed commands; inaccessible entries cannot prove absence.
+The sidecars do not exempt neighboring files from preservation. Snapshots retain
+bytes and hashes, not a filesystem permission model; product tests own mode proof.
+
+The first-install and reinstall cases derive a one-use create resolution from the initial settings witness
+before its first command. Its target path, exact-byte SHA-256, expected registry
+absence and effect identities are retained outside the observed project/home
+roots. Only their first command receives that resolution. The five other cases start
+with empty hook contexts and exercise automatic creation without a resolution.
+Later installations use
+the persistent registry. JSON-entry repair preserves the observed hooks and
+registry while removing only the instruction registration. The host validates
+resolution, command and observation bindings and required retained sidecars,
+without repeating the container's installation verdict.

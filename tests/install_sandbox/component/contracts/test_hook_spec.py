@@ -42,7 +42,12 @@ def test_hook_spec_requires_explicit_list_and_preserves_structured_values() -> N
     data["json"]["hooks"] = []
     assert InstallTestSpec.from_data(data).to_data() == data
     data["json"]["hooks"] = [
-        {"event": "E", "matcher": "M", "content": {"x": [None, {"enabled": True}]}}
+        {
+            "id": "graphify.search",
+            "event": "E",
+            "matcher": "M",
+            "content": {"x": [None, {"enabled": True}]},
+        }
     ]
     assert InstallTestSpec.from_data(data).to_data() == data
 

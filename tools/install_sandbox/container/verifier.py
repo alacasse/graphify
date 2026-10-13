@@ -7,6 +7,7 @@ from typing import cast
 
 from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.contracts.case import InstallTestCase, destinations
+from tools.install_sandbox.contracts.managed_json import registry, sidecars
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
     ObservationObstacle,
@@ -465,7 +466,7 @@ def _json_preparation(
 
 def _allowed(case: InstallTestCase, expected: FilesystemSnapshot) -> set[str]:
     dest = destinations(case)
-    paths = set(dest.values())
+    paths = set(dest.values()) | set(sidecars(case).values())
     source = case.spec.references_source
     paths.update(
         dest["references"] + e["path"][len(source) :]
@@ -670,6 +671,7 @@ class InstallVerifier:
         after: FilesystemSnapshot,
         *,
         skill_backup: bytes | None = None,
+        allow_registry_update: bool = False,
     ) -> VerificationResult:
         result = VerificationResult(
             obstacles=[
@@ -700,6 +702,7 @@ class InstallVerifier:
                 }
             )
         _skill_lock(expected.skill_lock, before, after, result)
+        _managed_json(case, before, after, result, allow_registry_update)
         _reinstall_stability(case, before, after, result)
         result.complete = not result.obstacles
         return result
@@ -845,7 +848,13 @@ class InstallVerifier:
                 }
             )
         dest = destinations(case)
-        for path in (dest["skill"], dest["references"], dest["version"], dest["skill"] + ".bak"):
+        for path in (
+            dest["skill"],
+            dest["references"],
+            dest["version"],
+            dest["skill"] + ".bak",
+            *sidecars(case).values(),
+        ):
             _require_absent(before, path, result)
         result.complete = not result.obstacles
         return result
@@ -870,3 +879,69 @@ class InstallVerifier:
                 _markdown(case, source, initial, installed, result)
             elif kind == "json":
                 _json(case, initial, installed, result)
+
+
+def _managed_json(
+    case: InstallTestCase,
+    before: FilesystemSnapshot,
+    after: FilesystemSnapshot,
+    result: VerificationResult,
+    allow_registry_update: bool,
+) -> None:
+    paths = sidecars(case)
+    content = _file(after, paths["state"], result)
+    if content is not None:
+        try:
+            state = _read_json(content)
+            if not _json_equal(state, registry(case)):
+                raise ValueError("Registry differs from independent managed effects")
+        except (ValueError, UnicodeError) as error:
+            _mismatch(
+                result,
+                "managed_registry",
+                "project",
+                paths["state"],
+                "exact independent registry",
+                str(error),
+            )
+    _managed_hook_contents(case, after, result)
+    _compare_bytes(after, paths["lock"], b"", result)
+    _require_absent(after, paths["journal"], result)
+    _require_absent(after, destinations(case)["json"] + ".bak", result)
+    old = before.contents.get(("project", paths["state"]))
+    if not allow_registry_update and old is not None and content != old:
+        _mismatch(
+            result,
+            "registry_stability",
+            "project",
+            paths["state"],
+            "unchanged registry bytes",
+            "different registry bytes",
+        )
+
+
+def _managed_hook_contents(
+    case: InstallTestCase, after: FilesystemSnapshot, result: VerificationResult
+) -> None:
+    path = destinations(case)["json"]
+    content = after.contents.get(("project", path))
+    if content is None:
+        return
+    try:
+        document = _read_json(content)
+        for hook in case.spec.json_hooks:
+            exact = sum(
+                _json_equal(value, hook.content)
+                for _, value in _hook_entries(document, hook.event, hook.matcher)
+            )
+            if exact != 1:
+                _mismatch(
+                    result,
+                    "managed_hook_content",
+                    "project",
+                    path,
+                    "one exact entire managed hook",
+                    str(exact),
+                )
+    except (ValueError, UnicodeError):
+        return  # The shared JSON verifier reports malformed documents separately.

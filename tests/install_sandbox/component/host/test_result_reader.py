@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 
 from tools.install_sandbox.contracts.case import InstallTestCase
+from tools.install_sandbox.contracts.managed_json import resolution, sidecars
 from tools.install_sandbox.contracts.results import InstallTestResult, VerificationResult
 from tools.install_sandbox.host.result_reader import read_result, safe_evidence_path
 
@@ -36,6 +37,8 @@ def _document() -> dict[str, object]:
                             "--platform",
                             case.target,
                             "--project",
+                            "--managed-hooks-resolution",
+                            "/evidence/managed-hooks-resolution.json",
                         ],
                         "cwd": "/work/project",
                         "state": "completed",
@@ -60,6 +63,10 @@ def _document() -> dict[str, object]:
 def _write(output: Path, document: dict[str, object]) -> None:
     """Provide transport evidence without deriving any installation verdict."""
     spec = _case().spec
+    (output / "managed-hooks-resolution.json").write_text(json.dumps(resolution(_case())))
+    (output / "managed-hooks-transport.json").write_text(
+        json.dumps({"resolution": "/evidence/managed-hooks-resolution.json"})
+    )
     sources = {
         spec.skill_source: b"Transport skill source\n",
         spec.markdown_source: b"Transport Markdown source\n",
@@ -105,6 +112,7 @@ def _write(output: Path, document: dict[str, object]) -> None:
         }
         if phase == "after":
             snapshot["entries"].append(_write_lock(output, prefix))
+            snapshot["entries"].extend(_write_managed_sidecars(output, prefix))
         (output / f"{prefix}.json").write_text(json.dumps(snapshot))
     steps = document.get("steps")
     if isinstance(steps, list) and steps and isinstance(steps[0], dict):
@@ -445,3 +453,15 @@ def test_reinstall_rejects_inconsistent_dependency_history(tmp_path: Path, defec
     _write(tmp_path, document)
     with pytest.raises(ValueError):
         read_result(tmp_path, case)
+
+
+def _write_managed_sidecars(output: Path, prefix: str) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for name in ("state", "lock"):
+        relative = sidecars(_case())[name]
+        binding = f"{prefix}/project/{relative}"
+        (output / binding).write_bytes(b"transport bytes")
+        entries.append(
+            {"root": "project", "path": relative, "kind": "file", "content_file": binding}
+        )
+    return entries

@@ -10,6 +10,7 @@ from tools.install_sandbox.container.environment import TestEnvironment as Envir
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as ResultWriter
 from tools.install_sandbox.container.verifier import InstallVerifier
 from tools.install_sandbox.contracts.case import InstallTestCase
+from tools.install_sandbox.contracts.managed_json import registry, sidecars
 from tools.install_sandbox.contracts.results import VerificationResult
 
 _CASE = Path(__file__).resolve().parents[1] / "fixtures" / "first-install.json"
@@ -69,6 +70,12 @@ class Scenario:
             }
         )
         put(config, json.dumps(data, indent=4).encode())
+        paths = sidecars(self.case)
+        put(self.environment.project / paths["state"], json.dumps(registry(self.case)).encode())
+        put(self.environment.project / paths["lock"], b"")
+        for path in paths.values():
+            if (self.environment.project / path).exists():
+                (self.environment.project / path).chmod(0o600)
 
     def verify(self) -> VerificationResult:
         after = self.environment.observe(self.writer, "after")

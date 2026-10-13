@@ -22,6 +22,7 @@ from tools.install_sandbox.contracts.case import (
     json_repair_plan,
     markdown_repair_plan,
 )
+from tools.install_sandbox.contracts.managed_json import needs_resolution, resolution
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
     InstallTestResult,
@@ -125,6 +126,8 @@ class InstallTestRunner:
         try:
             environment = TestEnvironment(case, work / "environment")
             environment.prepare()
+            if needs_resolution(case):
+                writer.write_managed_resolution(resolution(case))
             (work / "command-tmp").mkdir()
             expected = environment.preserve_expected(subject, writer)
             result.evidence["expected_contents"] = "expected/"
@@ -317,6 +320,9 @@ class InstallTestRunner:
                 environment.project,
                 environment.home,
                 environment.project.parent.parent / "command-tmp",
+                writer.output_directory / "managed-hooks-resolution.json"
+                if index == 0 and needs_resolution(case)
+                else None,
             )
             timing.duration_seconds = command.duration_seconds
             if command.duration_seconds is None:

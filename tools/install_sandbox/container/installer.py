@@ -93,8 +93,16 @@ class InstallerDriver:
         self.timeout = timeout
 
     def install(
-        self, case: InstallTestCase, executable: Path, project: Path, home: Path, temporary: Path
+        self,
+        case: InstallTestCase,
+        executable: Path,
+        project: Path,
+        home: Path,
+        temporary: Path,
+        resolution: Path | None = None,
     ) -> InstallerCommandResult:
         InstallTestCase.from_json(case.to_json())
         args = [str(executable), "install", "--platform", case.target, "--project"]
+        if resolution is not None:
+            args.extend(["--managed-hooks-resolution", str(resolution)])
         return self.execute(args, project, command_environment(home, temporary), self.timeout)

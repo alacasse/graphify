@@ -32,7 +32,8 @@ def check_case(result: CoordinatedResult) -> None:
     dest = destinations(case)
     first, second = reread.steps
     assert first["command"] is not None and second["command"] is not None
-    assert first["command"]["args"] == second["command"]["args"]
+    assert first["command"]["args"][-2] == "--managed-hooks-resolution"
+    assert first["command"]["args"][:-2] == second["command"]["args"]
     assert first["command"]["cwd"] == second["command"]["cwd"]
     versions = [
         (output / f"steps/{i}/after/project" / dest["version"]).read_bytes() for i in (0, 1)

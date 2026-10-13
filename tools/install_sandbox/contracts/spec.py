@@ -51,13 +51,14 @@ def _json_value(value: object) -> None:
 
 @dataclass(frozen=True)
 class HookExpectation:
+    id: str
     event: str
     matcher: str
     content: dict[str, object]
 
     @classmethod
     def from_data(cls, value: object) -> "HookExpectation":
-        data = fields(value, "event matcher content")
+        data = fields(value, "id event matcher content")
         content = data["content"]
         if not isinstance(content, dict) or not content:
             raise ValueError("Hook content must be a non-empty JSON object")
@@ -65,13 +66,21 @@ class HookExpectation:
             _json_value(cast(dict[object, object], content))
         except RecursionError as error:
             raise ValueError("Hook content must be an acyclic JSON value") from error
-        return cls(text(data["event"]), text(data["matcher"]), cast(dict[str, object], content))
+        return cls(
+            text(data["id"]),
+            text(data["event"]),
+            text(data["matcher"]),
+            cast(dict[str, object], content),
+        )
 
 
 def _hooks(value: object) -> tuple[HookExpectation, ...]:
     if not isinstance(value, list):
         raise ValueError("Expected a hooks list")
-    return tuple(HookExpectation.from_data(item) for item in cast(list[object], value))
+    hooks = tuple(HookExpectation.from_data(item) for item in cast(list[object], value))
+    if len({hook.id for hook in hooks}) != len(hooks):
+        raise ValueError("Duplicate hook identities")
+    return hooks
 
 
 def _skill(value: object) -> dict[str, object]:
@@ -101,6 +110,7 @@ class InstallTestSpec:
     json_file: str
     json_list: str
     json_hooks: tuple[HookExpectation, ...]
+    json_hook_management: str
     skill_lock: str | None = None
 
     @classmethod
@@ -116,7 +126,9 @@ class InstallTestSpec:
             raise ValueError("Duplicate scopes")
         skill = _skill(data["skill"])
         markdown = fields(data["markdown"], "file marker source")
-        config = fields(data["json"], "file list hooks")
+        config = fields(data["json"], "file list hooks hook_management")
+        if config["hook_management"] != "registry":
+            raise ValueError("JSON hook management must be registry")
         return cls(
             tuple(cast(list[str], scopes)),
             relative_path(data["directory"]),
@@ -129,6 +141,7 @@ class InstallTestSpec:
             relative_path(config["file"]),
             text(config["list"]),
             _hooks(config["hooks"]),
+            "registry",
             cast(str | None, skill.get("lock")),
         )
 
@@ -151,5 +164,6 @@ class InstallTestSpec:
                 "file": self.json_file,
                 "list": self.json_list,
                 "hooks": [asdict(hook) for hook in self.json_hooks],
+                "hook_management": self.json_hook_management,
             },
         }

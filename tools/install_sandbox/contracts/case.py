@@ -136,7 +136,10 @@ class InstallTestCase:
 
     @classmethod
     def from_json(cls, payload: str) -> "InstallTestCase":
-        data = fields(json.loads(payload), "name target scope spec initial_files operations")
+        data = fields(
+            json.loads(payload, object_pairs_hook=_unique_object),
+            "name target scope spec initial_files operations",
+        )
         spec = InstallTestSpec.from_data(data["spec"])
         name = text(data["name"])
         operations = case_operations(name)
@@ -206,3 +209,12 @@ def json_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, bytes]:
         "altered_path": path,
         "altered_content_file": "steps/1/preparation/altered-content.bin",
     }, content.encode("utf-8")
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate case transport field")
+        result[key] = value
+    return result

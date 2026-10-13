@@ -143,7 +143,12 @@ def test_allowed_hook_variations(tmp_path: Path, variation: str) -> None:
         initial[1]["content"] = json.dumps(data)
         run.case = replace(run.case, initial_files=initial)
     run.path("json").write_text(json.dumps(document, indent=4, sort_keys=True))
-    assert_passed(run.verify())
+    result = run.verify()
+    if variation == "extra":
+        assert any(m.type == "managed_hook_content" for m in result.mismatches)
+        assert not any(m.type == "hook_count" for m in result.mismatches)
+    else:
+        assert_passed(result)
 
 
 @pytest.mark.parametrize(
@@ -166,7 +171,10 @@ def test_structured_fields_are_compared_in_full(
         "type": "another-type",
         "options": {"mode": "strict", "values": [1, 2]},
     }
-    spec = replace(run.case.spec, json_hooks=(HookExpectation("BeforeTool", "Any", content),))
+    spec = replace(
+        run.case.spec,
+        json_hooks=(HookExpectation("graphify.search", "BeforeTool", "Any", content),),
+    )
     run.case = replace(run.case, spec=spec)
     document = _document()
     document["hooks"]["BeforeTool"] = [
@@ -177,7 +185,7 @@ def test_structured_fields_are_compared_in_full(
     ]
     run.path("json").write_text(json.dumps(document))
     result = run.verify()
-    assert (not result.mismatches) == passed
+    assert (not any(m.type == "hook_count" for m in result.mismatches)) == passed
 
 
 def test_reinstall_cannot_adopt_a_damaged_personal_baseline(tmp_path: Path) -> None:

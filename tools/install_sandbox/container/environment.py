@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from tools.install_sandbox.contracts.case import InstallTestCase, destinations
+from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
     ObservationObstacle,
@@ -282,7 +283,15 @@ class TestEnvironment:
         if (entry["root"], entry["path"]) in witnesses:
             return True
         return entry["root"] == "project" and (
-            entry["path"] in (dest["skill"], dest["markdown"], dest["json"], dest["version"])
+            is_transaction_temporary(self.case, entry["path"])
+            or entry["path"]
+            in (
+                dest["skill"],
+                dest["markdown"],
+                dest["json"],
+                dest["version"],
+                *sidecars(self.case).values(),
+            )
             or (
                 self.case.name in {"repair-skill", "preserve-skill-backup"}
                 and entry["path"] == dest["skill"] + ".bak"

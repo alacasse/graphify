@@ -11,6 +11,12 @@ from tools.install_sandbox.contracts.case import (
     json_repair_plan,
     markdown_repair_plan,
 )
+from tools.install_sandbox.contracts.managed_json import (
+    is_transaction_temporary,
+    needs_resolution,
+    resolution,
+    sidecars,
+)
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     FileAlterationPlan,
@@ -345,6 +351,7 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         _check_command_evidence(result, case, output_directory)
         _check_json_observations(result, case, output_directory)
         _check_lock_evidence(result, case, output_directory)
+        _check_managed_evidence(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
     return result
 
@@ -724,7 +731,13 @@ def _check_preparation_location(result: InstallTestResult, case: InstallTestCase
 def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
     if second["command"] is not None:
         assert first["command"] is not None
-        if any(first["command"][key] != second["command"][key] for key in ("args", "cwd")):
+        first_args = first["command"]["args"]
+        if "--managed-hooks-resolution" in first_args:
+            first_args = first_args[:-2]
+        if (
+            first_args != second["command"]["args"]
+            or first["command"]["cwd"] != second["command"]["cwd"]
+        ):
             raise ValueError(
                 "Dependent installation must repeat the first installation command and directory"
             )
@@ -792,3 +805,74 @@ def _check_retained_content(entry: dict[str, object], obstacles: list[Observatio
         return
     if not any(o["root"] == "project" and o["path"] == entry["path"] for o in obstacles):
         raise ValueError("Observed file requires retained content, not only a digest")
+
+
+def _check_managed_evidence(
+    result: InstallTestResult,
+    case: InstallTestCase,
+    output: Path,
+) -> None:
+    transported = _managed_transport(case, output)
+    paths = set(sidecars(case).values())
+    for index, step in enumerate(result.steps):
+        command = step["command"]
+        if command is None:
+            continue
+        _check_managed_command(command, case, index, transported)
+        for phase in ("before", "after"):
+            _check_managed_snapshot(output, f"steps/{index}/{phase}.json", case, paths)
+        if _check_attempted(step) == "passed":
+            _check_content_snapshot(
+                output,
+                f"steps/{index}/after.json",
+                paths,
+                {sidecars(case)["state"], sidecars(case)["lock"]},
+            )
+
+
+def _check_managed_snapshot(
+    output: Path, relative: str, case: InstallTestCase, paths: set[str]
+) -> None:
+    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
+    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
+    for value in _list(snapshot["entries"]):
+        entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
+        if entry["root"] == "project" and (
+            entry["path"] in paths or is_transaction_temporary(case, text(entry["path"]))
+        ):
+            _check_retained_content(entry, obstacles)
+
+
+def _check_managed_command(
+    command: CommandEvidence, case: InstallTestCase, index: int, transported: PurePosixPath | None
+) -> None:
+    args = command["args"]
+    expected_args = [args[0], "install", "--platform", case.target, "--project"]
+    if index == 0 and transported is not None:
+        expected_args.extend(["--managed-hooks-resolution", str(transported)])
+    cwd = PurePosixPath(command["cwd"])
+    if transported is not None and transported.is_relative_to(cwd.parent):
+        raise ValueError("Resolution must stay outside isolated observed roots")
+    if args != expected_args:
+        raise ValueError("Managed resolution must be passed only on first installation")
+
+
+def _managed_transport(case: InstallTestCase, output: Path) -> PurePosixPath | None:
+    if not needs_resolution(case):
+        if any(
+            (output / name).exists()
+            for name in ("managed-hooks-resolution.json", "managed-hooks-transport.json")
+        ):
+            raise ValueError("Empty initial hook contexts require no synthetic resolution")
+        return None
+    if _read_json_evidence(output, "managed-hooks-resolution.json") != resolution(case):
+        raise ValueError("Managed resolution contradicts independent initial witnesses")
+    transport = fields(_read_json_evidence(output, "managed-hooks-transport.json"), "resolution")
+    transported = PurePosixPath(text(transport["resolution"]))
+    if (
+        not transported.is_absolute()
+        or transported.name != "managed-hooks-resolution.json"
+        or ".." in transported.parts
+    ):
+        raise ValueError("Invalid managed resolution transport path")
+    return transported

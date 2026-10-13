@@ -45,6 +45,14 @@ def settings_script() -> str:
         "if hook not in group['hooks']:\n"
         "    group['hooks'].append(hook)\n"
         "p.write_text(json.dumps(data))\n"
+        "state = {'version': 1, 'owner': 'graphify', 'target': 'settings.json',\n"
+        "         'effects': [{'id': 'graphify.search', 'event': 'PreToolUse',\n"
+        "                      'matcher': 'Bash|Grep', 'content': hook}]}\n"
+        "sidecar = Path(str(p) + '.graphify-state.json')\n"
+        "if not sidecar.exists():\n    sidecar.write_text(json.dumps(state))\n"
+        "Path(str(p) + '.graphify.lock').touch()\n"
+        "sidecar.chmod(0o600)\n"
+        "Path(str(p) + '.graphify.lock').chmod(0o600)\n"
     )
 
 

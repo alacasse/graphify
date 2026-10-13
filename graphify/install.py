@@ -825,7 +825,18 @@ def _print_banner() -> None:
         print("\n" + "\n".join(lines) + "\n")
     except Exception:
         pass
-def install(platform: str = "claude", *, project: bool = False, project_dir: Path | None = None) -> None:
+def install(
+    platform: str = "claude",
+    *,
+    project: bool = False,
+    project_dir: Path | None = None,
+    managed_hooks_resolution: Path | None = None,
+) -> None:
+    if managed_hooks_resolution is not None and (platform != "sandbox-reference" or not project):
+        print(
+            "error: managed hooks resolution requires sandbox-reference --project", file=sys.stderr
+        )
+        sys.exit(1)
     _print_banner()
     platform = _canonical_platform(platform)
     if platform == "sandbox-reference" and not project:
@@ -851,7 +862,7 @@ def install(platform: str = "claude", *, project: bool = False, project_dir: Pat
     skill_dst = _copy_skill_file(platform, project=project, project_dir=project_dir)
 
     if platform == "sandbox-reference":
-        _sandbox_reference_configure(project_dir)
+        _sandbox_reference_configure(project_dir, managed_hooks_resolution)
 
     if platform == "kilo":
         # Kilo Code also supports a native /graphify command file.
@@ -917,25 +928,35 @@ def _refuse_sandbox_reference(operation: str) -> NoReturn:
     sys.exit(1)
 
 
-def _sandbox_reference_configure(project_dir: Path) -> None:
-    """Register the project skill in the reference target's shared files."""
-    directory = project_dir / ".sandbox-reference"
-    settings_path = directory / "settings.json"
-    settings = _read_settings_for_merge(settings_path)
-    original = json.dumps(settings, sort_keys=True)
-    instructions = settings.setdefault("instructions", [])
-    if not isinstance(instructions, list):
-        print(
-            f"error: refusing to modify {settings_path}: instructions must be a JSON list",
-            file=sys.stderr,
-        )
+def _sandbox_reference_configure(project_dir: Path, resolution_path: Path | None = None) -> None:
+    """Register project JSON through the managed hooks transaction owner."""
+    if sys.platform != "linux":
+        print("error: sandbox-reference managed hooks require Linux", file=sys.stderr)
         sys.exit(1)
-    entry = "skills/graphify/SKILL.md"
-    if entry not in instructions:
-        instructions.append(entry)
-    _sandbox_reference_hooks(settings)
-    if json.dumps(settings, sort_keys=True) != original:
-        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    from graphify.managed_json import ManagedJSONError, apply_managed_hooks, read_resolution
+
+    directory = project_dir / ".sandbox-reference"
+    command = {"type": "command", "command": "graphify hook-guard search"}
+    effects = [
+        {"id": "graphify.search", "event": "PreToolUse", "matcher": "Bash|Grep", "content": command}
+    ]
+    try:
+        resolution = read_resolution(resolution_path) if resolution_path is not None else None
+        apply_managed_hooks(
+            directory / "settings.json",
+            project_root=project_dir,
+            effects=effects,
+            instruction="skills/graphify/SKILL.md",
+            resolution=resolution,
+        )
+    except (ManagedJSONError, OSError) as exc:
+        detail = (
+            str(exc)
+            if isinstance(exc, ManagedJSONError)
+            else "managed JSON filesystem operation failed"
+        )
+        print(f"error: {directory / 'settings.json'} [graphify.search]: {detail}", file=sys.stderr)
+        sys.exit(1)
 
     target = directory / "instructions.md"
     content = target.read_text(encoding="utf-8") if target.exists() else ""
@@ -945,27 +966,13 @@ def _sandbox_reference_configure(project_dir: Path) -> None:
     print(f"  project configured ->  {directory}")
 
 
-def _sandbox_reference_hooks(settings: dict) -> None:
-    """Add the reference command without replacing any existing hook."""
-    command = {"type": "command", "command": "graphify hook-guard search"}
-    groups = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
-    matching = [group for group in groups if group.get("matcher") == "Bash|Grep"]
-    if any(
-        all(hook.get(key) == value for key, value in command.items())
-        for group in matching for hook in group.get("hooks", [])
-    ):
-        return
-    if not matching:
-        group = {"matcher": "Bash|Grep", "hooks": []}
-        groups.append(group)
-        matching.append(group)
-    matching[0].setdefault("hooks", []).append(command)
-
-
 def _print_install_usage() -> None:
     platforms = ", ".join([*_PLATFORM_CONFIG, "gemini", "cursor"])
     print("Usage: graphify install [--project] [--strict] [--platform P|P]")
     print(f"Platforms: {platforms}")
+    print(
+        "  --managed-hooks-resolution FILE  explicit hook resolution (sandbox-reference --project only)"
+    )
     print("  --strict  block the first raw file read per session until one "
           "`graphify query` runs (Claude Code project hook only; needs --project)")
 _CLAUDE_MD_MARKER = "## graphify"
@@ -2450,6 +2457,7 @@ def dispatch_install_cli(cmd: str) -> bool:
         selected_platform: str | None = None
         project_scope = False
         strict = False
+        resolution_path = None
         args = sys.argv[2:]
         i = 0
         while i < len(args):
@@ -2460,6 +2468,12 @@ def dispatch_install_cli(cmd: str) -> bool:
             if arg == "--project":
                 project_scope = True
                 i += 1
+            elif arg == "--managed-hooks-resolution":
+                if resolution_path is not None or i + 1 >= len(args) or args[i + 1].startswith("-"):
+                    print("error: --managed-hooks-resolution requires one file", file=sys.stderr)
+                    sys.exit(1)
+                resolution_path = Path(args[i + 1])
+                i += 2
             elif arg == "--strict":
                 strict = True
                 i += 1
@@ -2490,7 +2504,22 @@ def dispatch_install_cli(cmd: str) -> bool:
                 selected_platform = arg
                 i += 1
         chosen_platform = selected_platform or default_platform
-        if project_scope:
+        if resolution_path is not None and (
+            chosen_platform != "sandbox-reference" or not project_scope
+        ):
+            print(
+                "error: managed hooks resolution requires sandbox-reference --project",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if resolution_path is not None:
+            install(
+                platform=chosen_platform,
+                project=True,
+                project_dir=Path("."),
+                managed_hooks_resolution=resolution_path,
+            )
+        elif project_scope:
             _project_install(chosen_platform, Path("."), strict=strict)
         else:
             if strict:

@@ -194,6 +194,8 @@ def test_first_project_install_preserves_user_files_and_home(isolated_project):
         ".sandbox-reference/skills/graphify/references",
         ".sandbox-reference/instructions.md",
         ".sandbox-reference/settings.json",
+        ".sandbox-reference/settings.json.graphify-state.json",
+        ".sandbox-reference/settings.json.graphify.lock",
         *(f".sandbox-reference/skills/graphify/references/{name}" for name in references),
     }
     assert changed == expected_changes
@@ -309,9 +311,33 @@ def test_reference_hooks_preserved_across_two_installations(isolated_project, ex
         _write(locks[0].parent / "unrelated.lock", "Unrelated lock bytes.\n")
         _write(locks[0].parent / "personal.txt", "Personal cache neighbor.\n")
     home_before = _snapshot(home)
+    consent = {
+        "version": 1,
+        "target": ".sandbox-reference/settings.json",
+        "snapshot_sha256": hashlib.sha256(settings_path.read_bytes()).hexdigest(),
+        "registry_absent": True,
+        "effects": [{"id": "graphify.search", "action": "create"}],
+    }
+    if existing_group:
+        consent["effects"] = [
+            {
+                "id": "graphify.search",
+                "action": "adopt",
+                "event": "PreToolUse",
+                "matcher": "Bash|Grep",
+                "group_index": 1,
+                "hook_index": 0,
+                "content": HOOK | {"timeout": 23},
+            }
+        ]
+    resolution_path = project.parent / "resolution.json"
+    resolution_path.write_text(json.dumps(consent))
     installed = None
-    for _ in range(2):
-        result = _run_cli(project, env, "install", "--platform", "sandbox-reference", "--project")
+    for attempt in range(2):
+        options = ("--managed-hooks-resolution", str(resolution_path)) if attempt == 0 else ()
+        result = _run_cli(
+            project, env, "install", "--platform", "sandbox-reference", "--project", *options
+        )
         assert result.returncode == 0, result.stderr
         observed = json.loads(settings_path.read_bytes())
         hooks = [hook for group in observed["hooks"]["PreToolUse"] for hook in group["hooks"]]
@@ -323,3 +349,41 @@ def test_reference_hooks_preserved_across_two_installations(isolated_project, ex
         if installed is not None:
             assert observed == installed
         installed = observed
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--platform", "claude", "--project"),
+        ("--platform", "sandbox-reference"),
+        ("--platform", "gemini", "--project"),
+    ],
+)
+def test_resolution_scope_rejected_before_effects(isolated_project, args):
+    project, home, env = isolated_project
+    before, home_before = _snapshot(project), _snapshot(home)
+    result = _run_cli(project, env, "install", *args, "--managed-hooks-resolution", "missing.json")
+    assert result.returncode != 0 and "requires sandbox-reference --project" in result.stderr
+    assert _snapshot(project) == before and _snapshot(home) == home_before
+
+
+def test_null_resolution_refused_preserves_json_pair(isolated_project):
+    project, _, env = isolated_project
+    target = project / ".sandbox-reference/settings.json"
+    before = target.read_bytes()
+    document = project.parent / "null-resolution.json"
+    document.write_text("null")
+    result = _run_cli(
+        project,
+        env,
+        "install",
+        "--platform",
+        "sandbox-reference",
+        "--project",
+        "--managed-hooks-resolution",
+        str(document),
+    )
+    assert result.returncode != 0 and "invalid document shape" in result.stderr
+    assert target.read_bytes() == before
+    assert not target.with_name(target.name + ".graphify-state.json").exists()
+    assert not target.with_name(target.name + ".graphify-journal.json").exists()

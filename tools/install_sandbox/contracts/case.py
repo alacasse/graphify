@@ -1,6 +1,7 @@
 """Complete installation cases transported as JSON, without product contents."""
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import TypedDict, cast
@@ -26,6 +27,10 @@ def first_install_files(
     spec: InstallTestSpec, case_name: str = "first-install"
 ) -> list[InitialFile]:
     """Place the common witnesses using target paths and the JSON list fact."""
+    if spec.json_hook_management == "none":
+        if case_name != "first-install":
+            raise ValueError("Unmanaged JSON supports first-install only")
+        return _unmanaged_files(spec)
     directory = PurePosixPath(spec.directory)
     markdown = _PROJECT_INSTRUCTIONS
     if case_name == "repair-markdown-section":
@@ -150,7 +155,7 @@ class InstallTestCase:
         initial_files = _initial_files(data["initial_files"])
         if initial_files != first_install_files(spec, name):
             raise ValueError("Initial files do not match the case definition")
-        return cls(
+        result = cls(
             name,
             text(data["target"]),
             "project",
@@ -158,6 +163,8 @@ class InstallTestCase:
             initial_files,
             operations,
         )
+        install_arguments(result)
+        return result
 
     def to_json(self) -> str:
         data = asdict(self)
@@ -175,13 +182,101 @@ def destinations(case: InstallTestCase) -> dict[str, str]:
     spec = case.spec
     directory = Path(spec.directory)
     skill = directory / spec.skill_file
-    return {
+    result = {
         "skill": str(skill),
         "references": str(skill.parent / "references"),
         "version": str(skill.parent / ".graphify_version"),
         "markdown": str(directory / spec.markdown_file),
         "json": str(directory / spec.json_file),
     }
+    if spec.destinations is not None:
+        result.update({name: entry["path"] for name, entry in spec.destinations.items()})
+        parent = PurePosixPath(result["skill"]).parent
+        result.update(
+            references=str(parent / "references"), version=str(parent / ".graphify_version")
+        )
+    return result
+
+
+def destination_roots(case: InstallTestCase) -> dict[str, str]:
+    roots = dict.fromkeys(destinations(case), "project")
+    if case.spec.destinations is not None:
+        roots.update({name: entry["root"] for name, entry in case.spec.destinations.items()})
+        roots.update(references=roots["skill"], version=roots["skill"])
+    return roots
+
+
+def install_arguments(case: InstallTestCase) -> list[str]:
+    if case.spec.command is not None:
+        return list(case.spec.command)
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", case.target):
+        raise ValueError("Invalid installation target")
+    return ["install", "--platform", case.target, "--project"]
+
+
+def _unmanaged_files(spec: InstallTestSpec) -> list[InitialFile]:
+    case = InstallTestCase("first-install", "fixture", "project", spec, [], ["install"])
+    paths, roots = destinations(case), destination_roots(case)
+    personal: dict[str, object] = {
+        "theme": "dark",
+        "metadata": {"owner": "personal", "order": ["second", "first"]},
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash|Grep",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "python personal_graphify_audit.py",
+                            "timeout": 17,
+                        }
+                    ],
+                }
+            ],
+            "PostToolUse": [
+                {
+                    "matcher": "Read",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "python personal_after_read.py",
+                            "timeout": 9,
+                        },
+                        {"type": "command", "command": "python personal_record.py", "timeout": 8},
+                    ],
+                }
+            ],
+        },
+    }
+    settings = json.dumps(personal, indent=2) + "\n"
+    files: list[InitialFile] = [
+        {"root": roots["markdown"], "path": paths["markdown"], "content": _PROJECT_INSTRUCTIONS},
+        {"root": roots["json"], "path": paths["json"], "content": settings},
+        {"root": "home", "path": "personal-notes.txt", "content": _PERSONAL_NOTES},
+        {"root": "home", "path": ".cache/personal-cache.txt", "content": _PERSONAL_NOTES},
+    ]
+    for name in ("markdown", "json"):
+        opposite = "home" if roots[name] == "project" else "project"
+        counterpart = (
+            str(PurePosixPath(spec.directory) / spec.markdown_file)
+            if name == "markdown"
+            else str(PurePosixPath(spec.directory) / spec.json_file)
+        )
+        files.append(
+            {
+                "root": opposite,
+                "path": counterpart,
+                "content": _PERSONAL_INSTRUCTIONS if name == "markdown" else settings,
+            }
+        )
+        files.append(
+            {
+                "root": roots[name],
+                "path": str(PurePosixPath(paths[name]).parent / ("personal-" + name + ".txt")),
+                "content": _PERSONAL_NOTES,
+            }
+        )
+    return _initial_files(files)
 
 
 def markdown_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, bytes]:

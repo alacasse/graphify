@@ -1,6 +1,7 @@
 """Target facts and validation for the reference YAML format."""
 
 import math
+import re
 from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import cast
@@ -87,9 +88,8 @@ def _skill(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Expected skill fields")
     data = cast(dict[str, object], value)
-    result = fields(
-        data, "file source references lock" if "lock" in data else "file source references"
-    )
+    optional = {"lock", "version_source"} & data.keys()
+    result = fields(data, "file source references " + " ".join(sorted(optional)))
     if "lock" in result and result["lock"] != "persistent":
         raise ValueError("Skill lock must be persistent")
     return result
@@ -108,14 +108,24 @@ class InstallTestSpec:
     markdown_marker: str
     markdown_source: str
     json_file: str
-    json_list: str
+    json_list: str | None
     json_hooks: tuple[HookExpectation, ...]
     json_hook_management: str
     skill_lock: str | None = None
+    command: tuple[str, ...] | None = None
+    destinations: dict[str, dict[str, str]] | None = None
+    json_backup: str | None = None
+    version_source: str | None = None
 
     @classmethod
     def from_data(cls, value: object) -> "InstallTestSpec":
-        data = fields(value, "scopes directory skill markdown json")
+        if not isinstance(value, dict):
+            raise ValueError("Expected target facts")
+        incoming = cast(dict[str, object], value)
+        optional = {"command", "destinations"} & incoming.keys()
+        data = fields(
+            incoming, "scopes directory skill markdown json " + " ".join(sorted(optional))
+        )
         scopes = data["scopes"]
         if not isinstance(scopes, list) or not scopes:
             raise ValueError("Expected a non-empty scopes list")
@@ -126,10 +136,10 @@ class InstallTestSpec:
             raise ValueError("Duplicate scopes")
         skill = _skill(data["skill"])
         markdown = fields(data["markdown"], "file marker source")
-        config = fields(data["json"], "file list hooks hook_management")
-        if config["hook_management"] != "registry":
-            raise ValueError("JSON hook management must be registry")
-        return cls(
+        config = _config(data["json"])
+        command = _command(data.get("command"))
+        destinations = _destinations(data.get("destinations"))
+        result = cls(
             tuple(cast(list[str], scopes)),
             relative_path(data["directory"]),
             relative_path(skill["file"]),
@@ -139,17 +149,30 @@ class InstallTestSpec:
             text(markdown["marker"]),
             relative_path(markdown["source"]),
             relative_path(config["file"]),
-            text(config["list"]),
+            text(config["list"]) if config["list"] is not None else None,
             _hooks(config["hooks"]),
-            "registry",
+            text(config["hook_management"]),
             cast(str | None, skill.get("lock")),
+            command,
+            destinations,
+            cast(str | None, config.get("backup")),
+            relative_path(skill["version_source"]) if "version_source" in skill else None,
         )
+        _validate_paths(result)
+        return result
 
     def to_data(self) -> dict[str, object]:
         return {
+            **({"command": list(self.command)} if self.command is not None else {}),
+            **({"destinations": self.destinations} if self.destinations is not None else {}),
             "scopes": list(self.scopes),
             "directory": self.directory,
             "skill": {
+                **(
+                    {"version_source": self.version_source}
+                    if self.version_source is not None
+                    else {}
+                ),
                 "file": self.skill_file,
                 "source": self.skill_source,
                 "references": self.references_source,
@@ -161,9 +184,101 @@ class InstallTestSpec:
                 "source": self.markdown_source,
             },
             "json": {
+                **({"backup": self.json_backup} if self.json_backup is not None else {}),
                 "file": self.json_file,
                 "list": self.json_list,
                 "hooks": [asdict(hook) for hook in self.json_hooks],
                 "hook_management": self.json_hook_management,
             },
         }
+
+
+def _config(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected JSON facts")
+    data = cast(dict[str, object], value)
+    config = fields(
+        data, "file list hooks hook_management" + (" backup" if "backup" in data else "")
+    )
+    if config["hook_management"] not in ("registry", "none"):
+        raise ValueError("JSON hook management must be registry or none")
+    if config["hook_management"] == "registry" and config["list"] is None:
+        raise ValueError("Registry JSON requires an instruction list")
+    if "backup" in config and not re.fullmatch(r"\.[A-Za-z0-9_-]+", text(config["backup"])):
+        raise ValueError("JSON backup must be a safe filename suffix")
+    if config["hook_management"] == "registry" and "backup" in config:
+        raise ValueError("Registry JSON does not permit a backup")
+    return config
+
+
+def _command(value: object) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value:
+        raise ValueError("Expected a command argument list")
+    arguments = tuple(text(item) for item in cast(list[object], value))
+    if any(not re.fullmatch(r"[a-z][a-z0-9-]*", item) for item in arguments):
+        raise ValueError("Command arguments must be plain command words")
+    if arguments[-1] != "install" or any("resolution" in item for item in arguments):
+        raise ValueError("Command must select installation without resolution options")
+    return arguments
+
+
+def _destinations(value: object) -> dict[str, dict[str, str]] | None:
+    if value is None:
+        return None
+    data = fields(value, "skill markdown json")
+    result: dict[str, dict[str, str]] = {}
+    for name, entry in data.items():
+        destination = fields(entry, "root path")
+        root = text(destination["root"])
+        if root not in {"project", "home"}:
+            raise ValueError("Destination root must be project or home")
+        result[name] = {"root": root, "path": relative_path(destination["path"])}
+    skill = PurePosixPath(result["skill"]["path"])
+    owned = [(entry["root"], PurePosixPath(entry["path"])) for entry in result.values()]
+    owned.append((result["skill"]["root"], PurePosixPath(str(skill) + ".bak")))
+    owned.extend(
+        (result["skill"]["root"], skill.parent / name)
+        for name in ("references", ".graphify_version")
+    )
+    for index, (root, path) in enumerate(owned):
+        for other_root, other in owned[index + 1 :]:
+            if root == other_root and (
+                path == other or path in other.parents or other in path.parents
+            ):
+                raise ValueError("Installation destinations overlap")
+    return result
+
+
+def _validate_paths(spec: InstallTestSpec) -> None:
+    declared = spec.destinations or {
+        "skill": {"root": "project", "path": str(PurePosixPath(spec.directory) / spec.skill_file)},
+        "markdown": {
+            "root": "project",
+            "path": str(PurePosixPath(spec.directory) / spec.markdown_file),
+        },
+        "json": {"root": "project", "path": str(PurePosixPath(spec.directory) / spec.json_file)},
+    }
+    _destinations(declared)
+    json_path = declared["json"]["path"]
+    reserved = [
+        json_path + suffix
+        for suffix in (
+            ".graphify-state.json",
+            ".graphify.lock",
+            ".graphify-journal.json",
+        )
+    ]
+    if spec.json_backup is not None:
+        reserved.append(json_path + spec.json_backup)
+    for name in ("skill", "markdown"):
+        entry = declared[name]
+        if entry["root"] != declared["json"]["root"]:
+            continue
+        path = PurePosixPath(entry["path"])
+        if any(
+            path == PurePosixPath(other) or path in PurePosixPath(other).parents
+            for other in reserved
+        ):
+            raise ValueError("Installation destination collides with JSON evidence")

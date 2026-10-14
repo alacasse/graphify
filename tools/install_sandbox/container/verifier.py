@@ -2,11 +2,12 @@
 
 import json
 import posixpath
+from email.parser import BytesParser
 from pathlib import PurePosixPath
 from typing import cast
 
 from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.contracts.case import InstallTestCase, destinations
+from tools.install_sandbox.contracts.case import InstallTestCase, destination_roots, destinations
 from tools.install_sandbox.contracts.managed_json import registry, sidecars
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
@@ -25,25 +26,46 @@ def _mismatch(
     result.mismatches.append(VerificationMismatch(kind, root, path, expected, observed))
 
 
-def _file(snapshot: FilesystemSnapshot, path: str, result: VerificationResult) -> bytes | None:
-    entry = snapshot.entry("project", path)
+def _file(
+    snapshot: FilesystemSnapshot,
+    path: str,
+    result: VerificationResult,
+    root: str = "project",
+    *,
+    require_content: bool = True,
+) -> bytes | None:
+    entry = snapshot.entry(root, path)
     if entry is None:
-        if snapshot.absent("project", path):
-            _mismatch(result, "missing_file", "project", path, "file present", "file absent")
+        if snapshot.absent(root, path):
+            _mismatch(result, "missing_file", root, path, "file present", "file absent")
     elif entry["kind"] not in {"file", "unknown"}:
-        _mismatch(result, "entry_kind", "project", path, "file", entry["kind"])
-    return snapshot.contents.get(("project", path))
+        _mismatch(result, "entry_kind", root, path, "file", entry["kind"])
+    content = snapshot.contents.get((root, path))
+    if require_content and content is None and entry is not None and entry["kind"] == "file":
+        result.obstacles.append(
+            {
+                "operation": "read_file",
+                "root": root,
+                "path": path,
+                "reason": "File content unavailable",
+            }
+        )
+    return content
 
 
 def _compare_bytes(
-    snapshot: FilesystemSnapshot, path: str, expected: bytes, result: VerificationResult
+    snapshot: FilesystemSnapshot,
+    path: str,
+    expected: bytes,
+    result: VerificationResult,
+    root: str = "project",
 ) -> None:
-    observed = _file(snapshot, path, result)
+    observed = _file(snapshot, path, result, root)
     if observed is not None and observed != expected:
         _mismatch(
             result,
             "content_mismatch",
-            "project",
+            root,
             path,
             "bytes identical to retained source",
             "different bytes",
@@ -74,6 +96,7 @@ def _references(
 ) -> None:
     source = case.spec.references_source
     destination = destinations(case)["references"]
+    root = destination_roots(case)["references"]
     entry = expected.entry("subject", source)
     if entry is None or entry["kind"] != "directory":
         result.obstacles.append(
@@ -85,17 +108,17 @@ def _references(
             }
         )
         return
-    _reference_files(expected, after, source, destination, result)
+    _reference_files(expected, after, source, destination, result, root)
     for observed in after.entries:
         path = observed["path"]
-        if observed["root"] != "project" or not path.startswith(destination + "/"):
+        if observed["root"] != root or not path.startswith(destination + "/"):
             continue
         source_path = source + path[len(destination) :]
         if expected.absent("subject", source_path):
             _mismatch(
                 result,
                 "unexpected_reference",
-                "project",
+                root,
                 path,
                 "no additional reference entry",
                 observed["kind"],
@@ -108,6 +131,7 @@ def _reference_files(
     source: str,
     destination: str,
     result: VerificationResult,
+    root: str,
 ) -> None:
     for entry in expected.entries:
         path = entry["path"]
@@ -115,14 +139,14 @@ def _reference_files(
             continue
         target = destination + path[len(source) :]
         if entry["kind"] == "directory":
-            observed = after.entry("project", target)
+            observed = after.entry(root, target)
             if observed is not None and observed["kind"] not in {"directory", "unknown"}:
-                _mismatch(result, "entry_kind", "project", target, "directory", observed["kind"])
-            elif after.absent("project", target):
+                _mismatch(result, "entry_kind", root, target, "directory", observed["kind"])
+            elif after.absent(root, target):
                 _mismatch(
                     result,
                     "missing_directory",
-                    "project",
+                    root,
                     target,
                     "directory present",
                     "directory absent",
@@ -130,7 +154,7 @@ def _reference_files(
         elif entry["kind"] == "file":
             content = _expected_file(expected, path, result)
             if content is not None:
-                _compare_bytes(after, target, content, result)
+                _compare_bytes(after, target, content, result, root)
 
 
 def _markdown_parts(text: str, marker: str) -> tuple[str, str, str] | None:
@@ -169,14 +193,21 @@ def _markdown(
     try:
         source, initial, installed = (b.decode("utf-8") for b in (expected, before, after))
     except UnicodeDecodeError:
-        _mismatch(result, "invalid_markdown", "project", path, "UTF-8 text", "invalid UTF-8")
+        _mismatch(
+            result,
+            "invalid_markdown",
+            destination_roots(case)["markdown"],
+            path,
+            "UTF-8 text",
+            "invalid UTF-8",
+        )
         return
     parts = _markdown_parts(installed, case.spec.markdown_marker)
     if parts is None:
         _mismatch(
             result,
             "section_count",
-            "project",
+            destination_roots(case)["markdown"],
             path,
             "one Graphify section",
             "zero or multiple Graphify sections",
@@ -187,7 +218,7 @@ def _markdown(
         _mismatch(
             result,
             "content_mismatch",
-            "project",
+            destination_roots(case)["markdown"],
             path,
             "retained Markdown section",
             "different section content",
@@ -196,7 +227,7 @@ def _markdown(
         _mismatch(
             result,
             "user_content_lost",
-            "project",
+            destination_roots(case)["markdown"],
             path,
             "user text and section order preserved",
             "user content changed",
@@ -213,7 +244,7 @@ def _check_markdown_alteration(
         _mismatch(
             result,
             "invalid_preparation",
-            "project",
+            destination_roots(case)["markdown"],
             destinations(case)["markdown"],
             "one altered section with intact heading",
             "section not altered as required",
@@ -222,7 +253,7 @@ def _check_markdown_alteration(
         _mismatch(
             result,
             "user_content_lost",
-            "project",
+            destination_roots(case)["markdown"],
             destinations(case)["markdown"],
             "personal sections unchanged during preparation",
             "personal text changed",
@@ -315,6 +346,7 @@ def _hook_count(
     result: VerificationResult,
     *,
     personal: bool = False,
+    root: str = "project",
 ) -> None:
     event, matcher, content = context
     description = {"event": event, "matcher": matcher, "content": content, "count": count}
@@ -324,7 +356,7 @@ def _hook_count(
         _mismatch(
             result,
             "invalid_json_hooks",
-            "project",
+            root,
             path,
             json.dumps(description, sort_keys=True),
             str(error),
@@ -334,7 +366,7 @@ def _hook_count(
         _mismatch(
             result,
             "personal_hook_count" if personal else "hook_count",
-            "project",
+            root,
             path,
             json.dumps(description, sort_keys=True),
             json.dumps({"count": len(positions), "positions": positions}, sort_keys=True),
@@ -349,7 +381,7 @@ def _personal_hook_contexts(
     hooks = cast(dict[str, list[dict[str, object]]], initial.get("hooks", {}))
     for event, groups in hooks.items():
         for group in groups:
-            matcher = cast(str, group["matcher"])
+            matcher = cast(str, group.get("matcher", ""))
             for _, content in _group_hooks(group, f"hooks.{event}"):
                 key = (event, matcher, json.dumps(content, sort_keys=True))
                 contexts[key] = (event, matcher, content)
@@ -361,14 +393,14 @@ def _json_hooks(
 ) -> None:
     path = destinations(case)["json"]
     for hook in case.spec.json_hooks:
-        _hook_count(path, (hook.event, hook.matcher, hook.content), 1, installed, result)
-    content = next(
-        f["content"] for f in case.initial_files if f["root"] == "project" and f["path"] == path
-    )
-    initial = _read_json(content.encode("utf-8"))
-    for context in _personal_hook_contexts(initial):
-        count = len(_hook_positions(initial, *context, exact=True))
-        _hook_count(path, context, count, installed, result, personal=True)
+        _hook_count(
+            path,
+            (hook.event, hook.matcher, hook.content),
+            1,
+            installed,
+            result,
+            root=destination_roots(case)["json"],
+        )
 
 
 def _json_instructions(
@@ -377,19 +409,28 @@ def _json_instructions(
     installed: dict[str, object],
     result: VerificationResult,
 ) -> bool:
+    if case.spec.json_list is None:
+        return True
     dest = destinations(case)
     path = dest["json"]
     value = posixpath.relpath(dest["skill"], posixpath.dirname(path))
     items = installed.get(case.spec.json_list)
     if not isinstance(items, list):
-        _mismatch(result, "json_list", "project", path, "instruction list", "list unavailable")
+        _mismatch(
+            result,
+            "json_list",
+            destination_roots(case)["json"],
+            path,
+            "instruction list",
+            "list unavailable",
+        )
         return False
     items = cast(list[object], items)
     if items.count(value) != 1:
         _mismatch(
             result,
             "json_entry_count",
-            "project",
+            destination_roots(case)["json"],
             path,
             "one skill instruction",
             f"{items.count(value)} skill instructions",
@@ -407,25 +448,107 @@ def _without_hooks(document: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in document.items() if key != "hooks"}
 
 
+def _personal_groups(case: InstallTestCase, event: str, groups: list[object]) -> list[object]:
+    """Preserve personal groups while removing independently declared managed hooks."""
+    personal_groups: list[object] = []
+    for raw in groups:
+        if not isinstance(raw, dict):
+            raise ValueError("Hook groups must be objects")
+        group = cast(dict[str, object], raw)
+        entries = _group_hooks(group, f"hooks.{event}")
+        personal = [
+            content
+            for _, content in entries
+            if not any(
+                hook.event == event
+                and hook.matcher == group.get("matcher")
+                and (
+                    _json_equal(content, hook.content)
+                    if case.spec.json_hook_management == "registry"
+                    else all(
+                        key in content and _json_equal(content[key], value)
+                        for key, value in hook.content.items()
+                    )
+                )
+                for hook in case.spec.json_hooks
+            )
+        ]
+        removed = len(personal) != len(entries)
+        if removed and not personal and set(group) == {"matcher", "hooks"}:
+            continue
+        personal_groups.append({**group, "hooks": personal} if removed else group)
+    return personal_groups
+
+
+def _personal_json(case: InstallTestCase, document: dict[str, object]) -> dict[str, object]:
+    """Remove only independently declared managed hooks, retaining personal context/order."""
+    result = dict(document)
+    hooks = document.get("hooks")
+    if hooks is None:
+        return result
+    if not isinstance(hooks, dict):
+        raise ValueError("hooks must be an object")
+    events: dict[str, object] = {}
+    for event, groups in cast(dict[str, object], hooks).items():
+        if not isinstance(groups, list):
+            raise ValueError("Hook events must contain group lists")
+        personal_groups = _personal_groups(case, event, cast(list[object], groups))
+        if personal_groups or not groups:
+            events[event] = personal_groups
+    if events or not hooks:
+        result["hooks"] = events
+    else:
+        result.pop("hooks", None)
+    return result
+
+
+def _initial_json(case: InstallTestCase) -> dict[str, object]:
+    path = destinations(case)["json"]
+    root = destination_roots(case)["json"]
+    content = next(
+        f["content"] for f in case.initial_files if f["root"] == root and f["path"] == path
+    )
+    return _read_json(content.encode("utf-8"))
+
+
+def _personal_values(
+    case: InstallTestCase, initial: dict[str, object], installed: dict[str, object]
+) -> bool:
+    if not _json_equal(_without_hooks(initial), _without_hooks(installed)):
+        return False
+    if case.spec.json_hook_management == "registry":
+        return True  # Legacy registry contract permits regrouping personal hooks.
+    original = _personal_json(case, _initial_json(case))
+    current = _personal_json(case, installed)
+    return _json_equal(
+        {key: value for key, value in original.items() if key == "hooks"},
+        {key: value for key, value in current.items() if key == "hooks"},
+    )
+
+
 def _json(case: InstallTestCase, before: bytes, after: bytes, result: VerificationResult) -> None:
     path = destinations(case)["json"]
+    root = destination_roots(case)["json"]
     try:
         initial, installed = _read_json(before), _read_json(after)
+        _json_hooks(case, installed, result)
+        personal_initial = _initial_json(case)
+        for context in _personal_hook_contexts(personal_initial):
+            count = len(_hook_positions(personal_initial, *context, exact=True))
+            _hook_count(path, context, count, installed, result, personal=True, root=root)
+        if not _json_instructions(case, initial, installed, result):
+            return
+        if not _personal_values(case, initial, installed):
+            _mismatch(
+                result,
+                "user_content_lost",
+                root,
+                path,
+                "personal JSON, hook contexts, counts and array order preserved",
+                "personal JSON changed",
+            )
     except (ValueError, UnicodeDecodeError):
-        _mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
-        return
-    _json_hooks(case, installed, result)
-    if not _json_instructions(case, initial, installed, result):
-        return
-    if not _json_equal(_without_hooks(initial), _without_hooks(installed)):
-        _mismatch(
-            result,
-            "user_content_lost",
-            "project",
-            path,
-            "user JSON values and list order preserved",
-            "user values changed",
-        )
+        _mismatch(result, "invalid_json", root, path, "valid JSON object and hooks", "invalid JSON")
 
 
 def _json_preparation(
@@ -464,16 +587,23 @@ def _json_preparation(
         _mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
 
 
-def _allowed(case: InstallTestCase, expected: FilesystemSnapshot) -> set[str]:
+def _allowed(case: InstallTestCase, expected: FilesystemSnapshot) -> set[tuple[str, str]]:
     dest = destinations(case)
-    paths = set(dest.values()) | set(sidecars(case).values())
+    roots = destination_roots(case)
+    paths = {(roots[kind], path) for kind, path in dest.items()}
+    if case.spec.json_hook_management == "registry":
+        paths.update((roots["json"], path) for path in sidecars(case).values())
+    if case.spec.json_backup is not None:
+        paths.add((roots["json"], dest["json"] + case.spec.json_backup))
     source = case.spec.references_source
     paths.update(
-        dest["references"] + e["path"][len(source) :]
+        (roots["references"], dest["references"] + e["path"][len(source) :])
         for e in expected.entries
-        if e["path"].startswith(source + "/")
+        if e["root"] == "subject" and e["path"].startswith(source + "/")
     )
-    paths.update(str(parent) for path in tuple(paths) for parent in PurePosixPath(path).parents)
+    paths.update(
+        (root, str(parent)) for root, path in tuple(paths) for parent in PurePosixPath(path).parents
+    )
     return paths
 
 
@@ -498,14 +628,14 @@ def _preservation(
 ) -> None:
     allowed = _allowed(case, expected)
     if skill_backup is not None:
-        allowed.add(destinations(case)["skill"] + ".bak")
+        allowed.add((destination_roots(case)["skill"], destinations(case)["skill"] + ".bak"))
     keys = {(e["root"], e["path"]) for s in (before, after) for e in s.entries}
     for root, path in sorted(keys):
         # An incomplete source inventory cannot establish unauthorized membership.
         references = destinations(case)["references"]
         source_path = case.spec.references_source + path[len(references) :]
         if (
-            root == "project"
+            root == destination_roots(case)["references"]
             and path.startswith(references + "/")
             and not expected.absent("subject", source_path)
         ):
@@ -513,7 +643,7 @@ def _preservation(
         left, right = before.entry(root, path), after.entry(root, path)
         if root == "home" and _lock_creation(expected.skill_lock, before, after, path):
             continue
-        if root == "project" and path in allowed:
+        if (root, path) in allowed:
             # Only creation of required directories is authorized, never their removal/type change.
             if left is None or (
                 left["kind"] == "directory" and right is not None and right["kind"] == "directory"
@@ -554,15 +684,17 @@ def _preserved_entry(
         )
 
 
-def _require_absent(snapshot: FilesystemSnapshot, path: str, result: VerificationResult) -> None:
-    entry = snapshot.entry("project", path)
+def _require_absent(
+    snapshot: FilesystemSnapshot, path: str, result: VerificationResult, root: str = "project"
+) -> None:
+    entry = snapshot.entry(root, path)
     if entry is not None:
-        _mismatch(result, "unexpected_entry", "project", path, "absent", entry["kind"])
-    elif not snapshot.absent("project", path):
+        _mismatch(result, "unexpected_entry", root, path, "absent", entry["kind"])
+    elif not snapshot.absent(root, path):
         result.obstacles.append(
             {
                 "operation": "verify_absence",
-                "root": "project",
+                "root": root,
                 "path": path,
                 "reason": "Absence could not be established",
             }
@@ -585,7 +717,7 @@ def _reinstall_stability(
     }:
         return
     dest = destinations(case)
-    key = ("project", dest["version"])
+    key = (destination_roots(case)["version"], dest["version"])
     previous, current = before.contents.get(key), after.contents.get(key)
     if previous is not None and current is not None and previous != current:
         _mismatch(
@@ -662,6 +794,64 @@ def _skill_lock(
         )
 
 
+def _version(
+    case: InstallTestCase,
+    expected: FilesystemSnapshot,
+    after: FilesystemSnapshot,
+    result: VerificationResult,
+) -> None:
+    path = destinations(case)["version"]
+    root = destination_roots(case)["version"]
+    observed = _file(
+        after, path, result, root, require_content=case.spec.version_source is not None
+    )
+    if case.spec.version_source is None:
+        return
+    source = _expected_file(expected, case.spec.version_source, result)
+    if source is None:
+        return
+    try:
+        metadata = BytesParser().parsebytes(source)
+        versions = metadata.get_all("Version", [])
+        if len(versions) != 1 or not versions[0].strip():
+            raise ValueError("Expected one non-empty Core Metadata Version header")
+        version = versions[0].strip().encode("utf-8")
+    except (ValueError, UnicodeError) as error:
+        result.obstacles.append(
+            {
+                "operation": "read_expected",
+                "root": "subject",
+                "path": case.spec.version_source,
+                "reason": str(error),
+            }
+        )
+        return
+    if observed is not None and observed != version:
+        _mismatch(
+            result,
+            "content_mismatch",
+            root,
+            path,
+            "exact retained distribution version bytes",
+            "different version bytes",
+        )
+
+
+def _initial_absences(
+    case: InstallTestCase, before: FilesystemSnapshot, result: VerificationResult
+) -> None:
+    dest = destinations(case)
+    roots = destination_roots(case)
+    for kind in ("skill", "references", "version"):
+        _require_absent(before, dest[kind], result, roots[kind])
+    _require_absent(before, dest["skill"] + ".bak", result, roots["skill"])
+    if case.spec.json_hook_management == "registry":
+        for path in sidecars(case).values():
+            _require_absent(before, path, result, roots["json"])
+    if case.spec.json_backup is not None:
+        _require_absent(before, dest["json"] + case.spec.json_backup, result, roots["json"])
+
+
 class InstallVerifier:
     def verify(
         self,
@@ -683,15 +873,28 @@ class InstallVerifier:
         dest = destinations(case)
         skill = _expected_file(expected, case.spec.skill_source, result)
         if skill is not None:
-            _compare_bytes(after, dest["skill"], skill, result)
+            _compare_bytes(after, dest["skill"], skill, result, destination_roots(case)["skill"])
         _references(case, expected, after, result)
-        _file(after, dest["version"], result)
+        _version(case, expected, after, result)
         self._shared_files(case, expected, before, after, result)
+        if case.spec.json_backup is not None:
+            root = destination_roots(case)["json"]
+            initial_json = _file(before, dest["json"], result, root)
+            if initial_json is not None:
+                _compare_bytes(
+                    after, dest["json"] + case.spec.json_backup, initial_json, result, root
+                )
         _preservation(case, expected, before, after, result, skill_backup)
         if skill_backup is not None:
-            _compare_bytes(after, dest["skill"] + ".bak", skill_backup, result)
-        elif case.name != "first-install":
-            _require_absent(after, dest["skill"] + ".bak", result)
+            _compare_bytes(
+                after,
+                dest["skill"] + ".bak",
+                skill_backup,
+                result,
+                destination_roots(case)["skill"],
+            )
+        else:
+            _require_absent(after, dest["skill"] + ".bak", result, destination_roots(case)["skill"])
         if case.spec.skill_lock is not None and expected.skill_lock is None:
             result.obstacles.append(
                 {
@@ -837,6 +1040,8 @@ class InstallVerifier:
                 )
         for source in (case.spec.skill_source, case.spec.markdown_source):
             _expected_file(expected, source, result)
+        if case.spec.version_source is not None:
+            _expected_file(expected, case.spec.version_source, result)
         reference = expected.entry("subject", case.spec.references_source)
         if reference is None or reference["kind"] != "directory":
             result.obstacles.append(
@@ -847,15 +1052,7 @@ class InstallVerifier:
                     "reason": "Expected references directory unavailable",
                 }
             )
-        dest = destinations(case)
-        for path in (
-            dest["skill"],
-            dest["references"],
-            dest["version"],
-            dest["skill"] + ".bak",
-            *sidecars(case).values(),
-        ):
-            _require_absent(before, path, result)
+        _initial_absences(case, before, result)
         result.complete = not result.obstacles
         return result
 
@@ -871,8 +1068,9 @@ class InstallVerifier:
         source = _expected_file(expected, case.spec.markdown_source, result)
         for kind in ("markdown", "json"):
             path = dest[kind]
-            initial = before.contents.get(("project", path))
-            installed = _file(after, path, result)
+            root = destination_roots(case)[kind]
+            initial = before.contents.get((root, path))
+            installed = _file(after, path, result, root)
             if initial is None or installed is None:
                 continue
             if kind == "markdown" and source is not None:
@@ -888,8 +1086,11 @@ def _managed_json(
     result: VerificationResult,
     allow_registry_update: bool,
 ) -> None:
+    if case.spec.json_hook_management == "none":
+        return
+    root = destination_roots(case)["json"]
     paths = sidecars(case)
-    content = _file(after, paths["state"], result)
+    content = _file(after, paths["state"], result, root)
     if content is not None:
         try:
             state = _read_json(content)
@@ -899,21 +1100,21 @@ def _managed_json(
             _mismatch(
                 result,
                 "managed_registry",
-                "project",
+                root,
                 paths["state"],
                 "exact independent registry",
                 str(error),
             )
     _managed_hook_contents(case, after, result)
-    _compare_bytes(after, paths["lock"], b"", result)
-    _require_absent(after, paths["journal"], result)
-    _require_absent(after, destinations(case)["json"] + ".bak", result)
-    old = before.contents.get(("project", paths["state"]))
+    _compare_bytes(after, paths["lock"], b"", result, root)
+    _require_absent(after, paths["journal"], result, root)
+    _require_absent(after, destinations(case)["json"] + ".bak", result, root)
+    old = before.contents.get((root, paths["state"]))
     if not allow_registry_update and old is not None and content != old:
         _mismatch(
             result,
             "registry_stability",
-            "project",
+            root,
             paths["state"],
             "unchanged registry bytes",
             "different registry bytes",
@@ -924,7 +1125,8 @@ def _managed_hook_contents(
     case: InstallTestCase, after: FilesystemSnapshot, result: VerificationResult
 ) -> None:
     path = destinations(case)["json"]
-    content = after.contents.get(("project", path))
+    root = destination_roots(case)["json"]
+    content = after.contents.get((root, path))
     if content is None:
         return
     try:
@@ -938,7 +1140,7 @@ def _managed_hook_contents(
                 _mismatch(
                     result,
                     "managed_hook_content",
-                    "project",
+                    root,
                     path,
                     "one exact entire managed hook",
                     str(exact),

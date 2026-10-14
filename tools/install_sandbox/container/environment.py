@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from tools.install_sandbox.contracts.case import InstallTestCase, destinations
+from tools.install_sandbox.contracts.case import InstallTestCase, destination_roots, destinations
 from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
@@ -111,7 +111,8 @@ class TestEnvironment:
         self.home.mkdir(parents=True, exist_ok=False)
         self.skill_lock = None
         if self.case.spec.skill_lock is not None:
-            skill = (self.project / destinations(self.case)["skill"]).parent.resolve()
+            root = self.home if destination_roots(self.case)["skill"] == "home" else self.project
+            skill = (root / destinations(self.case)["skill"]).parent.resolve()
             digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
             self.skill_lock = f".cache/graphify/skill-locks/{digest}.lock"
             self.lock_expectation = {
@@ -160,7 +161,10 @@ class TestEnvironment:
             if not isinstance(settings, dict):
                 raise ValueError("Expected JSON object")
             settings = cast(dict[str, object], settings)
-            items = settings.get(self.case.spec.json_list)
+            instruction_list = self.case.spec.json_list
+            if instruction_list is None:
+                raise ValueError("JSON repair requires an instruction list")
+            items = settings.get(instruction_list)
             if not isinstance(items, list):
                 raise ValueError("Expected instruction list")
             items = cast(list[object], items)
@@ -199,7 +203,10 @@ class TestEnvironment:
         if self.skill_lock is not None:
             writer.write_lock_expectation(self.lock_expectation)
         spec = self.case.spec
-        for path in (spec.skill_source, spec.markdown_source, spec.references_source):
+        sources = [spec.skill_source, spec.markdown_source, spec.references_source]
+        if spec.version_source is not None:
+            sources.append(spec.version_source)
+        for path in sources:
             self._capture(snapshot, "subject", subject, path, expected=True)
         writer.write_snapshot(snapshot, "expected")
         return snapshot
@@ -257,7 +264,8 @@ class TestEnvironment:
         if (
             not expected
             and self.case.name == "first-install"
-            and entry["root"] == "project"
+            and self.case.spec.version_source is None
+            and entry["root"] == destination_roots(self.case)["version"]
             and entry["path"] == dest["version"]
         ):
             return
@@ -282,19 +290,21 @@ class TestEnvironment:
         witnesses = {(f["root"], f["path"]) for f in self.case.initial_files}
         if (entry["root"], entry["path"]) in witnesses:
             return True
-        return entry["root"] == "project" and (
-            is_transaction_temporary(self.case, entry["path"])
-            or entry["path"]
-            in (
-                dest["skill"],
-                dest["markdown"],
-                dest["json"],
-                dest["version"],
-                *sidecars(self.case).values(),
+        roots = destination_roots(self.case)
+        retained = {(roots[name], path) for name, path in dest.items()}
+        retained.update((roots["json"], path) for path in sidecars(self.case).values())
+        if self.case.spec.json_backup is not None:
+            retained.add((roots["json"], dest["json"] + self.case.spec.json_backup))
+        if self.case.name in {"repair-skill", "preserve-skill-backup"}:
+            retained.add((roots["skill"], dest["skill"] + ".bak"))
+        return (
+            (entry["root"], entry["path"]) in retained
+            or (
+                entry["root"] == roots["json"]
+                and is_transaction_temporary(self.case, entry["path"])
             )
             or (
-                self.case.name in {"repair-skill", "preserve-skill-backup"}
-                and entry["path"] == dest["skill"] + ".bak"
+                entry["root"] == roots["references"]
+                and entry["path"].startswith(dest["references"] + "/")
             )
-            or entry["path"].startswith(dest["references"] + "/")
         )

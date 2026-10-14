@@ -7,7 +7,9 @@ from typing import cast
 
 from tools.install_sandbox.contracts.case import (
     InstallTestCase,
+    destination_roots,
     destinations,
+    install_arguments,
     json_repair_plan,
     markdown_repair_plan,
 )
@@ -352,6 +354,8 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         _check_json_observations(result, case, output_directory)
         _check_lock_evidence(result, case, output_directory)
         _check_managed_evidence(result, case, output_directory)
+        _check_json_backup_evidence(result, case, output_directory)
+        _check_version_evidence(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
     return result
 
@@ -366,7 +370,8 @@ def _check_lock_evidence(result: InstallTestResult, case: InstallTestCase, outpu
         command = step["command"]
         if command is None:
             continue
-        if skill != PurePosixPath(command["cwd"], destinations(case)["skill"]).parent:
+        root = home if destination_roots(case)["skill"] == "home" else PurePosixPath(command["cwd"])
+        if skill != (root / destinations(case)["skill"]).parent:
             raise ValueError("Lock skill directory contradicts installation directory")
         if home.parent != PurePosixPath(command["cwd"]).parent or home.name != "home":
             raise ValueError("Lock home contradicts isolated installation roots")
@@ -419,7 +424,11 @@ def _read_json_evidence(output: Path, relative: str) -> object:
 
 
 def _check_snapshot(
-    output: Path, relative: str, *, complete: bool = True, presence_only: str | None = None
+    output: Path,
+    relative: str,
+    *,
+    complete: bool = True,
+    presence_only: tuple[str, str] | None = None,
 ) -> list[dict[str, object]]:
     """Validate inventory and content bindings, without deciding file conformance."""
     data = fields(_read_json_evidence(output, relative), "entries obstacles")
@@ -441,13 +450,15 @@ def _check_snapshot(
 
 
 def _check_complete_snapshot(
-    entries: list[dict[str, object]], obstacles: list[object], presence_only: str | None = None
+    entries: list[dict[str, object]],
+    obstacles: list[object],
+    presence_only: tuple[str, str] | None = None,
 ) -> None:
     if obstacles or not entries:
         raise ValueError("Complete verification requires observable snapshot evidence")
     for entry in entries:
         kind = entry["kind"]
-        if kind == "file" and entry["root"] == "project" and entry["path"] == presence_only:
+        if kind == "file" and (entry["root"], entry["path"]) == presence_only:
             continue
         if kind == "file" and entry.get("content_file") is None and entry.get("sha256") is None:
             raise ValueError("Complete verification requires file content evidence")
@@ -566,7 +577,12 @@ def _check_json_snapshot(
     snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
     obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
     entry = next(
-        (e for e in entries if e["root"] == "project" and e["path"] == destinations(case)["json"]),
+        (
+            e
+            for e in entries
+            if e["root"] == destination_roots(case)["json"]
+            and e["path"] == destinations(case)["json"]
+        ),
         None,
     )
     if required and (entry is None or entry["kind"] != "file" or entry.get("content_file") is None):
@@ -615,8 +631,10 @@ def _check_case_repair_plan(
         _check_repair_plan(plan, case, output, sources)
 
 
-def _presence_only(case: InstallTestCase) -> str | None:
-    return destinations(case)["version"] if case.name == "first-install" else None
+def _presence_only(case: InstallTestCase) -> tuple[str, str] | None:
+    if case.name == "first-install" and case.spec.version_source is None:
+        return destination_roots(case)["version"], destinations(case)["version"]
+    return None
 
 
 def _check_command_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
@@ -628,6 +646,8 @@ def _check_command_evidence(result: InstallTestResult, case: InstallTestCase, ou
     for index, step in enumerate(result.steps):
         if step["command"] is None:
             continue
+        _check_managed_command(step["command"], case, index, _managed_transport(case, output))
+        _check_declared_environment(case, step["command"], output, index)
         verification = step["verification"]
         assert verification is not None
         _check_snapshot(
@@ -655,6 +675,8 @@ def _check_expected_sources(case: InstallTestCase, output: Path) -> None:
         case.spec.markdown_source: "file",
         case.spec.references_source: "directory",
     }
+    if case.spec.version_source is not None:
+        required[case.spec.version_source] = "file"
     for path, kind in required.items():
         if path not in sources or sources[path]["kind"] != kind:
             raise ValueError(f"Missing retained source inventory entry: {path}")
@@ -759,7 +781,19 @@ def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, ou
             if _successful_stage(result, relative)
             else set()
         )
-        _check_content_snapshot(output, relative, paths, required)
+        _check_content_snapshot(
+            output,
+            relative,
+            paths,
+            required,
+            root=destination_roots(case)[
+                "json"
+                if case.name == "repair-json-entry"
+                else "markdown"
+                if case.name == "repair-markdown-section"
+                else "skill"
+            ],
+        )
 
 
 def _successful_stage(result: InstallTestResult, relative: str) -> bool:
@@ -783,14 +817,14 @@ def _required_content_paths(case: InstallTestCase, relative: str) -> set[str]:
 
 
 def _check_content_snapshot(
-    output: Path, relative: str, paths: set[str], required: set[str]
+    output: Path, relative: str, paths: set[str], required: set[str], *, root: str = "project"
 ) -> None:
     snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
     obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
     retained: set[str] = set()
     for value in _list(snapshot["entries"]):
         entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
-        if entry["root"] == "project" and entry["path"] in paths:
+        if entry["root"] == root and entry["path"] in paths:
             _check_retained_content(entry, obstacles)
             if entry["kind"] == "file" and entry.get("content_file") is not None:
                 retained.add(text(entry["path"]))
@@ -803,7 +837,7 @@ def _check_content_snapshot(
 def _check_retained_content(entry: dict[str, object], obstacles: list[ObservationObstacle]) -> None:
     if entry["kind"] != "file" or entry.get("content_file") is not None:
         return
-    if not any(o["root"] == "project" and o["path"] == entry["path"] for o in obstacles):
+    if not any(o["root"] == entry["root"] and o["path"] == entry["path"] for o in obstacles):
         raise ValueError("Observed file requires retained content, not only a digest")
 
 
@@ -813,6 +847,8 @@ def _check_managed_evidence(
     output: Path,
 ) -> None:
     transported = _managed_transport(case, output)
+    if case.spec.json_hook_management != "registry":
+        return
     paths = set(sidecars(case).values())
     for index, step in enumerate(result.steps):
         command = step["command"]
@@ -847,14 +883,14 @@ def _check_managed_command(
     command: CommandEvidence, case: InstallTestCase, index: int, transported: PurePosixPath | None
 ) -> None:
     args = command["args"]
-    expected_args = [args[0], "install", "--platform", case.target, "--project"]
+    expected_args = [args[0], *install_arguments(case)]
     if index == 0 and transported is not None:
         expected_args.extend(["--managed-hooks-resolution", str(transported)])
     cwd = PurePosixPath(command["cwd"])
     if transported is not None and transported.is_relative_to(cwd.parent):
         raise ValueError("Resolution must stay outside isolated observed roots")
     if args != expected_args:
-        raise ValueError("Managed resolution must be passed only on first installation")
+        raise ValueError("Installation command contradicts declared case arguments or resolution")
 
 
 def _managed_transport(case: InstallTestCase, output: Path) -> PurePosixPath | None:
@@ -876,3 +912,80 @@ def _managed_transport(case: InstallTestCase, output: Path) -> PurePosixPath | N
     ):
         raise ValueError("Invalid managed resolution transport path")
     return transported
+
+
+def _check_json_backup_evidence(
+    result: InstallTestResult, case: InstallTestCase, output: Path
+) -> None:
+    """Bind declared backups to retained pre-command settings after work cleanup."""
+    if case.spec.json_backup is None:
+        return
+    target = destinations(case)["json"]
+    root = destination_roots(case)["json"]
+    original = safe_evidence_path(output, f"steps/0/before/{root}/{target}").read_bytes()
+    backup = target + case.spec.json_backup
+    for index, step in enumerate(result.steps):
+        if step["command"] is None:
+            continue
+        relative = f"steps/{index}/after.json"
+        required: set[str] = {backup} if _check_attempted(step) == "passed" else set()
+        _check_content_snapshot(output, relative, {backup}, required, root=root)
+        entries = _check_snapshot(output, relative, complete=False)
+        retained = next(
+            (entry for entry in entries if entry["root"] == root and entry["path"] == backup),
+            None,
+        )
+        if retained is not None and retained.get("content_file") is not None:
+            content = safe_evidence_path(output, text(retained["content_file"])).read_bytes()
+            if _check_attempted(step) == "passed" and content != original:
+                raise ValueError("Successful JSON backup must retain exact initial settings bytes")
+
+
+def _check_version_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
+    if case.spec.version_source is None:
+        return
+    version = destinations(case)["version"]
+    root = destination_roots(case)["version"]
+    for index, step in enumerate(result.steps):
+        if step["command"] is None:
+            continue
+        required: set[str] = {version} if _check_attempted(step) == "passed" else set()
+        _check_content_snapshot(output, f"steps/{index}/after.json", {version}, required, root=root)
+
+
+def _check_environment(command: CommandEvidence, output: Path, index: int) -> None:
+    """Bind allowlisted execution settings to the case's isolated roots."""
+    cwd = PurePosixPath(command["cwd"])
+    if not cwd.is_absolute() or cwd.name != "project" or ".." in cwd.parts:
+        raise ValueError("Command requires a canonical isolated project directory")
+    home = cwd.parent / "home"
+    temporary = cwd.parent.parent / "command-tmp"
+    names = (
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+    )
+    expected = {
+        "PATH": "/bin:/usr/bin",
+        "HOME": str(home),
+        "TMPDIR": str(temporary),
+        "LANG": "C.UTF-8",
+        "PYTHONNOUSERSITE": "1",
+        "USERPROFILE": str(home),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        **{name: str(temporary / "configuration" / name.lower()) for name in names},
+    }
+    if _read_json_evidence(output, f"steps/{index}/environment.json") != expected:
+        raise ValueError("Execution environment contradicts isolated case roots or allowlist")
+
+
+def _check_declared_environment(
+    case: InstallTestCase, command: CommandEvidence, output: Path, index: int
+) -> None:
+    if case.spec.command is not None:
+        _check_environment(command, output, index)

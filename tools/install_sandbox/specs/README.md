@@ -175,3 +175,28 @@ the persistent registry. JSON-entry repair preserves the observed hooks and
 registry while removing only the instruction registration. The host validates
 resolution, command and observation bindings and required retained sidecars,
 without repeating the container's installation verdict.
+
+## Dedicated local first-install facts
+
+Supply `codebuddy-local/` alone to select the accepted CodeBuddy first-install
+contract. The retained catalog remains unconsumed. Its explicit `command`
+contains argument words after the executable. Without that field, reference
+cases retain `install --platform <target> --project`. Explicit command words
+cannot inject flags or a managed JSON resolution.
+
+Optional `destinations` supplies all three file effects (`skill`, `markdown`,
+`json`), each with a `project` or `home` root and a safe relative path. References
+and version remain siblings of the declared skill. Overlapping effects are
+rejected. Omitting overrides retains the reference layout and serialized shape.
+`skill.version_source` names a separately retained source for the expected
+version; the local CodeBuddy subject includes the existing installed package's
+unchanged distribution metadata, captured before execution.
+
+`json.hook_management: none` explicitly disables registry management and supports
+only first-install. `json.list: null` declares no instruction registration;
+`json.backup` declares a safe suffix whose bytes must equal the initial JSON.
+Registry cases still require their instruction list, sidecars and resolutions.
+Sidecar names remain derived even in none mode so their absence is observable.
+The none-mode fixtures derive paths from facts and include two personal Markdown
+sections, personal hooks (including the audit timeout 17), another event,
+ordered metadata, home counterparts, neighboring files and a cache witness.

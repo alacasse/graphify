@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import asdict
 from pathlib import PurePosixPath
 
-from tools.install_sandbox.contracts.case import InstallTestCase, destinations
+from tools.install_sandbox.contracts.case import InstallTestCase, destination_roots, destinations
 
 
 def sidecars(case: InstallTestCase) -> dict[str, str]:
@@ -30,7 +30,7 @@ def resolution(case: InstallTestCase) -> dict[str, object]:
     witness = next(
         file["content"]
         for file in case.initial_files
-        if file["root"] == "project" and file["path"] == target
+        if file["root"] == destination_roots(case)["json"] and file["path"] == target
     )
     return {
         "version": 1,
@@ -42,7 +42,10 @@ def resolution(case: InstallTestCase) -> dict[str, object]:
 
 
 def needs_resolution(case: InstallTestCase) -> bool:
-    return case.name in {"first-install", "reinstall"}
+    return case.spec.json_hook_management == "registry" and case.name in {
+        "first-install",
+        "reinstall",
+    }
 
 
 def is_transaction_temporary(case: InstallTestCase, path: str) -> bool:

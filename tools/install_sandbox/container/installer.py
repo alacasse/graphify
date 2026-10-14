@@ -6,11 +6,11 @@ import subprocess
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from tools.install_sandbox.contracts.case import InstallTestCase
+from tools.install_sandbox.contracts.case import InstallTestCase, install_arguments
 from tools.install_sandbox.contracts.timings import elapsed
 
 
@@ -24,6 +24,7 @@ class InstallerCommandResult:
     stdout: bytes = b""
     stderr: bytes = b""
     duration_seconds: float | None = None
+    environment: dict[str, str] | None = None
 
 
 CommandExecutor = Callable[[list[str], Path, dict[str, str], float], InstallerCommandResult]
@@ -102,7 +103,32 @@ class InstallerDriver:
         resolution: Path | None = None,
     ) -> InstallerCommandResult:
         InstallTestCase.from_json(case.to_json())
-        args = [str(executable), "install", "--platform", case.target, "--project"]
+        args = [str(executable), *install_arguments(case)]
+        if resolution is not None and case.spec.json_hook_management != "registry":
+            raise ValueError("Undeclared managed resolution")
         if resolution is not None:
             args.extend(["--managed-hooks-resolution", str(resolution)])
-        return self.execute(args, project, command_environment(home, temporary), self.timeout)
+        environment = command_environment(home, temporary)
+        if case.spec.command is not None:
+            environment.update(isolated_configuration(home, temporary))
+        result = self.execute(args, project, environment, self.timeout)
+        return replace(result, environment=environment)
+
+
+def isolated_configuration(home: Path, temporary: Path) -> dict[str, str]:
+    """Declare local configuration roots for dedicated installation commands."""
+    names = (
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+    )
+    return {
+        **{name: str(temporary / "configuration" / name.lower()) for name in names},
+        "USERPROFILE": str(home),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }

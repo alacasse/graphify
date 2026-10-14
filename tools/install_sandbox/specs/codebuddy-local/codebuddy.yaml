@@ -1,0 +1,37 @@
+scopes: [project]
+directory: .codebuddy
+command: [codebuddy, install]
+destinations:
+  skill: {root: home, path: .codebuddy/skills/graphify/SKILL.md}
+  markdown: {root: project, path: CODEBUDDY.md}
+  json: {root: project, path: .codebuddy/settings.json}
+skill:
+  lock: persistent
+  file: skills/graphify/SKILL.md
+  source: graphify/skill.md
+  references: graphify/skills/claude/references
+  version_source: graphifyy.dist-info/METADATA
+markdown:
+  file: CODEBUDDY.md
+  marker: "## graphify"
+  source: graphify/always_on/claude-md.md
+json:
+  file: settings.json
+  list: null
+  hook_management: none
+  backup: .graphify-bak
+  hooks:
+    - id: graphify.search
+      event: PreToolUse
+      matcher: Bash|Grep
+      content:
+        type: command
+        command: graphify hook-guard search
+        timeout: 10
+    - id: graphify.read
+      event: PreToolUse
+      matcher: Read|Glob
+      content:
+        type: command
+        command: graphify hook-guard read
+        timeout: 10

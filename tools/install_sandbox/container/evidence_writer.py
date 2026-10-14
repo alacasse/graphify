@@ -153,6 +153,8 @@ class TestResultWriter:
     def write_command(
         self, result: InstallerCommandResult, *, step_index: int = 0
     ) -> CommandEvidence:
+        if result.environment is not None:
+            self._write_json(f"steps/{step_index}/environment.json", result.environment)
         self._write_bytes(f"steps/{step_index}/stdout.txt", result.stdout)
         self._write_bytes(f"steps/{step_index}/stderr.txt", result.stderr)
         return {

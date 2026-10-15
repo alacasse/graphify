@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 from tools.install_sandbox.contracts.case import InstallTestCase, destination_roots, destinations
 from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
 from tools.install_sandbox.contracts.results import (
+    AlteredReferencePlan,
     FileAlterationPlan,
     MissingReferencePlan,
     ObservationObstacle,
@@ -72,6 +73,20 @@ def missing_reference_plan(
         "root": destination_roots(case)["references"],
         "deleted_path": destinations(case)["references"] + "/" + files[0][len(prefix) :],
     }
+
+
+def altered_reference_plan(
+    case: InstallTestCase, expected: FilesystemSnapshot
+) -> tuple[AlteredReferencePlan, bytes]:
+    """Alter the first source-selected reference, independently of installed files."""
+    selected = missing_reference_plan(case, expected)
+    relative = selected["deleted_path"][len(destinations(case)["references"]) + 1 :]
+    content = expected.contents[("subject", case.spec.references_source + "/" + relative)]
+    return {
+        "root": selected["root"],
+        "altered_path": selected["deleted_path"],
+        "altered_content_file": "steps/1/preparation/altered-content.bin",
+    }, content + b"\nSandbox repair witness.\n"
 
 
 def reference_repair_plan(
@@ -161,6 +176,14 @@ class TestEnvironment:
             (root / plan["deleted_path"]).unlink()
         except OSError as error:
             return f"Missing reference preparation failed: {error}"
+        return None
+
+    def prepare_altered_reference(self, plan: AlteredReferencePlan, content: bytes) -> str | None:
+        root = self.home if plan["root"] == "home" else self.project
+        try:
+            (root / plan["altered_path"]).write_bytes(content)
+        except OSError as error:
+            return f"Altered reference preparation failed: {error}"
         return None
 
     def prepare_reference_repair(self, plan: ReferenceRepairPlan, content: bytes) -> str | None:

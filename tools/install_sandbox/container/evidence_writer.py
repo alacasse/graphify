@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from tools.install_sandbox.container.installer import InstallerCommandResult
 from tools.install_sandbox.contracts.results import (
+    AlteredReferencePlan,
     CommandEvidence,
     EvidenceWriteError,
     FileAlterationPlan,
@@ -119,7 +120,9 @@ class TestResultWriter:
         self._write_json("steps/1/preparation/plan.json", plan)
 
     def write_step_preparation_plan(
-        self, plan: ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan, content: bytes
+        self,
+        plan: AlteredReferencePlan | ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan,
+        content: bytes,
     ) -> None:
         self._write_json("steps/1/preparation/plan.json", plan)
         content_file = (

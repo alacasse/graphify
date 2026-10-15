@@ -10,6 +10,7 @@ from typing import Literal
 from tools.install_sandbox.container.environment import (
     FilesystemSnapshot,
     TestEnvironment,
+    altered_reference_plan,
     missing_reference_plan,
     reference_repair_plan,
     skill_backup_plan,
@@ -25,6 +26,7 @@ from tools.install_sandbox.contracts.case import (
 )
 from tools.install_sandbox.contracts.managed_json import needs_resolution, resolution
 from tools.install_sandbox.contracts.results import (
+    AlteredReferencePlan,
     FileAlterationPlan,
     InstallTestResult,
     MissingReferencePlan,
@@ -144,9 +146,13 @@ class InstallTestRunner:
                 result, writer, "Initial verification failed: " + json.dumps(asdict(initial))
             )
             return None
-        if case.name in {"repair-references", "repair-missing-reference"}:
+        if case.name in {
+            "repair-references",
+            "repair-missing-reference",
+            "repair-altered-reference",
+        }:
             try:
-                if case.name == "repair-missing-reference":
+                if case.name in {"repair-missing-reference", "repair-altered-reference"}:
                     missing_reference_plan(case, expected)
                 else:
                     reference_repair_plan(case, expected)
@@ -173,6 +179,7 @@ class InstallTestRunner:
                     if case.name in {
                         "repair-references",
                         "repair-missing-reference",
+                        "repair-altered-reference",
                         "repair-skill",
                         "preserve-skill-backup",
                         "repair-markdown-section",
@@ -216,6 +223,10 @@ class InstallTestRunner:
         writer: TestResultWriter,
         step: StepEvidence,
     ) -> FilesystemSnapshot:
+        if case.name == "repair-altered-reference":
+            return self._prepare_altered_reference(
+                case, environment, expected, installed, writer, step
+            )
         if case.name == "repair-missing-reference":
             return self._prepare_missing_reference(
                 case, environment, expected, installed, writer, step
@@ -251,6 +262,24 @@ class InstallTestRunner:
             )
         self._record_preparation(writer, step, plan, reason, verification)
         return prepared_state
+
+    def _prepare_altered_reference(
+        self,
+        case: InstallTestCase,
+        environment: TestEnvironment,
+        expected: FilesystemSnapshot,
+        installed: FilesystemSnapshot,
+        writer: TestResultWriter,
+        step: StepEvidence,
+    ) -> FilesystemSnapshot:
+        plan, content = altered_reference_plan(case, expected)
+        writer.write_step_preparation_plan(plan, content)
+        writer.append_log("journal.log", "Preparing single reference alteration\n")
+        reason = environment.prepare_altered_reference(plan, content)
+        prepared = environment.observe(writer, "before", step_index=1)
+        verification = self.verifier.verify_altered_reference(plan, content, installed, prepared)
+        self._record_preparation(writer, step, plan, reason, verification)
+        return prepared
 
     def _prepare_missing_reference(
         self,
@@ -303,7 +332,11 @@ class InstallTestRunner:
     def _record_preparation(
         writer: TestResultWriter,
         step: StepEvidence,
-        plan: MissingReferencePlan | FileAlterationPlan | ReferenceRepairPlan | SkillBackupPlan,
+        plan: AlteredReferencePlan
+        | MissingReferencePlan
+        | FileAlterationPlan
+        | ReferenceRepairPlan
+        | SkillBackupPlan,
         reason: str | None,
         verification: VerificationResult,
     ) -> None:

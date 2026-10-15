@@ -10,6 +10,7 @@ from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.contracts.case import InstallTestCase, destination_roots, destinations
 from tools.install_sandbox.contracts.managed_json import registry, sidecars
 from tools.install_sandbox.contracts.results import (
+    AlteredReferencePlan,
     FileAlterationPlan,
     MissingReferencePlan,
     ObservationObstacle,
@@ -712,6 +713,7 @@ def _reinstall_stability(
         "reinstall",
         "repair-references",
         "repair-missing-reference",
+        "repair-altered-reference",
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
@@ -755,7 +757,7 @@ def _json_backup(
     backup = path + case.spec.json_backup
     source = path
     if (
-        case.name in {"reinstall", "repair-missing-reference"}
+        case.name in {"reinstall", "repair-missing-reference", "repair-altered-reference"}
         and case.spec.json_hook_management == "none"
         and before.entry(root, backup) is not None
     ):
@@ -929,6 +931,26 @@ class InstallVerifier:
         _skill_lock(expected.skill_lock, before, after, result)
         _managed_json(case, before, after, result, allow_registry_update)
         _reinstall_stability(case, before, after, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_altered_reference(
+        self,
+        plan: AlteredReferencePlan,
+        content: bytes,
+        installed: FilesystemSnapshot,
+        degraded: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Require precisely one altered file and preserve all other entries."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
+        )
+        root, path = plan["root"], plan["altered_path"]
+        _file(installed, path, result, root)
+        _compare_bytes(degraded, path, content, result, root)
+        keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
+        for other_root, other_path in sorted(keys - {(root, path)}):
+            _preserved_entry(installed, degraded, other_root, other_path, result)
         result.complete = not result.obstacles
         return result
 

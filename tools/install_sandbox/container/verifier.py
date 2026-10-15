@@ -764,6 +764,7 @@ def _json_backup(
             "repair-altered-reference",
             "repair-skill",
             "preserve-skill-backup",
+            "repair-markdown-section",
         }
         and case.spec.json_hook_management == "none"
         and before.entry(root, backup) is not None
@@ -1034,14 +1035,15 @@ class InstallVerifier:
         result = VerificationResult(
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
-        _compare_bytes(degraded, plan["altered_path"], content, result)
-        previous = installed.contents.get(("project", plan["altered_path"]))
+        root = destination_roots(case)["markdown"]
+        _compare_bytes(degraded, plan["altered_path"], content, result, root)
+        previous = _file(installed, plan["altered_path"], result, root)
         if previous is not None:
             _check_markdown_alteration(case, previous, content, result)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
-        for root, path in sorted(keys):
-            if (root, path) != ("project", plan["altered_path"]):
-                _preserved_entry(installed, degraded, root, path, result)
+        for entry_root, path in sorted(keys):
+            if (entry_root, path) != (root, plan["altered_path"]):
+                _preserved_entry(installed, degraded, entry_root, path, result)
         result.complete = not result.obstacles
         return result
 

@@ -82,12 +82,25 @@ def test_none_mode_missing_reference_case_reuses_initial_witnesses(tmp_path: Pat
     assert InstallTestCase.from_json(repair.to_json()) == repair
 
 
+def test_none_mode_markdown_repair_has_personal_sections_and_roundtrips(tmp_path: Path) -> None:
+    repair = InstallTestCoordinator().write_case(
+        _SPECS, "codebuddy", tmp_path / "repair.json", case_name="repair-markdown-section"
+    )
+    markdown = next(f for f in repair.initial_files if f["path"] == "CODEBUDDY.md")
+    assert markdown["root"] == "project"
+    assert markdown["content"] == (
+        "# My project\n\n## Language\nRespond in English.\n\n"
+        "## graphify\n\n## Changes\nExplain proposed changes.\n"
+    )
+    assert repair.operations == ["install", "install"]
+    assert InstallTestCase.from_json(repair.to_json()) == repair
+
+
 @pytest.mark.parametrize(
     "name",
     [
         "repair-json-entry",
         "repair-references",
-        "repair-markdown-section",
     ],
 )
 def test_none_mode_rejects_repair_case_before_writing(tmp_path: Path, name: str) -> None:

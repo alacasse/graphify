@@ -21,6 +21,7 @@ from tools.install_sandbox.container.installer import InstallerCommandResult, In
 from tools.install_sandbox.container.verifier import InstallVerifier
 from tools.install_sandbox.contracts.case import (
     InstallTestCase,
+    destination_roots,
     json_repair_plan,
     markdown_repair_plan,
 )
@@ -249,7 +250,7 @@ class InstallTestRunner:
             reason = environment.prepare_skill_repair(plan, content)
             prepared_state = environment.observe(writer, "before", step_index=1)
             verification = self.verifier.verify_skill_repair(
-                plan, content, installed, prepared_state
+                plan, content, installed, prepared_state, destination_roots(case)["skill"]
             )
         else:
             plan, content = reference_repair_plan(case, expected)

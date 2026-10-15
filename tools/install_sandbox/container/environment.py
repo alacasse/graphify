@@ -198,7 +198,10 @@ class TestEnvironment:
     def prepare_skill_repair(self, plan: FileAlterationPlan, content: bytes) -> str | None:
         """Preserve a failed write's partial effects for observation."""
         try:
-            (self.project / plan["altered_path"]).write_bytes(content)
+            (
+                (self.home if destination_roots(self.case)["skill"] == "home" else self.project)
+                / plan["altered_path"]
+            ).write_bytes(content)
         except OSError as error:
             return f"Skill repair preparation failed: {error}"
         return None

@@ -757,7 +757,8 @@ def _json_backup(
     backup = path + case.spec.json_backup
     source = path
     if (
-        case.name in {"reinstall", "repair-missing-reference", "repair-altered-reference"}
+        case.name
+        in {"reinstall", "repair-missing-reference", "repair-altered-reference", "repair-skill"}
         and case.spec.json_hook_management == "none"
         and before.entry(root, backup) is not None
     ):
@@ -1000,17 +1001,18 @@ class InstallVerifier:
         content: bytes,
         installed: FilesystemSnapshot,
         degraded: FilesystemSnapshot,
+        root: str = "project",
     ) -> VerificationResult:
         """Require exactly the skill alteration and no backup or other change."""
         result = VerificationResult(
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
-        _compare_bytes(degraded, plan["altered_path"], content, result)
-        _require_absent(degraded, plan["altered_path"] + ".bak", result)
+        _compare_bytes(degraded, plan["altered_path"], content, result, root)
+        _require_absent(degraded, plan["altered_path"] + ".bak", result, root)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
-        for root, path in sorted(keys):
-            if (root, path) != ("project", plan["altered_path"]):
-                _preserved_entry(installed, degraded, root, path, result)
+        for entry_root, path in sorted(keys):
+            if (entry_root, path) != (root, plan["altered_path"]):
+                _preserved_entry(installed, degraded, entry_root, path, result)
         result.complete = not result.obstacles
         return result
 

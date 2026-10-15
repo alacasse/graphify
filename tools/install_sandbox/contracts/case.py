@@ -33,9 +33,11 @@ def first_install_files(
             "reinstall",
             "repair-missing-reference",
             "repair-altered-reference",
+            "repair-skill",
         }:
             raise ValueError(
-                "Unmanaged JSON supports first-install, reinstall and single-reference repair only"
+                "Unmanaged JSON supports first-install, reinstall, skill repair "
+                "and single-reference repair only"
             )
         return _unmanaged_files(spec)
     directory = PurePosixPath(spec.directory)

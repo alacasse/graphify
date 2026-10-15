@@ -85,7 +85,6 @@ def test_none_mode_missing_reference_case_reuses_initial_witnesses(tmp_path: Pat
 @pytest.mark.parametrize(
     "name",
     [
-        "repair-skill",
         "repair-json-entry",
         "repair-references",
         "repair-markdown-section",

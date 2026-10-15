@@ -9,6 +9,7 @@ from tools.install_sandbox.container.environment import (
     FilesystemSnapshot,
     altered_reference_plan,
     missing_reference_plan,
+    skill_repair_plan,
 )
 from tools.install_sandbox.container.verifier import InstallVerifier
 from tools.install_sandbox.contracts.case import (
@@ -416,10 +417,10 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         _check_version_evidence(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
     if (
-        case.name in {"repair-missing-reference", "repair-altered-reference"}
+        case.name in {"repair-missing-reference", "repair-altered-reference", "repair-skill"}
         and result.preparation["ready"]
     ):
-        _check_missing_installations(result, case, output_directory)
+        _check_repair_installations(result, case, output_directory)
     return result
 
 
@@ -714,7 +715,7 @@ def _retained_snapshot(output: Path, relative: str) -> FilesystemSnapshot:
     return snapshot
 
 
-def _check_missing_installations(
+def _check_repair_installations(
     result: InstallTestResult, case: InstallTestCase, output: Path
 ) -> None:
     sources = _retained_snapshot(output, "expected.json")
@@ -729,8 +730,14 @@ def _check_missing_installations(
             continue
         before = _retained_snapshot(output, f"steps/{index}/before.json")
         after = _retained_snapshot(output, f"steps/{index}/after.json")
-        if verifier.verify(case, sources, before, after) != step["verification"]:
-            raise ValueError("Missing reference installation contradicts retained observations")
+        backup = (
+            skill_repair_plan(case, sources)[1] if index and case.name == "repair-skill" else None
+        )
+        if (
+            verifier.verify(case, sources, before, after, skill_backup=backup)
+            != step["verification"]
+        ):
+            raise ValueError("Repair installation contradicts retained observations")
 
 
 def _check_altered_reference(
@@ -798,6 +805,19 @@ def _check_case_repair_plan(
             raise ValueError("Prepared shared file content does not match the case witness")
     elif case.name == "repair-skill":
         _check_skill_repair_plan(plan, case, output)
+        content = safe_evidence_path(output, plan["altered_content_file"]).read_bytes()
+        computed = InstallVerifier().verify_skill_repair(
+            plan,
+            content,
+            _retained_snapshot(output, "steps/0/after.json"),
+            _retained_snapshot(output, "steps/1/before.json"),
+            destination_roots(case)["skill"],
+        )
+        saved = _step_preparation(
+            _read_json_evidence(output, "steps/1/preparation/result.json"), output
+        )
+        if computed != saved["verification"]:
+            raise ValueError("Skill preparation contradicts retained observations")
     else:
         if "deleted_path" not in plan:
             raise ValueError("Reference repair requires a deletion")

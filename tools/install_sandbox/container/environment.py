@@ -209,7 +209,10 @@ class TestEnvironment:
     def prepare_markdown_repair(self, plan: FileAlterationPlan, content: bytes) -> str | None:
         """Keep partial writes observable when the shared document cannot be prepared."""
         try:
-            (self.project / plan["altered_path"]).write_bytes(content)
+            (
+                (self.home if destination_roots(self.case)["markdown"] == "home" else self.project)
+                / plan["altered_path"]
+            ).write_bytes(content)
         except OSError as error:
             return f"Markdown repair preparation failed: {error}"
         return None

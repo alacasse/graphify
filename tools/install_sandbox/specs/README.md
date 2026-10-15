@@ -192,8 +192,12 @@ rejected. Omitting overrides retains the reference layout and serialized shape.
 version; the local CodeBuddy subject includes the existing installed package's
 unchanged distribution metadata, captured before execution.
 
-`json.hook_management: none` explicitly disables registry management and supports
-only first-install. `json.list: null` declares no instruction registration;
+`json.hook_management: none` explicitly disables registry management. It supports
+first installation, reinstallation, single missing or altered reference repair,
+skill repair, preservation of an existing skill backup, and Markdown section
+repair. Markdown repair changes only the declared section body, preserves the
+initial JSON backup, and retains independent preparation and readback evidence.
+`json.list: null` declares no instruction registration;
 `json.backup` declares a safe suffix whose bytes must equal the initial JSON.
 Registry cases still require their instruction list, sidecars and resolutions.
 Sidecar names remain derived even in none mode so their absence is observable.

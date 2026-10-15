@@ -94,7 +94,13 @@ class CodeBuddyCase:
             )
         settings.write_bytes(_settings(original, self.mode))
         markdown = project / "CODEBUDDY.md"
-        markdown.write_bytes(markdown.read_bytes() + b"\n## graphify\nUse the synthetic graph.\n")
+        initial = markdown.read_bytes()
+        section = b"## graphify\nUse the synthetic graph.\n"
+        markdown.write_bytes(
+            initial.replace(b"## graphify\n", section, 1)
+            if self.case_name == "repair-markdown-section"
+            else initial + b"\n" + section
+        )
         digest = hashlib.sha256(str(home / _SKILL).encode()).hexdigest()[:16]
         _write(home / f".cache/graphify/skill-locks/{digest}.lock", b"")
         if self.mode == "registry":
@@ -234,3 +240,29 @@ class CodeBuddySkillBackupCase(CodeBuddyReinstallCase):
         _reinstall_fault(project, home, self.mode)
         self.calls.append((list(args), project, dict(environment), timeout))
         return InstallerCommandResult(args, str(project), "completed", 0, None, b"preserve\n")
+
+
+class CodeBuddyMarkdownRepairCase(CodeBuddyReinstallCase):
+    def __init__(self, root: Path, mode: str = "passed") -> None:
+        super().__init__(root, mode, "repair-markdown-section")
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        if not self.calls:
+            return super().execute(args, project, environment, timeout)
+        markdown = project / "CODEBUDDY.md"
+        assert b"Sandbox altered Markdown section." in markdown.read_bytes()
+        if self.mode != "no-op":
+            markdown.write_bytes(self.first_files["project/CODEBUDDY.md"])
+        if self.mode == "lost-prefix":
+            markdown.write_bytes(b"## graphify" + markdown.read_bytes().split(b"## graphify", 1)[1])
+        elif self.mode == "lost-suffix":
+            markdown.write_bytes(markdown.read_bytes().split(b"## Changes", 1)[0])
+        elif self.mode == "foreign":
+            (Path(environment["HOME"]) / "personal-notes.txt").write_bytes(b"Lost\n")
+        elif self.mode == "registry":
+            _write(project / (_SETTINGS + ".graphify-state.json"), b"{}\n")
+        _reinstall_fault(project, Path(environment["HOME"]), self.mode)
+        self.calls.append((list(args), project, dict(environment), timeout))
+        return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")

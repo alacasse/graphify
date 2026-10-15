@@ -35,12 +35,13 @@ def first_install_files(
             "repair-altered-reference",
             "repair-skill",
             "preserve-skill-backup",
+            "repair-markdown-section",
         }:
             raise ValueError(
                 "Unmanaged JSON supports first-install, reinstall, skill backup preservation, "
-                "skill repair and single-reference repair only"
+                "skill repair, Markdown repair and single-reference repair only"
             )
-        return _unmanaged_files(spec)
+        return _unmanaged_files(spec, case_name)
     directory = PurePosixPath(spec.directory)
     markdown = _PROJECT_INSTRUCTIONS
     if case_name == "repair-markdown-section":
@@ -231,9 +232,12 @@ def install_arguments(case: InstallTestCase) -> list[str]:
     return ["install", "--platform", case.target, "--project"]
 
 
-def _unmanaged_files(spec: InstallTestSpec) -> list[InitialFile]:
+def _unmanaged_files(spec: InstallTestSpec, case_name: str) -> list[InitialFile]:
     case = InstallTestCase("first-install", "fixture", "project", spec, [], ["install"])
     paths, roots = destinations(case), destination_roots(case)
+    markdown = _PROJECT_INSTRUCTIONS
+    if case_name == "repair-markdown-section":
+        markdown = markdown.replace("## Changes", spec.markdown_marker + "\n\n## Changes")
     personal: dict[str, object] = {
         "theme": "dark",
         "metadata": {"owner": "personal", "order": ["second", "first"]},
@@ -267,7 +271,7 @@ def _unmanaged_files(spec: InstallTestSpec) -> list[InitialFile]:
     }
     settings = json.dumps(personal, indent=2) + "\n"
     files: list[InitialFile] = [
-        {"root": roots["markdown"], "path": paths["markdown"], "content": _PROJECT_INSTRUCTIONS},
+        {"root": roots["markdown"], "path": paths["markdown"], "content": markdown},
         {"root": roots["json"], "path": paths["json"], "content": settings},
         {"root": "home", "path": "personal-notes.txt", "content": _PERSONAL_NOTES},
         {"root": "home", "path": ".cache/personal-cache.txt", "content": _PERSONAL_NOTES},
@@ -299,7 +303,10 @@ def _unmanaged_files(spec: InstallTestSpec) -> list[InitialFile]:
 def markdown_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, bytes]:
     """Build the altered shared document from case witnesses, not installed output."""
     path = destinations(case)["markdown"]
-    initial = next(f["content"] for f in case.initial_files if f["path"] == path)
+    root = destination_roots(case)["markdown"]
+    initial = next(
+        f["content"] for f in case.initial_files if (f["root"], f["path"]) == (root, path)
+    )
     content = initial.replace(
         case.spec.markdown_marker + "\n",
         case.spec.markdown_marker + "\nSandbox altered Markdown section.\n",

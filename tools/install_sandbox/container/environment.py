@@ -10,7 +10,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from tools.install_sandbox.contracts.case import InstallTestCase, destination_roots, destinations
+from tools.install_sandbox.contracts.case import (
+    InstallTestCase,
+    destination_roots,
+    destinations,
+    remove_json_hook,
+)
 from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
 from tools.install_sandbox.contracts.results import (
     AlteredReferencePlan,
@@ -241,6 +246,18 @@ class TestEnvironment:
             path.write_bytes((json.dumps(settings, indent=2) + "\n").encode("utf-8"))
         except (OSError, ValueError, UnicodeError) as error:
             return f"JSON repair preparation failed: {error}"
+        return None
+
+    def prepare_json_hook_repair(self, plan: FileAlterationPlan) -> str | None:
+        """Remove only the declared hook; partial effects remain observable."""
+        try:
+            root = self.home if destination_roots(self.case)["json"] == "home" else self.project
+            path = root / plan["altered_path"]
+            document = cast(dict[str, object], json.loads(path.read_bytes()))
+            remove_json_hook(self.case, document)
+            path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        except (OSError, ValueError, UnicodeError, KeyError, TypeError) as error:
+            return f"JSON hook repair preparation failed: {error}"
         return None
 
     def prepare_skill_backup(self, plan: SkillBackupPlan, content: bytes) -> str | None:

@@ -1,12 +1,17 @@
 """Validate declared CodeBuddy facts at case construction and transport boundaries."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from tools.install_sandbox.contracts.case import InstallTestCase
+from tools.install_sandbox.contracts.case import (
+    InstallTestCase,
+    first_install_files,
+    remove_json_hook,
+)
 from tools.install_sandbox.host.coordinator import InstallTestCoordinator
 
 _SPECS = Path(__file__).resolve().parents[4] / "tools/install_sandbox/specs/codebuddy-local"
@@ -209,3 +214,36 @@ def test_none_mode_backup_case_reuses_initial_witnesses(tmp_path: Path) -> None:
     assert backup.initial_files == first.initial_files
     assert backup.operations == ["install", "install"]
     assert InstallTestCase.from_json(backup.to_json()) == backup
+
+
+@pytest.mark.parametrize(
+    "event,matcher", [("PreToolUse", "Read|Glob"), ("OtherEvent", "OtherTool")]
+)
+def test_missing_hook_fixture_uses_first_declared_context(
+    tmp_path: Path, event: str, matcher: str
+) -> None:
+    first = InstallTestCoordinator().write_case(_SPECS, "codebuddy", tmp_path / "first.json")
+    hook = replace(first.spec.json_hooks[0], event=event, matcher=matcher)
+    spec = replace(first.spec, json_hooks=(hook,))
+    initial = first_install_files(spec, "repair-missing-json-hook")
+    settings = json.loads(
+        next(
+            f["content"]
+            for f in initial
+            if f["path"] == ".codebuddy/settings.json" and f["root"] == "project"
+        )
+    )
+    case = replace(
+        first,
+        name="repair-missing-json-hook",
+        spec=spec,
+        initial_files=initial,
+        operations=["install", "install"],
+    )
+    assert InstallTestCase.from_json(case.to_json()) == case
+    group = next(g for g in settings["hooks"][event] if g["matcher"] == matcher)
+    assert group["hooks"][-1] == hook.content
+    remove_json_hook(case, settings)
+    assert group["hooks"] == [
+        {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
+    ]

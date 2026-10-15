@@ -60,7 +60,27 @@ def test_case_rejects_malformed_or_resolution_injecting_command(
         InstallTestCase.from_json(json.dumps(document))
 
 
-@pytest.mark.parametrize("name", ["reinstall", "repair-skill", "repair-json-entry"])
+def test_none_mode_reinstall_reuses_initial_witnesses(tmp_path: Path) -> None:
+    coordinator = InstallTestCoordinator()
+    first = coordinator.write_case(_SPECS, "codebuddy", tmp_path / "first.json")
+    repeated = coordinator.write_case(
+        _SPECS, "codebuddy", tmp_path / "repeat.json", case_name="reinstall"
+    )
+    assert repeated.initial_files == first.initial_files
+    assert repeated.operations == ["install", "install"]
+    assert InstallTestCase.from_json(repeated.to_json()) == repeated
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "repair-skill",
+        "repair-json-entry",
+        "repair-references",
+        "repair-markdown-section",
+        "preserve-skill-backup",
+    ],
+)
 def test_none_mode_rejects_repair_case_before_writing(tmp_path: Path, name: str) -> None:
     destination = tmp_path / "unsupported.json"
     with pytest.raises(ValueError, match="first-install"):

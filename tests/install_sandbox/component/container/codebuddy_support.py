@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -50,6 +50,7 @@ def _settings(original: bytes, mode: str) -> bytes:
 class CodeBuddyCase:
     root: Path
     mode: str = "passed"
+    case_name: str = "first-install"
 
     def __post_init__(self) -> None:
         for relative, content in {
@@ -63,7 +64,7 @@ class CodeBuddyCase:
         }.items():
             _write(self.root / "subject" / relative, content)
         self.case = InstallTestCoordinator().write_case(
-            _SPECS, "codebuddy", self.root / "case.json", case_name="first-install"
+            _SPECS, "codebuddy", self.root / "case.json", case_name=self.case_name
         )
 
     @property
@@ -111,3 +112,71 @@ class CodeBuddyCase:
 
     def retained_case(self) -> InstallTestCase:
         return InstallTestCase.from_json((self.root / "case.json").read_text())
+
+
+def _tree_bytes(project: Path, home: Path) -> dict[str, bytes]:
+    return {
+        f"{label}/{path.relative_to(root)}": path.read_bytes()
+        for label, root in (("project", project), ("home", home))
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _reinstall_fault(project: Path, home: Path, mode: str) -> None:
+    settings = project / _SETTINGS
+    backup = Path(str(settings) + ".graphify-bak")
+    replacements = {
+        "altered-backup": (backup, b"Changed backup.\n"),
+        "rolling-backup": (backup, settings.read_bytes()),
+        "wrong-skill": (home / _SKILL / "SKILL.md", b"Wrong skill.\n"),
+        "wrong-reference": (home / _SKILL / "references/one.md", b"Wrong reference.\n"),
+        "wrong-version": (home / _SKILL / ".graphify_version", b"0.0.0"),
+    }
+    if mode in replacements:
+        _write(*replacements[mode])
+    elif mode == "missing-backup":
+        backup.unlink()
+    elif mode in {"duplicate-hook", "lost-personal", "json-format"}:
+        _reinstall_json_fault(settings, mode)
+    elif mode == "duplicate-markdown":
+        markdown = project / "CODEBUDDY.md"
+        markdown.write_bytes(markdown.read_bytes() + b"\n## graphify\nDuplicate.\n")
+
+
+def _reinstall_json_fault(settings: Path, mode: str) -> None:
+    data = cast(dict[str, Any], json.loads(settings.read_bytes()))
+    groups = data["hooks"]["PreToolUse"]
+    if mode == "duplicate-hook":
+        groups[0]["hooks"].append(dict(groups[0]["hooks"][-1]))
+    elif mode == "lost-personal":
+        groups[0]["hooks"].pop(0)
+    settings.write_text(json.dumps(data, indent=4))
+
+
+@dataclass
+class CodeBuddyReinstallCase(CodeBuddyCase):
+    case_name: str = "reinstall"
+    calls: list[tuple[list[str], Path, dict[str, str], float]] = field(
+        default_factory=list[tuple[list[str], Path, dict[str, str], float]]
+    )
+    first_files: dict[str, bytes] = field(default_factory=dict[str, bytes])
+    repeated_files: dict[str, bytes] = field(default_factory=dict[str, bytes])
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        self.calls.append((list(args), project, dict(environment), timeout))
+        home = Path(environment["HOME"])
+        if len(self.calls) == 1:
+            requested_mode = self.mode
+            self.mode = "lost-personal" if requested_mode == "first-failure" else "passed"
+            result = super().execute(args, project, environment, timeout)
+            self.mode = requested_mode
+            self.first_files = _tree_bytes(project, home)
+            return result
+        self.repeated_files = _tree_bytes(project, home)
+        _reinstall_fault(project, home, self.mode)
+        return InstallerCommandResult(
+            args, str(project), "completed", 0, None, b"synthetic repeat\n"
+        )

@@ -70,6 +70,107 @@ def test_codebuddy_skill_file_references_graphify_query(tmp_path):
 # Project-scope install (graphify codebuddy install)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("same_group", [False, True])
+@pytest.mark.parametrize("command,matcher", [
+    ("graphify hook-guard search", "Bash|Grep"),
+    ("graphify hook-guard read", "Read|Glob"),
+])
+def test_codebuddy_install_refuses_ambiguous_hooks(tmp_path, capsys, same_group, command, matcher):
+    """Duplicate conforming occurrences refuse without writes or success claims."""
+    from graphify.__main__ import codebuddy_install
+    hook = {"type": "command", "command": command, "timeout": 10}
+    groups = [{"matcher": matcher, "hooks": [hook, hook], "personal": True}] if same_group else [
+        {"matcher": matcher, "hooks": [hook], "personal": index} for index in range(2)
+    ]
+    settings_path = _settings_path(tmp_path)
+    settings_path.parent.mkdir()
+    original = json.dumps({"hooks": {"PreToolUse": groups}}, indent=4).encode()
+    settings_path.write_bytes(original)
+    backup = settings_path.with_name("settings.json.graphify-bak")
+    backup.write_bytes(b"retained backup")
+    with pytest.raises(SystemExit) as exc:
+        codebuddy_install(tmp_path)
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "ambiguous" in captured.err.lower()
+    assert command in captured.err
+    assert "configured" not in captured.out
+    assert "registered" not in captured.out
+    assert "will now" not in captured.out
+    assert settings_path.read_bytes() == original
+    assert backup.read_bytes() == b"retained backup"
+    assert not _codebuddy_md_path(tmp_path).exists()
+
+
+def test_codebuddy_install_portable_hooks_with_absolute_executable(tmp_path):
+    from graphify.__main__ import codebuddy_install
+    with patch("graphify.install.shutil.which", return_value="/local tools/bin/graphify"):
+        codebuddy_install(tmp_path)
+    groups = json.loads(_settings_path(tmp_path).read_text())["hooks"]["PreToolUse"]
+    assert groups == [
+        {"matcher": "Bash|Grep", "hooks": [{"type": "command", "command": "graphify hook-guard search", "timeout": 10}]},
+        {"matcher": "Read|Glob", "hooks": [{"type": "command", "command": "graphify hook-guard read", "timeout": 10}]},
+    ]
+
+
+def test_codebuddy_install_preserves_personal_hooks_and_repeat_bytes(tmp_path):
+    from graphify.__main__ import codebuddy_install
+    personal_groups = [
+        {"matcher": "Bash|Grep", "hooks": [
+            {"type": "command", "command": "python personal_graphify_audit.py", "personal": 1},
+            {"type": "command", "command": "graphify hook-guard search", "timeout": 10, "personal": 2},
+            {"type": "command", "command": "echo after"},
+        ], "group_extra": {"keep": True}},
+        {"matcher": "Read|Glob", "hooks": [
+            {"type": "command", "command": '"/old tools/graphify" hook-guard read', "timeout": 10},
+        ], "old": True},
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "graphify custom"}]},
+    ]
+    original = {"personal": {"ordered": [3, 1, 2]}, "hooks": {
+        "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo personal"}]}],
+        "PreToolUse": personal_groups,
+    }}
+    settings_path = _settings_path(tmp_path)
+    settings_path.parent.mkdir()
+    original_bytes = json.dumps(original, indent=4).encode()
+    settings_path.write_bytes(original_bytes)
+    codebuddy_install(tmp_path)
+    installed = json.loads(settings_path.read_text())
+    assert installed["personal"] == original["personal"]
+    assert installed["hooks"]["PostToolUse"] == original["hooks"]["PostToolUse"]
+    assert installed["hooks"]["PreToolUse"] == personal_groups + [
+        {"matcher": "Read|Glob", "hooks": [{"type": "command", "command": "graphify hook-guard read", "timeout": 10}]},
+    ]
+    first_bytes = settings_path.read_bytes()
+    backup = settings_path.with_name("settings.json.graphify-bak")
+    assert backup.read_bytes() == original_bytes
+    codebuddy_install(tmp_path)
+    assert settings_path.read_bytes() == first_bytes
+    assert backup.read_bytes() == original_bytes
+    assert _codebuddy_md_path(tmp_path).read_text().count("## graphify") == 1
+
+
+def test_codebuddy_install_keeps_existing_conforming_settings_bytes(tmp_path):
+    """Conforming personal groups satisfy installation without a rewrite or backup."""
+    from graphify.__main__ import codebuddy_install
+    settings = {"hooks": {"PreToolUse": [
+        {"matcher": "Read|Glob", "hooks": [
+            {"type": "command", "command": "graphify hook-guard read", "timeout": 10, "personal": True},
+        ], "extra": "keep"},
+        {"matcher": "Bash|Grep", "hooks": [
+            {"type": "command", "command": "echo personal"},
+            {"type": "command", "command": "graphify hook-guard search", "timeout": 10},
+        ]},
+    ]}}
+    settings_path = _settings_path(tmp_path)
+    settings_path.parent.mkdir()
+    original = (json.dumps(settings, indent=4) + "\n").encode()
+    settings_path.write_bytes(original)
+    codebuddy_install(tmp_path)
+    assert settings_path.read_bytes() == original
+    assert not settings_path.with_name("settings.json.graphify-bak").exists()
+
+
 def test_codebuddy_install_project_writes_codebuddy_md(tmp_path):
     """Project-scope install writes CODEBUDDY.md with graphify section."""
     from graphify.__main__ import codebuddy_install

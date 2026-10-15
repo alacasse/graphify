@@ -2439,6 +2439,8 @@ def _strip_graphify_md_section(target: Path) -> bool:
     return True
 def codebuddy_install(project_dir: Path | None = None) -> None:
     """Install the graphify skill and CODEBUDDY.md section for CodeBuddy."""
+    # Refuse ambiguous hooks before writing the skill or announcing configuration.
+    _install_codebuddy_hook(project_dir or Path("."))
     _copy_skill_file("codebuddy", project=bool(project_dir), project_dir=project_dir)
     target = (project_dir or Path(".")) / "CODEBUDDY.md"
 
@@ -2457,9 +2459,6 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
         _write_keep_newline(target, new_content, newline)
         print(f"graphify section written to {target.resolve()}")
 
-    # Also write CodeBuddy PreToolUse hook to .codebuddy/settings.json
-    _install_codebuddy_hook(project_dir or Path("."))
-
     print()
     print("CodeBuddy will now check the knowledge graph before answering")
     print("codebase questions and rebuild it after code changes.")
@@ -2477,9 +2476,36 @@ def _install_codebuddy_hook(project_dir: Path) -> None:
     if not isinstance(pre_tool, list):
         _refuse_to_modify(settings_path)
 
-    hooks["PreToolUse"] = _strip_graphify_hooks(pre_tool)
-    hooks["PreToolUse"].extend(_claude_pretooluse_hooks())
-    _write_settings_with_backup(settings_path, settings)
+    missing = []
+    for expected_group in _claude_pretooluse_hooks(project=True):
+        expected_hook = expected_group["hooks"][0]
+        occurrences = 0
+        for group in pre_tool:
+            if not isinstance(group, dict) or group.get("matcher") != expected_group["matcher"]:
+                continue
+            group_hooks = group.get("hooks")
+            if not isinstance(group_hooks, list):
+                continue
+            occurrences += sum(
+                1 for hook in group_hooks
+                if isinstance(hook, dict)
+                and all(hook.get(key) == value for key, value in expected_hook.items())
+            )
+        if occurrences > 1:
+            print(
+                f"[graphify] refusing to modify {settings_path}: ambiguous "
+                f"PreToolUse hook {expected_hook['command']!r} "
+                f"({occurrences} conforming occurrences)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if occurrences == 0:
+            missing.append(expected_group)
+
+    # Matching hooks need no ownership claim; preserve every existing object.
+    if missing:
+        pre_tool.extend(missing)
+        _write_settings_with_backup(settings_path, settings)
     print(f"  .codebuddy/settings.json  ->  PreToolUse hooks registered")
 def _uninstall_codebuddy_hook(project_dir: Path) -> None:
     """Remove graphify PreToolUse hook from .codebuddy/settings.json."""

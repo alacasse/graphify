@@ -14,7 +14,7 @@ from tools.install_sandbox.contracts.case import (
     InstallTestCase,
     destination_roots,
     destinations,
-    remove_json_hook,
+    transform_json_hook,
 )
 from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
 from tools.install_sandbox.contracts.results import (
@@ -249,12 +249,12 @@ class TestEnvironment:
         return None
 
     def prepare_json_hook_repair(self, plan: FileAlterationPlan) -> str | None:
-        """Remove only the declared hook; partial effects remain observable."""
+        """Transform only the declared hook; partial effects remain observable."""
         try:
             root = self.home if destination_roots(self.case)["json"] == "home" else self.project
             path = root / plan["altered_path"]
             document = cast(dict[str, object], json.loads(path.read_bytes()))
-            remove_json_hook(self.case, document)
+            transform_json_hook(self.case, document)
             path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         except (OSError, ValueError, UnicodeError, KeyError, TypeError) as error:
             return f"JSON hook repair preparation failed: {error}"

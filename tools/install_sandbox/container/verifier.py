@@ -12,6 +12,7 @@ from tools.install_sandbox.contracts.case import (
     destination_roots,
     destinations,
     remove_json_hook,
+    transform_json_hook,
 )
 from tools.install_sandbox.contracts.managed_json import registry, sidecars
 from tools.install_sandbox.contracts.results import (
@@ -753,6 +754,8 @@ def _reinstall_stability(
         "repair-missing-markdown-section",
         "repair-json-entry",
         "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
     }:
         return
     dest = destinations(case)
@@ -802,6 +805,8 @@ def _json_backup(
             "repair-markdown-section",
             "repair-missing-markdown-section",
             "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
         }
         and case.spec.json_hook_management == "none"
         and before.entry(root, backup) is not None
@@ -809,7 +814,11 @@ def _json_backup(
         source = backup
         original = _file(before, path, result, root)
         if original is not None:
-            if case.name == "repair-missing-json-hook":
+            if case.name in {
+                "repair-missing-json-hook",
+                "repair-altered-json-hook",
+                "repair-duplicate-json-hook",
+            }:
                 _restored_hook_json(
                     case, original, _file(after, path, result, root), root, path, result
                 )
@@ -1102,8 +1111,12 @@ class InstallVerifier:
         result = VerificationResult(
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
-        if case.name == "repair-missing-json-hook":
-            return _verify_missing_hook(case, plan, installed, degraded)
+        if case.name in {
+            "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
+        }:
+            return _verify_hook_preparation(case, plan, installed, degraded)
         path = plan["altered_path"]
         observed = _file(degraded, path, result)
         previous = _file(installed, path, result)
@@ -1282,7 +1295,7 @@ def _restored_json(
         _mismatch(result, "content_mismatch", root, path, "unchanged JSON content", "changed JSON")
 
 
-def _verify_missing_hook(
+def _verify_hook_preparation(
     case: InstallTestCase,
     plan: FileAlterationPlan,
     installed: FilesystemSnapshot,
@@ -1297,7 +1310,7 @@ def _verify_missing_hook(
     if previous is not None:
         try:
             document = _read_json(previous)
-            remove_json_hook(case, document)
+            transform_json_hook(case, document)
             _restored_json(json.dumps(document).encode(), observed, root, path, result)
         except (ValueError, UnicodeError, KeyError, TypeError):
             _mismatch(

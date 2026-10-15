@@ -227,3 +227,20 @@ spec-conforming hook while preserving the complete installed JSON content and
 array order, ignoring formatting, and the byte-exact initial backup and other
 files. Retained snapshots permit preparation and installation recomputation after
 cleanup. The instruction-list `repair-json-entry` contract remains unchanged.
+
+
+The independent `repair-altered-json-hook` and `repair-duplicate-json-hook` cases
+also start from unmanaged JSON and a fully conforming first installation. Their
+initial JSON includes two personal groups for the first declared hook's event
+and matcher, with distinct group attributes and ordered personal hooks, before
+any installation. Alteration changes only that observed hook object's timeout
+from 10 to 11. Duplication appends an exact copy of that observed object to the
+second personal group. Preparation must match precisely this transformation,
+with every other observed entry unchanged, before the second command can run.
+Reinstallation must leave exactly one conforming first-declared hook, preserve
+the read hook and all personal groups, attributes and order, and leave no altered
+witness. Either duplicate copy may survive in either position. JSON formatting
+is unconstrained; the initial JSON backup and other observed files retain exact
+bytes. Retained plans, snapshots and results permit the same independent
+preparation and installation verification after environment cleanup. Existing
+missing-hook and other cases retain their original initial witnesses.

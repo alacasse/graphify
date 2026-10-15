@@ -25,11 +25,15 @@ def _write(path: Path, content: bytes) -> None:
 def _settings(original: bytes, mode: str) -> bytes:
     data = cast(dict[str, Any], json.loads(original))
     groups = data["hooks"]["PreToolUse"]
-    search = {"type": "command", "command": "graphify hook-guard search", "timeout": 10}
+    search: dict[str, object] = {
+        "type": "command",
+        "command": "graphify hook-guard search",
+        "timeout": 10,
+    }
     read = {"type": "command", "command": "graphify hook-guard read", "timeout": 10}
     if mode == "extra-field":
         search["description"] = "Additional managed metadata"
-    groups[0]["hooks"].append(search)
+    _append_search(groups[0]["hooks"], search)
     groups.append({"matcher": "Read|Glob", "hooks": [read]})
     if mode == "missing-hook":
         groups.pop()
@@ -316,3 +320,57 @@ class CodeBuddyMissingMarkdownRepairCase(CodeBuddyReinstallCase):
         _reinstall_fault(project, Path(environment["HOME"]), self.mode)
         self.calls.append((list(args), project, dict(environment), timeout))
         return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")
+
+
+class CodeBuddyMissingHookCase(CodeBuddyReinstallCase):
+    def __init__(self, root: Path, mode: str = "passed") -> None:
+        super().__init__(root, mode, "repair-missing-json-hook")
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        if not self.calls:
+            return super().execute(args, project, environment, timeout)
+        settings = project / _SETTINGS
+        data = cast(dict[str, Any], json.loads(settings.read_bytes()))
+        search: dict[str, object] = {
+            "type": "command",
+            "command": "graphify hook-guard search",
+            "timeout": 10,
+        }
+        groups = data["hooks"]["PreToolUse"]
+        assert groups[0]["hooks"] == [
+            {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
+        ]
+        if self.mode == "separate-group":
+            groups.append({"matcher": "Bash|Grep", "hooks": [search]})
+        elif self.mode != "no-op":
+            groups[0]["hooks"].append(search)
+        _missing_hook_fault(data, self.mode)
+        settings.write_text(json.dumps(data, indent=4))
+        _reinstall_fault(project, Path(environment["HOME"]), self.mode)
+        self.calls.append((list(args), project, dict(environment), timeout))
+        return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")
+
+
+def _missing_hook_fault(data: dict[str, Any], mode: str) -> None:
+    groups = data["hooks"]["PreToolUse"]
+    if mode == "malformed-group":
+        data["hooks"]["PreToolUse"] = [42]
+    elif mode == "wrong-hook":
+        groups[0]["hooks"][-1]["timeout"] = 99
+    elif mode == "read-hook":
+        groups[1]["hooks"][0]["timeout"] = 99
+    elif mode == "extra-field":
+        data["unexpected"] = True
+    elif mode == "metadata":
+        data["metadata"]["owner"] = "lost"
+    elif mode == "group-field":
+        groups[0]["unexpected"] = True
+    elif mode == "order":
+        data["hooks"]["PostToolUse"][0]["hooks"].reverse()
+
+
+def _append_search(entries: list[object], search: dict[str, object]) -> None:
+    if search not in entries:
+        entries.append(search)

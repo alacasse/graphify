@@ -216,3 +216,14 @@ All other observed entries, including the original JSON backup, remain unchanged
 Retained source, plan, preparation and installation observations allow the host
 reader to recompute both preparation and installation verdicts after cleanup.
 The existing `repair-markdown-section` case continues to alter the body only.
+
+The distinct `repair-missing-json-hook` case supports unmanaged JSON with at least
+one declared hook. It selects the first hook declaration (search in the independent
+CodeBuddy spec), verifies a conforming first installation, and removes only its
+complete observed object, including additional fields. Its group, personal hooks,
+other hooks and all other entries remain unchanged. An exact observed preparation
+is required before repeating the identical command. Reinstallation restores one
+spec-conforming hook while preserving the complete installed JSON content and
+array order, ignoring formatting, and the byte-exact initial backup and other
+files. Retained snapshots permit preparation and installation recomputation after
+cleanup. The instruction-list `repair-json-entry` contract remains unchanged.

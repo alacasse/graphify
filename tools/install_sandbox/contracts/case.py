@@ -27,6 +27,10 @@ def first_install_files(
     spec: InstallTestSpec, case_name: str = "first-install"
 ) -> list[InitialFile]:
     """Place the common witnesses using target paths and the JSON list fact."""
+    if case_name == "repair-missing-json-hook" and (
+        spec.json_hook_management != "none" or not spec.json_hooks
+    ):
+        raise ValueError("Missing JSON hook repair requires unmanaged JSON and a declared hook")
     if spec.json_hook_management == "none":
         if case_name not in {
             "first-install",
@@ -37,6 +41,7 @@ def first_install_files(
             "preserve-skill-backup",
             "repair-markdown-section",
             "repair-missing-markdown-section",
+            "repair-missing-json-hook",
         }:
             raise ValueError(
                 "Unmanaged JSON supports first-install, reinstall, skill backup preservation, "
@@ -141,6 +146,7 @@ CASE_NAMES = (
     "repair-markdown-section",
     "repair-missing-markdown-section",
     "repair-json-entry",
+    "repair-missing-json-hook",
 )
 
 
@@ -271,6 +277,8 @@ def _unmanaged_files(spec: InstallTestSpec, case_name: str) -> list[InitialFile]
             ],
         },
     }
+    if case_name == "repair-missing-json-hook":
+        _seed_json_hook(spec, personal)
     settings = json.dumps(personal, indent=2) + "\n"
     files: list[InitialFile] = [
         {"root": roots["markdown"], "path": paths["markdown"], "content": markdown},
@@ -326,7 +334,9 @@ def json_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, bytes]:
     """Retain expected personal settings independently of the installed document."""
     path = destinations(case)["json"]
     content = next(
-        f["content"] for f in case.initial_files if f["root"] == "project" and f["path"] == path
+        f["content"]
+        for f in case.initial_files
+        if f["root"] == destination_roots(case)["json"] and f["path"] == path
     )
     return {
         "altered_path": path,
@@ -341,3 +351,49 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError("Duplicate case transport field")
         result[key] = value
     return result
+
+
+def remove_json_hook(case: InstallTestCase, document: dict[str, object]) -> None:
+    """Remove exactly one full matching first-declared hook, retaining its group."""
+    hook = case.spec.json_hooks[0]
+    hooks = cast(dict[str, object], document["hooks"])
+    groups = cast(list[object], hooks[hook.event])
+    matches: list[tuple[list[object], object]] = []
+    for raw in groups:
+        if not isinstance(raw, dict):
+            raise ValueError("Hook group must be an object")
+        group = cast(dict[str, object], raw)
+        if group.get("matcher") != hook.matcher:
+            continue
+        entries = cast(list[object], group["hooks"])
+        for entry in entries:
+            if _hook_matches(entry, hook.content):
+                matches.append((entries, entry))
+    if len(matches) != 1:
+        raise ValueError("Expected exactly one declared hook before deletion")
+    entries, entry = matches[0]
+    entries.remove(entry)
+
+
+def _hook_matches(entry: object, expected: dict[str, object]) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    content = cast(dict[str, object], entry)
+    return all(key in content and content[key] == value for key, value in expected.items())
+
+
+def _seed_json_hook(spec: InstallTestSpec, document: dict[str, object]) -> None:
+    hook = spec.json_hooks[0]
+    events = cast(dict[str, list[dict[str, object]]], document["hooks"])
+    groups = events.setdefault(hook.event, [])
+    group = next((g for g in groups if g["matcher"] == hook.matcher), None)
+    if group is None:
+        new_group: dict[str, object] = {
+            "matcher": hook.matcher,
+            "hooks": [
+                {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
+            ],
+        }
+        groups.append(new_group)
+        group = new_group
+    cast(list[object], group["hooks"]).append(dict(hook.content))

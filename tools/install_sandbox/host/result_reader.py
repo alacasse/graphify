@@ -427,6 +427,8 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
             "repair-markdown-section",
             "repair-missing-markdown-section",
             "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
         }
         and result.preparation["ready"]
     ):
@@ -591,6 +593,8 @@ def _check_step_preparation_evidence(
         "repair-missing-markdown-section",
         "repair-json-entry",
         "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
     }:
         return
     first, second = result.steps
@@ -746,6 +750,8 @@ def _check_repair_installations(
             "repair-markdown-section",
             "repair-missing-markdown-section",
             "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
         }:
             before = _retained_snapshot(output, "steps/0/after.json")
         backup = None
@@ -846,6 +852,8 @@ def _check_case_repair_plan(
         "repair-missing-markdown-section",
         "repair-json-entry",
         "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
     }:
         _check_shared_preparation(plan, case, output)
     elif case.name == "repair-skill":
@@ -997,6 +1005,8 @@ def _check_preparation_location(result: InstallTestResult, case: InstallTestCase
                 "repair-missing-markdown-section",
                 "repair-json-entry",
                 "repair-missing-json-hook",
+                "repair-altered-json-hook",
+                "repair-duplicate-json-hook",
             }
             or index != 1
         ):
@@ -1026,6 +1036,8 @@ def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, ou
         "repair-missing-markdown-section": {dest["markdown"]},
         "repair-json-entry": {dest["json"]},
         "repair-missing-json-hook": {dest["json"]},
+        "repair-altered-json-hook": {dest["json"]},
+        "repair-duplicate-json-hook": {dest["json"]},
     }.get(case.name, {dest["skill"], dest["skill"] + ".bak"})
     for relative in ("steps/0/after.json", "steps/1/before.json", "steps/1/after.json"):
         path = safe_evidence_path(output, relative)
@@ -1043,7 +1055,13 @@ def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, ou
             required,
             root=destination_roots(case)[
                 "json"
-                if case.name in {"repair-json-entry", "repair-missing-json-hook"}
+                if case.name
+                in {
+                    "repair-json-entry",
+                    "repair-missing-json-hook",
+                    "repair-altered-json-hook",
+                    "repair-duplicate-json-hook",
+                }
                 else "markdown"
                 if case.name in {"repair-markdown-section", "repair-missing-markdown-section"}
                 else "skill"
@@ -1066,11 +1084,19 @@ def _required_content_paths(case: InstallTestCase, relative: str) -> set[str]:
         "repair-missing-markdown-section",
         "repair-json-entry",
         "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
     }:
         return {
             dest[
                 "json"
-                if case.name in {"repair-json-entry", "repair-missing-json-hook"}
+                if case.name
+                in {
+                    "repair-json-entry",
+                    "repair-missing-json-hook",
+                    "repair-altered-json-hook",
+                    "repair-duplicate-json-hook",
+                }
                 else "markdown"
             ]
         }
@@ -1279,14 +1305,24 @@ def _check_shared_preparation(
 ) -> None:
     expected_plan, content = (
         json_repair_plan(case)
-        if case.name in {"repair-json-entry", "repair-missing-json-hook"}
+        if case.name
+        in {
+            "repair-json-entry",
+            "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
+        }
         else markdown_repair_plan(case)
     )
     if plan != expected_plan:
         raise ValueError("Shared file repair plan does not match the case")
     if safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content:
         raise ValueError("Prepared shared file content does not match the case witness")
-    if case.name == "repair-missing-json-hook":
+    if case.name in {
+        "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
+    }:
         _check_hook_preparation(case, expected_plan, content, output)
     elif case.name in {"repair-markdown-section", "repair-missing-markdown-section"}:
         _check_markdown_preparation(case, expected_plan, content, output)

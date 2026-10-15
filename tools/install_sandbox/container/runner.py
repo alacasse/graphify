@@ -187,6 +187,8 @@ class InstallTestRunner:
                         "repair-missing-markdown-section",
                         "repair-json-entry",
                         "repair-missing-json-hook",
+                        "repair-altered-json-hook",
+                        "repair-duplicate-json-hook",
                     }:
                         before = self._prepare_step(
                             case, environment, expected, installed, writer, step
@@ -239,6 +241,8 @@ class InstallTestRunner:
             "repair-missing-markdown-section",
             "repair-json-entry",
             "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
         }:
             return self._prepare_shared_file(case, environment, installed, writer, step)
         if case.name == "preserve-skill-backup":
@@ -315,13 +319,23 @@ class InstallTestRunner:
         writer: TestResultWriter,
         step: StepEvidence,
     ) -> FilesystemSnapshot:
-        if case.name in {"repair-json-entry", "repair-missing-json-hook"}:
+        if case.name in {
+            "repair-json-entry",
+            "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
+        }:
             plan, content = json_repair_plan(case)
             writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing JSON entry deletion\n")
+            writer.append_log("journal.log", "Preparing controlled JSON repair witness\n")
             reason = (
                 environment.prepare_json_hook_repair(plan)
-                if case.name == "repair-missing-json-hook"
+                if case.name
+                in {
+                    "repair-missing-json-hook",
+                    "repair-altered-json-hook",
+                    "repair-duplicate-json-hook",
+                }
                 else environment.prepare_json_repair(plan)
             )
             prepared = environment.observe(writer, "before", step_index=1)

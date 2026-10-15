@@ -374,3 +374,67 @@ def _missing_hook_fault(data: dict[str, Any], mode: str) -> None:
 def _append_search(entries: list[object], search: dict[str, object]) -> None:
     if search not in entries:
         entries.append(search)
+
+
+class CodeBuddyHookRepairPairCase(CodeBuddyReinstallCase):
+    """Synthetic repair of the two independently prepared search-hook states."""
+
+    def __init__(self, root: Path, case_name: str, mode: str = "passed") -> None:
+        super().__init__(root, mode, case_name)
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        if not self.calls:
+            return super().execute(args, project, environment, timeout)
+        self.calls.append((list(args), project, dict(environment), timeout))
+        self.repeated_files = _tree_bytes(project, Path(environment["HOME"]))
+        settings = project / _SETTINGS
+        data = cast(dict[str, Any], json.loads(settings.read_bytes()))
+        if self.mode != "no-op":
+            _repair_pair_search(data, self.mode)
+        _pair_personal_fault(data, self.mode)
+        _pair_read_fault(data, self.mode)
+        _missing_hook_fault(data, "" if self.mode == "read-hook" else self.mode)
+        settings.write_text(json.dumps(data, indent=4))
+        if self.mode == "registry":
+            _write(project / (_SETTINGS + ".graphify-state.json"), b"{}\n")
+        _reinstall_fault(project, Path(environment["HOME"]), self.mode)
+        return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")
+
+
+def _repair_pair_search(data: dict[str, Any], mode: str) -> None:
+    groups = data["hooks"]["PreToolUse"]
+    search = {"type": "command", "command": "graphify hook-guard search", "timeout": 10}
+    for group in groups:
+        group["hooks"] = [
+            hook
+            for hook in group["hooks"]
+            if hook.get("command") != search["command"]
+            or (mode == "retain-altered" and hook.get("timeout") == 11)
+        ]
+    destination = groups[1] if mode == "keep-second" else groups[0]
+    destination["hooks"].insert(0 if mode == "prepend" else len(destination["hooks"]), search)
+    if mode == "cross-group-duplicate":
+        groups[1]["hooks"].append(dict(search))
+
+
+def _pair_personal_fault(data: dict[str, Any], mode: str) -> None:
+    groups = data["hooks"]["PreToolUse"]
+    if mode == "lost-second-group":
+        groups.pop(1)
+    elif mode == "second-group-attribute":
+        groups[1]["personal_group"] = "changed"
+    elif mode == "lost-second-hook":
+        groups[1]["hooks"] = []
+    elif mode == "group-order":
+        groups[0], groups[1] = groups[1], groups[0]
+
+
+def _pair_read_fault(data: dict[str, Any], mode: str) -> None:
+    if mode != "read-hook":
+        return
+    for group in data["hooks"]["PreToolUse"]:
+        for hook in group["hooks"]:
+            if hook.get("command") == "graphify hook-guard read":
+                hook["timeout"] = 99

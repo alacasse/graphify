@@ -247,3 +247,32 @@ def test_missing_hook_fixture_uses_first_declared_context(
     assert group["hooks"] == [
         {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17}
     ]
+
+
+@pytest.mark.parametrize("name", ["repair-altered-json-hook", "repair-duplicate-json-hook"])
+def test_hook_pair_constructs_personal_group_witnesses_and_roundtrips(
+    tmp_path: Path, name: str
+) -> None:
+    case = InstallTestCoordinator().write_case(
+        _SPECS, "codebuddy", tmp_path / "case.json", case_name=name
+    )
+    assert InstallTestCase.from_json(case.to_json()) == case
+    assert case.operations == ["install", "install"]
+    settings = json.loads(
+        next(
+            f["content"]
+            for f in case.initial_files
+            if f["root"] == "project" and f["path"] == ".codebuddy/settings.json"
+        )
+    )
+    groups = settings["hooks"]["PreToolUse"]
+    assert [g["personal_group"] for g in groups[:2]] == ["first", "second"]
+    assert groups[0]["matcher"] == groups[1]["matcher"] == "Bash|Grep"
+    assert groups[1]["hooks"] == [
+        {"type": "command", "command": "python personal_second_search.py", "timeout": 13}
+    ]
+    assert all(
+        hook.get("command") != "graphify hook-guard search"
+        for group in groups
+        for hook in group["hooks"]
+    )

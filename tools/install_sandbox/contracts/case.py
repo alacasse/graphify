@@ -27,9 +27,11 @@ def first_install_files(
     spec: InstallTestSpec, case_name: str = "first-install"
 ) -> list[InitialFile]:
     """Place the common witnesses using target paths and the JSON list fact."""
-    if case_name == "repair-missing-json-hook" and (
-        spec.json_hook_management != "none" or not spec.json_hooks
-    ):
+    if case_name in {
+        "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
+    } and (spec.json_hook_management != "none" or not spec.json_hooks):
         raise ValueError("Missing JSON hook repair requires unmanaged JSON and a declared hook")
     if spec.json_hook_management == "none":
         if case_name not in {
@@ -42,6 +44,8 @@ def first_install_files(
             "repair-markdown-section",
             "repair-missing-markdown-section",
             "repair-missing-json-hook",
+            "repair-altered-json-hook",
+            "repair-duplicate-json-hook",
         }:
             raise ValueError(
                 "Unmanaged JSON supports first-install, reinstall, skill backup preservation, "
@@ -147,6 +151,8 @@ CASE_NAMES = (
     "repair-missing-markdown-section",
     "repair-json-entry",
     "repair-missing-json-hook",
+    "repair-altered-json-hook",
+    "repair-duplicate-json-hook",
 )
 
 
@@ -279,6 +285,8 @@ def _unmanaged_files(spec: InstallTestSpec, case_name: str) -> list[InitialFile]
     }
     if case_name == "repair-missing-json-hook":
         _seed_json_hook(spec, personal)
+    if case_name in {"repair-altered-json-hook", "repair-duplicate-json-hook"}:
+        _seed_hook_pair_groups(spec, personal)
     settings = json.dumps(personal, indent=2) + "\n"
     files: list[InitialFile] = [
         {"root": roots["markdown"], "path": paths["markdown"], "content": markdown},
@@ -397,3 +405,66 @@ def _seed_json_hook(spec: InstallTestSpec, document: dict[str, object]) -> None:
         groups.append(new_group)
         group = new_group
     cast(list[object], group["hooks"]).append(dict(hook.content))
+
+
+def _seed_hook_pair_groups(spec: InstallTestSpec, document: dict[str, object]) -> None:
+    hook = spec.json_hooks[0]
+    events = cast(dict[str, list[dict[str, object]]], document["hooks"])
+    groups = events.setdefault(hook.event, [])
+    group = next((group for group in groups if group["matcher"] == hook.matcher), None)
+    if group is None:
+        new_group: dict[str, object] = {"matcher": hook.matcher, "hooks": []}
+        groups.append(new_group)
+        group = new_group
+    group["personal_group"] = "first"
+    groups.append(
+        {
+            "matcher": hook.matcher,
+            "personal_group": "second",
+            "hooks": [
+                {"type": "command", "command": "python personal_second_search.py", "timeout": 13}
+            ],
+        }
+    )
+
+
+def _selected_json_hook(
+    case: InstallTestCase, document: dict[str, object]
+) -> tuple[list[dict[str, object]], dict[str, object], dict[str, object]]:
+    hook = case.spec.json_hooks[0]
+    events = cast(dict[str, object], document["hooks"])
+    groups = cast(list[dict[str, object]], events[hook.event])
+    matches = [
+        (group, entry)
+        for group in groups
+        if group.get("matcher") == hook.matcher
+        for entry in cast(list[dict[str, object]], group["hooks"])
+        if _hook_matches(entry, hook.content)
+    ]
+    if len(matches) != 1:
+        raise ValueError("Expected exactly one declared hook before transformation")
+    group, entry = matches[0]
+    return groups, group, entry
+
+
+def transform_json_hook(case: InstallTestCase, document: dict[str, object]) -> None:
+    """Apply only the case-declared transformation to one observed hook object."""
+    if case.name == "repair-missing-json-hook":
+        remove_json_hook(case, document)
+        return
+    groups, source, entry = _selected_json_hook(case, document)
+    if case.name == "repair-altered-json-hook":
+        if entry.get("timeout") != 10:
+            raise ValueError("Altered hook repair requires declared timeout 10")
+        entry["timeout"] = 11
+        return
+    targets = [
+        group
+        for group in groups
+        if group is not source
+        and group.get("matcher") == case.spec.json_hooks[0].matcher
+        and group.get("personal_group") in {"first", "second"}
+    ]
+    if case.name != "repair-duplicate-json-hook" or not targets:
+        raise ValueError("Duplicate hook repair requires the second personal group")
+    cast(list[object], targets[-1]["hooks"]).append(dict(entry))

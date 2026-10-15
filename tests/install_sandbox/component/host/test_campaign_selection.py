@@ -96,6 +96,8 @@ def test_selected_order_scope_and_reports(
         "repair-missing-markdown-section",
         "repair-json-entry",
         "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
     } - set(selected)
     assert not set(saved["not_selected_cases"]) & set(selected)
     assert len([c for c in commands(tmp_path) if c[0] == "run"]) == len(selected) + 1
@@ -283,7 +285,11 @@ def test_all_cases_apply_to_renamed_reference(
     assert completed.returncode == 1
     saved = json.loads((tmp_path / "campaign/campaign.json").read_text())
     assert saved["selected_cases"] == names
-    assert saved["not_selected_cases"] == ["repair-missing-json-hook"]
+    assert saved["not_selected_cases"] == [
+        "repair-missing-json-hook",
+        "repair-altered-json-hook",
+        "repair-duplicate-json-hook",
+    ]
     assert all(c["state"] == "not_run" and c["not_run_reason"] for c in saved["cases"])
     for name in names:
         with zipfile.ZipFile(tmp_path / "campaign/evidence.zip") as archive:
@@ -338,10 +344,14 @@ def test_cli_defaults_to_distinct_local_run_directories(
             assert json.loads(archive.read("evidence/cases/first-install/result.json"))
 
 
-def test_registry_reference_rejects_missing_hook_before_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "case_name",
+    ["repair-missing-json-hook", "repair-altered-json-hook", "repair-duplicate-json-hook"],
+)
+def test_registry_reference_rejects_hook_repair_before_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_name: str
 ) -> None:
     arrange(tmp_path, monkeypatch)
-    completed = run_cli(tmp_path, ["--case", "repair-missing-json-hook"])
+    completed = run_cli(tmp_path, ["--case", case_name])
     assert completed.returncode == 2
     assert not commands(tmp_path)

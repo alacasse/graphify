@@ -5,7 +5,11 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from tools.install_sandbox.container.environment import FilesystemSnapshot, missing_reference_plan
+from tools.install_sandbox.container.environment import (
+    FilesystemSnapshot,
+    altered_reference_plan,
+    missing_reference_plan,
+)
 from tools.install_sandbox.container.verifier import InstallVerifier
 from tools.install_sandbox.contracts.case import (
     InstallTestCase,
@@ -22,6 +26,7 @@ from tools.install_sandbox.contracts.managed_json import (
     sidecars,
 )
 from tools.install_sandbox.contracts.results import (
+    AlteredReferencePlan,
     CommandEvidence,
     FileAlterationPlan,
     InstallTestResult,
@@ -180,7 +185,23 @@ def _step(value: object, output: Path) -> StepEvidence:
 
 def _step_plan(
     value: object,
-) -> MissingReferencePlan | ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan:
+) -> (
+    AlteredReferencePlan
+    | MissingReferencePlan
+    | ReferenceRepairPlan
+    | FileAlterationPlan
+    | SkillBackupPlan
+):
+    if isinstance(value, dict) and "root" in value and "altered_path" in value:
+        data = fields(cast(object, value), "root altered_path altered_content_file")
+        root = text(data["root"])
+        if root not in {"home", "project"}:
+            raise ValueError("Invalid altered reference destination root")
+        return {
+            "root": root,
+            "altered_path": relative_path(data["altered_path"]),
+            "altered_content_file": relative_path(data["altered_content_file"]),
+        }
     if isinstance(value, dict) and "root" in value:
         data = fields(cast(object, value), "root deleted_path")
         root = text(data["root"])
@@ -214,7 +235,7 @@ def _repair_plan(value: object) -> ReferenceRepairPlan | FileAlterationPlan:
 def _step_preparation(value: object, output: Path) -> StepPreparationEvidence:
     data = fields(value, "plan ready reason before verification")
     plan = _step_plan(data["plan"])
-    if "root" in plan:
+    if "deleted_path" in plan and "root" in plan:
         return _missing_preparation(data, plan)
     if "backup_content_file" in plan:
         content_file = plan["backup_content_file"]
@@ -394,7 +415,10 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         _check_json_backup_evidence(result, case, output_directory)
         _check_version_evidence(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
-    if case.name == "repair-missing-reference" and result.preparation["ready"]:
+    if (
+        case.name in {"repair-missing-reference", "repair-altered-reference"}
+        and result.preparation["ready"]
+    ):
         _check_missing_installations(result, case, output_directory)
     return result
 
@@ -549,6 +573,7 @@ def _check_step_preparation_evidence(
     if case.name not in {
         "repair-references",
         "repair-missing-reference",
+        "repair-altered-reference",
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
@@ -564,7 +589,11 @@ def _check_step_preparation_evidence(
         return
     sources = _check_snapshot(output, "expected.json")
     _check_snapshot(output, "steps/0/before.json")
-    if case.name not in {"repair-references", "repair-missing-reference"}:
+    if case.name not in {
+        "repair-references",
+        "repair-missing-reference",
+        "repair-altered-reference",
+    }:
         _check_content_evidence(result, case, output)
     if preparation is None:
         return
@@ -632,13 +661,20 @@ def _check_json_snapshot(
 
 
 def _check_case_preparation_plan(
-    plan: MissingReferencePlan | ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan,
+    plan: AlteredReferencePlan
+    | MissingReferencePlan
+    | ReferenceRepairPlan
+    | FileAlterationPlan
+    | SkillBackupPlan,
     case: InstallTestCase,
     output: Path,
     sources: list[dict[str, object]],
 ) -> None:
+    if case.name == "repair-altered-reference":
+        _check_altered_reference(case, output, plan)
+        return
     if case.name == "repair-missing-reference":
-        if "root" not in plan:
+        if "root" not in plan or "deleted_path" not in plan:
             raise ValueError("Missing reference repair requires a rooted deletion plan")
         _check_missing_reference(case, output, plan)
         return
@@ -695,6 +731,36 @@ def _check_missing_installations(
         after = _retained_snapshot(output, f"steps/{index}/after.json")
         if verifier.verify(case, sources, before, after) != step["verification"]:
             raise ValueError("Missing reference installation contradicts retained observations")
+
+
+def _check_altered_reference(
+    case: InstallTestCase,
+    output: Path,
+    plan: AlteredReferencePlan
+    | MissingReferencePlan
+    | ReferenceRepairPlan
+    | FileAlterationPlan
+    | SkillBackupPlan,
+) -> None:
+    if "root" not in plan or "altered_path" not in plan:
+        raise ValueError("Altered reference repair requires a rooted alteration plan")
+    expected, content = altered_reference_plan(case, _retained_snapshot(output, "expected.json"))
+    if (
+        plan != expected
+        or safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content
+    ):
+        raise ValueError("Altered reference plan contradicts captured source references")
+    computed = InstallVerifier().verify_altered_reference(
+        plan,
+        content,
+        _retained_snapshot(output, "steps/0/after.json"),
+        _retained_snapshot(output, "steps/1/before.json"),
+    )
+    saved = _step_preparation(
+        _read_json_evidence(output, "steps/1/preparation/result.json"), output
+    )
+    if computed != saved["verification"]:
+        raise ValueError("Altered reference preparation contradicts retained observations")
 
 
 def _check_missing_reference(
@@ -848,6 +914,7 @@ def _check_preparation_location(result: InstallTestResult, case: InstallTestCase
             not in {
                 "repair-references",
                 "repair-missing-reference",
+                "repair-altered-reference",
                 "repair-skill",
                 "preserve-skill-backup",
                 "repair-markdown-section",

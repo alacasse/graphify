@@ -58,6 +58,10 @@ class FileAlterationPlan(TypedDict):
     altered_content_file: str
 
 
+class AlteredReferencePlan(FileAlterationPlan):
+    root: str
+
+
 class MissingReferencePlan(TypedDict):
     root: str
     deleted_path: str
@@ -73,7 +77,13 @@ class SkillBackupPlan(TypedDict):
 
 
 class StepPreparationEvidence(TypedDict):
-    plan: MissingReferencePlan | ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan
+    plan: (
+        AlteredReferencePlan
+        | MissingReferencePlan
+        | ReferenceRepairPlan
+        | FileAlterationPlan
+        | SkillBackupPlan
+    )
     ready: bool
     reason: str | None
     before: str

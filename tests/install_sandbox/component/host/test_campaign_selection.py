@@ -84,7 +84,17 @@ def test_selected_order_scope_and_reports(
     assert saved["selected_cases"] == selected
     assert saved["selection_origin"] == ("default" if names is None else "explicit")
     assert [c["name"] for c in saved["cases"]] == selected
-    assert len(saved["not_selected_cases"]) == 7 - len(selected)
+    assert set(saved["not_selected_cases"]) == {
+        "first-install",
+        "reinstall",
+        "repair-references",
+        "repair-missing-reference",
+        "repair-altered-reference",
+        "repair-skill",
+        "preserve-skill-backup",
+        "repair-markdown-section",
+        "repair-json-entry",
+    } - set(selected)
     assert not set(saved["not_selected_cases"]) & set(selected)
     assert len([c for c in commands(tmp_path) if c[0] == "run"]) == len(selected) + 1
 
@@ -249,7 +259,7 @@ def test_yaml_alone_changes_default_cases(tmp_path: Path, monkeypatch: pytest.Mo
     assert _DEFAULTS.read_bytes() == original
 
 
-def test_all_seven_cases_apply_to_renamed_reference(
+def test_all_cases_apply_to_renamed_reference(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -259,6 +269,8 @@ def test_all_seven_cases_apply_to_renamed_reference(
         "first-install",
         "reinstall",
         "repair-references",
+        "repair-missing-reference",
+        "repair-altered-reference",
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",

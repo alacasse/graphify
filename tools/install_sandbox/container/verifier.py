@@ -2,6 +2,7 @@
 
 import json
 import posixpath
+from copy import deepcopy
 from email.parser import BytesParser
 from pathlib import PurePosixPath
 from typing import cast
@@ -556,9 +557,14 @@ def _personal_values(
         return True  # Legacy registry contract permits regrouping personal hooks.
     original = _personal_json(case, _initial_json(case))
     current = _personal_json(case, installed)
-    return _json_equal(
+    if _json_equal(
         {key: value for key, value in original.items() if key == "hooks"},
         {key: value for key, value in current.items() if key == "hooks"},
+    ):
+        return True
+    # A repair may move the search hook out of its previously observed bare group.
+    return case.name in {"repair-altered-json-hook", "repair-duplicate-json-hook"} and (
+        _same_hook_json(case, initial, installed)
     )
 
 
@@ -1324,16 +1330,64 @@ def _verify_hook_preparation(
     return result
 
 
-def _hook_projection(case: InstallTestCase, content: bytes) -> dict[str, object]:
-    document = _read_json(content)
-    remove_json_hook(case, document)
+def _hook_projection(case: InstallTestCase, value: dict[str, object]) -> dict[str, object]:
+    document = deepcopy(value)
     hook = case.spec.json_hooks[0]
     events = cast(dict[str, object], document["hooks"])
     groups = cast(list[dict[str, object]], events[hook.event])
+    empty: dict[str, object] = {"matcher": hook.matcher, "hooks": []}
+    # Empty groups already present are personal witnesses, not managed objects.
+    initial_empty = {index for index, group in enumerate(groups) if _json_equal(group, empty)}
+    remove_json_hook(case, document)
     events[hook.event] = [
-        group for group in groups if group != {"matcher": hook.matcher, "hooks": []}
+        group
+        for index, group in enumerate(groups)
+        if index in initial_empty or not _json_equal(group, empty)
     ]
     return document
+
+
+def _same_hook_json(
+    case: InstallTestCase, original: dict[str, object], observed: dict[str, object]
+) -> bool:
+    hook = case.spec.json_hooks[0]
+    if any(
+        len(_hook_positions(value, hook.event, hook.matcher, hook.content, exact=False)) != 1
+        for value in (original, observed)
+    ):
+        return False
+    expected, current = (_hook_projection(case, value) for value in (original, observed))
+    if _json_equal(expected, current):
+        return True
+    return _vacated_group_matches(case, original, expected, current)
+
+
+def _vacated_group_matches(
+    case: InstallTestCase,
+    original: dict[str, object],
+    expected: dict[str, object],
+    current: dict[str, object],
+) -> bool:
+    """Allow at most one empty residue of an observed bare managed search group."""
+    if case.name not in {"repair-altered-json-hook", "repair-duplicate-json-hook"}:
+        return False
+    hook = case.spec.json_hooks[0]
+    original_events = cast(dict[str, object], original["hooks"])
+    original_groups = cast(list[object], original_events[hook.event])
+    carrier = {"matcher": hook.matcher, "hooks": [hook.content]}
+    if not any(_json_equal(group, carrier) for group in original_groups):
+        return False
+    events = cast(dict[str, object], current["hooks"])
+    groups = cast(list[object], events[hook.event])
+    empty: dict[str, object] = {"matcher": hook.matcher, "hooks": []}
+    return any(
+        _json_equal(
+            expected,
+            {**current, "hooks": {**events, hook.event: groups[:index] + groups[index + 1 :]}},
+        )
+        for index, group in enumerate(groups)
+        if _json_equal(group, empty)
+    )
 
 
 def _restored_hook_json(
@@ -1347,7 +1401,7 @@ def _restored_hook_json(
     if observed is None:
         return
     try:
-        same = _json_equal(_hook_projection(case, original), _hook_projection(case, observed))
+        same = _same_hook_json(case, _read_json(original), _read_json(observed))
     except (ValueError, UnicodeError, KeyError, TypeError):
         same = False
     if not same:

@@ -241,7 +241,7 @@ class InstallTestRunner:
             reason = environment.prepare_skill_backup(plan, content)
             prepared_state = environment.observe(writer, "before", step_index=1)
             verification = self.verifier.verify_skill_backup(
-                plan, content, installed, prepared_state
+                plan, content, installed, prepared_state, destination_roots(case)["skill"]
             )
         elif case.name == "repair-skill":
             plan, content = skill_repair_plan(case, expected)

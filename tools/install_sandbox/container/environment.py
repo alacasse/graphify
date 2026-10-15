@@ -243,7 +243,10 @@ class TestEnvironment:
     def prepare_skill_backup(self, plan: SkillBackupPlan, content: bytes) -> str | None:
         """Keep any partial write observable if preparing the backup fails."""
         try:
-            (self.project / plan["backup_path"]).write_bytes(content)
+            (
+                (self.home if destination_roots(self.case)["skill"] == "home" else self.project)
+                / plan["backup_path"]
+            ).write_bytes(content)
         except OSError as error:
             return f"Skill backup preparation failed: {error}"
         return None

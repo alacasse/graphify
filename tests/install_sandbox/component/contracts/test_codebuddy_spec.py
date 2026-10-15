@@ -88,7 +88,6 @@ def test_none_mode_missing_reference_case_reuses_initial_witnesses(tmp_path: Pat
         "repair-json-entry",
         "repair-references",
         "repair-markdown-section",
-        "preserve-skill-backup",
     ],
 )
 def test_none_mode_rejects_repair_case_before_writing(tmp_path: Path, name: str) -> None:
@@ -186,3 +185,14 @@ def test_case_rejects_unsafe_json_backup_suffix(tmp_path: Path, suffix: str) -> 
     document["spec"]["json"]["backup"] = suffix
     with pytest.raises(ValueError):
         InstallTestCase.from_json(json.dumps(document))
+
+
+def test_none_mode_backup_case_reuses_initial_witnesses(tmp_path: Path) -> None:
+    coordinator = InstallTestCoordinator()
+    first = coordinator.write_case(_SPECS, "codebuddy", tmp_path / "first.json")
+    backup = coordinator.write_case(
+        _SPECS, "codebuddy", tmp_path / "backup.json", case_name="preserve-skill-backup"
+    )
+    assert backup.initial_files == first.initial_files
+    assert backup.operations == ["install", "install"]
+    assert InstallTestCase.from_json(backup.to_json()) == backup

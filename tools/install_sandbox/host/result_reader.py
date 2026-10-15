@@ -9,6 +9,7 @@ from tools.install_sandbox.container.environment import (
     FilesystemSnapshot,
     altered_reference_plan,
     missing_reference_plan,
+    skill_backup_plan,
     skill_repair_plan,
 )
 from tools.install_sandbox.container.verifier import InstallVerifier
@@ -417,7 +418,13 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         _check_version_evidence(result, case, output_directory)
     _check_step_preparation_evidence(result, case, output_directory)
     if (
-        case.name in {"repair-missing-reference", "repair-altered-reference", "repair-skill"}
+        case.name
+        in {
+            "repair-missing-reference",
+            "repair-altered-reference",
+            "repair-skill",
+            "preserve-skill-backup",
+        }
         and result.preparation["ready"]
     ):
         _check_repair_installations(result, case, output_directory)
@@ -730,9 +737,14 @@ def _check_repair_installations(
             continue
         before = _retained_snapshot(output, f"steps/{index}/before.json")
         after = _retained_snapshot(output, f"steps/{index}/after.json")
-        backup = (
-            skill_repair_plan(case, sources)[1] if index and case.name == "repair-skill" else None
-        )
+        backup = None
+        if index and case.name == "repair-skill":
+            backup = skill_repair_plan(case, sources)[1]
+        elif index and case.name == "preserve-skill-backup":
+            backup = skill_backup_plan(case, sources)[1]
+            # The runner compares reinstallation with the conformant installation;
+            # preparation is checked separately against its exact sole mutation.
+            before = _retained_snapshot(output, "steps/0/after.json")
         if (
             verifier.verify(case, sources, before, after, skill_backup=backup)
             != step["verification"]
@@ -919,12 +931,23 @@ def _check_skill_repair_plan(
 
 
 def _check_skill_backup_plan(plan: SkillBackupPlan, case: InstallTestCase, output: Path) -> None:
-    if plan["backup_path"] != destinations(case)["skill"] + ".bak":
-        raise ValueError("Backup path does not match the case")
-    source = safe_evidence_path(output, "expected/" + case.spec.skill_source).read_bytes()
-    content = safe_evidence_path(output, plan["backup_content_file"]).read_bytes()
-    if content != source + b"\nSandbox previous backup witness.\n":
+    expected, content = skill_backup_plan(case, _retained_snapshot(output, "expected.json"))
+    if plan != expected:
+        raise ValueError("Backup plan does not match the case")
+    if safe_evidence_path(output, plan["backup_content_file"]).read_bytes() != content:
         raise ValueError("Backup witness is inconsistent with the retained source")
+    computed = InstallVerifier().verify_skill_backup(
+        expected,
+        content,
+        _retained_snapshot(output, "steps/0/after.json"),
+        _retained_snapshot(output, "steps/1/before.json"),
+        destination_roots(case)["skill"],
+    )
+    saved = _step_preparation(
+        _read_json_evidence(output, "steps/1/preparation/result.json"), output
+    )
+    if computed != saved["verification"]:
+        raise ValueError("Backup preparation contradicts retained observations")
 
 
 def _check_preparation_location(result: InstallTestResult, case: InstallTestCase) -> None:

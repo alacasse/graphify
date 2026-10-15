@@ -984,19 +984,20 @@ def _read_settings_for_merge(settings_path: Path) -> dict:
         _refuse_to_modify(settings_path)
     return settings
 def _write_settings_with_backup(settings_path: Path, settings: dict) -> None:
-    """Serialize ``settings`` to ``settings_path``, backing up the previous file.
+    """Serialize ``settings``, preserving the initial settings backup.
 
     Skips the write entirely when the output is identical to what is on disk
-    (idempotent re-install: no backup churn, no mtime churn). Otherwise copies
-    the existing file to ``<name>.graphify-bak`` (single rolling backup) before
-    overwriting, so one bad merge can never destroy the user's config (#2167).
+    (idempotent re-install: no backup churn, no mtime churn). Before modifying an
+    existing file, copy it to ``<name>.graphify-bak`` only if that path is absent.
+    Later repairs preserve that backup instead of replacing the initial content.
     """
     output = json.dumps(settings, indent=2)
     if settings_path.exists():
         if settings_path.read_text(encoding="utf-8") == output:
             return
         backup = settings_path.with_name(settings_path.name + ".graphify-bak")
-        shutil.copy2(settings_path, backup)
+        if not os.path.lexists(backup):
+            shutil.copy2(settings_path, backup)
     settings_path.write_text(output, encoding="utf-8")
 def _install_gemini_hook(project_dir: Path, project: bool = False) -> None:
     settings_path = project_dir / ".gemini" / "settings.json"

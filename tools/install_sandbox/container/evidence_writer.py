@@ -16,6 +16,7 @@ from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
     FileAlterationPlan,
     InstallTestResult,
+    MissingReferencePlan,
     ReferenceRepairPlan,
     SkillBackupPlan,
     StepPreparationEvidence,
@@ -113,6 +114,9 @@ class TestResultWriter:
 
     def write_lock_expectation(self, expectation: dict[str, str]) -> None:
         self._write_json("skill-lock.json", expectation)
+
+    def write_missing_reference_plan(self, plan: MissingReferencePlan) -> None:
+        self._write_json("steps/1/preparation/plan.json", plan)
 
     def write_step_preparation_plan(
         self, plan: ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan, content: bytes

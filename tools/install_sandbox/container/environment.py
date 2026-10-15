@@ -14,6 +14,7 @@ from tools.install_sandbox.contracts.case import InstallTestCase, destination_ro
 from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
+    MissingReferencePlan,
     ObservationObstacle,
     ReferenceRepairPlan,
     SkillBackupPlan,
@@ -45,6 +46,32 @@ class FilesystemSnapshot:
                 entry["kind"] == "directory" and entry.get("listing_complete", False)
             )
         return parent != path and self.absent(root, parent)
+
+
+def missing_reference_plan(
+    case: InstallTestCase, expected: FilesystemSnapshot
+) -> MissingReferencePlan:
+    """Select the first captured source reference and its explicit destination root."""
+    prefix = case.spec.references_source + "/"
+    files = sorted(
+        e["path"]
+        for e in expected.entries
+        if e["root"] == "subject" and e["kind"] == "file" and e["path"].startswith(prefix)
+    )
+    inventory = expected.entry("subject", case.spec.references_source)
+    if (
+        expected.obstacles
+        or not files
+        or inventory is None
+        or not inventory.get("listing_complete")
+    ):
+        raise ValueError("Missing reference repair requires fully observed source references")
+    if ("subject", files[0]) not in expected.contents:
+        raise ValueError("Missing reference source content unavailable")
+    return {
+        "root": destination_roots(case)["references"],
+        "deleted_path": destinations(case)["references"] + "/" + files[0][len(prefix) :],
+    }
 
 
 def reference_repair_plan(
@@ -127,6 +154,14 @@ class TestEnvironment:
             path = root / initial["path"]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(initial["content"].encode("utf-8"))
+
+    def prepare_missing_reference(self, plan: MissingReferencePlan) -> str | None:
+        root = self.home if plan["root"] == "home" else self.project
+        try:
+            (root / plan["deleted_path"]).unlink()
+        except OSError as error:
+            return f"Missing reference preparation failed: {error}"
+        return None
 
     def prepare_reference_repair(self, plan: ReferenceRepairPlan, content: bytes) -> str | None:
         """Leave partial effects in place so the next observation can retain them."""

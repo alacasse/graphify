@@ -7,7 +7,8 @@ user's mcpServers/enabledPlugins/theme/hooks. The fix:
 
 - read with utf-8-sig (BOM-tolerant),
 - refuse to touch an existing file that is not a JSON object (stderr + exit 1),
-- back up to <name>.graphify-bak before any modifying write,
+- save the initial bytes to <name>.graphify-bak before the first modifying write
+  and preserve that backup across later writes, including an existing empty backup,
 - skip the write entirely when nothing changed (idempotent re-install),
 - never crash on (and always preserve) non-dict hook entries.
 """
@@ -184,6 +185,49 @@ def test_no_backup_on_fresh_install(tmp_path):
     settings_path = _run(tmp_path, "claude")
     assert settings_path.exists()
     assert not settings_path.with_name(settings_path.name + ".graphify-bak").exists()
+
+
+@ALL_INSTALLERS
+def test_hook_repair_preserves_initial_backup(tmp_path, installer):
+    original = b'{ "theme": "dark", "mcpServers": {"personal": {}} }\n'
+    settings_path = _seed(tmp_path, installer, original)
+    backup = settings_path.with_name(settings_path.name + ".graphify-bak")
+    _run(tmp_path, installer)
+    first = json.loads(settings_path.read_text(encoding="utf-8"))
+    section = _INSTALLERS[installer][2]
+    damaged = json.loads(settings_path.read_text(encoding="utf-8"))
+    group = next(g for g in damaged["hooks"][section] if "graphify" in str(g))
+    group["hooks"].pop(0)  # Keep the group: repair may append a replacement group.
+    settings_path.write_text(json.dumps(damaged), encoding="utf-8")
+
+    _run(tmp_path, installer)
+
+    repaired = json.loads(settings_path.read_text(encoding="utf-8"))
+    # Empty groups and group order do not affect the installed hook behavior.
+    for payload in (first, repaired):
+        payload["hooks"][section] = sorted(
+            json.dumps(g, sort_keys=True)
+            for g in payload["hooks"][section] if g.get("hooks")
+        )
+    assert repaired == first
+    assert backup.read_bytes() == original
+
+
+@ALL_INSTALLERS
+@pytest.mark.parametrize("saved_backup", [b"older personal settings\n", b""], ids=["nonempty", "empty"])
+def test_modifying_install_preserves_preexisting_backup(tmp_path, installer, saved_backup):
+    settings_path = _seed(tmp_path, installer, {"theme": "dark"})
+    original = settings_path.read_bytes()
+    backup = settings_path.with_name(settings_path.name + ".graphify-bak")
+    backup.write_bytes(saved_backup)
+
+    _run(tmp_path, installer)
+
+    assert settings_path.read_bytes() != original
+    result = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert result["theme"] == "dark"
+    assert any("graphify" in str(g) for g in result["hooks"][_INSTALLERS[installer][2]])
+    assert backup.read_bytes() == saved_backup
 
 
 # ---------------------------------------------------------------- non-dict entries

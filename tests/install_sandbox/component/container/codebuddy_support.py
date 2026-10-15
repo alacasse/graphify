@@ -209,3 +209,28 @@ class CodeBuddySkillRepairCase(CodeBuddyReinstallCase):
                 skill.write_bytes(_SKILL_SOURCE)
             _reinstall_fault(project, Path(environment["HOME"]), self.mode)
         return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")
+
+
+class CodeBuddySkillBackupCase(CodeBuddyReinstallCase):
+    def __init__(self, root: Path, mode: str = "passed") -> None:
+        super().__init__(root, mode, "preserve-skill-backup")
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        if not self.calls:
+            return super().execute(args, project, environment, timeout)
+        home = Path(environment["HOME"])
+        skill = home / _SKILL_FILE
+        backup = Path(str(skill) + ".bak")
+        assert skill.read_bytes() == _SKILL_SOURCE
+        assert backup.read_bytes() == _SKILL_SOURCE + b"\nSandbox previous backup witness.\n"
+        if self.mode == "missing-skill-backup":
+            backup.unlink()
+        elif self.mode == "wrong-skill-backup":
+            backup.write_bytes(_SKILL_SOURCE)
+        elif self.mode == "registry":
+            _write(project / (_SETTINGS + ".graphify-state.json"), b"{}\n")
+        _reinstall_fault(project, home, self.mode)
+        self.calls.append((list(args), project, dict(environment), timeout))
+        return InstallerCommandResult(args, str(project), "completed", 0, None, b"preserve\n")

@@ -740,6 +740,32 @@ def _reinstall_stability(
             )
 
 
+def _json_backup(
+    case: InstallTestCase,
+    before: FilesystemSnapshot,
+    after: FilesystemSnapshot,
+    result: VerificationResult,
+) -> None:
+    if case.spec.json_backup is None:
+        return
+    root = destination_roots(case)["json"]
+    path = destinations(case)["json"]
+    backup = path + case.spec.json_backup
+    source = path
+    if (
+        case.name == "reinstall"
+        and case.spec.json_hook_management == "none"
+        and before.entry(root, backup) is not None
+    ):
+        source = backup
+        original = _file(before, path, result, root)
+        if original is not None:
+            _compare_bytes(after, path, original, result, root)
+    original = _file(before, source, result, root)
+    if original is not None:
+        _compare_bytes(after, backup, original, result, root)
+
+
 def _lock_creation(
     lock: str | None, before: FilesystemSnapshot, after: FilesystemSnapshot, path: str
 ) -> bool:
@@ -877,13 +903,7 @@ class InstallVerifier:
         _references(case, expected, after, result)
         _version(case, expected, after, result)
         self._shared_files(case, expected, before, after, result)
-        if case.spec.json_backup is not None:
-            root = destination_roots(case)["json"]
-            initial_json = _file(before, dest["json"], result, root)
-            if initial_json is not None:
-                _compare_bytes(
-                    after, dest["json"] + case.spec.json_backup, initial_json, result, root
-                )
+        _json_backup(case, before, after, result)
         _preservation(case, expected, before, after, result, skill_backup)
         if skill_backup is not None:
             _compare_bytes(

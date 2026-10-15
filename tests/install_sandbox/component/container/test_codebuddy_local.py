@@ -21,7 +21,8 @@ from tools.install_sandbox.host.result_reader import read_result
 _SUBJECT = os.environ.get("INSTALL_SANDBOX_CODEBUDDY_SUBJECT")
 _EVIDENCE = os.environ.get("INSTALL_SANDBOX_CODEBUDDY_EVIDENCE")
 _SPECS = Path(__file__).resolve().parents[4] / "tools/install_sandbox/specs/codebuddy-local"
-pytestmark = pytest.mark.skipif(not _SUBJECT, reason="Supply INSTALL_SANDBOX_CODEBUDDY_SUBJECT")
+_FIXED_SUBJECT = os.environ.get("INSTALL_SANDBOX_CODEBUDDY_FIXED_SUBJECT")
+_FIXED_EVIDENCE = os.environ.get("INSTALL_SANDBOX_CODEBUDDY_FIXED_EVIDENCE")
 
 
 def _require_isolation() -> None:
@@ -156,8 +157,8 @@ def _assert_failure(result: InstallTestResult) -> None:
     ), mismatches
 
 
-def _assert_provenance(output: Path, subject: Path) -> None:
-    stdout = (output / "steps/0/stdout.txt").read_text()
+def _assert_provenance(output: Path, subject: Path, step: int = 0) -> None:
+    stdout = (output / f"steps/{step}/stdout.txt").read_text()
     origin_line = next(
         line for line in stdout.splitlines() if line.startswith("CodeBuddy import origins: ")
     )
@@ -189,6 +190,7 @@ def _run_once(subject: Path, retained: Path, temporary: Path, case_file: Path) -
         executable.unlink(missing_ok=True)
 
 
+@pytest.mark.skipif(not _SUBJECT, reason="Supply INSTALL_SANDBOX_CODEBUDDY_SUBJECT")
 def test_real_codebuddy_first_install_retains_known_failure(tmp_path: Path) -> None:
     _require_isolation()
     assert _SUBJECT is not None and _EVIDENCE is not None
@@ -202,6 +204,113 @@ def test_real_codebuddy_first_install_retains_known_failure(tmp_path: Path) -> N
     output = retained / "result"
     assert read_result(output, InstallTestCase.from_json(case_file.read_text())) == result
     _assert_failure(result)
+    _assert_provenance(output, subject)
+    settings = json.loads((output / "steps/0/after/project/.codebuddy/settings.json").read_bytes())
+    _assert_hook_diagnostics(case, settings, result)
+
+
+@pytest.mark.skipif(not _FIXED_SUBJECT, reason="Supply INSTALL_SANDBOX_CODEBUDDY_FIXED_SUBJECT")
+def test_fixed_codebuddy_first_install_passes(tmp_path: Path) -> None:
+    """Qualify explicitly selected corrected sources against the unchanged contract."""
+    _require_isolation()
+    assert _FIXED_SUBJECT is not None and _FIXED_EVIDENCE is not None
+    subject = Path(_FIXED_SUBJECT).resolve(strict=True)
+    retained = Path(_FIXED_EVIDENCE).resolve()
+    assert not retained.exists() or not any(retained.iterdir()), "Evidence must be fresh"
+    retained.mkdir(parents=True, exist_ok=True)
+    case_file = retained / "case.json"
+    case = InstallTestCoordinator().write_case(_SPECS, "codebuddy", case_file)
+    result = _run_once(subject, retained, tmp_path, case_file)
+    output = retained / "result"
+    assert read_result(output, InstallTestCase.from_json(case_file.read_text())) == result
+    assert result.status == "passed", result
+    assert len(result.steps) == 1
+    command = result.steps[0]["command"]
+    assert command is not None and command["state"] == "completed" and command["exit_code"] == 0
+    assert command["args"][1:] == ["codebuddy", "install"]
+    verification = result.steps[0]["verification"]
+    assert verification is not None and verification.complete and not verification.mismatches
+    _assert_provenance(output, subject)
+    settings = json.loads((output / "steps/0/after/project/.codebuddy/settings.json").read_bytes())
+    _assert_hook_diagnostics(case, settings, result)
+
+
+def _retained_files(path: Path) -> dict[str, bytes]:
+    return {
+        file.relative_to(path).as_posix(): file.read_bytes()
+        for file in path.rglob("*")
+        if file.is_file()
+    }
+
+
+@pytest.mark.skipif(not _FIXED_SUBJECT, reason="Supply INSTALL_SANDBOX_CODEBUDDY_FIXED_SUBJECT")
+def test_fixed_codebuddy_reinstall_passes(tmp_path: Path) -> None:
+    """Run identical real commands without altering their shared installed environment."""
+    _require_isolation()
+    assert _FIXED_SUBJECT is not None and _FIXED_EVIDENCE is not None
+    subject = Path(_FIXED_SUBJECT).resolve(strict=True)
+    retained = Path(_FIXED_EVIDENCE).resolve() / "reinstall"
+    assert not retained.exists() or not any(retained.iterdir()), "Evidence must be fresh"
+    retained.mkdir(parents=True, exist_ok=True)
+    case_file = retained / "case.json"
+    case = InstallTestCoordinator().write_case(
+        _SPECS, "codebuddy", case_file, case_name="reinstall"
+    )
+    result = _run_once(subject, retained, tmp_path, case_file)
+    output = retained / "result"
+    assert read_result(output, case) == result
+    assert result.status == "passed" and len(result.steps) == 2, result
+    for index, step in enumerate(result.steps):
+        command, verification = step["command"], step["verification"]
+        assert command is not None and command["state"] == "completed"
+        assert command["exit_code"] == 0 and command["args"][1:] == ["codebuddy", "install"]
+        assert verification is not None and verification.complete and not verification.mismatches
+        _assert_provenance(output, subject, index)
+    _assert_unchanged_reinstall(output, result)
+
+
+def _assert_unchanged_reinstall(output: Path, result: InstallTestResult) -> None:
+    first, second = (step["command"] for step in result.steps)
+    assert first is not None and second is not None
+    assert first["args"] == second["args"] and first["cwd"] == second["cwd"]
+    assert (
+        _retained_files(output / "steps/0/after")
+        == _retained_files(output / "steps/1/before")
+        == _retained_files(output / "steps/1/after")
+    )
+    initial_json = output / "steps/0/before/project/.codebuddy/settings.json"
+    backup = output / "steps/1/after/project/.codebuddy/settings.json.graphify-bak"
+    assert backup.read_bytes() == initial_json.read_bytes()
+
+
+@pytest.mark.skipif(not _SUBJECT, reason="Supply INSTALL_SANDBOX_CODEBUDDY_SUBJECT")
+def test_original_codebuddy_reinstall_stops_after_known_failure(tmp_path: Path) -> None:
+    """Keep the original defect observable and never claim a second command was tested."""
+    _require_isolation()
+    assert _SUBJECT is not None and _EVIDENCE is not None
+    subject = Path(_SUBJECT).resolve(strict=True)
+    retained = Path(_EVIDENCE).resolve() / "reinstall"
+    assert not retained.exists() or not any(retained.iterdir()), "Evidence must be fresh"
+    retained.mkdir(parents=True, exist_ok=True)
+    case_file = retained / "case.json"
+    case = InstallTestCoordinator().write_case(
+        _SPECS, "codebuddy", case_file, case_name="reinstall"
+    )
+    result = _run_once(subject, retained, tmp_path, case_file)
+    output = retained / "result"
+    assert read_result(output, case) == result
+    assert result.status == "failed" and len(result.steps) == 2
+    first, second = result.steps
+    command, verification = first["command"], first["verification"]
+    assert command is not None and command["exit_code"] == 0
+    assert verification is not None and verification.complete
+    assert {mismatch.type for mismatch in verification.mismatches} == {
+        "hook_count",
+        "personal_hook_count",
+        "user_content_lost",
+    }
+    assert second["command"] is None and second["verification"] is None and second["skip_reason"]
+    assert not (output / "steps/1/stdout.txt").exists()
     _assert_provenance(output, subject)
     settings = json.loads((output / "steps/0/after/project/.codebuddy/settings.json").read_bytes())
     _assert_hook_diagnostics(case, settings, result)

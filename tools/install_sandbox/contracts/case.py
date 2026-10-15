@@ -28,8 +28,8 @@ def first_install_files(
 ) -> list[InitialFile]:
     """Place the common witnesses using target paths and the JSON list fact."""
     if spec.json_hook_management == "none":
-        if case_name != "first-install":
-            raise ValueError("Unmanaged JSON supports first-install only")
+        if case_name not in {"first-install", "reinstall"}:
+            raise ValueError("Unmanaged JSON supports first-install and reinstall only")
         return _unmanaged_files(spec)
     directory = PurePosixPath(spec.directory)
     markdown = _PROJECT_INSTRUCTIONS

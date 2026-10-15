@@ -180,3 +180,32 @@ class CodeBuddyReinstallCase(CodeBuddyCase):
         return InstallerCommandResult(
             args, str(project), "completed", 0, None, b"synthetic repeat\n"
         )
+
+
+_SKILL_FILE = _SKILL + "/SKILL.md"
+_SKILL_SOURCE = b"# Synthetic skill\n"
+_SKILL_ALTERED = _SKILL_SOURCE + b"\nSandbox skill repair witness.\n"
+
+
+class CodeBuddySkillRepairCase(CodeBuddyReinstallCase):
+    def __init__(self, root: Path, mode: str = "passed") -> None:
+        super().__init__(root, mode, "repair-skill")
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        if not self.calls:
+            return super().execute(args, project, environment, timeout)
+        self.calls.append((list(args), project, dict(environment), timeout))
+        skill = Path(environment["HOME"]) / _SKILL_FILE
+        assert skill.read_bytes() == _SKILL_ALTERED
+        if self.mode != "no-op":
+            if self.mode != "missing-skill-backup":
+                _write(
+                    Path(str(skill) + ".bak"),
+                    b"Wrong\n" if self.mode == "wrong-skill-backup" else skill.read_bytes(),
+                )
+            if self.mode != "only-backup":
+                skill.write_bytes(_SKILL_SOURCE)
+            _reinstall_fault(project, Path(environment["HOME"]), self.mode)
+        return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")

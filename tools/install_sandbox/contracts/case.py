@@ -28,8 +28,10 @@ def first_install_files(
 ) -> list[InitialFile]:
     """Place the common witnesses using target paths and the JSON list fact."""
     if spec.json_hook_management == "none":
-        if case_name not in {"first-install", "reinstall"}:
-            raise ValueError("Unmanaged JSON supports first-install and reinstall only")
+        if case_name not in {"first-install", "reinstall", "repair-missing-reference"}:
+            raise ValueError(
+                "Unmanaged JSON supports first-install, reinstall and repair-missing-reference only"
+            )
         return _unmanaged_files(spec)
     directory = PurePosixPath(spec.directory)
     markdown = _PROJECT_INSTRUCTIONS
@@ -39,7 +41,7 @@ def first_install_files(
     settings = (
         '{\n  "theme": "dark",\n  ' + json.dumps(spec.json_list) + ': ["my-instructions.md"]\n}\n'
     )
-    if case_name in {"first-install", "reinstall"}:
+    if case_name in {"first-install", "reinstall", "repair-missing-reference"}:
         settings = (
             json.dumps(
                 {
@@ -117,6 +119,7 @@ CASE_NAMES = (
     "first-install",
     "reinstall",
     "repair-references",
+    "repair-missing-reference",
     "repair-skill",
     "preserve-skill-backup",
     "repair-markdown-section",

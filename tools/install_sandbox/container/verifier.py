@@ -11,6 +11,7 @@ from tools.install_sandbox.contracts.case import InstallTestCase, destination_ro
 from tools.install_sandbox.contracts.managed_json import registry, sidecars
 from tools.install_sandbox.contracts.results import (
     FileAlterationPlan,
+    MissingReferencePlan,
     ObservationObstacle,
     ReferenceRepairPlan,
     SkillBackupPlan,
@@ -710,6 +711,7 @@ def _reinstall_stability(
     if case.name not in {
         "reinstall",
         "repair-references",
+        "repair-missing-reference",
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
@@ -753,7 +755,7 @@ def _json_backup(
     backup = path + case.spec.json_backup
     source = path
     if (
-        case.name == "reinstall"
+        case.name in {"reinstall", "repair-missing-reference"}
         and case.spec.json_hook_management == "none"
         and before.entry(root, backup) is not None
     ):
@@ -927,6 +929,25 @@ class InstallVerifier:
         _skill_lock(expected.skill_lock, before, after, result)
         _managed_json(case, before, after, result, allow_registry_update)
         _reinstall_stability(case, before, after, result)
+        result.complete = not result.obstacles
+        return result
+
+    def verify_missing_reference(
+        self,
+        plan: MissingReferencePlan,
+        installed: FilesystemSnapshot,
+        degraded: FilesystemSnapshot,
+    ) -> VerificationResult:
+        """Require one deletion while preserving every other entry in both roots."""
+        result = VerificationResult(
+            obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
+        )
+        key = (plan["root"], plan["deleted_path"])
+        _file(installed, plan["deleted_path"], result, plan["root"])
+        _require_absent(degraded, plan["deleted_path"], result, plan["root"])
+        keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
+        for root, path in sorted(keys - {key}):
+            _preserved_entry(installed, degraded, root, path, result)
         result.complete = not result.obstacles
         return result
 

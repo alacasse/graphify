@@ -71,6 +71,17 @@ def test_none_mode_reinstall_reuses_initial_witnesses(tmp_path: Path) -> None:
     assert InstallTestCase.from_json(repeated.to_json()) == repeated
 
 
+def test_none_mode_missing_reference_case_reuses_initial_witnesses(tmp_path: Path) -> None:
+    coordinator = InstallTestCoordinator()
+    first = coordinator.write_case(_SPECS, "codebuddy", tmp_path / "first.json")
+    repair = coordinator.write_case(
+        _SPECS, "codebuddy", tmp_path / "repair.json", case_name="repair-missing-reference"
+    )
+    assert repair.initial_files == first.initial_files
+    assert repair.operations == ["install", "install"]
+    assert InstallTestCase.from_json(repair.to_json()) == repair
+
+
 @pytest.mark.parametrize(
     "name",
     [

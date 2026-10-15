@@ -189,7 +189,12 @@ def _markdown_preserved(before: str, prefix: str, suffix: str, marker: str) -> b
 
 
 def _markdown(
-    case: InstallTestCase, expected: bytes, before: bytes, after: bytes, result: VerificationResult
+    case: InstallTestCase,
+    expected: bytes,
+    before: bytes,
+    after: bytes,
+    result: VerificationResult,
+    allow_markdown_relocation: bool = False,
 ) -> None:
     path = destinations(case)["markdown"]
     try:
@@ -225,7 +230,14 @@ def _markdown(
             "retained Markdown section",
             "different section content",
         )
-    if not _markdown_preserved(initial, prefix, suffix, case.spec.markdown_marker):
+    preserved = _markdown_preserved(initial, prefix, suffix, case.spec.markdown_marker)
+    if allow_markdown_relocation and case.name == "repair-missing-markdown-section":
+        original = _markdown_parts(initial, case.spec.markdown_marker)
+        if original is not None:
+            preserved = _personal_markdown(original[0], original[2]) == _personal_markdown(
+                prefix, suffix
+            )
+    if not preserved:
         _mismatch(
             result,
             "user_content_lost",
@@ -236,12 +248,28 @@ def _markdown(
         )
 
 
+def _personal_markdown(prefix: str, suffix: str) -> str:
+    """Join personal text while allowing only the section separator newlines."""
+    return "\n\n".join(part for part in (prefix.strip("\n"), suffix.strip("\n")) if part)
+
+
 def _check_markdown_alteration(
     case: InstallTestCase, before: bytes, altered: bytes, result: VerificationResult
 ) -> None:
     marker = case.spec.markdown_marker
     previous = _markdown_parts(before.decode("utf-8"), marker)
     planned = _markdown_parts(altered.decode("utf-8"), marker)
+    if case.name == "repair-missing-markdown-section":
+        if previous is None or previous[0] + previous[2] != altered.decode("utf-8"):
+            _mismatch(
+                result,
+                "invalid_preparation",
+                destination_roots(case)["markdown"],
+                destinations(case)["markdown"],
+                "only the entire Graphify section removed",
+                "section removal differs from the installed personal text",
+            )
+        return
     if previous is None or planned is None or previous[1] == planned[1]:
         _mismatch(
             result,
@@ -717,6 +745,7 @@ def _reinstall_stability(
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-missing-markdown-section",
         "repair-json-entry",
     }:
         return
@@ -765,6 +794,7 @@ def _json_backup(
             "repair-skill",
             "preserve-skill-backup",
             "repair-markdown-section",
+            "repair-missing-markdown-section",
         }
         and case.spec.json_hook_management == "none"
         and before.entry(root, backup) is not None
@@ -900,6 +930,7 @@ class InstallVerifier:
         *,
         skill_backup: bytes | None = None,
         allow_registry_update: bool = False,
+        allow_markdown_relocation: bool = False,
     ) -> VerificationResult:
         result = VerificationResult(
             obstacles=[
@@ -914,7 +945,7 @@ class InstallVerifier:
             _compare_bytes(after, dest["skill"], skill, result, destination_roots(case)["skill"])
         _references(case, expected, after, result)
         _version(case, expected, after, result)
-        self._shared_files(case, expected, before, after, result)
+        self._shared_files(case, expected, before, after, result, allow_markdown_relocation)
         _json_backup(case, before, after, result)
         _preservation(case, expected, before, after, result, skill_backup)
         if skill_backup is not None:
@@ -1137,6 +1168,7 @@ class InstallVerifier:
         before: FilesystemSnapshot,
         after: FilesystemSnapshot,
         result: VerificationResult,
+        allow_markdown_relocation: bool,
     ) -> None:
         dest = destinations(case)
         source = _expected_file(expected, case.spec.markdown_source, result)
@@ -1148,7 +1180,7 @@ class InstallVerifier:
             if initial is None or installed is None:
                 continue
             if kind == "markdown" and source is not None:
-                _markdown(case, source, initial, installed, result)
+                _markdown(case, source, initial, installed, result, allow_markdown_relocation)
             elif kind == "json":
                 _json(case, initial, installed, result)
 

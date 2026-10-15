@@ -425,6 +425,7 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
             "repair-skill",
             "preserve-skill-backup",
             "repair-markdown-section",
+            "repair-missing-markdown-section",
         }
         and result.preparation["ready"]
     ):
@@ -586,6 +587,7 @@ def _check_step_preparation_evidence(
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-missing-markdown-section",
         "repair-json-entry",
     }:
         return
@@ -738,7 +740,7 @@ def _check_repair_installations(
             continue
         before = _retained_snapshot(output, f"steps/{index}/before.json")
         after = _retained_snapshot(output, f"steps/{index}/after.json")
-        if index and case.name == "repair-markdown-section":
+        if index and case.name in {"repair-markdown-section", "repair-missing-markdown-section"}:
             before = _retained_snapshot(output, "steps/0/after.json")
         backup = None
         if index and case.name == "repair-skill":
@@ -749,7 +751,15 @@ def _check_repair_installations(
             # preparation is checked separately against its exact sole mutation.
             before = _retained_snapshot(output, "steps/0/after.json")
         if (
-            verifier.verify(case, sources, before, after, skill_backup=backup)
+            verifier.verify(
+                case,
+                sources,
+                before,
+                after,
+                skill_backup=backup,
+                allow_markdown_relocation=index > 0
+                and case.name == "repair-missing-markdown-section",
+            )
             != step["verification"]
         ):
             raise ValueError("Repair installation contradicts retained observations")
@@ -825,7 +835,11 @@ def _check_case_repair_plan(
     output: Path,
     sources: list[dict[str, object]],
 ) -> None:
-    if case.name in {"repair-markdown-section", "repair-json-entry"}:
+    if case.name in {
+        "repair-markdown-section",
+        "repair-missing-markdown-section",
+        "repair-json-entry",
+    }:
         expected_plan, content = (
             json_repair_plan(case)
             if case.name == "repair-json-entry"
@@ -835,7 +849,7 @@ def _check_case_repair_plan(
             raise ValueError("Shared file repair plan does not match the case")
         if safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content:
             raise ValueError("Prepared shared file content does not match the case witness")
-        if case.name == "repair-markdown-section":
+        if case.name in {"repair-markdown-section", "repair-missing-markdown-section"}:
             _check_markdown_preparation(case, expected_plan, content, output)
     elif case.name == "repair-skill":
         _check_skill_repair_plan(plan, case, output)
@@ -983,6 +997,7 @@ def _check_preparation_location(result: InstallTestResult, case: InstallTestCase
                 "repair-skill",
                 "preserve-skill-backup",
                 "repair-markdown-section",
+                "repair-missing-markdown-section",
                 "repair-json-entry",
             }
             or index != 1
@@ -1010,6 +1025,7 @@ def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, ou
     dest = destinations(case)
     paths = {
         "repair-markdown-section": {dest["markdown"]},
+        "repair-missing-markdown-section": {dest["markdown"]},
         "repair-json-entry": {dest["json"]},
     }.get(case.name, {dest["skill"], dest["skill"] + ".bak"})
     for relative in ("steps/0/after.json", "steps/1/before.json", "steps/1/after.json"):
@@ -1030,7 +1046,7 @@ def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, ou
                 "json"
                 if case.name == "repair-json-entry"
                 else "markdown"
-                if case.name == "repair-markdown-section"
+                if case.name in {"repair-markdown-section", "repair-missing-markdown-section"}
                 else "skill"
             ],
         )
@@ -1046,7 +1062,11 @@ def _successful_stage(result: InstallTestResult, relative: str) -> bool:
 
 def _required_content_paths(case: InstallTestCase, relative: str) -> set[str]:
     dest = destinations(case)
-    if case.name in {"repair-markdown-section", "repair-json-entry"}:
+    if case.name in {
+        "repair-markdown-section",
+        "repair-missing-markdown-section",
+        "repair-json-entry",
+    }:
         return {dest["json" if case.name == "repair-json-entry" else "markdown"]}
     paths = {dest["skill"]}
     if relative == "steps/1/after.json" or (

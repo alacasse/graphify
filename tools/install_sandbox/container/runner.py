@@ -184,6 +184,7 @@ class InstallTestRunner:
                         "repair-skill",
                         "preserve-skill-backup",
                         "repair-markdown-section",
+                        "repair-missing-markdown-section",
                         "repair-json-entry",
                     }:
                         before = self._prepare_step(
@@ -232,7 +233,11 @@ class InstallTestRunner:
             return self._prepare_missing_reference(
                 case, environment, expected, installed, writer, step
             )
-        if case.name in {"repair-markdown-section", "repair-json-entry"}:
+        if case.name in {
+            "repair-markdown-section",
+            "repair-missing-markdown-section",
+            "repair-json-entry",
+        }:
             return self._prepare_shared_file(case, environment, installed, writer, step)
         if case.name == "preserve-skill-backup":
             plan, content = skill_backup_plan(case, expected)
@@ -418,7 +423,14 @@ class InstallTestRunner:
             backup = skill_repair_plan(case, expected)[1]
         elif index and case.name == "preserve-skill-backup":
             backup = skill_backup_plan(case, expected)[1]
-        verification = self.verifier.verify(case, expected, before, after, skill_backup=backup)
+        verification = self.verifier.verify(
+            case,
+            expected,
+            before,
+            after,
+            skill_backup=backup,
+            allow_markdown_relocation=index > 0 and case.name == "repair-missing-markdown-section",
+        )
         step["verification"] = verification
         step["observations"] = {
             "before": f"steps/{index}/before.json",

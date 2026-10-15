@@ -98,7 +98,7 @@ class CodeBuddyCase:
         section = b"## graphify\nUse the synthetic graph.\n"
         markdown.write_bytes(
             initial.replace(b"## graphify\n", section, 1)
-            if self.case_name == "repair-markdown-section"
+            if self.case_name in {"repair-markdown-section", "repair-missing-markdown-section"}
             else initial + b"\n" + section
         )
         digest = hashlib.sha256(str(home / _SKILL).encode()).hexdigest()[:16]
@@ -260,6 +260,56 @@ class CodeBuddyMarkdownRepairCase(CodeBuddyReinstallCase):
         elif self.mode == "lost-suffix":
             markdown.write_bytes(markdown.read_bytes().split(b"## Changes", 1)[0])
         elif self.mode == "foreign":
+            (Path(environment["HOME"]) / "personal-notes.txt").write_bytes(b"Lost\n")
+        elif self.mode == "registry":
+            _write(project / (_SETTINGS + ".graphify-state.json"), b"{}\n")
+        _reinstall_fault(project, Path(environment["HOME"]), self.mode)
+        self.calls.append((list(args), project, dict(environment), timeout))
+        return InstallerCommandResult(args, str(project), "completed", 0, None, b"repair\n")
+
+
+class CodeBuddyMissingMarkdownRepairCase(CodeBuddyReinstallCase):
+    def __init__(self, root: Path, mode: str = "passed") -> None:
+        super().__init__(root, mode, "repair-missing-markdown-section")
+
+    def execute(
+        self, args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        if not self.calls:
+            result = super().execute(args, project, environment, timeout)
+            if self.mode in {"first-append", "first-prepend"}:
+                markdown = project / "CODEBUDDY.md"
+                section = b"## graphify\nUse the synthetic graph.\n"
+                personal = markdown.read_bytes().replace(section + b"\n", b"", 1)
+                variants = {
+                    "first-append": personal + b"\n" + section,
+                    "first-prepend": section + b"\n" + personal,
+                }
+                markdown.write_bytes(variants[self.mode])
+            return result
+        markdown = project / "CODEBUDDY.md"
+        assert b"## graphify" not in markdown.read_bytes()
+        section = b"## graphify\nUse the synthetic graph.\n"
+        personal = markdown.read_bytes()
+        content = self.first_files["project/CODEBUDDY.md"]
+        variants = {
+            "append": personal + b"\n" + section,
+            "prepend": section + b"\n" + personal,
+            "no-op": personal,
+            "duplicate": content + b"\n" + section,
+            "malformed": content.replace(b"## graphify", b"### graphify"),
+            "wrong-body": content.replace(b"Use the synthetic graph.", b"Wrong body."),
+            "lost-prefix": b"## graphify" + content.split(b"## graphify", 1)[1],
+            "lost-suffix": content.split(b"## Changes", 1)[0],
+            "reordered": (
+                b"## Changes\nExplain proposed changes.\n\n"
+                + section
+                + b"\n# My project\n\n## Language\nRespond in English.\n"
+            ),
+        }
+        content = variants.get(self.mode, content)
+        markdown.write_bytes(content)
+        if self.mode == "foreign":
             (Path(environment["HOME"]) / "personal-notes.txt").write_bytes(b"Lost\n")
         elif self.mode == "registry":
             _write(project / (_SETTINGS + ".graphify-state.json"), b"{}\n")

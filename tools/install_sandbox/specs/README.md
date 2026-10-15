@@ -28,7 +28,7 @@ the retained catalog or make its older format readable.
 
 `spec.py` validates the new facts. The common initial witnesses and the
 first-install, reinstall, repair-references, repair-skill, preserve-skill-backup,
-repair-markdown-section, or repair-json-entry operations belong
+repair-markdown-section, repair-missing-markdown-section, or repair-json-entry operations belong
 to the case, and `InstallTestCoordinator` assembles and writes
 the complete project case JSON. Product source paths are transported without
 reading or embedding their contents. No installation is executed by this entry.
@@ -102,7 +102,7 @@ second command. No additional YAML facts are needed.
 | Catalog membership and target identity | `*.yaml` filename stems |
 | Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
 | Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, preserve-skill-backup, repair-markdown-section, and repair-json-entry project cases are implemented |
+| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, preserve-skill-backup, repair-markdown-section, repair-missing-markdown-section, and repair-json-entry project cases are implemented |
 
 ## Classify data before changing it
 
@@ -194,9 +194,10 @@ unchanged distribution metadata, captured before execution.
 
 `json.hook_management: none` explicitly disables registry management. It supports
 first installation, reinstallation, single missing or altered reference repair,
-skill repair, preservation of an existing skill backup, and Markdown section
-repair. Markdown repair changes only the declared section body, preserves the
-initial JSON backup, and retains independent preparation and readback evidence.
+skill repair, preservation of an existing skill backup, and both Markdown section
+repair cases. `repair-markdown-section` changes only the declared section body;
+`repair-missing-markdown-section` removes the entire heading and body. Both preserve
+the initial JSON backup and retain independent preparation and readback evidence.
 `json.list: null` declares no instruction registration;
 `json.backup` declares a safe suffix whose bytes must equal the initial JSON.
 Registry cases still require their instruction list, sidecars and resolutions.
@@ -204,3 +205,14 @@ Sidecar names remain derived even in none mode so their absence is observable.
 The none-mode fixtures derive paths from facts and include two personal Markdown
 sections, personal hooks (including the audit timeout 17), another event,
 ordered metadata, home counterparts, neighboring files and a cache witness.
+
+The distinct `repair-missing-markdown-section` case first installs a conforming
+Graphify section between personal sections. Preparation removes that entire
+heading and body and verifies the exact remaining witness and preservation of
+all other entries before allowing the identical second install. The second
+install must restore exactly one source-conforming section; its position may
+change, including appending it, while personal text and its order remain intact.
+All other observed entries, including the original JSON backup, remain unchanged.
+Retained source, plan, preparation and installation observations allow the host
+reader to recompute both preparation and installation verdicts after cleanup.
+The existing `repair-markdown-section` case continues to alter the body only.

@@ -36,6 +36,7 @@ def first_install_files(
             "repair-skill",
             "preserve-skill-backup",
             "repair-markdown-section",
+            "repair-missing-markdown-section",
         }:
             raise ValueError(
                 "Unmanaged JSON supports first-install, reinstall, skill backup preservation, "
@@ -44,7 +45,7 @@ def first_install_files(
         return _unmanaged_files(spec, case_name)
     directory = PurePosixPath(spec.directory)
     markdown = _PROJECT_INSTRUCTIONS
-    if case_name == "repair-markdown-section":
+    if case_name in {"repair-markdown-section", "repair-missing-markdown-section"}:
         markdown = markdown.replace("## Changes", spec.markdown_marker + "\n\n## Changes")
     config_file = directory / spec.json_file
     settings = (
@@ -138,6 +139,7 @@ CASE_NAMES = (
     "repair-skill",
     "preserve-skill-backup",
     "repair-markdown-section",
+    "repair-missing-markdown-section",
     "repair-json-entry",
 )
 
@@ -236,7 +238,7 @@ def _unmanaged_files(spec: InstallTestSpec, case_name: str) -> list[InitialFile]
     case = InstallTestCase("first-install", "fixture", "project", spec, [], ["install"])
     paths, roots = destinations(case), destination_roots(case)
     markdown = _PROJECT_INSTRUCTIONS
-    if case_name == "repair-markdown-section":
+    if case_name in {"repair-markdown-section", "repair-missing-markdown-section"}:
         markdown = markdown.replace("## Changes", spec.markdown_marker + "\n\n## Changes")
     personal: dict[str, object] = {
         "theme": "dark",
@@ -312,6 +314,8 @@ def markdown_repair_plan(case: InstallTestCase) -> tuple[FileAlterationPlan, byt
         case.spec.markdown_marker + "\nSandbox altered Markdown section.\n",
         1,
     )
+    if case.name == "repair-missing-markdown-section":
+        content = initial.replace(case.spec.markdown_marker + "\n\n", "", 1)
     return {
         "altered_path": path,
         "altered_content_file": "steps/1/preparation/altered-content.bin",

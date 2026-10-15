@@ -93,6 +93,7 @@ def test_selected_order_scope_and_reports(
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-missing-markdown-section",
         "repair-json-entry",
     } - set(selected)
     assert not set(saved["not_selected_cases"]) & set(selected)
@@ -274,6 +275,7 @@ def test_all_cases_apply_to_renamed_reference(
         "repair-skill",
         "preserve-skill-backup",
         "repair-markdown-section",
+        "repair-missing-markdown-section",
         "repair-json-entry",
     ]
     completed = run_cli(tmp_path, [arg for name in names for arg in ("--case", name)])

@@ -2275,6 +2275,42 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
     print()
     print("CodeBuddy will now check the knowledge graph before answering")
     print("codebase questions and rebuild it after code changes.")
+def _repair_codebuddy_search_hooks(pre_tool: list) -> bool:
+    """Repair only the exact portable search shape with integer timeout 10/11.
+
+    This is content recognition, not an ownership record. Extended objects and
+    other commands/timeouts remain personal content. Keep all groups, even when
+    removing a duplicate leaves one empty. The caller checks ambiguity before
+    writing, including conflicts with extended conforming objects.
+    """
+    expected = {"type": "command", "command": "graphify hook-guard search", "timeout": 10}
+    seen = False
+    changed = False
+    for group in pre_tool:
+        if not isinstance(group, dict) or group.get("matcher") != "Bash|Grep":
+            continue
+        group_hooks = group.get("hooks")
+        if not isinstance(group_hooks, list):
+            continue
+        retained = []
+        for hook in group_hooks:
+            repairable = (
+                isinstance(hook, dict) and hook.keys() == expected.keys()
+                and hook.get("type") == expected["type"]
+                and hook.get("command") == expected["command"]
+                and type(hook.get("timeout")) is int and hook["timeout"] in (10, 11)
+            )
+            if not repairable:
+                retained.append(hook)
+                continue
+            changed = changed or seen or hook["timeout"] != 10
+            if not seen:
+                retained.append(dict(expected))
+            seen = True
+        group_hooks[:] = retained
+    return changed
+
+
 def _install_codebuddy_hook(project_dir: Path) -> None:
     """Add graphify PreToolUse hook to .codebuddy/settings.json."""
     settings_path = project_dir / ".codebuddy" / "settings.json"
@@ -2289,6 +2325,7 @@ def _install_codebuddy_hook(project_dir: Path) -> None:
     if not isinstance(pre_tool, list):
         _refuse_to_modify(settings_path)
 
+    repaired = _repair_codebuddy_search_hooks(pre_tool)
     missing = []
     for expected_group in _claude_pretooluse_hooks(project=True):
         expected_hook = expected_group["hooks"][0]
@@ -2315,8 +2352,8 @@ def _install_codebuddy_hook(project_dir: Path) -> None:
         if occurrences == 0:
             missing.append(expected_group)
 
-    # Matching hooks need no ownership claim; preserve every existing object.
-    if missing:
+    # Persist only after both search and read ambiguity checks have passed.
+    if missing or repaired:
         pre_tool.extend(missing)
         _write_settings_with_backup(settings_path, settings)
     print(f"  .codebuddy/settings.json  ->  PreToolUse hooks registered")

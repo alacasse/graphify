@@ -9,7 +9,7 @@ from typing import cast
 from tools.install_sandbox.contracts.case import InstallTestCase
 from tools.install_sandbox.contracts.spec import fields
 from tools.install_sandbox.contracts.timings import Timing, case_timings
-from tools.install_sandbox.host.result_reader import safe_evidence_path
+from tools.install_sandbox.host.evidence_reader import safe_evidence_path
 
 
 @dataclass

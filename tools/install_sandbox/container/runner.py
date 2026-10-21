@@ -7,6 +7,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
+from tools.install_sandbox.container.effect_environment import EffectEnvironment
+from tools.install_sandbox.container.effect_verifier import EffectVerifier
 from tools.install_sandbox.container.environment import (
     FilesystemSnapshot,
     TestEnvironment,
@@ -25,6 +27,8 @@ from tools.install_sandbox.contracts.case import (
     json_repair_plan,
     markdown_repair_plan,
 )
+from tools.install_sandbox.contracts.case_transport import ExecutionCase, load_case
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.managed_json import needs_resolution, resolution
 from tools.install_sandbox.contracts.results import (
     AlteredReferencePlan,
@@ -50,7 +54,7 @@ def _check_directories(subject: Path, case_file: Path, work: Path, output: Path)
             raise ValueError(f"Directory must be fresh or empty: {path}")
 
 
-def _new_result(case: InstallTestCase) -> InstallTestResult:
+def _new_result(case: ExecutionCase) -> InstallTestResult:
     steps: list[StepEvidence] = [
         {
             "operation": operation,
@@ -89,9 +93,11 @@ class InstallTestRunner:
             path.resolve()
             for path in (reference_sources, case_file, work_directory, output_directory)
         )
-        case = InstallTestCase.from_json(case_path.read_text(encoding="utf-8"))
+        case = load_case(case_path.read_text(encoding="utf-8"))
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
+        if isinstance(case, EffectInstallCase):
+            case.write(output / "case.json")
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
         writer.append_log("journal.log", "Validated case; starting preparation\n")
@@ -104,7 +110,7 @@ class InstallTestRunner:
 
     def _run(
         self,
-        case: InstallTestCase,
+        case: ExecutionCase,
         subject: Path,
         executable: Path,
         work: Path,
@@ -122,16 +128,20 @@ class InstallTestRunner:
 
     def _prepare_initial(
         self,
-        case: InstallTestCase,
+        case: ExecutionCase,
         subject: Path,
         work: Path,
         writer: TestResultWriter,
         result: InstallTestResult,
-    ) -> tuple[TestEnvironment, FilesystemSnapshot, FilesystemSnapshot] | None:
+    ) -> tuple[TestEnvironment | EffectEnvironment, FilesystemSnapshot, FilesystemSnapshot] | None:
         try:
-            environment = TestEnvironment(case, work / "environment")
+            environment = (
+                EffectEnvironment(case, work / "environment")
+                if isinstance(case, EffectInstallCase)
+                else TestEnvironment(case, work / "environment")
+            )
             environment.prepare()
-            if needs_resolution(case):
+            if isinstance(case, InstallTestCase) and needs_resolution(case):
                 writer.write_managed_resolution(resolution(case))
             (work / "command-tmp").mkdir()
             expected = environment.preserve_expected(subject, writer)
@@ -140,14 +150,20 @@ class InstallTestRunner:
         except OSError as error:
             self._not_run(result, writer, f"Initial preparation failed: {error}")
             return None
-        initial = self.verifier.verify_initial(case, expected, before)
+        initial = (
+            EffectVerifier().verify_initial(case, expected, before)
+            if isinstance(case, EffectInstallCase)
+            else self.verifier.verify_initial(case, expected, before)
+        )
+        if isinstance(case, EffectInstallCase):
+            writer.write_initial_verification(initial)
         writer.append_log("preparation.log", json.dumps(asdict(initial)) + "\n")
         if not initial.complete or initial.mismatches:
             self._not_run(
                 result, writer, "Initial verification failed: " + json.dumps(asdict(initial))
             )
             return None
-        if case.name in {
+        if isinstance(case, InstallTestCase) and case.name in {
             "repair-references",
             "repair-missing-reference",
             "repair-altered-reference",
@@ -164,9 +180,9 @@ class InstallTestRunner:
 
     def _run_steps(
         self,
-        case: InstallTestCase,
+        case: ExecutionCase,
         executable: Path,
-        environment: TestEnvironment,
+        environment: TestEnvironment | EffectEnvironment,
         expected: FilesystemSnapshot,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
@@ -177,7 +193,7 @@ class InstallTestRunner:
             installed = before
             if index:
                 with writer.measure("step_preparation", index):
-                    if case.name in {
+                    if isinstance(case, InstallTestCase) and case.name in {
                         "repair-references",
                         "repair-missing-reference",
                         "repair-altered-reference",
@@ -190,6 +206,7 @@ class InstallTestRunner:
                         "repair-altered-json-hook",
                         "repair-duplicate-json-hook",
                     }:
+                        assert isinstance(environment, TestEnvironment)
                         before = self._prepare_step(
                             case, environment, expected, installed, writer, step
                         )
@@ -391,9 +408,9 @@ class InstallTestRunner:
 
     def _install(
         self,
-        case: InstallTestCase,
+        case: ExecutionCase,
         executable: Path,
-        environment: TestEnvironment,
+        environment: TestEnvironment | EffectEnvironment,
         expected: FilesystemSnapshot,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
@@ -408,7 +425,7 @@ class InstallTestRunner:
                 environment.home,
                 environment.project.parent.parent / "command-tmp",
                 writer.output_directory / "managed-hooks-resolution.json"
-                if index == 0 and needs_resolution(case)
+                if index == 0 and isinstance(case, InstallTestCase) and needs_resolution(case)
                 else None,
             )
             timing.duration_seconds = command.duration_seconds
@@ -422,8 +439,8 @@ class InstallTestRunner:
 
     def _check_install(
         self,
-        case: InstallTestCase,
-        environment: TestEnvironment,
+        case: ExecutionCase,
+        environment: TestEnvironment | EffectEnvironment,
         expected: FilesystemSnapshot,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
@@ -438,19 +455,23 @@ class InstallTestRunner:
             f"Step {index} command {command.state}: {command.exit_code}; {command.reason}\n",
         )
         after = environment.observe(writer, "after", step_index=index)
-        backup = None
-        if index and case.name == "repair-skill":
-            backup = skill_repair_plan(case, expected)[1]
-        elif index and case.name == "preserve-skill-backup":
-            backup = skill_backup_plan(case, expected)[1]
-        verification = self.verifier.verify(
-            case,
-            expected,
-            before,
-            after,
-            skill_backup=backup,
-            allow_markdown_relocation=index > 0 and case.name == "repair-missing-markdown-section",
-        )
+        if isinstance(case, EffectInstallCase):
+            verification = EffectVerifier().verify(case, expected, before, after)
+        else:
+            backup = None
+            if index and case.name == "repair-skill":
+                backup = skill_repair_plan(case, expected)[1]
+            elif index and case.name == "preserve-skill-backup":
+                backup = skill_backup_plan(case, expected)[1]
+            verification = self.verifier.verify(
+                case,
+                expected,
+                before,
+                after,
+                skill_backup=backup,
+                allow_markdown_relocation=index > 0
+                and case.name == "repair-missing-markdown-section",
+            )
         step["verification"] = verification
         step["observations"] = {
             "before": f"steps/{index}/before.json",

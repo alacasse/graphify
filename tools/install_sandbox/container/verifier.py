@@ -29,13 +29,13 @@ from tools.install_sandbox.contracts.results import (
 )
 
 
-def _mismatch(
+def mismatch(
     result: VerificationResult, kind: str, root: str, path: str, expected: str, observed: str
 ) -> None:
     result.mismatches.append(VerificationMismatch(kind, root, path, expected, observed))
 
 
-def _file(
+def file(
     snapshot: FilesystemSnapshot,
     path: str,
     result: VerificationResult,
@@ -46,9 +46,9 @@ def _file(
     entry = snapshot.entry(root, path)
     if entry is None:
         if snapshot.absent(root, path):
-            _mismatch(result, "missing_file", root, path, "file present", "file absent")
+            mismatch(result, "missing_file", root, path, "file present", "file absent")
     elif entry["kind"] not in {"file", "unknown"}:
-        _mismatch(result, "entry_kind", root, path, "file", entry["kind"])
+        mismatch(result, "entry_kind", root, path, "file", entry["kind"])
     content = snapshot.contents.get((root, path))
     if require_content and content is None and entry is not None and entry["kind"] == "file":
         result.obstacles.append(
@@ -62,16 +62,16 @@ def _file(
     return content
 
 
-def _compare_bytes(
+def compare_bytes(
     snapshot: FilesystemSnapshot,
     path: str,
     expected: bytes,
     result: VerificationResult,
     root: str = "project",
 ) -> None:
-    observed = _file(snapshot, path, result, root)
+    observed = file(snapshot, path, result, root)
     if observed is not None and observed != expected:
-        _mismatch(
+        mismatch(
             result,
             "content_mismatch",
             root,
@@ -81,7 +81,7 @@ def _compare_bytes(
         )
 
 
-def _expected_file(
+def expected_file(
     expected: FilesystemSnapshot, path: str, result: VerificationResult
 ) -> bytes | None:
     content = expected.contents.get(("subject", path))
@@ -117,14 +117,14 @@ def _references(
             }
         )
         return
-    _reference_files(expected, after, source, destination, result, root)
+    reference_files(expected, after, source, destination, result, root)
     for observed in after.entries:
         path = observed["path"]
         if observed["root"] != root or not path.startswith(destination + "/"):
             continue
         source_path = source + path[len(destination) :]
         if expected.absent("subject", source_path):
-            _mismatch(
+            mismatch(
                 result,
                 "unexpected_reference",
                 root,
@@ -134,7 +134,7 @@ def _references(
             )
 
 
-def _reference_files(
+def reference_files(
     expected: FilesystemSnapshot,
     after: FilesystemSnapshot,
     source: str,
@@ -150,9 +150,9 @@ def _reference_files(
         if entry["kind"] == "directory":
             observed = after.entry(root, target)
             if observed is not None and observed["kind"] not in {"directory", "unknown"}:
-                _mismatch(result, "entry_kind", root, target, "directory", observed["kind"])
+                mismatch(result, "entry_kind", root, target, "directory", observed["kind"])
             elif after.absent(root, target):
-                _mismatch(
+                mismatch(
                     result,
                     "missing_directory",
                     root,
@@ -161,9 +161,9 @@ def _reference_files(
                     "directory absent",
                 )
         elif entry["kind"] == "file":
-            content = _expected_file(expected, path, result)
+            content = expected_file(expected, path, result)
             if content is not None:
-                _compare_bytes(after, target, content, result, root)
+                compare_bytes(after, target, content, result, root)
 
 
 def _markdown_parts(text: str, marker: str) -> tuple[str, str, str] | None:
@@ -203,25 +203,50 @@ def _markdown(
     result: VerificationResult,
     allow_markdown_relocation: bool = False,
 ) -> None:
-    path = destinations(case)["markdown"]
+    verify_markdown_section(
+        expected,
+        before,
+        after,
+        result,
+        root=destination_roots(case)["markdown"],
+        path=destinations(case)["markdown"],
+        marker=case.spec.markdown_marker,
+        allow_markdown_relocation=(
+            allow_markdown_relocation and case.name == "repair-missing-markdown-section"
+        ),
+    )
+
+
+def verify_markdown_section(
+    expected: bytes,
+    before: bytes,
+    after: bytes,
+    result: VerificationResult,
+    *,
+    root: str,
+    path: str,
+    marker: str,
+    allow_markdown_relocation: bool = False,
+) -> None:
+    """Check a unique source section and preserve surrounding personal text."""
     try:
         source, initial, installed = (b.decode("utf-8") for b in (expected, before, after))
     except UnicodeDecodeError:
-        _mismatch(
+        mismatch(
             result,
             "invalid_markdown",
-            destination_roots(case)["markdown"],
+            root,
             path,
             "UTF-8 text",
             "invalid UTF-8",
         )
         return
-    parts = _markdown_parts(installed, case.spec.markdown_marker)
+    parts = _markdown_parts(installed, marker)
     if parts is None:
-        _mismatch(
+        mismatch(
             result,
             "section_count",
-            destination_roots(case)["markdown"],
+            root,
             path,
             "one Graphify section",
             "zero or multiple Graphify sections",
@@ -229,26 +254,26 @@ def _markdown(
         return
     prefix, section, suffix = parts
     if section.rstrip("\n") != source.rstrip("\n"):
-        _mismatch(
+        mismatch(
             result,
             "content_mismatch",
-            destination_roots(case)["markdown"],
+            root,
             path,
             "retained Markdown section",
             "different section content",
         )
-    preserved = _markdown_preserved(initial, prefix, suffix, case.spec.markdown_marker)
-    if allow_markdown_relocation and case.name == "repair-missing-markdown-section":
-        original = _markdown_parts(initial, case.spec.markdown_marker)
+    preserved = _markdown_preserved(initial, prefix, suffix, marker)
+    if allow_markdown_relocation:
+        original = _markdown_parts(initial, marker)
         if original is not None:
             preserved = _personal_markdown(original[0], original[2]) == _personal_markdown(
                 prefix, suffix
             )
     if not preserved:
-        _mismatch(
+        mismatch(
             result,
             "user_content_lost",
-            destination_roots(case)["markdown"],
+            root,
             path,
             "user text and section order preserved",
             "user content changed",
@@ -268,7 +293,7 @@ def _check_markdown_alteration(
     planned = _markdown_parts(altered.decode("utf-8"), marker)
     if case.name == "repair-missing-markdown-section":
         if previous is None or previous[0] + previous[2] != altered.decode("utf-8"):
-            _mismatch(
+            mismatch(
                 result,
                 "invalid_preparation",
                 destination_roots(case)["markdown"],
@@ -278,7 +303,7 @@ def _check_markdown_alteration(
             )
         return
     if previous is None or planned is None or previous[1] == planned[1]:
-        _mismatch(
+        mismatch(
             result,
             "invalid_preparation",
             destination_roots(case)["markdown"],
@@ -287,7 +312,7 @@ def _check_markdown_alteration(
             "section not altered as required",
         )
     elif previous[0] != planned[0] or previous[2] != planned[2]:
-        _mismatch(
+        mismatch(
             result,
             "user_content_lost",
             destination_roots(case)["markdown"],
@@ -310,7 +335,7 @@ def _reject_constant(value: str) -> object:
     raise ValueError(f"Invalid JSON constant: {value}")
 
 
-def _read_json(content: bytes) -> dict[str, object]:
+def read_json(content: bytes) -> dict[str, object]:
     value: object = json.loads(
         content.decode("utf-8"), object_pairs_hook=_json_object, parse_constant=_reject_constant
     )
@@ -319,7 +344,7 @@ def _read_json(content: bytes) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _json_equal(left: object, right: object) -> bool:
+def json_equal(left: object, right: object) -> bool:
     return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
 
 
@@ -338,11 +363,11 @@ def _hook_entries(
             raise ValueError(f"hooks.{event}[{index}] must be an object")
         group = cast(dict[str, object], group)
         if group.get("matcher") == matcher:
-            found.extend(_group_hooks(group, f"hooks.{event}[{index}].hooks"))
+            found.extend(group_hooks(group, f"hooks.{event}[{index}].hooks"))
     return found
 
 
-def _group_hooks(group: dict[str, object], path: str) -> list[tuple[str, dict[str, object]]]:
+def group_hooks(group: dict[str, object], path: str) -> list[tuple[str, dict[str, object]]]:
     values = group.get("hooks", [])
     if not isinstance(values, list):
         raise ValueError(f"{path} must be a list")
@@ -354,7 +379,7 @@ def _group_hooks(group: dict[str, object], path: str) -> list[tuple[str, dict[st
     return found
 
 
-def _hook_positions(
+def hook_positions(
     document: dict[str, object],
     event: str,
     matcher: str,
@@ -366,11 +391,9 @@ def _hook_positions(
         path
         for path, hook in _hook_entries(document, event, matcher)
         if (
-            _json_equal(hook, content)
+            json_equal(hook, content)
             if exact
-            else all(
-                key in hook and _json_equal(hook[key], value) for key, value in content.items()
-            )
+            else all(key in hook and json_equal(hook[key], value) for key, value in content.items())
         )
     ]
 
@@ -388,9 +411,9 @@ def _hook_count(
     event, matcher, content = context
     description = {"event": event, "matcher": matcher, "content": content, "count": count}
     try:
-        positions = _hook_positions(installed, event, matcher, content, exact=personal)
+        positions = hook_positions(installed, event, matcher, content, exact=personal)
     except ValueError as error:
-        _mismatch(
+        mismatch(
             result,
             "invalid_json_hooks",
             root,
@@ -400,7 +423,7 @@ def _hook_count(
         )
         return
     if len(positions) != count:
-        _mismatch(
+        mismatch(
             result,
             "personal_hook_count" if personal else "hook_count",
             root,
@@ -419,7 +442,7 @@ def _personal_hook_contexts(
     for event, groups in hooks.items():
         for group in groups:
             matcher = cast(str, group.get("matcher", ""))
-            for _, content in _group_hooks(group, f"hooks.{event}"):
+            for _, content in group_hooks(group, f"hooks.{event}"):
                 key = (event, matcher, json.dumps(content, sort_keys=True))
                 contexts[key] = (event, matcher, content)
     return list(contexts.values())
@@ -453,7 +476,7 @@ def _json_instructions(
     value = posixpath.relpath(dest["skill"], posixpath.dirname(path))
     items = installed.get(case.spec.json_list)
     if not isinstance(items, list):
-        _mismatch(
+        mismatch(
             result,
             "json_list",
             destination_roots(case)["json"],
@@ -464,7 +487,7 @@ def _json_instructions(
         return False
     items = cast(list[object], items)
     if items.count(value) != 1:
-        _mismatch(
+        mismatch(
             result,
             "json_entry_count",
             destination_roots(case)["json"],
@@ -492,7 +515,7 @@ def _personal_groups(case: InstallTestCase, event: str, groups: list[object]) ->
         if not isinstance(raw, dict):
             raise ValueError("Hook groups must be objects")
         group = cast(dict[str, object], raw)
-        entries = _group_hooks(group, f"hooks.{event}")
+        entries = group_hooks(group, f"hooks.{event}")
         personal = [
             content
             for _, content in entries
@@ -500,10 +523,10 @@ def _personal_groups(case: InstallTestCase, event: str, groups: list[object]) ->
                 hook.event == event
                 and hook.matcher == group.get("matcher")
                 and (
-                    _json_equal(content, hook.content)
+                    json_equal(content, hook.content)
                     if case.spec.json_hook_management == "registry"
                     else all(
-                        key in content and _json_equal(content[key], value)
+                        key in content and json_equal(content[key], value)
                         for key, value in hook.content.items()
                     )
                 )
@@ -545,19 +568,19 @@ def _initial_json(case: InstallTestCase) -> dict[str, object]:
     content = next(
         f["content"] for f in case.initial_files if f["root"] == root and f["path"] == path
     )
-    return _read_json(content.encode("utf-8"))
+    return read_json(content.encode("utf-8"))
 
 
 def _personal_values(
     case: InstallTestCase, initial: dict[str, object], installed: dict[str, object]
 ) -> bool:
-    if not _json_equal(_without_hooks(initial), _without_hooks(installed)):
+    if not json_equal(_without_hooks(initial), _without_hooks(installed)):
         return False
     if case.spec.json_hook_management == "registry":
         return True  # Legacy registry contract permits regrouping personal hooks.
     original = _personal_json(case, _initial_json(case))
     current = _personal_json(case, installed)
-    if _json_equal(
+    if json_equal(
         {key: value for key, value in original.items() if key == "hooks"},
         {key: value for key, value in current.items() if key == "hooks"},
     ):
@@ -572,16 +595,16 @@ def _json(case: InstallTestCase, before: bytes, after: bytes, result: Verificati
     path = destinations(case)["json"]
     root = destination_roots(case)["json"]
     try:
-        initial, installed = _read_json(before), _read_json(after)
+        initial, installed = read_json(before), read_json(after)
         _json_hooks(case, installed, result)
         personal_initial = _initial_json(case)
         for context in _personal_hook_contexts(personal_initial):
-            count = len(_hook_positions(personal_initial, *context, exact=True))
+            count = len(hook_positions(personal_initial, *context, exact=True))
             _hook_count(path, context, count, installed, result, personal=True, root=root)
         if not _json_instructions(case, initial, installed, result):
             return
         if not _personal_values(case, initial, installed):
-            _mismatch(
+            mismatch(
                 result,
                 "user_content_lost",
                 root,
@@ -590,7 +613,7 @@ def _json(case: InstallTestCase, before: bytes, after: bytes, result: Verificati
                 "personal JSON changed",
             )
     except (ValueError, UnicodeDecodeError):
-        _mismatch(result, "invalid_json", root, path, "valid JSON object and hooks", "invalid JSON")
+        mismatch(result, "invalid_json", root, path, "valid JSON object and hooks", "invalid JSON")
 
 
 def _json_preparation(
@@ -601,9 +624,9 @@ def _json_preparation(
     result: VerificationResult,
 ) -> None:
     try:
-        expected_json, observed_json = _read_json(expected), _read_json(observed)
-        if not _json_equal(_without_hooks(expected_json), _without_hooks(observed_json)):
-            _mismatch(
+        expected_json, observed_json = read_json(expected), read_json(observed)
+        if not json_equal(_without_hooks(expected_json), _without_hooks(observed_json)):
+            mismatch(
                 result,
                 "invalid_preparation",
                 "project",
@@ -612,12 +635,12 @@ def _json_preparation(
                 "different JSON",
             )
         if previous is not None:
-            installed = _read_json(previous)
+            installed = read_json(previous)
             # Keep absence distinct from a newly introduced empty branch.
             left = {k: v for k, v in installed.items() if k == "hooks"}
             right = {k: v for k, v in observed_json.items() if k == "hooks"}
-            if not _json_equal(left, right):
-                _mismatch(
+            if not json_equal(left, right):
+                mismatch(
                     result,
                     "invalid_preparation",
                     "project",
@@ -626,7 +649,7 @@ def _json_preparation(
                     "different hooks",
                 )
     except (ValueError, UnicodeError):
-        _mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
+        mismatch(result, "invalid_json", "project", path, "valid JSON object", "invalid JSON")
 
 
 def _allowed(case: InstallTestCase, expected: FilesystemSnapshot) -> set[tuple[str, str]]:
@@ -693,10 +716,10 @@ def _preservation(
                 continue
             if left["kind"] != "directory" and right is not None and right["kind"] != "directory":
                 continue
-        _preserved_entry(before, after, root, path, result)
+        preserved_entry(before, after, root, path, result)
 
 
-def _preserved_entry(
+def preserved_entry(
     before: FilesystemSnapshot,
     after: FilesystemSnapshot,
     root: str,
@@ -716,7 +739,7 @@ def _preserved_entry(
     elif left["kind"] == "file":
         changed = _same_file(before, after, left, right) is False
     if changed:
-        _mismatch(
+        mismatch(
             result,
             "unexpected_change",
             root,
@@ -726,12 +749,12 @@ def _preserved_entry(
         )
 
 
-def _require_absent(
+def require_absent(
     snapshot: FilesystemSnapshot, path: str, result: VerificationResult, root: str = "project"
 ) -> None:
     entry = snapshot.entry(root, path)
     if entry is not None:
-        _mismatch(result, "unexpected_entry", root, path, "absent", entry["kind"])
+        mismatch(result, "unexpected_entry", root, path, "absent", entry["kind"])
     elif not snapshot.absent(root, path):
         result.obstacles.append(
             {
@@ -768,7 +791,7 @@ def _reinstall_stability(
     key = (destination_roots(case)["version"], dest["version"])
     previous, current = before.contents.get(key), after.contents.get(key)
     if previous is not None and current is not None and previous != current:
-        _mismatch(
+        mismatch(
             result,
             "version_changed",
             *key,
@@ -818,7 +841,7 @@ def _json_backup(
         and before.entry(root, backup) is not None
     ):
         source = backup
-        original = _file(before, path, result, root)
+        original = file(before, path, result, root)
         if original is not None:
             if case.name in {
                 "repair-missing-json-hook",
@@ -826,13 +849,13 @@ def _json_backup(
                 "repair-duplicate-json-hook",
             }:
                 _restored_hook_json(
-                    case, original, _file(after, path, result, root), root, path, result
+                    case, original, file(after, path, result, root), root, path, result
                 )
             else:
-                _compare_bytes(after, path, original, result, root)
-    original = _file(before, source, result, root)
+                compare_bytes(after, path, original, result, root)
+    original = file(before, source, result, root)
     if original is not None:
-        _compare_bytes(after, backup, original, result, root)
+        compare_bytes(after, backup, original, result, root)
 
 
 def _lock_creation(
@@ -850,7 +873,7 @@ def _lock_creation(
     )
 
 
-def _skill_lock(
+def skill_lock(
     path: str | None,
     before: FilesystemSnapshot,
     after: FilesystemSnapshot,
@@ -861,10 +884,10 @@ def _skill_lock(
     entry = after.entry("home", path)
     if entry is None:
         if after.absent("home", path):
-            _mismatch(result, "missing_file", "home", path, "persistent lock", "absent")
+            mismatch(result, "missing_file", "home", path, "persistent lock", "absent")
         return
     if entry["kind"] != "file":
-        _mismatch(result, "entry_kind", "home", path, "ordinary file", entry["kind"])
+        mismatch(result, "entry_kind", "home", path, "ordinary file", entry["kind"])
         return
     key = ("home", path)
     previous = b"" if before.absent(*key) else before.contents.get(key)
@@ -879,7 +902,7 @@ def _skill_lock(
             }
         )
     elif previous != current:
-        _mismatch(
+        mismatch(
             result,
             "content_mismatch",
             "home",
@@ -897,12 +920,10 @@ def _version(
 ) -> None:
     path = destinations(case)["version"]
     root = destination_roots(case)["version"]
-    observed = _file(
-        after, path, result, root, require_content=case.spec.version_source is not None
-    )
+    observed = file(after, path, result, root, require_content=case.spec.version_source is not None)
     if case.spec.version_source is None:
         return
-    source = _expected_file(expected, case.spec.version_source, result)
+    source = expected_file(expected, case.spec.version_source, result)
     if source is None:
         return
     try:
@@ -922,7 +943,7 @@ def _version(
         )
         return
     if observed is not None and observed != version:
-        _mismatch(
+        mismatch(
             result,
             "content_mismatch",
             root,
@@ -938,13 +959,13 @@ def _initial_absences(
     dest = destinations(case)
     roots = destination_roots(case)
     for kind in ("skill", "references", "version"):
-        _require_absent(before, dest[kind], result, roots[kind])
-    _require_absent(before, dest["skill"] + ".bak", result, roots["skill"])
+        require_absent(before, dest[kind], result, roots[kind])
+    require_absent(before, dest["skill"] + ".bak", result, roots["skill"])
     if case.spec.json_hook_management == "registry":
         for path in sidecars(case).values():
-            _require_absent(before, path, result, roots["json"])
+            require_absent(before, path, result, roots["json"])
     if case.spec.json_backup is not None:
-        _require_absent(before, dest["json"] + case.spec.json_backup, result, roots["json"])
+        require_absent(before, dest["json"] + case.spec.json_backup, result, roots["json"])
 
 
 class InstallVerifier:
@@ -967,16 +988,16 @@ class InstallVerifier:
             ]
         )
         dest = destinations(case)
-        skill = _expected_file(expected, case.spec.skill_source, result)
+        skill = expected_file(expected, case.spec.skill_source, result)
         if skill is not None:
-            _compare_bytes(after, dest["skill"], skill, result, destination_roots(case)["skill"])
+            compare_bytes(after, dest["skill"], skill, result, destination_roots(case)["skill"])
         _references(case, expected, after, result)
         _version(case, expected, after, result)
         self._shared_files(case, expected, before, after, result, allow_markdown_relocation)
         _json_backup(case, before, after, result)
         _preservation(case, expected, before, after, result, skill_backup)
         if skill_backup is not None:
-            _compare_bytes(
+            compare_bytes(
                 after,
                 dest["skill"] + ".bak",
                 skill_backup,
@@ -984,7 +1005,7 @@ class InstallVerifier:
                 destination_roots(case)["skill"],
             )
         else:
-            _require_absent(after, dest["skill"] + ".bak", result, destination_roots(case)["skill"])
+            require_absent(after, dest["skill"] + ".bak", result, destination_roots(case)["skill"])
         if case.spec.skill_lock is not None and expected.skill_lock is None:
             result.obstacles.append(
                 {
@@ -994,7 +1015,7 @@ class InstallVerifier:
                     "reason": "Independent lock expectation unavailable",
                 }
             )
-        _skill_lock(expected.skill_lock, before, after, result)
+        skill_lock(expected.skill_lock, before, after, result)
         _managed_json(case, before, after, result, allow_registry_update)
         _reinstall_stability(case, before, after, result)
         result.complete = not result.obstacles
@@ -1012,11 +1033,11 @@ class InstallVerifier:
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
         root, path = plan["root"], plan["altered_path"]
-        _file(installed, path, result, root)
-        _compare_bytes(degraded, path, content, result, root)
+        file(installed, path, result, root)
+        compare_bytes(degraded, path, content, result, root)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for other_root, other_path in sorted(keys - {(root, path)}):
-            _preserved_entry(installed, degraded, other_root, other_path, result)
+            preserved_entry(installed, degraded, other_root, other_path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1031,11 +1052,11 @@ class InstallVerifier:
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
         key = (plan["root"], plan["deleted_path"])
-        _file(installed, plan["deleted_path"], result, plan["root"])
-        _require_absent(degraded, plan["deleted_path"], result, plan["root"])
+        file(installed, plan["deleted_path"], result, plan["root"])
+        require_absent(degraded, plan["deleted_path"], result, plan["root"])
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for root, path in sorted(keys - {key}):
-            _preserved_entry(installed, degraded, root, path, result)
+            preserved_entry(installed, degraded, root, path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1050,13 +1071,13 @@ class InstallVerifier:
         result = VerificationResult(
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
-        _require_absent(degraded, plan["deleted_path"], result)
-        _compare_bytes(degraded, plan["altered_path"], content, result)
+        require_absent(degraded, plan["deleted_path"], result)
+        compare_bytes(degraded, plan["altered_path"], content, result)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for root, path in sorted(keys):
             if root == "project" and path in (plan["deleted_path"], plan["altered_path"]):
                 continue
-            _preserved_entry(installed, degraded, root, path, result)
+            preserved_entry(installed, degraded, root, path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1072,12 +1093,12 @@ class InstallVerifier:
         result = VerificationResult(
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
-        _compare_bytes(degraded, plan["altered_path"], content, result, root)
-        _require_absent(degraded, plan["altered_path"] + ".bak", result, root)
+        compare_bytes(degraded, plan["altered_path"], content, result, root)
+        require_absent(degraded, plan["altered_path"] + ".bak", result, root)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for entry_root, path in sorted(keys):
             if (entry_root, path) != (root, plan["altered_path"]):
-                _preserved_entry(installed, degraded, entry_root, path, result)
+                preserved_entry(installed, degraded, entry_root, path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1094,14 +1115,14 @@ class InstallVerifier:
             obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
         )
         root = destination_roots(case)["markdown"]
-        _compare_bytes(degraded, plan["altered_path"], content, result, root)
-        previous = _file(installed, plan["altered_path"], result, root)
+        compare_bytes(degraded, plan["altered_path"], content, result, root)
+        previous = file(installed, plan["altered_path"], result, root)
         if previous is not None:
             _check_markdown_alteration(case, previous, content, result)
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for entry_root, path in sorted(keys):
             if (entry_root, path) != (root, plan["altered_path"]):
-                _preserved_entry(installed, degraded, entry_root, path, result)
+                preserved_entry(installed, degraded, entry_root, path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1124,8 +1145,8 @@ class InstallVerifier:
         }:
             return _verify_hook_preparation(case, plan, installed, degraded)
         path = plan["altered_path"]
-        observed = _file(degraded, path, result)
-        previous = _file(installed, path, result)
+        observed = file(degraded, path, result)
+        previous = file(installed, path, result)
         if observed is not None:
             _json_preparation(content, observed, previous, path, result)
         if previous is not None:
@@ -1133,7 +1154,7 @@ class InstallVerifier:
         keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
         for root, entry_path in sorted(keys):
             if (root, entry_path) != ("project", path):
-                _preserved_entry(installed, degraded, root, entry_path, result)
+                preserved_entry(installed, degraded, root, entry_path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1149,12 +1170,12 @@ class InstallVerifier:
         result = VerificationResult(
             obstacles=[ObservationObstacle(**o) for s in (installed, prepared) for o in s.obstacles]
         )
-        _require_absent(installed, plan["backup_path"], result, root)
-        _compare_bytes(prepared, plan["backup_path"], content, result, root)
+        require_absent(installed, plan["backup_path"], result, root)
+        compare_bytes(prepared, plan["backup_path"], content, result, root)
         keys = {(e["root"], e["path"]) for s in (installed, prepared) for e in s.entries}
         for entry_root, path in sorted(keys):
             if (entry_root, path) != (root, plan["backup_path"]):
-                _preserved_entry(installed, prepared, entry_root, path, result)
+                preserved_entry(installed, prepared, entry_root, path, result)
         result.complete = not result.obstacles
         return result
 
@@ -1177,9 +1198,9 @@ class InstallVerifier:
                     }
                 )
         for source in (case.spec.skill_source, case.spec.markdown_source):
-            _expected_file(expected, source, result)
+            expected_file(expected, source, result)
         if case.spec.version_source is not None:
-            _expected_file(expected, case.spec.version_source, result)
+            expected_file(expected, case.spec.version_source, result)
         reference = expected.entry("subject", case.spec.references_source)
         if reference is None or reference["kind"] != "directory":
             result.obstacles.append(
@@ -1204,12 +1225,12 @@ class InstallVerifier:
         allow_markdown_relocation: bool,
     ) -> None:
         dest = destinations(case)
-        source = _expected_file(expected, case.spec.markdown_source, result)
+        source = expected_file(expected, case.spec.markdown_source, result)
         for kind in ("markdown", "json"):
             path = dest[kind]
             root = destination_roots(case)[kind]
             initial = before.contents.get((root, path))
-            installed = _file(after, path, result, root)
+            installed = file(after, path, result, root)
             if initial is None or installed is None:
                 continue
             if kind == "markdown" and source is not None:
@@ -1229,14 +1250,14 @@ def _managed_json(
         return
     root = destination_roots(case)["json"]
     paths = sidecars(case)
-    content = _file(after, paths["state"], result, root)
+    content = file(after, paths["state"], result, root)
     if content is not None:
         try:
-            state = _read_json(content)
-            if not _json_equal(state, registry(case)):
+            state = read_json(content)
+            if not json_equal(state, registry(case)):
                 raise ValueError("Registry differs from independent managed effects")
         except (ValueError, UnicodeError) as error:
-            _mismatch(
+            mismatch(
                 result,
                 "managed_registry",
                 root,
@@ -1245,12 +1266,12 @@ def _managed_json(
                 str(error),
             )
     _managed_hook_contents(case, after, result)
-    _compare_bytes(after, paths["lock"], b"", result, root)
-    _require_absent(after, paths["journal"], result, root)
-    _require_absent(after, destinations(case)["json"] + ".bak", result, root)
+    compare_bytes(after, paths["lock"], b"", result, root)
+    require_absent(after, paths["journal"], result, root)
+    require_absent(after, destinations(case)["json"] + ".bak", result, root)
     old = before.contents.get((root, paths["state"]))
     if not allow_registry_update and old is not None and content != old:
-        _mismatch(
+        mismatch(
             result,
             "registry_stability",
             root,
@@ -1269,14 +1290,14 @@ def _managed_hook_contents(
     if content is None:
         return
     try:
-        document = _read_json(content)
+        document = read_json(content)
         for hook in case.spec.json_hooks:
             exact = sum(
-                _json_equal(value, hook.content)
+                json_equal(value, hook.content)
                 for _, value in _hook_entries(document, hook.event, hook.matcher)
             )
             if exact != 1:
-                _mismatch(
+                mismatch(
                     result,
                     "managed_hook_content",
                     root,
@@ -1294,11 +1315,11 @@ def _restored_json(
     if observed is None:
         return
     try:
-        same = _json_equal(_read_json(original), _read_json(observed))
+        same = json_equal(read_json(original), read_json(observed))
     except (ValueError, UnicodeError):
         same = False
     if not same:
-        _mismatch(result, "content_mismatch", root, path, "unchanged JSON content", "changed JSON")
+        mismatch(result, "content_mismatch", root, path, "unchanged JSON content", "changed JSON")
 
 
 def _verify_hook_preparation(
@@ -1311,21 +1332,19 @@ def _verify_hook_preparation(
         obstacles=[ObservationObstacle(**o) for s in (installed, degraded) for o in s.obstacles]
     )
     root, path = destination_roots(case)["json"], plan["altered_path"]
-    previous = _file(installed, path, result, root)
-    observed = _file(degraded, path, result, root)
+    previous = file(installed, path, result, root)
+    observed = file(degraded, path, result, root)
     if previous is not None:
         try:
-            document = _read_json(previous)
+            document = read_json(previous)
             transform_json_hook(case, document)
             _restored_json(json.dumps(document).encode(), observed, root, path, result)
         except (ValueError, UnicodeError, KeyError, TypeError):
-            _mismatch(
-                result, "invalid_preparation", root, path, "one declared hook", "invalid hook"
-            )
+            mismatch(result, "invalid_preparation", root, path, "one declared hook", "invalid hook")
     keys = {(e["root"], e["path"]) for s in (installed, degraded) for e in s.entries}
     for entry_root, entry_path in sorted(keys):
         if (entry_root, entry_path) != (root, path):
-            _preserved_entry(installed, degraded, entry_root, entry_path, result)
+            preserved_entry(installed, degraded, entry_root, entry_path, result)
     result.complete = not result.obstacles
     return result
 
@@ -1337,12 +1356,12 @@ def _hook_projection(case: InstallTestCase, value: dict[str, object]) -> dict[st
     groups = cast(list[dict[str, object]], events[hook.event])
     empty: dict[str, object] = {"matcher": hook.matcher, "hooks": []}
     # Empty groups already present are personal witnesses, not managed objects.
-    initial_empty = {index for index, group in enumerate(groups) if _json_equal(group, empty)}
+    initial_empty = {index for index, group in enumerate(groups) if json_equal(group, empty)}
     remove_json_hook(case, document)
     events[hook.event] = [
         group
         for index, group in enumerate(groups)
-        if index in initial_empty or not _json_equal(group, empty)
+        if index in initial_empty or not json_equal(group, empty)
     ]
     return document
 
@@ -1352,12 +1371,12 @@ def _same_hook_json(
 ) -> bool:
     hook = case.spec.json_hooks[0]
     if any(
-        len(_hook_positions(value, hook.event, hook.matcher, hook.content, exact=False)) != 1
+        len(hook_positions(value, hook.event, hook.matcher, hook.content, exact=False)) != 1
         for value in (original, observed)
     ):
         return False
     expected, current = (_hook_projection(case, value) for value in (original, observed))
-    if _json_equal(expected, current):
+    if json_equal(expected, current):
         return True
     return _vacated_group_matches(case, original, expected, current)
 
@@ -1375,18 +1394,18 @@ def _vacated_group_matches(
     original_events = cast(dict[str, object], original["hooks"])
     original_groups = cast(list[object], original_events[hook.event])
     carrier = {"matcher": hook.matcher, "hooks": [hook.content]}
-    if not any(_json_equal(group, carrier) for group in original_groups):
+    if not any(json_equal(group, carrier) for group in original_groups):
         return False
     events = cast(dict[str, object], current["hooks"])
     groups = cast(list[object], events[hook.event])
     empty: dict[str, object] = {"matcher": hook.matcher, "hooks": []}
     return any(
-        _json_equal(
+        json_equal(
             expected,
             {**current, "hooks": {**events, hook.event: groups[:index] + groups[index + 1 :]}},
         )
         for index, group in enumerate(groups)
-        if _json_equal(group, empty)
+        if json_equal(group, empty)
     )
 
 
@@ -1401,11 +1420,11 @@ def _restored_hook_json(
     if observed is None:
         return
     try:
-        same = _same_hook_json(case, _read_json(original), _read_json(observed))
+        same = _same_hook_json(case, read_json(original), read_json(observed))
     except (ValueError, UnicodeError, KeyError, TypeError):
         same = False
     if not same:
-        _mismatch(
+        mismatch(
             result,
             "content_mismatch",
             root,

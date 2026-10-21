@@ -1,12 +1,10 @@
 """Validate the received case result independently of container execution."""
 
-import hashlib
 import json
 from pathlib import Path, PurePosixPath
 from typing import cast
 
 from tools.install_sandbox.container.environment import (
-    FilesystemSnapshot,
     altered_reference_plan,
     missing_reference_plan,
     skill_backup_plan,
@@ -21,6 +19,7 @@ from tools.install_sandbox.contracts.case import (
     json_repair_plan,
     markdown_repair_plan,
 )
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.managed_json import (
     is_transaction_temporary,
     needs_resolution,
@@ -37,96 +36,56 @@ from tools.install_sandbox.contracts.results import (
     PreparationEvidence,
     ReferenceRepairPlan,
     SkillBackupPlan,
-    SnapshotEntry,
     StepEvidence,
     StepPreparationEvidence,
-    VerificationMismatch,
-    VerificationResult,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
-
-
-def safe_evidence_path(output_directory: Path, relative: str) -> Path:
-    """Resolve a result-relative evidence reference without leaving its directory."""
-    relative_path(relative.removesuffix("/"))
-    root = output_directory.resolve()
-    try:
-        destination = (root / relative).resolve()
-    except RuntimeError as error:
-        raise ValueError(f"Cannot resolve evidence path: {relative!r}") from error
-    if not destination.is_relative_to(root) or destination == root:
-        raise ValueError(f"Evidence path escapes the result directory: {relative!r}")
-    return destination
-
-
-def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    data: dict[str, object] = {}
-    for key, value in pairs:
-        if key in data:
-            raise ValueError(f"Duplicate result field: {key}")
-        data[key] = value
-    return data
-
-
-def _string(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("Expected a string")
-    return value
-
-
-def _list(value: object) -> list[object]:
-    if not isinstance(value, list):
-        raise ValueError("Expected a list")
-    return cast(list[object], value)
-
-
-def _boolean(value: object) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError("Expected a boolean")
-    return value
-
-
-def _optional_text(value: object) -> str | None:
-    return None if value is None else text(value)
+from tools.install_sandbox.host.effect_result_reader import check_effect_result
+from tools.install_sandbox.host.evidence_reader import (
+    boolean as _boolean,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    check_environment as _check_environment,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    check_snapshot as _check_snapshot,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    json_list as _list,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    json_object as _json_object,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    lock_expectation as _lock_expectation,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    optional_text as _optional_text,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    parse_obstacle as _obstacle,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    read_json_evidence as _read_json_evidence,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    retained_snapshot as _retained_snapshot,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    safe_evidence_path,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    snapshot_entry as _snapshot_entry,
+)
+from tools.install_sandbox.host.evidence_reader import (
+    verification as _verification,
+)
 
 
 def _evidence(value: object, output: Path) -> str | None:
     result = _optional_text(value)
     if result is not None:
         safe_evidence_path(output, result)
-    return result
-
-
-def _obstacle(value: object) -> ObservationObstacle:
-    data = fields(value, "operation root path reason")
-    return {
-        "operation": text(data["operation"]),
-        "root": text(data["root"]),
-        "path": text(data["path"]),
-        "reason": text(data["reason"]),
-    }
-
-
-def _mismatch(value: object) -> VerificationMismatch:
-    data = fields(value, "type root path expected observed")
-    return VerificationMismatch(
-        text(data["type"]),
-        text(data["root"]),
-        text(data["path"]),
-        _string(data["expected"]),
-        _string(data["observed"]),
-    )
-
-
-def _verification(value: object) -> VerificationResult:
-    data = fields(value, "complete mismatches obstacles")
-    result = VerificationResult(
-        _boolean(data["complete"]),
-        [_mismatch(item) for item in _list(data["mismatches"])],
-        [_obstacle(item) for item in _list(data["obstacles"])],
-    )
-    if result.complete and result.obstacles:
-        raise ValueError("Complete verification cannot contain observation obstacles")
     return result
 
 
@@ -381,7 +340,9 @@ def _check_consistency(result: InstallTestResult) -> None:
         raise ValueError("Case status contradicts command or verification facts")
 
 
-def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestResult:
+def read_result(
+    output_directory: Path, case: InstallTestCase | EffectInstallCase
+) -> InstallTestResult:
     """Read a complete result; retain I/O failures and reject incompatible documents."""
     payload = safe_evidence_path(output_directory, "result.json").read_text(encoding="utf-8")
     data = fields(
@@ -409,6 +370,9 @@ def read_result(output_directory: Path, case: InstallTestCase) -> InstallTestRes
         },
     )
     _check_consistency(result)
+    if isinstance(case, EffectInstallCase):
+        check_effect_result(result, case, output_directory)
+        return result
     if result.preparation["ready"]:
         _check_command_evidence(result, case, output_directory)
         _check_json_observations(result, case, output_directory)
@@ -461,22 +425,6 @@ def _check_lock_evidence(result: InstallTestResult, case: InstallTestCase, outpu
             )
 
 
-def _lock_expectation(output: Path) -> tuple[PurePosixPath, PurePosixPath, str]:
-    expectation = fields(
-        _read_json_evidence(output, "skill-lock.json"), "home skill_directory path"
-    )
-    home, skill = (PurePosixPath(text(expectation[k])) for k in ("home", "skill_directory"))
-    if not home.is_absolute() or not skill.is_absolute() or ".." in home.parts + skill.parts:
-        raise ValueError("Lock expectation requires canonical absolute roots")
-    if str(home) != expectation["home"] or str(skill) != expectation["skill_directory"]:
-        raise ValueError("Lock roots must retain their canonical spelling")
-    digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
-    path = f".cache/graphify/skill-locks/{digest}.lock"
-    if expectation["path"] != path:
-        raise ValueError("Lock path does not match retained skill directory")
-    return home, skill, path
-
-
 def _check_lock_snapshot(output: Path, relative: str, path: str, *, required: bool) -> None:
     snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
     obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
@@ -491,92 +439,6 @@ def _check_lock_snapshot(output: Path, relative: str, path: str, *, required: bo
             retained = entry.get("content_file") is not None
     if required and not retained:
         raise ValueError("Successful installation requires observed lock bytes")
-
-
-def _read_json_evidence(output: Path, relative: str) -> object:
-    return json.loads(
-        safe_evidence_path(output, relative).read_bytes(), object_pairs_hook=_json_object
-    )
-
-
-def _check_snapshot(
-    output: Path,
-    relative: str,
-    *,
-    complete: bool = True,
-    presence_only: tuple[str, str] | None = None,
-) -> list[dict[str, object]]:
-    """Validate inventory and content bindings, without deciding file conformance."""
-    data = fields(_read_json_evidence(output, relative), "entries obstacles")
-    for obstacle in _list(data["obstacles"]):
-        _obstacle(obstacle)
-    entries: list[dict[str, object]] = []
-    seen: set[tuple[str, str]] = set()
-    prefix = relative.removesuffix(".json")
-    for value in _list(data["entries"]):
-        entry = _snapshot_entry(value, output, prefix)
-        key = (text(entry["root"]), text(entry["path"]))
-        if key in seen:
-            raise ValueError("Duplicate snapshot entry")
-        seen.add(key)
-        entries.append(entry)
-    if complete:
-        _check_complete_snapshot(entries, _list(data["obstacles"]), presence_only)
-    return entries
-
-
-def _check_complete_snapshot(
-    entries: list[dict[str, object]],
-    obstacles: list[object],
-    presence_only: tuple[str, str] | None = None,
-) -> None:
-    if obstacles or not entries:
-        raise ValueError("Complete verification requires observable snapshot evidence")
-    for entry in entries:
-        kind = entry["kind"]
-        if kind == "file" and (entry["root"], entry["path"]) == presence_only:
-            continue
-        if kind == "file" and entry.get("content_file") is None and entry.get("sha256") is None:
-            raise ValueError("Complete verification requires file content evidence")
-        if kind == "directory" and entry.get("listing_complete") is not True:
-            raise ValueError("Complete verification requires complete directory listings")
-        if kind not in {"file", "directory"}:
-            raise ValueError("Complete verification contradicts unsupported entry")
-
-
-def _snapshot_entry(value: object, output: Path, prefix: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise ValueError("Invalid snapshot entry")
-    entry = cast(dict[str, object], value)
-    if not {"root", "path", "kind"} <= entry.keys() or entry.keys() - {
-        "root",
-        "path",
-        "kind",
-        "content_file",
-        "sha256",
-        "listing_complete",
-    }:
-        raise ValueError("Invalid snapshot entry fields")
-    root, path, kind = text(entry["root"]), text(entry["path"]), text(entry["kind"])
-    if path != ".":
-        relative_path(path)
-    if root not in ({"subject"} if prefix == "expected" else {"project", "home"}):
-        raise ValueError("Invalid snapshot root")
-    if kind not in {"file", "directory", "unknown", "other"}:
-        raise ValueError("Invalid snapshot entry kind")
-    if "listing_complete" in entry:
-        _boolean(entry["listing_complete"])
-    _check_content_binding(entry, output, prefix)
-    return entry
-
-
-def _check_content_binding(entry: dict[str, object], output: Path, prefix: str) -> None:
-    root, path = entry["root"], entry["path"]
-    if entry.get("content_file") is not None:
-        binding = f"{prefix}/{path}" if root == "subject" else f"{prefix}/{root}/{path}"
-        if entry["content_file"] != binding:
-            raise ValueError("Snapshot content must belong to its own observation")
-        safe_evidence_path(output, binding).read_bytes()
 
 
 def _check_step_preparation_evidence(
@@ -705,30 +567,6 @@ def _check_case_preparation_plan(
     if "backup_path" in plan:
         raise ValueError("Unexpected backup preparation plan")
     _check_case_repair_plan(plan, case, output, sources)
-
-
-def _retained_snapshot(output: Path, relative: str) -> FilesystemSnapshot:
-    data = fields(_read_json_evidence(output, relative), "entries obstacles")
-    entries = _check_snapshot(output, relative, complete=False)
-    snapshot = FilesystemSnapshot(
-        entries=[cast(SnapshotEntry, entry) for entry in entries],
-        obstacles=[_obstacle(o) for o in _list(data["obstacles"])],
-    )
-    for entry in snapshot.entries:
-        content = entry.get("content_file")
-        if content is not None:
-            retained = safe_evidence_path(output, content).read_bytes()
-            if entry.get("sha256") not in {None, hashlib.sha256(retained).hexdigest()}:
-                raise ValueError("Retained content contradicts its snapshot digest")
-            snapshot.contents[(entry["root"], entry["path"])] = retained
-    lock = output / "skill-lock.json"
-    if lock.exists():
-        snapshot.skill_lock = text(
-            fields(_read_json_evidence(output, "skill-lock.json"), "home skill_directory path")[
-                "path"
-            ]
-        )
-    return snapshot
 
 
 def _check_repair_installations(
@@ -1243,37 +1081,6 @@ def _check_version_evidence(result: InstallTestResult, case: InstallTestCase, ou
             continue
         required: set[str] = {version} if _check_attempted(step) == "passed" else set()
         _check_content_snapshot(output, f"steps/{index}/after.json", {version}, required, root=root)
-
-
-def _check_environment(command: CommandEvidence, output: Path, index: int) -> None:
-    """Bind allowlisted execution settings to the case's isolated roots."""
-    cwd = PurePosixPath(command["cwd"])
-    if not cwd.is_absolute() or cwd.name != "project" or ".." in cwd.parts:
-        raise ValueError("Command requires a canonical isolated project directory")
-    home = cwd.parent / "home"
-    temporary = cwd.parent.parent / "command-tmp"
-    names = (
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_CACHE_HOME",
-        "XDG_STATE_HOME",
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "APPDATA",
-        "LOCALAPPDATA",
-    )
-    expected = {
-        "PATH": "/bin:/usr/bin",
-        "HOME": str(home),
-        "TMPDIR": str(temporary),
-        "LANG": "C.UTF-8",
-        "PYTHONNOUSERSITE": "1",
-        "USERPROFILE": str(home),
-        "PYTHONDONTWRITEBYTECODE": "1",
-        **{name: str(temporary / "configuration" / name.lower()) for name in names},
-    }
-    if _read_json_evidence(output, f"steps/{index}/environment.json") != expected:
-        raise ValueError("Execution environment contradicts isolated case roots or allowlist")
 
 
 def _check_declared_environment(

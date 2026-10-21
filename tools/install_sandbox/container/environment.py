@@ -147,7 +147,80 @@ def _obstacle(
     )
 
 
-class TestEnvironment:
+class ObservedEnvironment:
+    """Capture project/home trees for both case representations, retaining file bytes."""
+
+    project: Path
+    home: Path
+
+    def observe(
+        self, writer: TestResultWriter, phase: str, *, step_index: int = 0
+    ) -> FilesystemSnapshot:
+        if phase not in {"before", "after"}:
+            raise ValueError("Observation phase must be before or after")
+        snapshot = FilesystemSnapshot()
+        for root, directory in (("project", self.project), ("home", self.home)):
+            self._capture(snapshot, root, directory, ".", expected=False)
+        writer.write_snapshot(snapshot, phase, step_index=step_index)
+        return snapshot
+
+    def _capture(
+        self,
+        snapshot: FilesystemSnapshot,
+        root: str,
+        directory: Path,
+        relative: str,
+        *,
+        expected: bool,
+    ) -> None:
+        path = directory / relative
+        entry: SnapshotEntry = {"root": root, "path": relative, "kind": "unknown"}
+        snapshot.entries.append(entry)
+        try:
+            mode = path.lstat().st_mode
+        except OSError as error:
+            _obstacle(snapshot, "stat", root, relative, error)
+            return
+        if stat.S_ISDIR(mode):
+            entry["kind"] = "directory"
+            self._directory(snapshot, entry, directory, expected=expected)
+        elif stat.S_ISREG(mode):
+            entry["kind"] = "file"
+            self._file(snapshot, entry, path, expected=expected)
+        else:
+            entry["kind"] = "other"
+            _obstacle(snapshot, "observe_entry", root, relative, "Unsupported filesystem entry")
+
+    def _directory(
+        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, directory: Path, *, expected: bool
+    ) -> None:
+        entry["listing_complete"] = False
+        try:
+            children = sorted((directory / entry["path"]).iterdir())
+        except OSError as error:
+            _obstacle(snapshot, "list_directory", entry["root"], entry["path"], error)
+            return
+        entry["listing_complete"] = True
+        for child in children:
+            self._capture(
+                snapshot,
+                entry["root"],
+                directory,
+                str(child.relative_to(directory)),
+                expected=expected,
+            )
+
+    def _file(
+        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, path: Path, *, expected: bool
+    ) -> None:
+        entry["content_file"] = None
+        try:
+            snapshot.contents[(entry["root"], entry["path"])] = path.read_bytes()
+        except OSError as error:
+            _obstacle(snapshot, "read_file", entry["root"], entry["path"], error)
+
+
+class TestEnvironment(ObservedEnvironment):
     """Own fresh project/home directories; software and evidence stay outside them."""
 
     def __init__(self, case: InstallTestCase, directory: Path):
@@ -271,17 +344,6 @@ class TestEnvironment:
             return f"Skill backup preparation failed: {error}"
         return None
 
-    def observe(
-        self, writer: TestResultWriter, phase: str, *, step_index: int = 0
-    ) -> FilesystemSnapshot:
-        if phase not in {"before", "after"}:
-            raise ValueError("Observation phase must be before or after")
-        snapshot = FilesystemSnapshot()
-        for root, directory in (("project", self.project), ("home", self.home)):
-            self._capture(snapshot, root, directory, ".", expected=False)
-        writer.write_snapshot(snapshot, phase, step_index=step_index)
-        return snapshot
-
     def preserve_expected(self, subject: Path, writer: TestResultWriter) -> FilesystemSnapshot:
         snapshot = FilesystemSnapshot(skill_lock=self.skill_lock)
         if self.skill_lock is not None:
@@ -294,52 +356,6 @@ class TestEnvironment:
             self._capture(snapshot, "subject", subject, path, expected=True)
         writer.write_snapshot(snapshot, "expected")
         return snapshot
-
-    def _capture(
-        self,
-        snapshot: FilesystemSnapshot,
-        root: str,
-        directory: Path,
-        relative: str,
-        *,
-        expected: bool,
-    ) -> None:
-        path = directory / relative
-        entry: SnapshotEntry = {"root": root, "path": relative, "kind": "unknown"}
-        snapshot.entries.append(entry)
-        try:
-            mode = path.lstat().st_mode
-        except OSError as error:
-            _obstacle(snapshot, "stat", root, relative, error)
-            return
-        if stat.S_ISDIR(mode):
-            entry["kind"] = "directory"
-            self._directory(snapshot, entry, directory, expected=expected)
-        elif stat.S_ISREG(mode):
-            entry["kind"] = "file"
-            self._file(snapshot, entry, path, expected=expected)
-        else:
-            entry["kind"] = "other"
-            _obstacle(snapshot, "observe_entry", root, relative, "Unsupported filesystem entry")
-
-    def _directory(
-        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, directory: Path, *, expected: bool
-    ) -> None:
-        entry["listing_complete"] = False
-        try:
-            children = sorted((directory / entry["path"]).iterdir())
-        except OSError as error:
-            _obstacle(snapshot, "list_directory", entry["root"], entry["path"], error)
-            return
-        entry["listing_complete"] = True
-        for child in children:
-            self._capture(
-                snapshot,
-                entry["root"],
-                directory,
-                str(child.relative_to(directory)),
-                expected=expected,
-            )
 
     def _file(
         self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, path: Path, *, expected: bool

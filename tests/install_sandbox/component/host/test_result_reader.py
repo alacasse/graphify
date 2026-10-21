@@ -11,7 +11,8 @@ import pytest
 from tools.install_sandbox.contracts.case import InstallTestCase
 from tools.install_sandbox.contracts.managed_json import resolution, sidecars
 from tools.install_sandbox.contracts.results import InstallTestResult, VerificationResult
-from tools.install_sandbox.host.result_reader import read_result, safe_evidence_path
+from tools.install_sandbox.host.evidence_reader import safe_evidence_path
+from tools.install_sandbox.host.result_reader import read_result
 
 _CASE = Path(__file__).resolve().parents[1] / "fixtures" / "first-install.json"
 

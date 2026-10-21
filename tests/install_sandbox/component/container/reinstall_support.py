@@ -7,7 +7,7 @@ import pytest
 
 from tests.install_sandbox.component.container.local_case import LocalCase, controlled_script
 from tools.install_sandbox.host.coordinator import CoordinatedResult, InstallTestCoordinator
-from tools.install_sandbox.host.result_reader import safe_evidence_path
+from tools.install_sandbox.host.evidence_reader import safe_evidence_path
 
 _COMPONENT = Path(__file__).parent
 

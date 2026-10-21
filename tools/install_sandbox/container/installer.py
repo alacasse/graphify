@@ -10,7 +10,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from tools.install_sandbox.contracts.case import InstallTestCase, install_arguments
+from tools.install_sandbox.contracts.case import install_arguments
+from tools.install_sandbox.contracts.case_transport import ExecutionCase, load_case
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.timings import elapsed
 
 
@@ -95,21 +97,23 @@ class InstallerDriver:
 
     def install(
         self,
-        case: InstallTestCase,
+        case: ExecutionCase,
         executable: Path,
         project: Path,
         home: Path,
         temporary: Path,
         resolution: Path | None = None,
     ) -> InstallerCommandResult:
-        InstallTestCase.from_json(case.to_json())
-        args = [str(executable), *install_arguments(case)]
-        if resolution is not None and case.spec.json_hook_management != "registry":
+        case = load_case(case.to_json())
+        native = isinstance(case, EffectInstallCase)
+        arguments = list(case.subject.invocation) if native else install_arguments(case)
+        args = [str(executable), *arguments]
+        if resolution is not None and (native or case.spec.json_hook_management != "registry"):
             raise ValueError("Undeclared managed resolution")
         if resolution is not None:
             args.extend(["--managed-hooks-resolution", str(resolution)])
         environment = command_environment(home, temporary)
-        if case.spec.command is not None:
+        if native or case.spec.command is not None:
             environment.update(isolated_configuration(home, temporary))
         result = self.execute(args, project, environment, self.timeout)
         return replace(result, environment=environment)

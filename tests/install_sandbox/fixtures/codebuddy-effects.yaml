@@ -1,0 +1,20 @@
+scope: project
+directory: .codebuddy
+effects:
+  - kind: skill
+    source: skill.md
+    references: skills/claude/references
+    destination: {root: home, path: skills/graphify}
+  - kind: markdown-section
+    source: always_on/claude-md.md
+    destination: {directory: ., path: CODEBUDDY.md}
+  - kind: json-hooks
+    family: pretooluse-context
+    destination: {path: settings.json}
+    events:
+      PreToolUse:
+        tools:
+          shell: Bash
+          search-content: Grep
+          read-file: Read
+          find-files: Glob

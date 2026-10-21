@@ -116,6 +116,9 @@ class TestResultWriter:
     def write_lock_expectation(self, expectation: dict[str, str]) -> None:
         self._write_json("skill-lock.json", expectation)
 
+    def write_initial_verification(self, result: VerificationResult) -> None:
+        self._write_json("initial-verification.json", asdict(result))
+
     def write_missing_reference_plan(self, plan: MissingReferencePlan) -> None:
         self._write_json("steps/1/preparation/plan.json", plan)
 

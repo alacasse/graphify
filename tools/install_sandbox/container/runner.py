@@ -67,7 +67,13 @@ def _new_result(case: ExecutionCase) -> InstallTestResult:
     ]
     return InstallTestResult(
         {"name": case.name, "target": case.target, "scope": case.scope},
-        {"ready": False, "reason": None, "log": "preparation.log", "source": "campaign"},
+        {
+            "ready": False,
+            "reason": None,
+            "log": "preparation.log",
+            "source": "campaign",
+            "stage": "started",
+        },
         steps,
         "not_run",
         {"journal": "journal.log", "expected_contents": None},
@@ -146,6 +152,7 @@ class InstallTestRunner:
             (work / "command-tmp").mkdir()
             expected = environment.preserve_expected(subject, writer)
             result.evidence["expected_contents"] = "expected/"
+            result.preparation["stage"] = "sources_retained"
             before = environment.observe(writer, "before")
         except OSError as error:
             self._not_run(result, writer, f"Initial preparation failed: {error}")
@@ -157,6 +164,7 @@ class InstallTestRunner:
         )
         if isinstance(case, EffectInstallCase):
             writer.write_initial_verification(initial)
+        result.preparation["stage"] = "initial_verified"
         writer.append_log("preparation.log", json.dumps(asdict(initial)) + "\n")
         if not initial.complete or initial.mismatches:
             self._not_run(

@@ -251,17 +251,37 @@ def _missing_preparation(
 
 
 def _preparation(value: object, output: Path) -> PreparationEvidence:
-    data = fields(value, "ready reason log source")
+    has_stage = isinstance(value, dict) and "stage" in value
+    data = fields(cast(object, value), "ready reason log source" + (" stage" if has_stage else ""))
     if data["source"] != "campaign":
         raise ValueError("Package preparation must be inherited from campaign")
     log = text(data["log"])
     safe_evidence_path(output, log)
-    return {
+    result: PreparationEvidence = {
         "source": "campaign",
         "ready": _boolean(data["ready"]),
         "reason": _optional_text(data["reason"]),
         "log": log,
     }
+    if has_stage:
+        stage = text(data["stage"])
+        if stage not in ("started", "sources_retained", "initial_verified"):
+            raise ValueError("Invalid preparation stage")
+        result["stage"] = stage
+    return result
+
+
+def _check_preparation_stage(result: InstallTestResult) -> None:
+    stage = result.preparation.get("stage")
+    if stage is None:
+        return  # Historical results retain their existing evidence requirements.
+    expected = None if stage == "started" else "expected/"
+    if result.evidence["expected_contents"] != expected:
+        raise ValueError("Preparation stage contradicts retained source reference")
+    if result.preparation["ready"] and (
+        stage != "initial_verified" or result.preparation["reason"] is not None
+    ):
+        raise ValueError("Ready preparation requires completed initial verification without reason")
 
 
 def _check_references(result: InstallTestResult, step: StepEvidence, index: int) -> None:
@@ -323,6 +343,7 @@ def _check_next_step(result: InstallTestResult, step: StepEvidence, index: int) 
 
 
 def _check_consistency(result: InstallTestResult) -> None:
+    _check_preparation_stage(result)
     if not result.preparation["ready"]:
         for step in result.steps:
             _check_skipped(step)

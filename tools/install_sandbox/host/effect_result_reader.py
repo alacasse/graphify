@@ -47,7 +47,9 @@ def _snapshot(output: Path, relative: str, *, complete: bool = True) -> Filesyst
     return snapshot
 
 
-def _expected_sources(case: EffectInstallCase, expected: FilesystemSnapshot) -> None:
+def _expected_sources(
+    case: EffectInstallCase, expected: FilesystemSnapshot, *, complete: bool = True
+) -> None:
     required: dict[str, str] = {}
     for effect in case.effects.effects:
         if isinstance(effect, SkillEffect):
@@ -57,9 +59,22 @@ def _expected_sources(case: EffectInstallCase, expected: FilesystemSnapshot) -> 
         elif isinstance(effect, MarkdownSectionEffect):
             required[effect.source] = "file"
     for path, kind in required.items():
+        if not complete and (
+            _source_obstructed(expected, path)
+            or any(path.startswith(parent + "/") for parent in required)
+        ):
+            continue
         entry = expected.entry("subject", path)
-        if entry is None or entry["kind"] != kind:
+        if entry is None or (complete and entry["kind"] != kind):
             raise ValueError(f"Missing retained effects source: {path}")
+
+
+def _source_obstructed(expected: FilesystemSnapshot, path: str) -> bool:
+    return any(
+        obstacle["root"] == "subject"
+        and (path == obstacle["path"] or path.startswith(obstacle["path"] + "/"))
+        for obstacle in expected.obstacles
+    )
 
 
 def _same_observation(first: FilesystemSnapshot, second: FilesystemSnapshot) -> bool:
@@ -196,6 +211,17 @@ def _command_binding(
 def _failed_initial_evidence(
     case: EffectInstallCase, result: InstallTestResult, output: Path
 ) -> None:
+    stage = result.preparation.get("stage")
+    if stage in ("started", "sources_retained"):
+        if (output / "initial-verification.json").is_symlink() or (
+            output / "initial-verification.json"
+        ).exists():
+            raise ValueError("Preparation stage contradicts retained initial verification")
+        safe_evidence_path(output, "journal.log").read_bytes()
+        if stage == "sources_retained":
+            expected = _snapshot(output, "expected.json", complete=False)
+            _expected_sources(case, expected, complete=False)
+        return
     if result.evidence["expected_contents"] != "expected/":
         return
     saved = verification(read_json_evidence(output, "initial-verification.json"))

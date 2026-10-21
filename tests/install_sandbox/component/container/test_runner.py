@@ -9,13 +9,16 @@ from pathlib import Path
 import pytest
 
 from tests.install_sandbox.component.container.local_case import LocalCase, deny_read
+from tools.install_sandbox.container.environment import TestEnvironment as SandboxEnvironment
 from tools.install_sandbox.container.installer import (
     InstallerCommandResult,
     InstallerDriver,
     execute_command,
 )
 from tools.install_sandbox.container.runner import InstallTestRunner
+from tools.install_sandbox.contracts.case import InstallTestCase
 from tools.install_sandbox.contracts.results import EvidenceWriteError
+from tools.install_sandbox.host.result_reader import read_result
 
 # Literal effects only: no product imports, reference discovery or spec interpretation.
 
@@ -29,6 +32,7 @@ def test_passed_result_and_all_contents_survive_workspace_removal(tmp_path: Path
         "reason": None,
         "log": "preparation.log",
         "source": "campaign",
+        "stage": "initial_verified",
     }
     command = result.steps[0]["command"]
     assert command is not None
@@ -112,6 +116,43 @@ def test_initial_read_obstacle_prevents_attempt(
     assert result.steps[0]["command"] is None
     assert "Controlled read denied" in (result.preparation["reason"] or "")
     assert not (tmp_path / "work/environment/project/.sandbox-reference/skills").exists()
+
+
+def test_escaping_initial_observation_error_preserves_sources_after_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = LocalCase(tmp_path)
+    calls: list[list[str]] = []
+
+    def execute(
+        args: list[str], cwd: Path, env: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        calls.append(args)
+        raise AssertionError("Preparation failure must prevent installer execution")
+
+    def observe(*args: object, **kwargs: object) -> None:
+        raise OSError("Controlled escaping observation failure")
+
+    monkeypatch.setattr(SandboxEnvironment, "observe", observe)
+    case = InstallTestCase.from_json((tmp_path / "case.json").read_text())
+    result = InstallTestRunner(InstallerDriver(execute)).run_case(
+        reference_sources=tmp_path / "subject",
+        prepared_executable=local.prepare_executable(),
+        case_file=tmp_path / "case.json",
+        work_directory=tmp_path / "work",
+        output_directory=tmp_path / "results",
+    )
+    assert calls == []
+    assert result.status == "not_run"
+    assert result.preparation.get("stage") == "sources_retained"
+    assert "Controlled escaping observation failure" in (result.preparation["reason"] or "")
+    assert result.evidence["expected_contents"] == "expected/"
+    assert all(step["command"] is None for step in result.steps)
+    shutil.rmtree(tmp_path / "work")
+    shutil.rmtree(tmp_path / "subject")
+    restored = read_result(tmp_path / "results", case)
+    assert restored == result
+    assert (tmp_path / "results/expected/graphify/skill.md").read_text() == "# Local skill\n"
 
 
 def test_final_obstacle_keeps_known_mismatch(

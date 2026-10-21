@@ -41,6 +41,8 @@ class PreparationEvidence(TypedDict):
     ready: bool
     reason: str | None
     log: str
+    # Absent only in historical results; verification completed does not imply success.
+    stage: NotRequired[Literal["started", "sources_retained", "initial_verified"]]
 
 
 class CommandEvidence(TypedDict):

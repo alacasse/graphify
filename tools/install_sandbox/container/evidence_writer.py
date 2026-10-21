@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from collections.abc import Generator
@@ -103,6 +104,8 @@ class TestResultWriter:
                 relative = f"{prefix}/{key[1]}"
                 self._write_bytes(relative, snapshot.contents[key])
                 entry["content_file"] = relative
+                if name == "expected":
+                    entry["sha256"] = hashlib.sha256(snapshot.contents[key]).hexdigest()
         relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
 

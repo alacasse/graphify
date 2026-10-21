@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from tests.install_sandbox.component.container.effect_case_support import EffectsRun
+from tests.install_sandbox.component.container.local_case import deny_read
+from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.host.result_reader import read_result
 
@@ -82,6 +84,44 @@ def test_missing_source_blocks_both_installs(tmp_path: Path) -> None:
     assert result.status == "not_run"
     assert not local.calls
     assert local.reread_after_cleanup() == result
+
+
+@pytest.mark.parametrize("markdown_only", [False, True])
+@pytest.mark.parametrize("method", ["prepare", "preserve_expected", "observe"])
+def test_initial_io_failure_remains_readable_after_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str, markdown_only: bool
+) -> None:
+    local = EffectsRun(tmp_path, markdown_only=markdown_only)
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError("Controlled initial failure")
+
+    monkeypatch.setattr(EffectEnvironment, method, fail)
+    result = local.run()
+    assert result.status == "not_run"
+    assert local.calls == []
+    assert "Controlled initial failure" in (result.preparation["reason"] or "")
+    assert (local.output / "expected.json").exists() == (method == "observe")
+    assert not (local.output / "steps/0/before.json").exists()
+    assert not (local.output / "initial-verification.json").exists()
+    assert local.reread_after_cleanup() == result
+    assert result.preparation.get("stage") == (
+        "sources_retained" if method == "observe" else "started"
+    )
+
+
+def test_initial_observation_obstacle_is_recomputed_after_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = EffectsRun(tmp_path)
+    deny_read(monkeypatch, tmp_path / "work/environment/project/CODEBUDDY.md")
+    result = local.run()
+    assert result.status == "not_run"
+    assert local.calls == []
+    verdict = json.loads((local.output / "initial-verification.json").read_text())
+    assert not verdict["complete"] and verdict["obstacles"]
+    assert local.reread_after_cleanup() == result
+    assert result.preparation.get("stage") == "initial_verified"
 
 
 @pytest.mark.parametrize(

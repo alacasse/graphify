@@ -8,6 +8,8 @@ from typing import cast
 
 import pytest
 
+from tests.install_sandbox.component.container.effect_case_support import EffectsRun
+from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.effect_verifier import EffectVerifier
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
@@ -205,3 +207,158 @@ def test_failed_initial_verification_requires_retained_observations(tmp_path: Pa
     (output / "steps/0/before.json").unlink()
     with pytest.raises(OSError):
         read_result(output, case)
+
+
+def _observation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> EffectsRun:
+    local = EffectsRun(tmp_path)
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError("Controlled observation failure")
+
+    monkeypatch.setattr(EffectEnvironment, "observe", fail)
+    assert local.run().status == "not_run"
+    assert local.calls == []
+    return local
+
+
+@pytest.mark.parametrize("artifact", ["expected.json", "expected/skill.md", "journal.log"])
+def test_observation_failure_requires_retained_sources_and_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, artifact: str
+) -> None:
+    local = _observation_failure(tmp_path, monkeypatch)
+    (local.output / artifact).unlink()
+    with pytest.raises(OSError):
+        local.reread_after_cleanup()
+
+
+def test_observation_failure_rejects_altered_retained_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _observation_failure(tmp_path, monkeypatch)
+    (local.output / "expected/skill.md").write_text("Altered skill\n")
+    with pytest.raises(ValueError, match="snapshot digest"):
+        local.reread_after_cleanup()
+
+
+def test_observation_failure_rejects_missing_source_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _observation_failure(tmp_path, monkeypatch)
+    (local.output / "expected.json").write_text('{"entries": [], "obstacles": []}')
+    with pytest.raises(ValueError, match="Missing retained effects source"):
+        local.reread_after_cleanup()
+
+
+def test_observation_failure_preserves_source_obstacles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = EffectsRun(tmp_path)
+    (tmp_path / "subject/skill.md").unlink()
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError("Controlled observation failure")
+
+    monkeypatch.setattr(EffectEnvironment, "observe", fail)
+    result = local.run()
+    assert result.status == "not_run" and local.calls == []
+    expected = retained_snapshot(local.output, "expected.json")
+    assert any(obstacle["path"] == "skill.md" for obstacle in expected.obstacles)
+    assert local.reread_after_cleanup() == result
+
+
+@pytest.mark.parametrize("source", ["skill.md", "skills/claude/references"])
+def test_observation_failure_preserves_wrong_source_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    local = EffectsRun(tmp_path)
+    path = tmp_path / "subject" / source
+    if path.is_dir():
+        shutil.rmtree(path)
+        path.write_text("Expected directory is a file\n")
+    else:
+        path.unlink()
+        path.mkdir()
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError("Controlled observation failure")
+
+    monkeypatch.setattr(EffectEnvironment, "observe", fail)
+    result = local.run()
+    assert result.status == "not_run" and local.calls == []
+    assert local.reread_after_cleanup() == result
+
+
+@pytest.mark.parametrize("stage", ["started", "sources_retained"])
+def test_completed_initial_verification_cannot_be_downgraded(tmp_path: Path, stage: str) -> None:
+    local = EffectsRun(tmp_path)
+    (tmp_path / "subject/skill.md").unlink()
+    assert local.run().status == "not_run"
+    document = json.loads((local.output / "result.json").read_text())
+    document["preparation"]["stage"] = stage
+    if stage == "started":
+        document["evidence"]["expected_contents"] = None
+    (local.output / "result.json").write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="stage contradicts retained initial verification"):
+        local.reread_after_cleanup()
+
+
+@pytest.mark.parametrize("historical", [False, True])
+@pytest.mark.parametrize(
+    "artifact", ["expected.json", "steps/0/before.json", "initial-verification.json"]
+)
+def test_failed_initial_verification_still_requires_all_proofs(
+    tmp_path: Path, historical: bool, artifact: str
+) -> None:
+    local = EffectsRun(tmp_path)
+    (tmp_path / "subject/skill.md").unlink()
+    result = local.run()
+    assert result.status == "not_run" and local.calls == []
+    if historical:
+        document = json.loads((local.output / "result.json").read_text())
+        del document["preparation"]["stage"]
+        (local.output / "result.json").write_text(json.dumps(document))
+        del result.preparation["stage"]
+    assert local.reread_after_cleanup() == result
+    (local.output / artifact).unlink()
+    with pytest.raises(OSError):
+        read_result(local.output, local.case)
+
+
+@pytest.mark.parametrize(
+    "artifact", ["initial-verification.json", "steps/0/before/project/CODEBUDDY.md"]
+)
+def test_failed_initial_verification_is_recomputed(tmp_path: Path, artifact: str) -> None:
+    local = EffectsRun(tmp_path)
+    (tmp_path / "subject/skill.md").unlink()
+    assert local.run().status == "not_run"
+    path = local.output / artifact
+    if artifact == "initial-verification.json":
+        path.write_text(json.dumps({"complete": True, "mismatches": [], "obstacles": []}))
+    else:
+        path.write_text("Altered initial witness\n")
+    with pytest.raises(ValueError):
+        local.reread_after_cleanup()
+
+
+def test_missing_stage_cannot_excuse_missing_initial_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _observation_failure(tmp_path, monkeypatch)
+    document = json.loads((local.output / "result.json").read_text())
+    del document["preparation"]["stage"]
+    (local.output / "result.json").write_text(json.dumps(document))
+    with pytest.raises(OSError):
+        local.reread_after_cleanup()
+
+
+def test_historical_success_retains_strict_evidence_checks(tmp_path: Path) -> None:
+    local = EffectsRun(tmp_path)
+    result = local.run()
+    document = json.loads((local.output / "result.json").read_text())
+    del document["preparation"]["stage"]
+    (local.output / "result.json").write_text(json.dumps(document))
+    del result.preparation["stage"]
+    assert local.reread_after_cleanup() == result
+    (local.output / "initial-verification.json").unlink()
+    with pytest.raises(OSError):
+        read_result(local.output, local.case)

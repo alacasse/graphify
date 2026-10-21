@@ -155,6 +155,44 @@ def test_valid_passed_document_round_trips_without_recomputing_verification(tmp_
     assert (tmp_path / "steps/0/after/project/.sandbox-reference/settings.json").is_file()
 
 
+@pytest.mark.parametrize("stage", [None, True, 1, [], {}, "", "prepared"])
+def test_rejects_invalid_preparation_stage(tmp_path: Path, stage: object) -> None:
+    document = _document()
+    _object(document["preparation"])["stage"] = stage
+    _write(tmp_path, document)
+    with pytest.raises(ValueError):
+        read_result(tmp_path, _case())
+
+
+@pytest.mark.parametrize(
+    "stage,expected_contents,reason",
+    [
+        ("started", "expected/", None),
+        ("started", None, None),
+        ("sources_retained", None, None),
+        ("initial_verified", None, None),
+        ("sources_retained", "expected/", None),
+        ("initial_verified", "expected/", "Preparation failed"),
+    ],
+)
+def test_rejects_preparation_stage_contradictions(
+    tmp_path: Path, stage: str, expected_contents: str | None, reason: str | None
+) -> None:
+    document = _document()
+    _object(document["preparation"]).update(stage=stage, reason=reason)
+    _object(document["evidence"])["expected_contents"] = expected_contents
+    _write(tmp_path, document)
+    with pytest.raises(ValueError, match=r"Preparation stage|Ready preparation"):
+        read_result(tmp_path, _case())
+
+
+def test_valid_explicit_preparation_stage_round_trips(tmp_path: Path) -> None:
+    document = _document()
+    _object(document["preparation"])["stage"] = "initial_verified"
+    _write(tmp_path, document)
+    assert asdict(read_result(tmp_path, _case())) == document
+
+
 @pytest.mark.parametrize("status", ["failed", "incomplete"])
 def test_diagnostics_are_reconstructed_and_retained(tmp_path: Path, status: str) -> None:
     document = _document()

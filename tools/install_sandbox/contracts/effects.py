@@ -110,14 +110,12 @@ def physical_destinations(effect: Effect) -> tuple[Destination, ...]:
 def validate_effects(effects: tuple[Effect, ...]) -> None:
     if not effects:
         raise ValueError("Expected at least one effect")
-    owned: list[Destination] = []
+    owned: dict[Destination, bool] = {}
     for effect in effects:
         for destination in physical_destinations(effect):
-            if (
-                isinstance(effect, SkillEffect)
-                and destination == Destination("home", ".cache/graphify/skill-locks")
-                and destination in owned
-            ):
+            # Only the skill's auxiliary lock directory is shareable, never its destination.
+            shared_lock = isinstance(effect, SkillEffect) and destination != effect.destination
+            if shared_lock and owned.get(destination) is True:
                 continue
             path = PurePosixPath(destination.path)
             for previous in owned:
@@ -126,7 +124,7 @@ def validate_effects(effects: tuple[Effect, ...]) -> None:
                     path == other or path in other.parents or other in path.parents
                 ):
                     raise ValueError("Effect destinations overlap, including auxiliary files")
-            owned.append(destination)
+            owned[destination] = shared_lock
 
 
 @dataclass(frozen=True)

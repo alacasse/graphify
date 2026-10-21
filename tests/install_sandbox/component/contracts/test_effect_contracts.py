@@ -138,15 +138,69 @@ def test_personal_witnesses_cannot_collide_with_effects() -> None:
     assert EffectInstallCase.from_json(case.to_json()) == case
 
 
-def test_skill_lock_destination_is_reserved_and_multiple_skills_diagnosed() -> None:
+@pytest.mark.parametrize("section_first", [True, False])
+@pytest.mark.parametrize(
+    "path", [".cache/graphify/skill-locks", ".cache/graphify", ".cache/graphify/skill-locks/file"]
+)
+def test_skill_lock_directory_cannot_be_a_markdown_file(section_first: bool, path: str) -> None:
     skill = SkillEffect(
         "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
     )
-    markdown = MarkdownSectionEffect(
-        "always_on/claude-md.md", Destination("home", ".cache/graphify/skill-locks/collision")
-    )
+    markdown = MarkdownSectionEffect("always_on/claude-md.md", Destination("home", path))
+    effects = (markdown, skill) if section_first else (skill, markdown)
     with pytest.raises(ValueError, match="overlap"):
-        EffectSpec((skill, markdown))
+        build_reinstall_case(EffectSpec(effects), context())
+
+
+@pytest.mark.parametrize("section_first", [True, False])
+@pytest.mark.parametrize(
+    "destination",
+    [
+        Destination("home", "instructions.md"),
+        Destination("home", ".cache/graphify/skill-locks-other"),
+        Destination("project", ".cache/graphify/skill-locks"),
+    ],
+)
+def test_disjoint_skill_and_markdown_destinations_accept_either_order(
+    section_first: bool, destination: Destination
+) -> None:
+    skill = SkillEffect(
+        "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
+    )
+    markdown = MarkdownSectionEffect("always_on/claude-md.md", destination)
+    effects = (markdown, skill) if section_first else (skill, markdown)
+    case = build_reinstall_case(EffectSpec(effects), context())
+    assert case.operations == ["install", "install"]
+    assert EffectInstallCase.from_json(case.to_json()) == case
+
+
+@pytest.mark.parametrize("hooks_first", [True, False])
+def test_skill_lock_directory_cannot_be_a_json_file(hooks_first: bool) -> None:
+    spec = EffectSpecReader().read(FIXTURE)
+    skill, _, hooks = spec.effects
+    assert isinstance(hooks, JsonHooksEffect)
+    collision = JsonHooksEffect(Destination("home", ".cache/graphify/skill-locks"), hooks.hooks)
+    effects = (collision, skill) if hooks_first else (skill, collision)
+    with pytest.raises(ValueError, match="overlap"):
+        build_reinstall_case(EffectSpec(effects), context())
+
+
+@pytest.mark.parametrize(
+    "path", [".cache/graphify/skill-locks", ".cache/graphify", ".cache/graphify/skill-locks/skill"]
+)
+def test_skill_destination_cannot_overlap_its_own_lock_directory(path: str) -> None:
+    skill = SkillEffect("skill.md", "skills/claude/references", Destination("home", path))
+    with pytest.raises(ValueError, match="overlap"):
+        build_reinstall_case(EffectSpec((skill,)), context())
+
+
+@pytest.mark.parametrize("home_first", [True, False])
+def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first: bool) -> None:
+    skill = SkillEffect(
+        "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
+    )
     second = SkillEffect("skill.md", "skills/claude/references", Destination("project", "skill"))
+    effects = (skill, second) if home_first else (second, skill)
+    spec = EffectSpec(effects)
     with pytest.raises(ValueError, match="Multiple skill effects"):
-        build_reinstall_case(EffectSpec((skill, second)), context())
+        build_reinstall_case(spec, context())

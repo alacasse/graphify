@@ -2,30 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import posixpath
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from tools.install_sandbox.contracts.case import (
-    InstallTestCase,
-    destination_roots,
-    destinations,
-    transform_json_hook,
-)
-from tools.install_sandbox.contracts.managed_json import is_transaction_temporary, sidecars
-from tools.install_sandbox.contracts.results import (
-    AlteredReferencePlan,
-    FileAlterationPlan,
-    MissingReferencePlan,
-    ObservationObstacle,
-    ReferenceRepairPlan,
-    SkillBackupPlan,
-    SnapshotEntry,
-)
+from tools.install_sandbox.contracts.results import ObservationObstacle, SnapshotEntry
 
 if TYPE_CHECKING:
     from tools.install_sandbox.container.evidence_writer import TestResultWriter
@@ -33,7 +15,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class FilesystemSnapshot:
-    skill_lock: str | None = None
     entries: list[SnapshotEntry] = field(default_factory=list[SnapshotEntry])
     obstacles: list[ObservationObstacle] = field(default_factory=list[ObservationObstacle])
     contents: dict[tuple[str, str], bytes] = field(default_factory=dict[tuple[str, str], bytes])
@@ -52,91 +33,6 @@ class FilesystemSnapshot:
                 entry["kind"] == "directory" and entry.get("listing_complete", False)
             )
         return parent != path and self.absent(root, parent)
-
-
-def missing_reference_plan(
-    case: InstallTestCase, expected: FilesystemSnapshot
-) -> MissingReferencePlan:
-    """Select the first captured source reference and its explicit destination root."""
-    prefix = case.spec.references_source + "/"
-    files = sorted(
-        e["path"]
-        for e in expected.entries
-        if e["root"] == "subject" and e["kind"] == "file" and e["path"].startswith(prefix)
-    )
-    inventory = expected.entry("subject", case.spec.references_source)
-    if (
-        expected.obstacles
-        or not files
-        or inventory is None
-        or not inventory.get("listing_complete")
-    ):
-        raise ValueError("Missing reference repair requires fully observed source references")
-    if ("subject", files[0]) not in expected.contents:
-        raise ValueError("Missing reference source content unavailable")
-    return {
-        "root": destination_roots(case)["references"],
-        "deleted_path": destinations(case)["references"] + "/" + files[0][len(prefix) :],
-    }
-
-
-def altered_reference_plan(
-    case: InstallTestCase, expected: FilesystemSnapshot
-) -> tuple[AlteredReferencePlan, bytes]:
-    """Alter the first source-selected reference, independently of installed files."""
-    selected = missing_reference_plan(case, expected)
-    relative = selected["deleted_path"][len(destinations(case)["references"]) + 1 :]
-    content = expected.contents[("subject", case.spec.references_source + "/" + relative)]
-    return {
-        "root": selected["root"],
-        "altered_path": selected["deleted_path"],
-        "altered_content_file": "steps/1/preparation/altered-content.bin",
-    }, content + b"\nSandbox repair witness.\n"
-
-
-def reference_repair_plan(
-    case: InstallTestCase, expected: FilesystemSnapshot
-) -> tuple[ReferenceRepairPlan, bytes]:
-    """Select from retained source files, never from the installed inventory."""
-    source = case.spec.references_source + "/"
-    files = sorted(
-        e["path"]
-        for e in expected.entries
-        if e["root"] == "subject" and e["kind"] == "file" and e["path"].startswith(source)
-    )
-    if expected.obstacles or len(files) < 2:
-        raise ValueError("Reference repair requires at least two fully observed source files")
-    content = expected.contents.get(("subject", files[1]))
-    if content is None:
-        raise ValueError("Reference repair source content unavailable")
-    destination = destinations(case)["references"] + "/"
-    return {
-        "deleted_path": destination + files[0][len(source) :],
-        "altered_path": destination + files[1][len(source) :],
-        "altered_content_file": "steps/1/preparation/altered-content.bin",
-    }, content + b"\nSandbox repair witness.\n"
-
-
-def skill_repair_plan(
-    case: InstallTestCase, expected: FilesystemSnapshot
-) -> tuple[FileAlterationPlan, bytes]:
-    """Retain the exact skill alteration independently of installed contents."""
-    content = expected.contents[("subject", case.spec.skill_source)]
-    return {
-        "altered_path": destinations(case)["skill"],
-        "altered_content_file": "steps/1/preparation/altered-content.bin",
-    }, content + b"\nSandbox skill repair witness.\n"
-
-
-def skill_backup_plan(
-    case: InstallTestCase, expected: FilesystemSnapshot
-) -> tuple[SkillBackupPlan, bytes]:
-    """Build the backup witness from retained sources, independently of installed files."""
-    content = expected.contents[("subject", case.spec.skill_source)]
-    return {
-        "backup_path": destinations(case)["skill"] + ".bak",
-        "backup_content_file": "steps/1/preparation/backup-content.bin",
-    }, content + b"\nSandbox previous backup witness.\n"
 
 
 def _obstacle(
@@ -160,7 +56,7 @@ class ObservedEnvironment:
             raise ValueError("Observation phase must be before or after")
         snapshot = FilesystemSnapshot()
         for root, directory in (("project", self.project), ("home", self.home)):
-            self._capture(snapshot, root, directory, ".", expected=False)
+            self._capture(snapshot, root, directory, ".")
         writer.write_snapshot(snapshot, phase, step_index=step_index)
         return snapshot
 
@@ -170,8 +66,6 @@ class ObservedEnvironment:
         root: str,
         directory: Path,
         relative: str,
-        *,
-        expected: bool,
     ) -> None:
         path = directory / relative
         entry: SnapshotEntry = {"root": root, "path": relative, "kind": "unknown"}
@@ -183,16 +77,16 @@ class ObservedEnvironment:
             return
         if stat.S_ISDIR(mode):
             entry["kind"] = "directory"
-            self._directory(snapshot, entry, directory, expected=expected)
+            self._directory(snapshot, entry, directory)
         elif stat.S_ISREG(mode):
             entry["kind"] = "file"
-            self._file(snapshot, entry, path, expected=expected)
+            self._file(snapshot, entry, path)
         else:
             entry["kind"] = "other"
             _obstacle(snapshot, "observe_entry", root, relative, "Unsupported filesystem entry")
 
     def _directory(
-        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, directory: Path, *, expected: bool
+        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, directory: Path
     ) -> None:
         entry["listing_complete"] = False
         try:
@@ -207,204 +101,11 @@ class ObservedEnvironment:
                 entry["root"],
                 directory,
                 str(child.relative_to(directory)),
-                expected=expected,
             )
 
-    def _file(
-        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, path: Path, *, expected: bool
-    ) -> None:
+    def _file(self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, path: Path) -> None:
         entry["content_file"] = None
         try:
             snapshot.contents[(entry["root"], entry["path"])] = path.read_bytes()
         except OSError as error:
             _obstacle(snapshot, "read_file", entry["root"], entry["path"], error)
-
-
-class TestEnvironment(ObservedEnvironment):
-    """Own fresh project/home directories; software and evidence stay outside them."""
-
-    def __init__(self, case: InstallTestCase, directory: Path):
-        self.case = InstallTestCase.from_json(case.to_json())
-        self.project = directory / "project"
-        self.home = directory / "home"
-        self.project.mkdir(parents=True, exist_ok=False)
-        self.home.mkdir(parents=True, exist_ok=False)
-        self.skill_lock = None
-        if self.case.spec.skill_lock is not None:
-            root = self.home if destination_roots(self.case)["skill"] == "home" else self.project
-            skill = (root / destinations(self.case)["skill"]).parent.resolve()
-            digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
-            self.skill_lock = f".cache/graphify/skill-locks/{digest}.lock"
-            self.lock_expectation = {
-                "home": str(self.home.resolve()),
-                "skill_directory": str(skill),
-                "path": self.skill_lock,
-            }
-
-    def prepare(self) -> None:
-        for initial in self.case.initial_files:
-            root = self.project if initial["root"] == "project" else self.home
-            path = root / initial["path"]
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(initial["content"].encode("utf-8"))
-
-    def prepare_missing_reference(self, plan: MissingReferencePlan) -> str | None:
-        root = self.home if plan["root"] == "home" else self.project
-        try:
-            (root / plan["deleted_path"]).unlink()
-        except OSError as error:
-            return f"Missing reference preparation failed: {error}"
-        return None
-
-    def prepare_altered_reference(self, plan: AlteredReferencePlan, content: bytes) -> str | None:
-        root = self.home if plan["root"] == "home" else self.project
-        try:
-            (root / plan["altered_path"]).write_bytes(content)
-        except OSError as error:
-            return f"Altered reference preparation failed: {error}"
-        return None
-
-    def prepare_reference_repair(self, plan: ReferenceRepairPlan, content: bytes) -> str | None:
-        """Leave partial effects in place so the next observation can retain them."""
-        try:
-            (self.project / plan["deleted_path"]).unlink()
-            (self.project / plan["altered_path"]).write_bytes(content)
-        except OSError as error:
-            return f"Reference repair preparation failed: {error}"
-        return None
-
-    def prepare_skill_repair(self, plan: FileAlterationPlan, content: bytes) -> str | None:
-        """Preserve a failed write's partial effects for observation."""
-        try:
-            (
-                (self.home if destination_roots(self.case)["skill"] == "home" else self.project)
-                / plan["altered_path"]
-            ).write_bytes(content)
-        except OSError as error:
-            return f"Skill repair preparation failed: {error}"
-        return None
-
-    def prepare_markdown_repair(self, plan: FileAlterationPlan, content: bytes) -> str | None:
-        """Keep partial writes observable when the shared document cannot be prepared."""
-        try:
-            (
-                (self.home if destination_roots(self.case)["markdown"] == "home" else self.project)
-                / plan["altered_path"]
-            ).write_bytes(content)
-        except OSError as error:
-            return f"Markdown repair preparation failed: {error}"
-        return None
-
-    def prepare_json_repair(self, plan: FileAlterationPlan) -> str | None:
-        """Remove only the registration from the installed JSON, retaining partial effects."""
-        try:
-            path = self.project / plan["altered_path"]
-            settings: object = json.loads(path.read_bytes())
-            if not isinstance(settings, dict):
-                raise ValueError("Expected JSON object")
-            settings = cast(dict[str, object], settings)
-            instruction_list = self.case.spec.json_list
-            if instruction_list is None:
-                raise ValueError("JSON repair requires an instruction list")
-            items = settings.get(instruction_list)
-            if not isinstance(items, list):
-                raise ValueError("Expected instruction list")
-            items = cast(list[object], items)
-            entry = posixpath.relpath(
-                destinations(self.case)["skill"], posixpath.dirname(plan["altered_path"])
-            )
-            if items.count(entry) != 1:
-                raise ValueError("Expected exactly one skill instruction before deletion")
-            items.remove(entry)
-            path.write_bytes((json.dumps(settings, indent=2) + "\n").encode("utf-8"))
-        except (OSError, ValueError, UnicodeError) as error:
-            return f"JSON repair preparation failed: {error}"
-        return None
-
-    def prepare_json_hook_repair(self, plan: FileAlterationPlan) -> str | None:
-        """Transform only the declared hook; partial effects remain observable."""
-        try:
-            root = self.home if destination_roots(self.case)["json"] == "home" else self.project
-            path = root / plan["altered_path"]
-            document = cast(dict[str, object], json.loads(path.read_bytes()))
-            transform_json_hook(self.case, document)
-            path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-        except (OSError, ValueError, UnicodeError, KeyError, TypeError) as error:
-            return f"JSON hook repair preparation failed: {error}"
-        return None
-
-    def prepare_skill_backup(self, plan: SkillBackupPlan, content: bytes) -> str | None:
-        """Keep any partial write observable if preparing the backup fails."""
-        try:
-            (
-                (self.home if destination_roots(self.case)["skill"] == "home" else self.project)
-                / plan["backup_path"]
-            ).write_bytes(content)
-        except OSError as error:
-            return f"Skill backup preparation failed: {error}"
-        return None
-
-    def preserve_expected(self, subject: Path, writer: TestResultWriter) -> FilesystemSnapshot:
-        snapshot = FilesystemSnapshot(skill_lock=self.skill_lock)
-        if self.skill_lock is not None:
-            writer.write_lock_expectation(self.lock_expectation)
-        spec = self.case.spec
-        sources = [spec.skill_source, spec.markdown_source, spec.references_source]
-        if spec.version_source is not None:
-            sources.append(spec.version_source)
-        for path in sources:
-            self._capture(snapshot, "subject", subject, path, expected=True)
-        writer.write_snapshot(snapshot, "expected")
-        return snapshot
-
-    def _file(
-        self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, path: Path, *, expected: bool
-    ) -> None:
-        dest = destinations(self.case)
-        if (
-            not expected
-            and self.case.name == "first-install"
-            and self.case.spec.version_source is None
-            and entry["root"] == destination_roots(self.case)["version"]
-            and entry["path"] == dest["version"]
-        ):
-            return
-        keep = expected or self._keep_content(entry, dest)
-        if keep:
-            entry["content_file"] = None
-        else:
-            entry["sha256"] = None
-        try:
-            content = path.read_bytes()
-        except OSError as error:
-            _obstacle(snapshot, "read_file", entry["root"], entry["path"], error)
-            return
-        if keep:
-            snapshot.contents[(entry["root"], entry["path"])] = content
-        else:
-            entry["sha256"] = hashlib.sha256(content).hexdigest()
-
-    def _keep_content(self, entry: SnapshotEntry, dest: dict[str, str]) -> bool:
-        if entry["root"] == "home" and entry["path"] == self.skill_lock:
-            return True
-        witnesses = {(f["root"], f["path"]) for f in self.case.initial_files}
-        if (entry["root"], entry["path"]) in witnesses:
-            return True
-        roots = destination_roots(self.case)
-        retained = {(roots[name], path) for name, path in dest.items()}
-        retained.update((roots["json"], path) for path in sidecars(self.case).values())
-        if self.case.spec.json_backup is not None:
-            retained.add((roots["json"], dest["json"] + self.case.spec.json_backup))
-        if self.case.name in {"repair-skill", "preserve-skill-backup"}:
-            retained.add((roots["skill"], dest["skill"] + ".bak"))
-        return (
-            (entry["root"], entry["path"]) in retained
-            or (
-                entry["root"] == roots["json"]
-                and is_transaction_temporary(self.case, entry["path"])
-            )
-            or (
-                entry["root"] == roots["references"]
-                and entry["path"].startswith(dest["references"] + "/")
-            )
-        )

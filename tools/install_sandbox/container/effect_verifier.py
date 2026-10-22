@@ -1,37 +1,22 @@
-"""Verify composed native effects against retained sources and personal witnesses."""
+"""Compare explicit expectations with independent observations, without target inference."""
 
-from email.parser import BytesParser
-from pathlib import PurePosixPath
-from typing import cast
-
-from tools.install_sandbox.container import verifier as checks
+from tools.install_sandbox.container import comparison as checks
 from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.effects import (
-    Effect,
-    JsonHooksEffect,
-    MarkdownSectionEffect,
-    SkillEffect,
-)
+from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
 from tools.install_sandbox.contracts.results import ObservationObstacle, VerificationResult
-from tools.install_sandbox.contracts.spec import HookExpectation
 
 
-def _result(*snapshots: FilesystemSnapshot) -> VerificationResult:
-    result = VerificationResult(
-        obstacles=[ObservationObstacle(**o) for snapshot in snapshots for o in snapshot.obstacles]
+def _obstacle(result: VerificationResult, root: str, path: str, reason: str) -> None:
+    result.obstacles.append(
+        ObservationObstacle(operation="verify_expectation", root=root, path=path, reason=reason)
     )
-    for snapshot in snapshots:
-        _complete_observation(snapshot, result)
-    for snapshot in snapshots[1:]:
-        for root in ("home", "project"):
-            entry = snapshot.entry(root, ".")
-            if entry is None or entry["kind"] != "directory":
-                _obstacle(result, root, ".", "Complete observed root unavailable")
-    return result
 
 
-def _complete_observation(snapshot: FilesystemSnapshot, result: VerificationResult) -> None:
+def _complete(snapshot: FilesystemSnapshot, result: VerificationResult) -> None:
+    result.obstacles.extend(snapshot.obstacles)
+    keys = [(entry["root"], entry["path"]) for entry in snapshot.entries]
+    if len(keys) != len(set(keys)):
+        _obstacle(result, "project", ".", "Duplicate observed destination")
     for entry in snapshot.entries:
         root, path = entry["root"], entry["path"]
         if entry["kind"] == "directory":
@@ -42,324 +27,128 @@ def _complete_observation(snapshot: FilesystemSnapshot, result: VerificationResu
                 _obstacle(result, root, path, "Retained file bytes unavailable")
         else:
             _obstacle(result, root, path, "Unsupported observed entry")
+    _roots_complete(snapshot, result)
 
 
-def _obstacle(result: VerificationResult, root: str, path: str, reason: str) -> None:
-    result.obstacles.append(
-        {
-            "operation": "verify_effect",
-            "root": root,
-            "path": path,
-            "reason": reason,
-        }
-    )
+def _roots_complete(snapshot: FilesystemSnapshot, result: VerificationResult) -> None:
+    for root in ("home", "project"):
+        entry = snapshot.entry(root, ".")
+        if entry is None or entry["kind"] != "directory":
+            _obstacle(result, root, ".", "Complete observed root unavailable")
 
 
-def _source_inventory(
-    effect: SkillEffect,
-    expected: FilesystemSnapshot,
-    result: VerificationResult,
-) -> bool:
-    entry = expected.entry("subject", effect.references)
-    if entry is None or entry["kind"] != "directory" or not entry.get("listing_complete"):
-        _obstacle(result, "subject", effect.references, "Complete source references unavailable")
-        return False
-    for source in expected.entries:
-        if source["path"].startswith(effect.references + "/"):
-            if source["kind"] == "file":
-                checks.expected_file(expected, source["path"], result)
-            elif source["kind"] != "directory" or not source.get("listing_complete"):
-                _obstacle(result, "subject", source["path"], "Incomplete reference observation")
-    return True
+def _directory(item: Expectation, observed: FilesystemSnapshot, result: VerificationResult) -> None:
+    entry = observed.entry(item.root, item.path)
+    if entry is not None and entry["kind"] != "directory":
+        checks.mismatch(result, "entry_kind", item.root, item.path, "directory", entry["kind"])
+    elif entry is None and observed.absent(item.root, item.path):
+        checks.mismatch(result, "missing_directory", item.root, item.path, "directory", "absent")
+    elif entry is None:
+        _obstacle(result, item.root, item.path, "Directory presence unavailable")
 
 
-def _version(
-    case: EffectInstallCase,
-    expected: FilesystemSnapshot,
-    result: VerificationResult,
-) -> bytes | None:
-    source = checks.expected_file(expected, case.subject.version_source, result)
-    if source is None:
-        return None
-    versions = BytesParser().parsebytes(source).get_all("Version", [])
-    if len(versions) != 1 or not versions[0].strip():
-        _obstacle(result, "subject", case.subject.version_source, "Expected one metadata Version")
-        return None
-    return versions[0].strip().encode("utf-8")
-
-
-def _skill(
-    case: EffectInstallCase,
-    effect: SkillEffect,
-    expected: FilesystemSnapshot,
-    after: FilesystemSnapshot,
-    result: VerificationResult,
-) -> None:
-    root, path = effect.destination.root, effect.destination.path
-    source = checks.expected_file(expected, effect.source, result)
-    if source is not None:
-        checks.compare_bytes(after, path + "/SKILL.md", source, result, root)
-    if _source_inventory(effect, expected, result):
-        checks.reference_files(
-            expected, after, effect.references, path + "/references", result, root
-        )
-    version = _version(case, expected, result)
-    if version is not None:
-        checks.compare_bytes(after, path + "/.graphify_version", version, result, root)
-    checks.require_absent(after, path + "/SKILL.md" + case.subject.rules.skill_backup, result, root)
-
-
-def _managed_hook(
-    hooks: tuple[HookExpectation, ...],
-    event: str,
-    group: dict[str, object],
-    content: dict[str, object],
-) -> bool:
-    return any(
-        hook.event == event
-        and hook.matcher == group.get("matcher")
-        and all(
-            key in content and checks.json_equal(content[key], value)
-            for key, value in hook.content.items()
-        )
-        for hook in hooks
-    )
-
-
-def _personal_groups(
-    hooks: tuple[HookExpectation, ...], event: str, groups: list[object]
-) -> list[object]:
-    result: list[object] = []
-    for raw in groups:
-        if not isinstance(raw, dict):
-            raise ValueError("Hook groups must be objects")
-        group = cast(dict[str, object], raw)
-        contents = checks.group_hooks(group, event)
-        personal = [
-            content for _, content in contents if not _managed_hook(hooks, event, group, content)
-        ]
-        removed = len(personal) != len(contents)
-        if removed and not personal and set(group) == {"matcher", "hooks"}:
-            continue
-        result.append({**group, "hooks": personal} if removed else group)
-    return result
-
-
-def _personal_json(
-    hooks: tuple[HookExpectation, ...], document: dict[str, object]
-) -> dict[str, object]:
-    result = dict(document)
-    raw = document.get("hooks")
-    if raw is None:
-        return result
-    if not isinstance(raw, dict):
-        raise ValueError("hooks must be an object")
-    events: dict[str, object] = {}
-    for event, groups in cast(dict[str, object], raw).items():
-        if not isinstance(groups, list):
-            raise ValueError("Hook events must contain group lists")
-        personal = _personal_groups(hooks, event, cast(list[object], groups))
-        if personal or not groups:
-            events[event] = personal
-    if events or not raw:
-        result["hooks"] = events
-    else:
-        result.pop("hooks", None)
-    return result
-
-
-def _json(effect: JsonHooksEffect, before: bytes, after: bytes, result: VerificationResult) -> None:
-    root, path = effect.destination.root, effect.destination.path
+def _json(item: Expectation, current: bytes, result: VerificationResult) -> None:
+    assert item.baseline is not None
     try:
-        initial, installed = checks.read_json(before), checks.read_json(after)
-        for hook in effect.hooks:
+        before, after = checks.read_json(item.baseline), checks.read_json(current)
+        for hook in item.hooks:
             count = len(
-                checks.hook_positions(
-                    installed, hook.event, hook.matcher, hook.content, exact=False
-                )
+                checks.hook_positions(after, hook.event, hook.matcher, hook.content, exact=False)
             )
             if count != 1:
-                checks.mismatch(result, "hook_count", root, path, "one conforming hook", str(count))
+                checks.mismatch(
+                    result, "hook_count", item.root, item.path, "one conforming hook", str(count)
+                )
         if not checks.json_equal(
-            _personal_json(effect.hooks, initial), _personal_json(effect.hooks, installed)
+            checks.personal_json(item.hooks, before), checks.personal_json(item.hooks, after)
         ):
             checks.mismatch(
                 result,
                 "user_content_lost",
-                root,
-                path,
+                item.root,
+                item.path,
                 "personal JSON preserved",
                 "personal JSON changed",
             )
     except (ValueError, UnicodeError):
-        checks.mismatch(result, "invalid_json", root, path, "valid JSON hooks", "invalid JSON")
-
-
-def _shared(
-    effect: MarkdownSectionEffect | JsonHooksEffect,
-    expected: FilesystemSnapshot,
-    before: FilesystemSnapshot,
-    after: FilesystemSnapshot,
-    result: VerificationResult,
-) -> None:
-    root, path = effect.destination.root, effect.destination.path
-    initial = checks.file(before, path, result, root)
-    installed = checks.file(after, path, result, root)
-    if initial is None or installed is None:
-        return
-    if isinstance(effect, JsonHooksEffect):
-        _json(effect, initial, installed, result)
-        return
-    source = checks.expected_file(expected, effect.source, result)
-    if source is not None:
-        checks.verify_markdown_section(
-            source, initial, installed, result, root=root, path=path, marker=effect.marker
+        checks.mismatch(
+            result, "invalid_json", item.root, item.path, "valid JSON hooks", "invalid JSON"
         )
 
 
-def _json_auxiliary(
-    case: EffectInstallCase,
-    effect: JsonHooksEffect,
-    before: FilesystemSnapshot,
-    after: FilesystemSnapshot,
-    result: VerificationResult,
+def _constraint(
+    item: Expectation, observed: FilesystemSnapshot, result: VerificationResult
 ) -> None:
-    root, path = effect.destination.root, effect.destination.path
-    backup = path + case.subject.rules.json_backup
-    origin = backup if before.entry(root, backup) is not None else path
-    original = checks.file(before, origin, result, root)
-    if original is not None:
-        checks.compare_bytes(after, backup, original, result, root)
-    for suffix in (".bak", ".graphify-state.json", ".graphify.lock", ".graphify-journal.json"):
-        checks.require_absent(after, path + suffix, result, root)
+    if item.kind == "absent":
+        checks.require_absent(observed, item.path, result, item.root)
+    elif item.kind == "directory":
+        _directory(item, observed, result)
+    elif item.kind == "file":
+        assert item.content is not None
+        checks.compare_bytes(observed, item.path, item.content, result, item.root)
+    else:
+        current = checks.file(observed, item.path, result, item.root)
+        if current is not None:
+            _semantic(item, current, result)
 
 
-def _allowed(case: EffectInstallCase, expected: FilesystemSnapshot) -> set[tuple[str, str]]:
-    allowed: set[tuple[str, str]] = set()
-    for effect in case.effects.effects:
-        root, path = effect.destination.root, effect.destination.path
-        if isinstance(effect, SkillEffect):
-            paths = [path, path + "/SKILL.md", path + "/.graphify_version"]
-            paths.extend(
-                path + "/references" + entry["path"][len(effect.references) :]
-                for entry in expected.entries
-                if entry["path"] == effect.references
-                or entry["path"].startswith(effect.references + "/")
-            )
-        else:
-            paths = [path]
-            if isinstance(effect, JsonHooksEffect):
-                paths.append(path + case.subject.rules.json_backup)
-        for target in paths:
-            allowed.add((root, target))
-            allowed.update((root, str(parent)) for parent in PurePosixPath(target).parents)
-    if expected.skill_lock is not None:
-        allowed.add(("home", expected.skill_lock))
-        allowed.update(("home", str(p)) for p in PurePosixPath(expected.skill_lock).parents)
-    return allowed
+def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> None:
+    if item.kind == "markdown":
+        assert item.content is not None and item.baseline is not None and item.marker is not None
+        checks.verify_markdown_section(
+            item.content,
+            item.baseline,
+            current,
+            result,
+            root=item.root,
+            path=item.path,
+            marker=item.marker,
+        )
+    elif item.kind == "json-hooks":
+        _json(item, current, result)
 
 
 def _preservation(
-    case: EffectInstallCase,
-    expected: FilesystemSnapshot,
-    before: FilesystemSnapshot,
-    after: FilesystemSnapshot,
-    result: VerificationResult,
+    expected: ExpectationSet, observed: FilesystemSnapshot, result: VerificationResult
 ) -> None:
-    allowed = _allowed(case, expected)
-    for root, path in sorted({(e["root"], e["path"]) for s in (before, after) for e in s.entries}):
-        if (root, path) in allowed:
-            left, right = before.entry(root, path), after.entry(root, path)
-            if left is None:
-                continue
-            if right is not None and left["kind"] == right["kind"]:
-                continue
-        checks.preserved_entry(before, after, root, path, result)
-
-
-def _reinstall(
-    case: EffectInstallCase,
-    before: FilesystemSnapshot,
-    after: FilesystemSnapshot,
-    result: VerificationResult,
-) -> None:
-    # Witness bytes distinguish the first installation from the dependent reinstall.
-    initial = {(f["root"], f["path"]): f["content"].encode("utf-8") for f in case.initial_files}
-    skill_present = any(
-        isinstance(effect, SkillEffect)
-        and before.entry(effect.destination.root, effect.destination.path + "/SKILL.md") is not None
-        for effect in case.effects.effects
-    )
-    if not skill_present and all(
-        before.contents.get(key) == content for key, content in initial.items()
-    ):
+    if not expected.baseline:
         return
-    for root, path in sorted({(e["root"], e["path"]) for s in (before, after) for e in s.entries}):
-        checks.preserved_entry(before, after, root, path, result)
+    before = {(e.root, e.path): e for e in expected.baseline}
+    after = {(e["root"], e["path"]): e for e in observed.entries}
+    allowed = set(expected.allowed_changes)
+    for key in sorted(before.keys() | after.keys()):
+        prior, current = before.get(key), after.get(key)
+        if key in allowed and (
+            prior is None or (current is not None and prior.kind == current["kind"])
+        ):
+            continue
+        if (
+            prior is not None
+            and current is not None
+            and prior.kind == current["kind"]
+            and (prior.kind == "directory" or prior.content == observed.contents.get(key))
+        ):
+            continue
+        checks.mismatch(
+            result,
+            "unexpected_change",
+            key[0],
+            key[1],
+            "entry preserved",
+            "entry added, removed or changed",
+        )
 
 
 class EffectVerifier:
-    """Check effects directly without reconstructing a legacy installation spec."""
+    """The only inputs are constraints and the observation being compared."""
 
-    def verify_initial(
-        self, case: EffectInstallCase, expected: FilesystemSnapshot, before: FilesystemSnapshot
-    ) -> VerificationResult:
-        result = _result(expected, before)
-        for initial in case.initial_files:
-            checks.compare_bytes(
-                before, initial["path"], initial["content"].encode("utf-8"), result, initial["root"]
-            )
-        for effect in case.effects.effects:
-            self._initial_effect(case, effect, expected, before, result)
-        result.complete = not result.obstacles
-        return result
-
-    def _initial_effect(
-        self,
-        case: EffectInstallCase,
-        effect: Effect,
-        expected: FilesystemSnapshot,
-        before: FilesystemSnapshot,
-        result: VerificationResult,
-    ) -> None:
-        root, path = effect.destination.root, effect.destination.path
-        if isinstance(effect, SkillEffect):
-            checks.expected_file(expected, effect.source, result)
-            _source_inventory(effect, expected, result)
-            _version(case, expected, result)
-            checks.require_absent(before, path, result, root)
-            checks.require_absent(
-                before, path + "/SKILL.md" + case.subject.rules.skill_backup, result, root
-            )
-            if expected.skill_lock is None:
-                _obstacle(result, "home", ".", "Independent lock expectation unavailable")
-            else:
-                checks.require_absent(before, expected.skill_lock, result, "home")
-        elif isinstance(effect, MarkdownSectionEffect):
-            checks.expected_file(expected, effect.source, result)
-        else:
-            checks.require_absent(before, path + case.subject.rules.json_backup, result, root)
-
-    def verify(
-        self,
-        case: EffectInstallCase,
-        expected: FilesystemSnapshot,
-        before: FilesystemSnapshot,
-        after: FilesystemSnapshot,
-    ) -> VerificationResult:
-        result = _result(expected, before, after)
-        for effect in case.effects.effects:
-            if isinstance(effect, SkillEffect):
-                _skill(case, effect, expected, after, result)
-            else:
-                _shared(effect, expected, before, after, result)
-            if isinstance(effect, JsonHooksEffect):
-                _json_auxiliary(case, effect, before, after, result)
-        if any(isinstance(effect, SkillEffect) for effect in case.effects.effects):
-            if expected.skill_lock is None:
-                _obstacle(result, "home", ".", "Independent lock expectation unavailable")
-            checks.skill_lock(expected.skill_lock, before, after, result)
-        _preservation(case, expected, before, after, result)
-        _reinstall(case, before, after, result)
+    def verify(self, expected: ExpectationSet, observed: FilesystemSnapshot) -> VerificationResult:
+        result = VerificationResult()
+        _complete(observed, result)
+        if expected.roots is None:
+            _obstacle(result, "project", ".", "Expectations have no retained root binding")
+        for item in expected.expectations:
+            _constraint(item, observed, result)
+        _preservation(expected, observed, result)
         result.complete = not result.obstacles
         return result

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,10 +48,9 @@ class CampaignOutput:
     def run(
         self,
         *,
-        specs_directory: Path,
-        target: str,
+        spec_file: Path,
+        subject_context_file: Path,
         subject_checkout: Path,
-        case_names: Sequence[str] | None = None,
         output_directory: Path | None = None,
         runtime_executable: str | Path = "docker",
     ) -> CampaignCommandResult:
@@ -60,9 +59,8 @@ class CampaignOutput:
             str(output_directory or ""),
             None,
             str(subject_checkout),
-            str(specs_directory),
-            target,
-            list(case_names) if case_names is not None else None,
+            str(spec_file),
+            str(subject_context_file),
         )
         session = _Session(self.root, report, self.now)
         with SignalCapture() as interrupts:
@@ -152,10 +150,9 @@ class _Session:
     def _execute(self, runtime: str, interrupts: SignalCapture) -> None:
         assert self.directory is not None
         result = InstallTestCoordinator().run_campaign(
-            specs_directory=Path(self.report.specs),
-            target=self.report.target,
+            spec_file=Path(self.report.spec),
+            subject_context_file=Path(self.report.subject_context),
             subject_checkout=Path(self.report.subject),
-            case_names=self.report.requested_cases,
             output_directory=self.directory / "evidence",
             runtime_executable=runtime,
             interrupts=interrupts,

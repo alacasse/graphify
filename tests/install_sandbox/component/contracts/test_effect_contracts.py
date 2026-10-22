@@ -19,9 +19,38 @@ from tools.install_sandbox.contracts.effects import (
     SkillEffect,
     effect_identity,
 )
+from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
-FIXTURE = Path(__file__).parents[2] / "fixtures" / "codebuddy-effects.yaml"
+FIXTURE = Path(__file__).parents[2] / "fixtures" / "generic-effects.yaml"
+
+
+def structured_spec() -> EffectSpec:
+    return EffectSpec(
+        (
+            SkillEffect(
+                "package.md", "reference-data", Destination("home", ".synthetic/skills/package")
+            ),
+            MarkdownSectionEffect("instructions.md", Destination("project", "GUIDE.md")),
+            JsonHooksEffect(
+                Destination("project", ".synthetic/config.json"),
+                (
+                    HookExpectation(
+                        "PreToolUse-search",
+                        "PreToolUse",
+                        "Bash|Grep",
+                        {"type": "command", "command": "graphify hook-guard search", "timeout": 10},
+                    ),
+                    HookExpectation(
+                        "PreToolUse-read",
+                        "PreToolUse",
+                        "Read|Glob",
+                        {"type": "command", "command": "graphify hook-guard read", "timeout": 10},
+                    ),
+                ),
+            ),
+        )
+    )
 
 
 def context() -> SubjectContext:
@@ -35,7 +64,7 @@ def context() -> SubjectContext:
 
 @pytest.mark.parametrize("timeout", [11, True, None])
 def test_transported_hook_must_match_subject_timeout_rule(timeout: object) -> None:
-    case = build_reinstall_case(EffectSpecReader().read(FIXTURE), context())
+    case = build_reinstall_case(structured_spec(), context())
     payload = json.loads(case.to_json())
     payload["effects"]["effects"][2]["hooks"][0]["content"]["timeout"] = timeout
     with pytest.raises(ValueError, match="Hook timeout contradicts"):
@@ -47,12 +76,13 @@ def test_exact_yaml_and_rename(tmp_path: Path) -> None:
     spec = reader.read(FIXTURE)
     skill, markdown, hooks = spec.effects
     assert isinstance(skill, SkillEffect)
-    assert skill.destination == Destination("home", ".codebuddy/skills/graphify")
-    assert skill.source == "skill.md"
+    assert skill.destination == Destination("home", ".synthetic/skills/package")
+    assert skill.source == "package.md"
+    assert spec == structured_spec()
     assert isinstance(markdown, MarkdownSectionEffect)
-    assert markdown.destination == Destination("project", "CODEBUDDY.md")
+    assert markdown.destination == Destination("project", "GUIDE.md")
     assert isinstance(hooks, JsonHooksEffect)
-    assert hooks.destination == Destination("project", ".codebuddy/settings.json")
+    assert hooks.destination == Destination("project", ".synthetic/config.json")
     assert [(hook.matcher, hook.content["command"]) for hook in hooks.hooks] == [
         ("Bash|Grep", "graphify hook-guard search"),
         ("Read|Glob", "graphify hook-guard read"),
@@ -60,7 +90,6 @@ def test_exact_yaml_and_rename(tmp_path: Path) -> None:
     renamed = tmp_path / "independent-name.yaml"
     renamed.write_text(FIXTURE.read_text())
     assert reader.read(renamed) == spec
-    assert build_reinstall_case(spec, context(), "renamed").effects == spec
 
 
 def test_markdown_only_case_and_strict_roundtrip() -> None:
@@ -68,7 +97,7 @@ def test_markdown_only_case_and_strict_roundtrip() -> None:
     spec = EffectSpec((effect,))
     case = build_reinstall_case(spec, context())
     assert case.operations == ["install", "install"]
-    assert all("settings.json" not in file["path"] for file in case.initial_files)
+    assert all("config.json" not in file["path"] for file in case.initial_files)
     assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(case.to_json())
     raw["operations"] = ["install"]
@@ -77,10 +106,10 @@ def test_markdown_only_case_and_strict_roundtrip() -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["settings.json.graphify-bak", "settings.json.graphify.lock", "settings.json.bak"]
+    "path", ["config.json.graphify-bak", "config.json.graphify.lock", "config.json.bak"]
 )
 def test_auxiliary_collision(path: str) -> None:
-    payload = FIXTURE.read_text().replace("path: CODEBUDDY.md", f"path: .codebuddy/{path}")
+    payload = FIXTURE.read_text().replace("path: GUIDE.md", f"path: .synthetic/{path}")
     with pytest.raises(ValueError, match="overlap"):
         EffectSpecReader().from_yaml(payload)
 
@@ -95,7 +124,7 @@ def test_unknown_effect_and_fields(fragment: str) -> None:
 
 
 def test_missing_rule_and_duplicate_field_rejected() -> None:
-    case = build_reinstall_case(EffectSpecReader().read(FIXTURE), context())
+    case = build_reinstall_case(structured_spec(), context())
     raw = json.loads(case.to_json())
     del raw["subject"]["rules"]["json_backup"]
     with pytest.raises(ValueError, match="Expected fields"):
@@ -105,7 +134,7 @@ def test_missing_rule_and_duplicate_field_rejected() -> None:
 
 
 def test_unsupported_rule_and_path_rejected() -> None:
-    spec = EffectSpecReader().read(FIXTURE)
+    spec = structured_spec()
     subject = SubjectContext(
         "controlled",
         ("install",),
@@ -119,17 +148,17 @@ def test_unsupported_rule_and_path_rejected() -> None:
     assert effect_identity(spec.effects[1]) == (
         "markdown-section",
         "project",
-        "CODEBUDDY.md",
+        "GUIDE.md",
         "## graphify",
     )
 
 
 def test_personal_witnesses_cannot_collide_with_effects() -> None:
     skill = SkillEffect(
-        "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
+        "skill.md", "skills/claude/references", Destination("home", ".synthetic/skills/package")
     )
     markdown = MarkdownSectionEffect(
-        "always_on/claude-md.md", Destination("home", ".codebuddy/skills/personal-effect-0.txt")
+        "always_on/claude-md.md", Destination("home", ".synthetic/skills/personal-effect-0.txt")
     )
     case = build_reinstall_case(EffectSpec((skill, markdown)), context())
     paths = [(file["root"], file["path"]) for file in case.initial_files]
@@ -144,7 +173,7 @@ def test_personal_witnesses_cannot_collide_with_effects() -> None:
 )
 def test_skill_lock_directory_cannot_be_a_markdown_file(section_first: bool, path: str) -> None:
     skill = SkillEffect(
-        "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
+        "skill.md", "skills/claude/references", Destination("home", ".synthetic/skills/package")
     )
     markdown = MarkdownSectionEffect("always_on/claude-md.md", Destination("home", path))
     effects = (markdown, skill) if section_first else (skill, markdown)
@@ -165,7 +194,7 @@ def test_disjoint_skill_and_markdown_destinations_accept_either_order(
     section_first: bool, destination: Destination
 ) -> None:
     skill = SkillEffect(
-        "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
+        "skill.md", "skills/claude/references", Destination("home", ".synthetic/skills/package")
     )
     markdown = MarkdownSectionEffect("always_on/claude-md.md", destination)
     effects = (markdown, skill) if section_first else (skill, markdown)
@@ -176,7 +205,7 @@ def test_disjoint_skill_and_markdown_destinations_accept_either_order(
 
 @pytest.mark.parametrize("hooks_first", [True, False])
 def test_skill_lock_directory_cannot_be_a_json_file(hooks_first: bool) -> None:
-    spec = EffectSpecReader().read(FIXTURE)
+    spec = structured_spec()
     skill, _, hooks = spec.effects
     assert isinstance(hooks, JsonHooksEffect)
     collision = JsonHooksEffect(Destination("home", ".cache/graphify/skill-locks"), hooks.hooks)
@@ -197,7 +226,7 @@ def test_skill_destination_cannot_overlap_its_own_lock_directory(path: str) -> N
 @pytest.mark.parametrize("home_first", [True, False])
 def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first: bool) -> None:
     skill = SkillEffect(
-        "skill.md", "skills/claude/references", Destination("home", ".codebuddy/skills/graphify")
+        "skill.md", "skills/claude/references", Destination("home", ".synthetic/skills/package")
     )
     second = SkillEffect("skill.md", "skills/claude/references", Destination("project", "skill"))
     effects = (skill, second) if home_first else (second, skill)

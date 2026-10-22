@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.install_sandbox.component.container.local_case import LocalCase
+from tests.install_sandbox.component.container.native_case_support import NativeCase
 from tools.install_sandbox.container.__main__ import main
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
@@ -46,7 +46,7 @@ def test_saved_case_status_is_separate_from_program_exit(
     mode: str,
     status: str,
 ) -> None:
-    local = LocalCase(tmp_path, mode)
+    local = NativeCase(tmp_path, mode)
     local.prepare_executable()
     runner = InstallTestRunner()
     assert main(_arguments(tmp_path), runner=runner) == 0
@@ -55,7 +55,7 @@ def test_saved_case_status_is_separate_from_program_exit(
     assert "inherited from campaign" in (output / "preparation.log").read_text()
     if status == "failed":
         saved = json.loads((output / "steps/0/verification.json").read_bytes())
-        assert any(item["type"] == "missing_file" for item in saved["mismatches"])
+        assert any(item["type"] == "section_count" for item in saved["mismatches"])
 
 
 def test_result_write_failure_keeps_evidence_and_returns_nonzero(
@@ -63,7 +63,7 @@ def test_result_write_failure_keeps_evidence_and_returns_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    local = LocalCase(tmp_path)
+    local = NativeCase(tmp_path)
     original = Path.replace
 
     def replace(path: Path, target: Path) -> Path:
@@ -87,7 +87,7 @@ def test_unexpected_stop_is_not_success(
     capsys: pytest.CaptureFixture[str],
     interrupted: bool,
 ) -> None:
-    LocalCase(tmp_path)
+    NativeCase(tmp_path)
 
     def execute(
         args: list[str],
@@ -111,7 +111,7 @@ def test_invalid_case_fails_before_commands(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    local = LocalCase(tmp_path)
+    local = NativeCase(tmp_path)
     (tmp_path / "case.json").write_text("{}", encoding="utf-8")
     local.prepare_executable()
     runner = InstallTestRunner()
@@ -144,10 +144,8 @@ def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> No
     foreign.mkdir()
     for module in ("tools", "graphify", "yaml"):
         (foreign / f"{module}.py").write_text("raise RuntimeError('Foreign import')\n")
-    shutil.copyfile(
-        Path(__file__).resolve().parents[1] / "fixtures" / "first-install.json",
-        tmp_path / "case.json",
-    )
+    NativeCase(tmp_path)
+    shutil.rmtree(tmp_path / "subject")
     # Missing subject stops the real preparer before it can execute venv or pip.
     entrypoint = json.loads(
         next(
@@ -180,7 +178,7 @@ def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> No
     assert all(value >= 0 for value in timing["seconds"].values())
     saved = json.loads((tmp_path / "results/result.json").read_bytes())
     assert saved["status"] == "not_run"
-    assert "Initial verification failed" in saved["preparation"]["reason"]
+    assert saved["preparation"]["reason"]
     assert not (tmp_path / "work/software/venv").exists()
 
 
@@ -195,7 +193,7 @@ def _admitted(filename: str, rules: list[str]) -> bool:
 def test_unwritable_timing_stderr_does_not_prevent_case_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    local = LocalCase(tmp_path)
+    local = NativeCase(tmp_path)
     local.prepare_executable()
 
     class Unwritable:

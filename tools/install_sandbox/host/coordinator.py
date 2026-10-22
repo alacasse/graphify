@@ -1,22 +1,19 @@
-"""Assemble and conduct a selected project case from discovered target facts."""
+"""Conduct the native two-step reinstall from effects and explicit subject context."""
 
 import json
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
-import yaml
-
-from tools.install_sandbox.contracts.case import (
-    CASE_NAMES,
-    InstallTestCase,
-    case_operations,
-    first_install_files,
+from tools.install_sandbox.contracts.effect_case import (
+    EffectInstallCase,
+    SubjectContext,
+    build_reinstall_case,
+    unique_object,
 )
 from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
-from tools.install_sandbox.contracts.spec import InstallTestSpec, fields, text
 from tools.install_sandbox.contracts.timings import Timing, elapsed, measure
 from tools.install_sandbox.host.build_context import validate_evidence_location
 from tools.install_sandbox.host.docker_runtime import (
@@ -25,8 +22,8 @@ from tools.install_sandbox.host.docker_runtime import (
     SignalCapture,
     WriterObserver,
 )
-from tools.install_sandbox.host.result_reader import read_result
-from tools.install_sandbox.host.spec_reader import InstallSpecReader
+from tools.install_sandbox.host.effect_reader import EffectSpecReader
+from tools.install_sandbox.host.result_reader import read_evidence
 from tools.install_sandbox.host.timing_reader import CaseTimingResult, read_timings
 
 
@@ -54,10 +51,13 @@ class CoordinatedResult:
 
 
 def _collect_result(
-    container: ContainerRunResult, case: InstallTestCase, output: Path
+    container: ContainerRunResult, case: EffectInstallCase, output: Path
 ) -> CoordinatedResult:
     try:
-        result = read_result(output, case)
+        result = read_evidence(output)
+        retained = EffectInstallCase.from_json((output / "case.json").read_text(encoding="utf-8"))
+        if retained != case:
+            raise ValueError("Retained case differs from the submitted reinstall case")
     except FileNotFoundError as error:
         return CoordinatedResult(container, None, f"Result unavailable: {error}", output)
     except OSError as error:
@@ -81,9 +81,6 @@ class CampaignCase:
 class CampaignResult:
     output_directory: Path
     cases: list[CampaignCase]
-    selection_origin: Literal["default", "explicit"] = "explicit"
-    selected_cases: list[str] = field(default_factory=list[str])
-    not_selected_cases: list[str] = field(default_factory=list[str])
     interrupted: bool = False
     preparation: ContainerRunResult | None = None
     cleanup: ContainerRunResult | None = None
@@ -107,7 +104,7 @@ class CampaignResult:
         )
 
     def payload(self) -> dict[str, object]:
-        return {"version": 1, "passed": self.passed, **asdict(self, dict_factory=_campaign_fields)}
+        return {"version": 2, "passed": self.passed, **asdict(self, dict_factory=_campaign_fields)}
 
     def save(self) -> None:
         from tools.install_sandbox.host.timing_report import render_campaign
@@ -136,9 +133,8 @@ class InstallTestCoordinator:
     def run_campaign(
         self,
         *,
-        specs_directory: Path,
-        target: str,
-        case_names: Sequence[str] | None = None,
+        spec_file: Path,
+        subject_context_file: Path,
         subject_checkout: Path,
         output_directory: Path,
         runtime_executable: str | Path = "docker",
@@ -163,20 +159,15 @@ class InstallTestCoordinator:
                 interrupts=interrupts,
                 observer=observer,
             )
-            names = self._select_cases(case_names)
             subject, output, cases = self._prepare_campaign(
-                specs_directory,
-                target,
-                names,
+                spec_file,
+                subject_context_file,
                 subject_checkout,
                 output_directory,
             )
         result = CampaignResult(
             output,
             [CampaignCase(c.name, output / "cases" / c.name) for c in cases],
-            selection_origin="default" if case_names is None else "explicit",
-            selected_cases=names,
-            not_selected_cases=[name for name in CASE_NAMES if name not in names],
             timings=[inputs],
         )
         with harness:
@@ -201,42 +192,22 @@ class InstallTestCoordinator:
                     result.error = f"{result.error or 'Campaign evidence incomplete'}; {error}"
         return result
 
-    @staticmethod
-    def _select_cases(names: Sequence[str] | None) -> list[str]:
-        if names is None:
-            path = Path(__file__).with_name("campaign-defaults.yaml")
-            try:
-                data = fields(yaml.safe_load(path.read_text(encoding="utf-8")), "default_cases")
-                configured = data["default_cases"]
-                if not isinstance(configured, list):
-                    raise ValueError("default_cases must be an ordered list")
-                names = [text(item) for item in cast(list[object], configured)]
-            except (OSError, ValueError, yaml.YAMLError) as error:
-                raise ValueError(f"Cannot load campaign defaults {path}: {error}") from error
-        if isinstance(names, str) or not names:
-            raise ValueError("Select a nonempty ordered list of case names")
-        if len(set(names)) != len(names):
-            raise ValueError("Duplicate case names are not allowed")
-        for name in names:
-            case_operations(name)
-        return list(names)
-
     def _prepare_campaign(
         self,
-        specs: Path,
-        target: str,
-        names: Sequence[str],
+        spec: Path,
+        context: Path,
         subject: Path,
         output: Path,
-    ) -> tuple[Path, Path, list[InstallTestCase]]:
+    ) -> tuple[Path, Path, list[EffectInstallCase]]:
         subject = subject.expanduser().resolve(strict=True)
         destination = output.expanduser()
         output = destination.resolve()
         _check_campaign_paths(subject, destination, output)
-        catalog = InstallSpecReader().read(specs)
-        if target not in catalog:
-            raise ValueError(f"Target not found in {specs}: {target}")
-        cases = [self.build_case(target, catalog[target], case_name=name) for name in names]
+        effects = EffectSpecReader().read(spec)
+        subject_context = SubjectContext.from_data(
+            json.loads(context.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
+        )
+        cases = [build_reinstall_case(effects, subject_context, subject_context.identity)]
         output.mkdir(parents=True, exist_ok=True)
         (output / "inputs").mkdir()
         (output / "cases").mkdir()
@@ -248,7 +219,7 @@ class InstallTestCoordinator:
     def _conduct_cases(
         self,
         harness: ContainerHarness,
-        cases: list[InstallTestCase],
+        cases: list[EffectInstallCase],
         result: CampaignResult,
         progress: Callable[[CampaignResult], None] | None,
     ) -> None:
@@ -285,7 +256,7 @@ class InstallTestCoordinator:
     def _run_and_read(
         self,
         harness: ContainerHarness,
-        case: InstallTestCase,
+        case: EffectInstallCase,
         output: Path,
         campaign: CampaignResult,
     ) -> CoordinatedResult:
@@ -312,36 +283,6 @@ class InstallTestCoordinator:
                 entry.state, entry.error = "incomplete", reason
             elif entry.result is None:
                 entry.state, entry.not_run_reason = "not_run", reason
-
-    def write_case(
-        self,
-        specs_directory: Path,
-        target: str,
-        case_file: Path,
-        *,
-        case_name: str = "first-install",
-    ) -> InstallTestCase:
-        """Discover targets, assemble one project case and write its complete JSON."""
-        specs = InstallSpecReader().read(specs_directory)
-        if target not in specs:
-            raise ValueError(f"Target not found in {specs_directory}: {target}")
-        case = self.build_case(target, specs[target], case_name=case_name)
-        case.write(case_file)
-        return case
-
-    def build_case(
-        self, target: str, spec: InstallTestSpec, *, case_name: str = "first-install"
-    ) -> InstallTestCase:
-        if "project" not in spec.scopes:
-            raise ValueError("Installation case requires a supported project scope")
-        return InstallTestCase(
-            name=case_name,
-            target=target,
-            scope="project",
-            spec=spec,
-            initial_files=first_install_files(spec, case_name),
-            operations=case_operations(case_name),
-        )
 
 
 def _check_campaign_paths(subject: Path, destination: Path, output: Path) -> None:

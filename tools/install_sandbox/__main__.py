@@ -1,4 +1,4 @@
-"""Run a configured installation campaign from the repository checkout."""
+"""Run a native two-step reinstall from effect YAML and explicit subject context."""
 
 import argparse
 import sys
@@ -10,8 +10,8 @@ from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
-    parser.add_argument("--specs", type=Path, required=True)
-    parser.add_argument("--target", required=True)
+    parser.add_argument("--spec", type=Path, required=True)
+    parser.add_argument("--subject-context", type=Path, required=True)
     parser.add_argument(
         "--output",
         type=Path,
@@ -21,12 +21,10 @@ def main(arguments: list[str] | None = None) -> int:
             "be absent; outside out, retention belongs to the caller."
         ),
     )
-    parser.add_argument("--case", action="append", dest="cases", metavar="NAME")
     args = parser.parse_args(arguments)
     result = CampaignOutput().run(
-        specs_directory=args.specs,
-        target=args.target,
-        case_names=args.cases,
+        spec_file=args.spec,
+        subject_context_file=args.subject_context,
         subject_checkout=args.repo,
         output_directory=args.output,
     )

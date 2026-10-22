@@ -92,9 +92,7 @@ def render_campaign(result: CampaignResult) -> str:
     lines = [
         f"Campaign passed: {result.passed}",
         f"Interrupted: {result.interrupted}",
-        f"Selection origin: {result.selection_origin}",
-        f"Selected cases ({len(result.cases)}): {', '.join(result.selected_cases)}",
-        f"Not selected: {', '.join(result.not_selected_cases) or 'none'}",
+        "Operation: reinstall (two installation steps)",
         f"Evidence: {result.output_directory}",
         f"Preparation: {preparation.state if preparation else 'not completed'}",
         f"Preparation diagnostic: {preparation.detail if preparation else 'unavailable'}",

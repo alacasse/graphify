@@ -1,46 +1,20 @@
-universal_uninstall_scopes: [user, project]
-scopes:
-  user:
-    effects:
-      - kind: skill
-        root: home
-        path: .codebuddy/skills/graphify/SKILL.md
-        source: graphify/skill.md
-        reference_bundle: claude
-      - kind: section
-        root: home
-        path: .codebuddy/CODEBUDDY.md
-        marker: "## graphify"
-        source: graphify/always_on/claude-md.md
-      - kind: json
-        root: home
-        path: .codebuddy/settings.json
-        preserves_backup: true
-        entries:
-          hooks:
-            PreToolUse:
-              - matcher: Bash|Grep
-              - matcher: Read|Glob
-        required_text: [graphify, hook-guard]
-  project:
-    effects:
-      - kind: skill
-        root: project
-        path: .codebuddy/skills/graphify/SKILL.md
-        source: graphify/skill.md
-        reference_bundle: claude
-      - kind: section
-        root: project
-        path: CODEBUDDY.md
-        marker: "## graphify"
-        source: graphify/always_on/claude-md.md
-      - kind: json
-        root: project
-        path: .codebuddy/settings.json
-        preserves_backup: true
-        entries:
-          hooks:
-            PreToolUse:
-              - matcher: Bash|Grep
-              - matcher: Read|Glob
-        required_text: [graphify, hook-guard]
+scope: project
+directory: .codebuddy
+effects:
+  - kind: skill
+    source: skill.md
+    references: skills/claude/references
+    destination: {root: home, path: skills/graphify}
+  - kind: markdown-section
+    source: always_on/claude-md.md
+    destination: {directory: ., path: CODEBUDDY.md}
+  - kind: json-hooks
+    family: pretooluse-context
+    destination: {path: settings.json}
+    events:
+      PreToolUse:
+        tools:
+          shell: Bash
+          search-content: Grep
+          read-file: Read
+          find-files: Glob

@@ -1,0 +1,20 @@
+scope: project
+directory: .synthetic
+effects:
+  - kind: skill
+    source: package.md
+    references: reference-data
+    destination: {root: home, path: skills/package}
+  - kind: markdown-section
+    source: instructions.md
+    destination: {directory: ., path: GUIDE.md}
+  - kind: json-hooks
+    family: pretooluse-context
+    destination: {path: config.json}
+    events:
+      PreToolUse:
+        tools:
+          shell: Bash
+          search-content: Grep
+          read-file: Read
+          find-files: Glob

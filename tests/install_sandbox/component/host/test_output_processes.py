@@ -34,7 +34,8 @@ def _child(root: Path, body: str) -> subprocess.Popen[str]:
         "from tools.install_sandbox.host import output_lifecycle\n"
         f"root=Path({str(root)!r})\n" + body + "\nresult=CampaignOutput(managed_root=root/'out', "
         f"now=lambda:datetime.fromisoformat({START.isoformat()!r})).run("
-        "specs_directory=root/'specs', target='missing', subject_checkout=root/'subject')\n"
+        "spec_file=root/'missing-effects.yaml', subject_context_file=root/'context.json',"
+        " subject_checkout=root/'subject')\n"
         "print(result.report.render(), flush=True)\n"
         "raise SystemExit(result.exit_code)\n"
     )

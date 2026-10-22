@@ -13,15 +13,9 @@ from typing import TYPE_CHECKING
 
 from tools.install_sandbox.container.installer import InstallerCommandResult
 from tools.install_sandbox.contracts.results import (
-    AlteredReferencePlan,
     CommandEvidence,
     EvidenceWriteError,
-    FileAlterationPlan,
     InstallTestResult,
-    MissingReferencePlan,
-    ReferenceRepairPlan,
-    SkillBackupPlan,
-    StepPreparationEvidence,
     VerificationResult,
 )
 from tools.install_sandbox.contracts.timings import (
@@ -109,40 +103,11 @@ class TestResultWriter:
         relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
         self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
 
-    def write_managed_resolution(self, value: dict[str, object]) -> None:
-        self._write_json("managed-hooks-resolution.json", value)
-        self._write_json(
-            "managed-hooks-transport.json",
-            {"resolution": str(self.output_directory / "managed-hooks-resolution.json")},
-        )
-
-    def write_lock_expectation(self, expectation: dict[str, str]) -> None:
-        self._write_json("skill-lock.json", expectation)
+    def write_metadata(self, relative: str, value: object) -> None:
+        self._write_json(relative, value)
 
     def write_initial_verification(self, result: VerificationResult) -> None:
         self._write_json("initial-verification.json", asdict(result))
-
-    def write_missing_reference_plan(self, plan: MissingReferencePlan) -> None:
-        self._write_json("steps/1/preparation/plan.json", plan)
-
-    def write_step_preparation_plan(
-        self,
-        plan: AlteredReferencePlan | ReferenceRepairPlan | FileAlterationPlan | SkillBackupPlan,
-        content: bytes,
-    ) -> None:
-        self._write_json("steps/1/preparation/plan.json", plan)
-        content_file = (
-            plan["backup_content_file"]
-            if "backup_content_file" in plan
-            else plan["altered_content_file"]
-        )
-        self._write_bytes(content_file, content)
-
-    def write_step_preparation(self, evidence: StepPreparationEvidence) -> None:
-        self._write_json(
-            "steps/1/preparation/result.json",
-            {**evidence, "verification": asdict(evidence["verification"])},
-        )
 
     def write_verification(self, result: VerificationResult, *, step_index: int = 0) -> None:
         self._write_json(f"steps/{step_index}/verification.json", asdict(result))

@@ -1,6 +1,5 @@
 """Observe native effects without imposing the legacy three-field spec."""
 
-import hashlib
 from pathlib import Path
 
 from tools.install_sandbox.container.environment import FilesystemSnapshot, ObservedEnvironment
@@ -31,19 +30,6 @@ class EffectEnvironment(ObservedEnvironment):
         self.home = directory / "home"
         self.project.mkdir(parents=True, exist_ok=False)
         self.home.mkdir(parents=True, exist_ok=False)
-        self.skill_lock: str | None = None
-        self.lock_expectation: dict[str, str] | None = None
-        for effect in case.effects.effects:
-            if isinstance(effect, SkillEffect):
-                root = self.home if effect.destination.root == "home" else self.project
-                skill = (root / effect.destination.path).resolve()
-                digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
-                self.skill_lock = f".cache/graphify/skill-locks/{digest}.lock"
-                self.lock_expectation = {
-                    "home": str(self.home.resolve()),
-                    "skill_directory": str(skill),
-                    "path": self.skill_lock,
-                }
 
     def prepare(self) -> None:
         for initial in self.case.initial_files:
@@ -53,10 +39,8 @@ class EffectEnvironment(ObservedEnvironment):
             path.write_bytes(initial["content"].encode("utf-8"))
 
     def preserve_expected(self, subject: Path, writer: TestResultWriter) -> FilesystemSnapshot:
-        snapshot = FilesystemSnapshot(skill_lock=self.skill_lock)
-        if self.lock_expectation is not None:
-            writer.write_lock_expectation(self.lock_expectation)
+        snapshot = FilesystemSnapshot()
         for path in source_paths(self.case):
-            self._capture(snapshot, "subject", subject, path, expected=True)
+            self._capture(snapshot, "subject", subject, path)
         writer.write_snapshot(snapshot, "expected")
         return snapshot

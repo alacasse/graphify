@@ -3,9 +3,8 @@
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import TypedDict, cast
 
-from tools.install_sandbox.contracts.case import InitialFile
 from tools.install_sandbox.contracts.effects import (
     EffectSpec,
     JsonHooksEffect,
@@ -14,6 +13,12 @@ from tools.install_sandbox.contracts.effects import (
     physical_destinations,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
+
+
+class InitialFile(TypedDict):
+    root: str
+    path: str
+    content: str
 
 
 def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -200,7 +205,7 @@ class EffectInstallCase:
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "effects-v1"
+        data["format"] = "explicit-expectations-v2"
         data["effects"] = self.effects.to_data()
         payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         self.from_json(payload)
@@ -215,7 +220,7 @@ class EffectInstallCase:
             json.loads(payload, object_pairs_hook=unique_object),
             "format name target scope effects subject initial_files operations",
         )
-        if data["format"] != "effects-v1" or data["name"] != "reinstall":
+        if data["format"] != "explicit-expectations-v2" or data["name"] != "reinstall":
             raise ValueError("Unsupported effects case format or operation")
         case = build_reinstall_case(
             EffectSpec.from_data(data["effects"]),

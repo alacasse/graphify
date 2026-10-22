@@ -9,3 +9,5 @@
 !metadata/
 !metadata/**
 !prepare_dependencies.py
+!verified/
+!verified/**

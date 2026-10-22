@@ -13,6 +13,8 @@ from tools.install_sandbox.contracts.effect_case import (
     build_reinstall_case,
     unique_object,
 )
+from tools.install_sandbox.contracts.effects import EffectSpec
+from tools.install_sandbox.contracts.preparation import PreparationResult
 from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
 from tools.install_sandbox.contracts.timings import Timing, elapsed, measure
 from tools.install_sandbox.host.build_context import validate_evidence_location
@@ -24,6 +26,7 @@ from tools.install_sandbox.host.docker_runtime import (
 )
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
+from tools.install_sandbox.host.subject_checkout import captured_subject
 from tools.install_sandbox.host.timing_reader import CaseTimingResult, read_timings
 
 
@@ -87,6 +90,37 @@ class CampaignResult:
     error: str | None = None
     duration_seconds: float | None = None
     timings: list[Timing] = field(default_factory=list[Timing])
+    prepare_only: bool = False
+    preparation_result: PreparationResult | None = None
+
+    @property
+    def prepared(self) -> bool:
+        return (
+            not self.interrupted
+            and self.error is None
+            and self.preparation_result is not None
+            and self.preparation_result.status == "prepared"
+            and self.preparation is not None
+            and self.preparation.state == "completed"
+            and self.preparation.cleanup_complete
+            and self.cleanup is not None
+            and self.cleanup.state == "completed"
+            and self.cleanup.cleanup_complete
+        )
+
+    @property
+    def successful(self) -> bool:
+        return self.prepared if self.prepare_only else self.passed
+
+    @property
+    def status(self) -> str:
+        if not self.prepare_only:
+            return "passed" if self.passed else "incomplete"
+        if self.prepared:
+            return "prepared"
+        if self.preparation_result and self.preparation_result.status == "nonconformant":
+            return "nonconformant"
+        return "incomplete"
 
     @property
     def passed(self) -> bool:
@@ -104,7 +138,12 @@ class CampaignResult:
         )
 
     def payload(self) -> dict[str, object]:
-        return {"version": 2, "passed": self.passed, **asdict(self, dict_factory=_campaign_fields)}
+        return {
+            "version": 2,
+            "passed": self.passed,
+            "status": self.status,
+            **asdict(self, dict_factory=_campaign_fields),
+        }
 
     def save(self) -> None:
         from tools.install_sandbox.host.timing_report import render_campaign
@@ -145,6 +184,7 @@ class InstallTestCoordinator:
         interrupts: SignalCapture | None = None,
         observer: WriterObserver | None = None,
         progress: Callable[[CampaignResult], None] | None = None,
+        prepare_only: bool = False,
     ) -> CampaignResult:
         """Prepare once, conduct ordered isolated cases, and always finalize owned resources."""
         started = time.monotonic_ns()
@@ -159,24 +199,28 @@ class InstallTestCoordinator:
                 interrupts=interrupts,
                 observer=observer,
             )
-            subject, output, cases = self._prepare_campaign(
+            subject, output, effects, context, cases = self._prepare_campaign(
                 spec_file,
                 subject_context_file,
                 subject_checkout,
                 output_directory,
+                prepare_only,
             )
         result = CampaignResult(
             output,
             [CampaignCase(c.name, output / "cases" / c.name) for c in cases],
             timings=[inputs],
+            prepare_only=prepare_only,
         )
         with harness:
             try:
                 _save_progress(result, progress)
-                result.preparation = harness.prepare(subject, output / "preparation")
+                self._prepare_image(harness, subject, effects, context, result)
+                assert result.preparation is not None
                 result.timings.extend(result.preparation.timings)
                 _save_progress(result, progress)
-                self._conduct_cases(harness, cases, result, progress)
+                if not prepare_only:
+                    self._conduct_cases(harness, cases, result, progress)
             except (Exception, KeyboardInterrupt) as error:
                 result.interrupted = isinstance(error, KeyboardInterrupt)
                 result.error = f"Campaign stopped: {type(error).__name__}: {error}"
@@ -192,13 +236,36 @@ class InstallTestCoordinator:
                     result.error = f"{result.error or 'Campaign evidence incomplete'}; {error}"
         return result
 
+    @staticmethod
+    def _prepare_image(
+        harness: ContainerHarness,
+        subject: Path,
+        effects: EffectSpec,
+        context: SubjectContext,
+        result: CampaignResult,
+    ) -> None:
+        with captured_subject(subject, context) as captured:
+            if context.package_root is None:
+                result.preparation = harness.prepare(
+                    captured, result.output_directory / "preparation"
+                )
+            else:
+                result.preparation = harness.prepare(
+                    captured,
+                    result.output_directory / "preparation",
+                    effects=effects,
+                    subject_context=context,
+                )
+                result.preparation_result = harness.preparation_result
+
     def _prepare_campaign(
         self,
         spec: Path,
         context: Path,
         subject: Path,
         output: Path,
-    ) -> tuple[Path, Path, list[EffectInstallCase]]:
+        prepare_only: bool = False,
+    ) -> tuple[Path, Path, EffectSpec, SubjectContext, list[EffectInstallCase]]:
         subject = subject.expanduser().resolve(strict=True)
         destination = output.expanduser()
         output = destination.resolve()
@@ -207,14 +274,21 @@ class InstallTestCoordinator:
         subject_context = SubjectContext.from_data(
             json.loads(context.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
         )
-        cases = [build_reinstall_case(effects, subject_context, subject_context.identity)]
+        if prepare_only and subject_context.package_root is None:
+            raise ValueError("Preparation-only requires a package root and exact subject revision")
+        cases = (
+            []
+            if prepare_only
+            else [build_reinstall_case(effects, subject_context, subject_context.identity)]
+        )
         output.mkdir(parents=True, exist_ok=True)
         (output / "inputs").mkdir()
-        (output / "cases").mkdir()
+        if cases:
+            (output / "cases").mkdir()
         for case in cases:
             (output / "cases" / case.name).mkdir()
             case.write(output / "inputs" / f"{case.name}.json")
-        return subject, output, cases
+        return subject, output, effects, subject_context, cases
 
     def _conduct_cases(
         self,

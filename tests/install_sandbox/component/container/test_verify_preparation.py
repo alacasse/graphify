@@ -62,3 +62,54 @@ def test_failed_evidence_copy_is_timed_and_help_is_not_run(
     timing = json.loads(capsys.readouterr().err.removeprefix(prefix))
     assert not timing["evidence_copy_completed"]
     assert timing["seconds"]["evidence_copy"] >= 0
+
+
+def test_verified_entrypoint_runs_isolated_observer_without_invoking_product(
+    tmp_path: Path,
+) -> None:
+    source, output, binary = tmp_path / "image", tmp_path / "evidence", tmp_path / "bin"
+    for path in (source, output, binary):
+        path.mkdir()
+    (source / "dependencies.json").write_text('{"mode":"locked"}')
+    (source / "inputs.json").write_text(
+        json.dumps(
+            {
+                "distribution": "sandbox-intentionally-missing-package",
+                "console": "candidate-cli",
+                "entry_point": "candidate:main",
+                "package_root": "candidate",
+            }
+        )
+    )
+    (binary / "python").symlink_to(sys.executable)
+    executable = binary / "candidate-cli"
+    executable.write_text(
+        f"#!{binary / 'python'}\nimport re\nimport sys\nfrom candidate import main\n"
+        "if __name__ == '__main__':\n"
+        "    sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?$', '', sys.argv[0])\n"
+        "    sys.exit(main())\n"
+    )
+    executable.chmod(0o755)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            verify_preparation.__file__,
+            str(source),
+            str(output),
+            str(executable),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads((output / "observation.json").read_text())
+    assert observed["executable_entry_point"] is True
+    assert observed["executable_script"]
+    assert "PackageNotFoundError" in observed["errors"][0]
+    assert (output / "dependencies.json").read_bytes() == (
+        source / "dependencies.json"
+    ).read_bytes()
+    assert not list(binary.glob("__pycache__"))

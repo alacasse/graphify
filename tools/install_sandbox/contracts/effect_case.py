@@ -1,6 +1,7 @@
 """Construct a reinstall case directly from effects and explicit subject rules."""
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import TypedDict, cast
@@ -58,10 +59,12 @@ class SubjectContext:
     invocation: tuple[str, ...]
     version_source: str
     rules: EffectRules
+    package_root: str | None = None
+    revision: str | None = None
 
     @classmethod
     def from_data(cls, value: object) -> "SubjectContext":
-        data = fields(value, "identity invocation version_source rules")
+        data = _context_fields(value)
         raw = data["invocation"]
         if not isinstance(raw, list) or not raw:
             raise ValueError("Expected explicit subject invocation arguments")
@@ -73,7 +76,27 @@ class SubjectContext:
             arguments,
             relative_path(data["version_source"]),
             EffectRules.from_data(data["rules"]),
+            cast(str | None, data["package_root"]),
+            cast(str | None, data["revision"]),
         )
+
+
+def _context_fields(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected a subject context object")
+    incoming = cast(dict[str, object], value)
+    data = fields(
+        {"package_root": None, "revision": None, **incoming},
+        "identity invocation version_source rules package_root revision",
+    )
+    root, revision = data["package_root"], data["revision"]
+    if root is not None:
+        relative_path(root)
+        if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+            raise ValueError("Package preparation requires an exact subject commit SHA")
+    elif revision is not None:
+        raise ValueError("Subject revision requires a package root")
+    return data
 
 
 def _validate_hook_rules(effect: JsonHooksEffect, rules: EffectRules) -> None:

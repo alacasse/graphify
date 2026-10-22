@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -20,6 +21,9 @@ from pathlib import Path
 from types import FrameType
 from typing import Literal, Protocol, TextIO
 
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase, SubjectContext
+from tools.install_sandbox.contracts.effects import EffectSpec
+from tools.install_sandbox.contracts.preparation import PreparationResult
 from tools.install_sandbox.contracts.timings import Timing, measure, skip_pending
 from tools.install_sandbox.host.build_context import (
     DependencyPreparation,
@@ -27,6 +31,8 @@ from tools.install_sandbox.host.build_context import (
     read_dependency_preparation,
     validate_evidence_location,
 )
+from tools.install_sandbox.host.preparation import capture_preparation, evaluate_preparation
+from tools.install_sandbox.host.preparation_reader import read_preparation
 
 __all__ = ["ContainerHarness", "ContainerRunResult"]
 
@@ -188,6 +194,10 @@ class ContainerHarness:
         self.logs: Path | None = None
         self.diagnostics = _DiagnosticTails()
         self.dependency_preparation: DependencyPreparation | None = None
+        self.preparation_result: PreparationResult | None = None
+        self.binding: dict[str, str] | None = None
+        self._effects: EffectSpec | None = None
+        self._subject_context: SubjectContext | None = None
 
     def __enter__(self) -> ContainerHarness:
         if self._owns_interrupts:
@@ -202,9 +212,19 @@ class ContainerHarness:
     def interrupted(self) -> bool:
         return self.interrupts.signal_number is not None
 
-    def prepare(self, subject_checkout: Path, output_directory: Path) -> ContainerRunResult:
+    def prepare(
+        self,
+        subject_checkout: Path,
+        output_directory: Path,
+        *,
+        effects: EffectSpec | None = None,
+        subject_context: SubjectContext | None = None,
+    ) -> ContainerRunResult:
+        if (effects is None) != (subject_context is None):
+            raise ValueError("Effects and subject context must be supplied together")
         if self.logs is not None:
             raise ValueError("A harness prepares exactly one campaign image")
+        self._effects, self._subject_context = effects, subject_context
         subject_checkout = subject_checkout.expanduser().resolve(strict=True)
         if not subject_checkout.is_dir():
             raise ValueError("subject_checkout must be a directory")
@@ -216,17 +236,55 @@ class ContainerHarness:
             outcome = self._prepare_image(subject_checkout, records)
         except Exception as error:
             outcome = _Outcome("incomplete", "build", 2, f"Preparation failed: {error}")
+        outcome = self._evaluate_preparation(outcome)
         self.ready = outcome.state == "completed" and not self.pending_containers
         return replace(
             self._result(outcome, not self.pending_containers, records, self.run_id),
             dependency_preparation=self.dependency_preparation,
         )
 
+    def _evaluate_preparation(self, outcome: _Outcome) -> _Outcome:
+        if self._subject_context is None or self._subject_context.package_root is None:
+            return outcome
+        assert self.logs is not None
+        observation = self.logs / "dependencies/observation.json"
+        if observation.is_file():
+            shutil.copyfile(observation, self.logs / "observation.json")
+        if outcome.state != "completed":
+            (self.logs / "runtime.json").write_text(
+                json.dumps(
+                    {
+                        "state": outcome.state,
+                        "phase": outcome.phase,
+                        "detail": outcome.detail,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        self.preparation_result = evaluate_preparation(self.logs, self.image_id or "")
+        self.binding = self.preparation_result.binding
+        if self.preparation_result.status != "prepared" and outcome.state == "completed":
+            return _Outcome(
+                "incomplete", "verify", 2, "; ".join(self.preparation_result.diagnostics)
+            )
+        return outcome
+
     def _prepare_image(self, subject: Path, records: list[Timing]) -> _Outcome:
         with measure(records[0]):
             self._check_temporary_parent(subject)
             self.temporary = tempfile.TemporaryDirectory(prefix=f"install-sandbox-{self.run_id}-")
             context = prepare_context(subject, Path(self.temporary.name))
+            if self._subject_context is not None and self._subject_context.package_root is not None:
+                assert self.logs is not None and self._effects is not None
+                captured = self.logs
+                capture_preparation(
+                    context / "subject", captured, self._effects, self._subject_context
+                )
+                embedded = context / "verified"
+                shutil.copytree(captured / "expected", embedded / "expected")
+                (embedded / "preparation").mkdir()
+                shutil.copyfile(captured / "inputs.json", embedded / "preparation/inputs.json")
         with measure(records[1]):
             result = self._command(
                 [self.runtime, "version", "--format", "{{.Server.Version}}"],
@@ -307,6 +365,18 @@ class ContainerHarness:
         if not self.ready:
             raise ValueError("Campaign image is not available")
         case = _resolve_case(case_file)
+        if self.binding is not None:
+            parsed = EffectInstallCase.from_json(case.read_text(encoding="utf-8"))
+            assert self.logs is not None
+            retained = read_preparation(self.logs)
+            if (
+                parsed.subject != self._subject_context
+                or parsed.effects != self._effects
+                or self.binding.get("image_id") != self.image_id
+                or retained.status != "prepared"
+                or retained.binding != self.binding
+            ):
+                raise ValueError("Case subject does not match verified preparation binding")
         output = output_directory.expanduser().resolve()
         if _paths_overlap(case, output) or any("," in str(p) for p in (case, output)):
             raise ValueError("Case and evidence mount paths must be separate and comma-free")
@@ -391,6 +461,7 @@ class ContainerHarness:
             f"INSTALL_SANDBOX_RUN_ID={run_id}",
             "--env",
             f"INSTALL_SANDBOX_IMAGE_ID={self.image_id}",
+            "--network=none",
             "--workdir",
             "/sandbox/work",
         ]
@@ -418,9 +489,11 @@ class ContainerHarness:
             _mount(output, "/sandbox/output", False),
             self.image_id,
             "--reference-sources",
-            "/opt/install-sandbox/reference",
+            "/opt/install-sandbox/expected" if self.binding else "/opt/install-sandbox/reference",
             "--prepared-executable",
-            "/opt/install-sandbox/venv/bin/graphify",
+            self.binding["executable"]
+            if self.binding
+            else "/opt/install-sandbox/venv/bin/graphify",
             "--case-file",
             "/sandbox/case.json",
             "--output-directory",

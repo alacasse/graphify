@@ -37,6 +37,19 @@ def verify(source: Path, output: Path, executable: str) -> int:
         completed = True
     finally:
         _report_entry((time.monotonic_ns() - started) / 1_000_000_000, completed)
+    declaration = source / "inputs.json"
+    if declaration.is_file():
+        return subprocess.call(
+            [
+                str(Path(executable).parent / "python"),
+                "-I",
+                "-B",
+                str(Path(__file__).with_name("package_observation.py")),
+                str(declaration),
+                str(output),
+                executable,
+            ]
+        )
     return subprocess.call([executable, "--help"])
 
 

@@ -90,9 +90,13 @@ def render_campaign(result: CampaignResult) -> str:
     preparation = result.preparation
     cleanup = result.cleanup
     lines = [
-        f"Campaign passed: {result.passed}",
+        f"Preparation result: {result.status}"
+        if result.prepare_only
+        else f"Campaign passed: {result.passed}",
         f"Interrupted: {result.interrupted}",
-        "Operation: reinstall (two installation steps)",
+        "Operation: prepare-only (zero installation steps)"
+        if result.prepare_only
+        else "Operation: reinstall (two installation steps)",
         f"Evidence: {result.output_directory}",
         f"Preparation: {preparation.state if preparation else 'not completed'}",
         f"Preparation diagnostic: {preparation.detail if preparation else 'unavailable'}",

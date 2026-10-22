@@ -53,6 +53,7 @@ class CampaignOutput:
         subject_checkout: Path,
         output_directory: Path | None = None,
         runtime_executable: str | Path = "docker",
+        prepare_only: bool = False,
     ) -> CampaignCommandResult:
         report = OutputReport(
             self.now().astimezone(UTC).isoformat(),
@@ -62,14 +63,22 @@ class CampaignOutput:
             str(spec_file),
             str(subject_context_file),
         )
-        session = _Session(self.root, report, self.now)
+        session = _Session(self.root, report, self.now, prepare_only=prepare_only)
         with SignalCapture() as interrupts:
             return session.run(output_directory, str(runtime_executable), interrupts)
 
 
 class _Session:
-    def __init__(self, root: Path, report: OutputReport, now: Callable[[], datetime]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        report: OutputReport,
+        now: Callable[[], datetime],
+        *,
+        prepare_only: bool = False,
+    ) -> None:
         self.root, self.report, self.now = root, report, now
+        self.prepare_only = prepare_only
         self.directory: Path | None = None
         self.lock: FileLock | None = None
 
@@ -158,9 +167,10 @@ class _Session:
             interrupts=interrupts,
             observer=self,
             progress=self._progress,
+            prepare_only=self.prepare_only,
         )
         self.report.observe(result)
-        self.report.exit_code = 0 if result.passed else 1
+        self.report.exit_code = 0 if result.successful else 1
         self.report.phase = "executed"
         self.report.save(self.directory)
 

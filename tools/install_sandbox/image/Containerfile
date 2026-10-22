@@ -25,5 +25,7 @@ RUN cp -a /opt/install-sandbox/reference /tmp/package \
 COPY --chmod=0555 contracts/ /opt/install-sandbox/tools/install_sandbox/contracts/
 COPY --chmod=0555 container/ /opt/install-sandbox/tools/install_sandbox/container/
 
+COPY --chmod=0555 verified/ /opt/install-sandbox/
+
 WORKDIR /sandbox/work
 ENTRYPOINT ["python", "-I", "-B", "-u", "/opt/install-sandbox/tools/install_sandbox/container/__main__.py"]

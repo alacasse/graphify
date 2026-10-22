@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -71,6 +72,7 @@ def _build(state: Path, mode: str, arguments: list[str]) -> int:
     _dependency_evidence(state, mode)
     context = Path(arguments[-1])
     shutil.copytree(context / "subject", state / "reference", dirs_exist_ok=True)
+    shutil.copytree(context / "verified", state / "verified", dirs_exist_ok=True)
     (state / "captured-context.json").write_text(
         json.dumps(sorted(p.name for p in context.iterdir()))
     )
@@ -96,6 +98,7 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     marker.write_text("running", encoding="utf-8")
     if any(value.endswith("/verify_preparation.py") for value in arguments):
         _retrieve_dependency_evidence(state, arguments)
+        _verified_observation(state, arguments)
         return _verify(mode, marker)
     run_id = _environment(arguments, "INSTALL_SANDBOX_RUN_ID")
     output = _output_mount(arguments)
@@ -113,6 +116,59 @@ def _run(state: Path, mode: str, arguments: list[str]) -> int:
     if mode != "container_cleanup_fail":
         marker.unlink(missing_ok=True)
     return 0
+
+
+def _verified_observation(state: Path, arguments: list[str]) -> None:
+    if not (state / "verified/preparation/inputs.json").is_file():
+        return
+    payload = _package_observation(state)
+    fault = os.environ.get("FAKE_DOCKER_PREPARATION_FAULT")
+    if fault == "missing-observation":
+        return
+    if fault in {"version", "image_id"}:
+        payload[fault] = "wrong-version" if fault == "version" else "sha256:" + "f" * 64
+    if fault == "resource":
+        payload["resources"] = {}
+    for argument in arguments:
+        if argument.startswith("type=bind,") and ",dst=/sandbox/preparation" in argument:
+            output = Path(argument.split("src=", 1)[1].split(",", 1)[0])
+            (output / "observation.json").write_text(json.dumps(payload))
+
+
+def _package_observation(state: Path) -> dict[str, object]:
+    package = state / "reference/graphify"
+    resources = {
+        p.relative_to(package).as_posix(): base64.b64encode(p.read_bytes()).decode()
+        for p in package.rglob("*")
+        if p.is_file()
+    }
+    return {
+        "format": "preparation-observation-v1",
+        "image_id": _IMAGE_ID,
+        "distribution": "graphifyy",
+        "version": "1.2.3",
+        "entry_point": "graphify.cli:main",
+        "interpreter": "/opt/install-sandbox/venv/bin/python",
+        "executable": "/opt/install-sandbox/venv/bin/graphify",
+        "module": "/opt/install-sandbox/venv/lib/python3.12/site-packages/graphify/cli.py",
+        "source_root": "/opt/install-sandbox/venv/lib/python3.12/site-packages/graphify",
+        "resources": resources,
+        "directories": [
+            p.relative_to(package).as_posix() for p in package.rglob("*") if p.is_dir()
+        ],
+        "executable_script": base64.b64encode(
+            b"#!/opt/install-sandbox/venv/bin/python\nimport re\nimport sys\n"
+            b"from graphify.cli import main\nif __name__ == '__main__':\n"
+            b"    sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?$', '', sys.argv[0])\n"
+            b"    sys.exit(main())\n"
+        ).decode(),
+        "executable_owned": True,
+        "executable_entry_point": True,
+        "executable_regular": True,
+        "module_owned": True,
+        "executable_shebang": "#!/opt/install-sandbox/venv/bin/python",
+        "errors": [],
+    }
 
 
 def _hold(state: Path, mode: str, run_id: str) -> None:
@@ -184,7 +240,9 @@ def _execute_case(state: Path, arguments: list[str]) -> int:
         [
             sys.executable,
             os.environ["FAKE_DOCKER_CASE_PROGRAM"],
-            str(state / "reference"),
+            str(state / "verified/expected")
+            if _option(arguments, "--reference-sources") == "/opt/install-sandbox/expected"
+            else str(state / "reference"),
             mounts["/sandbox/case.json"],
             mounts["/sandbox/output"],
         ],

@@ -50,6 +50,7 @@ def prepare_context(subject: Path, directory: Path) -> Path:
         captured = context / "subject" / filename
         if captured.exists():
             shutil.copyfile(captured, metadata / filename)
+    (context / "verified").mkdir()
     return context
 
 

@@ -13,6 +13,11 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--subject-context", type=Path, required=True)
     parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Verify package preparation without running installation cases",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help=(
@@ -27,6 +32,7 @@ def main(arguments: list[str] | None = None) -> int:
         subject_context_file=args.subject_context,
         subject_checkout=args.repo,
         output_directory=args.output,
+        prepare_only=args.prepare_only,
     )
     report = result.report.render()
     if result.exit_code:

@@ -30,9 +30,8 @@ class OutputReport:
     destination: str
     managed_root: str | None
     subject: str
-    specs: str
-    target: str
-    requested_cases: list[str] | None
+    spec: str
+    subject_context: str
     identity: str = field(default_factory=lambda: uuid.uuid4().hex)
     available_directory: str | None = None
     finished_at: str | None = None
@@ -70,7 +69,7 @@ class OutputReport:
             + "\n".join(
                 [
                     f"Product: {self.subject}",
-                    f"Target: {self.target}; specs: {self.specs}",
+                    f"Spec: {self.spec}; subject context: {self.subject_context}",
                     f"Command exit code: {self.exit_code}",
                     f"Result available at: {self.available_directory or 'not allocated'}",
                     f"Output phase: {self.phase}; archive: {self.archive}",

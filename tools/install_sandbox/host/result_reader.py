@@ -1,54 +1,19 @@
-"""Validate the received case result independently of container execution."""
+"""Decode current results and replay retained evidence without external inputs."""
 
 import json
-from pathlib import Path, PurePosixPath
-from typing import cast
+from pathlib import Path
 
-from tools.install_sandbox.container.environment import (
-    altered_reference_plan,
-    missing_reference_plan,
-    skill_backup_plan,
-    skill_repair_plan,
-)
-from tools.install_sandbox.container.verifier import InstallVerifier
-from tools.install_sandbox.contracts.case import (
-    InstallTestCase,
-    destination_roots,
-    destinations,
-    install_arguments,
-    json_repair_plan,
-    markdown_repair_plan,
-)
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.managed_json import (
-    is_transaction_temporary,
-    needs_resolution,
-    resolution,
-    sidecars,
-)
 from tools.install_sandbox.contracts.results import (
-    AlteredReferencePlan,
     CommandEvidence,
-    FileAlterationPlan,
     InstallTestResult,
-    MissingReferencePlan,
-    ObservationObstacle,
     PreparationEvidence,
-    ReferenceRepairPlan,
-    SkillBackupPlan,
     StepEvidence,
-    StepPreparationEvidence,
 )
-from tools.install_sandbox.contracts.spec import fields, relative_path, text
+from tools.install_sandbox.contracts.spec import fields, text
 from tools.install_sandbox.host.effect_result_reader import check_effect_result
 from tools.install_sandbox.host.evidence_reader import (
     boolean as _boolean,
-)
-from tools.install_sandbox.host.evidence_reader import (
-    check_environment as _check_environment,
-)
-from tools.install_sandbox.host.evidence_reader import (
-    check_snapshot as _check_snapshot,
 )
 from tools.install_sandbox.host.evidence_reader import (
     json_list as _list,
@@ -57,25 +22,13 @@ from tools.install_sandbox.host.evidence_reader import (
     json_object as _json_object,
 )
 from tools.install_sandbox.host.evidence_reader import (
-    lock_expectation as _lock_expectation,
-)
-from tools.install_sandbox.host.evidence_reader import (
     optional_text as _optional_text,
-)
-from tools.install_sandbox.host.evidence_reader import (
-    parse_obstacle as _obstacle,
 )
 from tools.install_sandbox.host.evidence_reader import (
     read_json_evidence as _read_json_evidence,
 )
 from tools.install_sandbox.host.evidence_reader import (
-    retained_snapshot as _retained_snapshot,
-)
-from tools.install_sandbox.host.evidence_reader import (
     safe_evidence_path,
-)
-from tools.install_sandbox.host.evidence_reader import (
-    snapshot_entry as _snapshot_entry,
 )
 from tools.install_sandbox.host.evidence_reader import (
     verification as _verification,
@@ -114,12 +67,15 @@ def _command(value: object, output: Path) -> CommandEvidence:
     }
 
 
+def _has_failure(value: object) -> bool:
+    return isinstance(value, dict) and "failure" in value
+
+
 def _step(value: object, output: Path) -> StepEvidence:
-    has_preparation = isinstance(value, dict) and "preparation" in value
+    failed = _has_failure(value)
     data = fields(
-        cast(object, value),
-        "operation skip_reason command verification observations"
-        + (" preparation" if has_preparation else ""),
+        value,
+        "operation skip_reason command verification observations" + (" failure" if failed else ""),
     )
     observations = data["observations"]
     references = (
@@ -139,142 +95,31 @@ def _step(value: object, output: Path) -> StepEvidence:
         else _verification(data["verification"]),
         "observations": references,
     }
-    if has_preparation:
-        step["preparation"] = _step_preparation(data["preparation"], output)
+    if failed:
+        failure = fields(data["failure"], "stage reason")
+        step["failure"] = {"stage": text(failure["stage"]), "reason": text(failure["reason"])}
     return step
 
 
-def _step_plan(
-    value: object,
-) -> (
-    AlteredReferencePlan
-    | MissingReferencePlan
-    | ReferenceRepairPlan
-    | FileAlterationPlan
-    | SkillBackupPlan
-):
-    if isinstance(value, dict) and "root" in value and "altered_path" in value:
-        data = fields(cast(object, value), "root altered_path altered_content_file")
-        root = text(data["root"])
-        if root not in {"home", "project"}:
-            raise ValueError("Invalid altered reference destination root")
-        return {
-            "root": root,
-            "altered_path": relative_path(data["altered_path"]),
-            "altered_content_file": relative_path(data["altered_content_file"]),
-        }
-    if isinstance(value, dict) and "root" in value:
-        data = fields(cast(object, value), "root deleted_path")
-        root = text(data["root"])
-        if root not in {"home", "project"}:
-            raise ValueError("Invalid missing reference destination root")
-        return {"root": root, "deleted_path": relative_path(data["deleted_path"])}
-    if isinstance(value, dict) and "backup_path" in value:
-        data = fields(cast(object, value), "backup_path backup_content_file")
-        return {
-            "backup_path": relative_path(data["backup_path"]),
-            "backup_content_file": relative_path(data["backup_content_file"]),
-        }
-    return _repair_plan(cast(object, value))
-
-
-def _repair_plan(value: object) -> ReferenceRepairPlan | FileAlterationPlan:
-    has_deleted = isinstance(value, dict) and "deleted_path" in value
-    data = fields(
-        cast(object, value),
-        "altered_path altered_content_file" + (" deleted_path" if has_deleted else ""),
-    )
-    common: FileAlterationPlan = {
-        "altered_path": relative_path(data["altered_path"]),
-        "altered_content_file": relative_path(data["altered_content_file"]),
-    }
-    if has_deleted:
-        return {**common, "deleted_path": relative_path(data["deleted_path"])}
-    return common
-
-
-def _step_preparation(value: object, output: Path) -> StepPreparationEvidence:
-    data = fields(value, "plan ready reason before verification")
-    plan = _step_plan(data["plan"])
-    if "deleted_path" in plan and "root" in plan:
-        return _missing_preparation(data, plan)
-    if "backup_content_file" in plan:
-        content_file = plan["backup_content_file"]
-        expected_file = "steps/1/preparation/backup-content.bin"
-    else:
-        content_file = plan["altered_content_file"]
-        expected_file = "steps/1/preparation/altered-content.bin"
-    if content_file != expected_file:
-        raise ValueError("Invalid preparation content evidence path")
-    if data["before"] != "steps/1/before.json":
-        raise ValueError("Invalid preparation observation path")
-    safe_evidence_path(output, content_file)
-    result: StepPreparationEvidence = {
-        "plan": plan,
-        "ready": _boolean(data["ready"]),
-        "reason": _optional_text(data["reason"]),
-        "before": "steps/1/before.json",
-        "verification": _verification(data["verification"]),
-    }
-    verification = result["verification"]
-    if result["ready"]:
-        if result["reason"] is not None or not verification.complete or verification.mismatches:
-            raise ValueError(
-                "Ready step preparation requires complete verification without mismatch"
-            )
-    elif result["reason"] is None:
-        raise ValueError("Unavailable step preparation requires a reason")
-    return result
-
-
-def _missing_preparation(
-    data: dict[str, object], plan: MissingReferencePlan
-) -> StepPreparationEvidence:
-    if data["before"] != "steps/1/before.json":
-        raise ValueError("Invalid preparation observation path")
-    result: StepPreparationEvidence = {
-        "plan": plan,
-        "ready": _boolean(data["ready"]),
-        "reason": _optional_text(data["reason"]),
-        "before": "steps/1/before.json",
-        "verification": _verification(data["verification"]),
-    }
-    check = result["verification"]
-    if result["ready"]:
-        if result["reason"] is not None or not check.complete or check.mismatches:
-            raise ValueError(
-                "Ready step preparation requires complete verification without mismatch"
-            )
-    elif result["reason"] is None:
-        raise ValueError("Unavailable step preparation requires a reason")
-    return result
-
-
 def _preparation(value: object, output: Path) -> PreparationEvidence:
-    has_stage = isinstance(value, dict) and "stage" in value
-    data = fields(cast(object, value), "ready reason log source" + (" stage" if has_stage else ""))
+    data = fields(value, "ready reason log source stage")
     if data["source"] != "campaign":
         raise ValueError("Package preparation must be inherited from campaign")
-    log = text(data["log"])
+    log, stage = text(data["log"]), text(data["stage"])
     safe_evidence_path(output, log)
-    result: PreparationEvidence = {
+    if stage not in ("started", "sources_retained", "initial_verified"):
+        raise ValueError("Invalid preparation stage")
+    return {
         "source": "campaign",
         "ready": _boolean(data["ready"]),
         "reason": _optional_text(data["reason"]),
         "log": log,
+        "stage": stage,
     }
-    if has_stage:
-        stage = text(data["stage"])
-        if stage not in ("started", "sources_retained", "initial_verified"):
-            raise ValueError("Invalid preparation stage")
-        result["stage"] = stage
-    return result
 
 
 def _check_preparation_stage(result: InstallTestResult) -> None:
     stage = result.preparation.get("stage")
-    if stage is None:
-        return  # Historical results retain their existing evidence requirements.
     expected = None if stage == "started" else "expected/"
     if result.evidence["expected_contents"] != expected:
         raise ValueError("Preparation stage contradicts retained source reference")
@@ -311,8 +156,10 @@ def _check_references(result: InstallTestResult, step: StepEvidence, index: int)
 
 
 def _check_skipped(step: StepEvidence) -> None:
-    if step["skip_reason"] is None or any(
-        step[key] is not None for key in ("command", "verification", "observations")
+    if (
+        "failure" in step
+        or step["skip_reason"] is None
+        or any(step[key] is not None for key in ("command", "verification", "observations"))
     ):
         raise ValueError("An unattempted step requires a reason and no command or observations")
 
@@ -331,15 +178,32 @@ def _check_attempted(step: StepEvidence) -> str:
 
 
 def _check_next_step(result: InstallTestResult, step: StepEvidence, index: int) -> str:
-    preparation = step.get("preparation")
-    if preparation is not None and not preparation["ready"]:
-        _check_skipped(step)
-        if step["skip_reason"] != preparation["reason"]:
-            raise ValueError("Step skip reason contradicts preparation")
-        return "incomplete"
+    if "failure" in step:
+        return _check_failed_phase(step)
     status = _check_attempted(step)
     _check_references(result, step, index)
     return status
+
+
+def _check_failed_phase(step: StepEvidence) -> str:
+    failure = step.get("failure")
+    assert failure is not None
+    stage = failure["stage"]
+    before_command = {"preparation", "expectations", "command"}
+    after_command = {"command_evidence", "observation", "verification", "verification_evidence"}
+    if stage not in before_command | after_command:
+        raise ValueError("Unknown failed execution stage")
+    if stage in before_command:
+        if step["command"] is not None or step["skip_reason"] != failure["reason"]:
+            raise ValueError("Failure before command cannot claim command evidence")
+    elif step["command"] is None or step["skip_reason"] is not None:
+        raise ValueError("Failure after command requires actual command facts")
+    expected_observation = stage in {"verification", "verification_evidence"}
+    if (step["observations"] is not None) != expected_observation:
+        raise ValueError("Failed stage contradicts retained observations")
+    if (step["verification"] is not None) != (stage == "verification_evidence"):
+        raise ValueError("Failed stage contradicts retained verification")
+    return "incomplete"
 
 
 def _check_consistency(result: InstallTestResult) -> None:
@@ -361,9 +225,7 @@ def _check_consistency(result: InstallTestResult) -> None:
         raise ValueError("Case status contradicts command or verification facts")
 
 
-def read_result(
-    output_directory: Path, case: InstallTestCase | EffectInstallCase
-) -> InstallTestResult:
+def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTestResult:
     """Read a complete result; retain I/O failures and reject incompatible documents."""
     payload = safe_evidence_path(output_directory, "result.json").read_text(encoding="utf-8")
     data = fields(
@@ -391,766 +253,17 @@ def read_result(
         },
     )
     _check_consistency(result)
-    if isinstance(case, EffectInstallCase):
-        check_effect_result(result, case, output_directory)
-        return result
-    if result.preparation["ready"]:
-        _check_command_evidence(result, case, output_directory)
-        _check_json_observations(result, case, output_directory)
-        _check_lock_evidence(result, case, output_directory)
-        _check_managed_evidence(result, case, output_directory)
-        _check_json_backup_evidence(result, case, output_directory)
-        _check_version_evidence(result, case, output_directory)
-    _check_step_preparation_evidence(result, case, output_directory)
-    if (
-        case.name
-        in {
-            "repair-missing-reference",
-            "repair-altered-reference",
-            "repair-skill",
-            "preserve-skill-backup",
-            "repair-markdown-section",
-            "repair-missing-markdown-section",
-            "repair-missing-json-hook",
-            "repair-altered-json-hook",
-            "repair-duplicate-json-hook",
-        }
-        and result.preparation["ready"]
-    ):
-        _check_repair_installations(result, case, output_directory)
+    check_effect_result(result, case, output_directory)
     return result
 
 
-def _check_lock_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
-    if case.spec.skill_lock is None:
-        if (output / "skill-lock.json").exists():
-            raise ValueError("Undeclared lock expectation")
-        return
-    home, skill, path = _lock_expectation(output)
-    for index, step in enumerate(result.steps):
-        command = step["command"]
-        if command is None:
-            continue
-        root = home if destination_roots(case)["skill"] == "home" else PurePosixPath(command["cwd"])
-        if skill != (root / destinations(case)["skill"]).parent:
-            raise ValueError("Lock skill directory contradicts installation directory")
-        if home.parent != PurePosixPath(command["cwd"]).parent or home.name != "home":
-            raise ValueError("Lock home contradicts isolated installation roots")
-        for phase in ("before", "after"):
-            _check_lock_snapshot(
-                output,
-                f"steps/{index}/{phase}.json",
-                path,
-                required=(phase == "before" and index > 0)
-                or (phase == "after" and _check_attempted(step) == "passed"),
-            )
-
-
-def _check_lock_snapshot(output: Path, relative: str, path: str, *, required: bool) -> None:
-    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
-    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
-    retained = False
-    for value in _list(snapshot["entries"]):
-        entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
-        if entry["root"] == "home" and entry["path"] == path and entry["kind"] == "file":
-            if entry.get("content_file") is None and not any(
-                o["root"] == "home" and o["path"] == path for o in obstacles
-            ):
-                raise ValueError("Observed lock requires retained bytes")
-            retained = entry.get("content_file") is not None
-    if required and not retained:
-        raise ValueError("Successful installation requires observed lock bytes")
-
-
-def _check_step_preparation_evidence(
-    result: InstallTestResult, case: InstallTestCase, output: Path
-) -> None:
-    _check_preparation_location(result, case)
-    if case.name not in {
-        "repair-references",
-        "repair-missing-reference",
-        "repair-altered-reference",
-        "repair-skill",
-        "preserve-skill-backup",
-        "repair-markdown-section",
-        "repair-missing-markdown-section",
-        "repair-json-entry",
-        "repair-missing-json-hook",
-        "repair-altered-json-hook",
-        "repair-duplicate-json-hook",
+def read_evidence(output_directory: Path) -> InstallTestResult:
+    """Rebuild and validate verdicts entirely from retained native evidence."""
+    if _read_json_evidence(output_directory, "evidence-format.json") != {
+        "format": "explicit-expectations-v2"
     }:
-        return
-    first, second = result.steps
-    preparation = second.get("preparation")
-    first_passed = first["command"] is not None and _check_attempted(first) == "passed"
-    if (preparation is not None) != first_passed:
-        raise ValueError("Step preparation must follow a successful first installation")
-    if not result.preparation["ready"]:
-        return
-    sources = _check_snapshot(output, "expected.json")
-    _check_snapshot(output, "steps/0/before.json")
-    if case.name not in {
-        "repair-references",
-        "repair-missing-reference",
-        "repair-altered-reference",
-    }:
-        _check_content_evidence(result, case, output)
-    if preparation is None:
-        return
-    _check_snapshot(output, preparation["before"], complete=preparation["verification"].complete)
-    saved = _step_preparation(
-        _read_json_evidence(output, "steps/1/preparation/result.json"), output
+        raise ValueError("Unsupported evidence format; use its identified historical reader")
+    case = EffectInstallCase.from_json(
+        safe_evidence_path(output_directory, "case.json").read_text(encoding="utf-8")
     )
-    if saved != preparation:
-        raise ValueError("Step preparation differs from its saved evidence")
-    plan = preparation["plan"]
-    if _read_json_evidence(output, "steps/1/preparation/plan.json") != plan:
-        raise ValueError("Step preparation plan differs from its saved evidence")
-    _check_case_preparation_plan(plan, case, output, sources)
-    _check_repeated_command(first, second)
-
-
-def _check_json_observations(
-    result: InstallTestResult, case: InstallTestCase, output: Path
-) -> None:
-    """Retain observable JSON at every attempted stage, including failed stages."""
-    _check_json_snapshot(output, "steps/0/before.json", case, required=True, complete=True)
-    for index, step in enumerate(result.steps):
-        verification = step["verification"]
-        if step["command"] is None or verification is None:
-            continue
-        if index:
-            _check_json_snapshot(
-                output, f"steps/{index}/before.json", case, required=True, complete=True
-            )
-        _check_json_snapshot(
-            output,
-            f"steps/{index}/after.json",
-            case,
-            required=_check_attempted(step) == "passed",
-            complete=verification.complete,
-        )
-
-
-def _check_json_snapshot(
-    output: Path,
-    relative: str,
-    case: InstallTestCase,
-    *,
-    required: bool,
-    complete: bool,
-) -> None:
-    entries = _check_snapshot(
-        output, relative, complete=complete, presence_only=_presence_only(case)
-    )
-    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
-    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
-    entry = next(
-        (
-            e
-            for e in entries
-            if e["root"] == destination_roots(case)["json"]
-            and e["path"] == destinations(case)["json"]
-        ),
-        None,
-    )
-    if required and (entry is None or entry["kind"] != "file" or entry.get("content_file") is None):
-        raise ValueError("Successful JSON stage requires retained settings content")
-    if entry is not None:
-        _check_retained_content(entry, obstacles)
-
-
-def _check_case_preparation_plan(
-    plan: AlteredReferencePlan
-    | MissingReferencePlan
-    | ReferenceRepairPlan
-    | FileAlterationPlan
-    | SkillBackupPlan,
-    case: InstallTestCase,
-    output: Path,
-    sources: list[dict[str, object]],
-) -> None:
-    if case.name == "repair-altered-reference":
-        _check_altered_reference(case, output, plan)
-        return
-    if case.name == "repair-missing-reference":
-        if "root" not in plan or "deleted_path" not in plan:
-            raise ValueError("Missing reference repair requires a rooted deletion plan")
-        _check_missing_reference(case, output, plan)
-        return
-    if "root" in plan:
-        raise ValueError("Unexpected missing reference plan")
-    if case.name == "preserve-skill-backup":
-        if "backup_path" not in plan:
-            raise ValueError("Backup preservation requires a backup plan")
-        _check_skill_backup_plan(plan, case, output)
-        return
-    if "backup_path" in plan:
-        raise ValueError("Unexpected backup preparation plan")
-    _check_case_repair_plan(plan, case, output, sources)
-
-
-def _check_repair_installations(
-    result: InstallTestResult, case: InstallTestCase, output: Path
-) -> None:
-    sources = _retained_snapshot(output, "expected.json")
-    verifier = InstallVerifier()
-    initial = verifier.verify_initial(
-        case, sources, _retained_snapshot(output, "steps/0/before.json")
-    )
-    if not initial.complete or initial.mismatches:
-        raise ValueError("Initial preparation contradicts retained observations")
-    for index, step in enumerate(result.steps):
-        if step["command"] is None:
-            continue
-        before = _retained_snapshot(output, f"steps/{index}/before.json")
-        after = _retained_snapshot(output, f"steps/{index}/after.json")
-        if index and case.name in {
-            "repair-markdown-section",
-            "repair-missing-markdown-section",
-            "repair-missing-json-hook",
-            "repair-altered-json-hook",
-            "repair-duplicate-json-hook",
-        }:
-            before = _retained_snapshot(output, "steps/0/after.json")
-        backup = None
-        if index and case.name == "repair-skill":
-            backup = skill_repair_plan(case, sources)[1]
-        elif index and case.name == "preserve-skill-backup":
-            backup = skill_backup_plan(case, sources)[1]
-            # The runner compares reinstallation with the conformant installation;
-            # preparation is checked separately against its exact sole mutation.
-            before = _retained_snapshot(output, "steps/0/after.json")
-        if (
-            verifier.verify(
-                case,
-                sources,
-                before,
-                after,
-                skill_backup=backup,
-                allow_markdown_relocation=index > 0
-                and case.name == "repair-missing-markdown-section",
-            )
-            != step["verification"]
-        ):
-            raise ValueError("Repair installation contradicts retained observations")
-
-
-def _check_altered_reference(
-    case: InstallTestCase,
-    output: Path,
-    plan: AlteredReferencePlan
-    | MissingReferencePlan
-    | ReferenceRepairPlan
-    | FileAlterationPlan
-    | SkillBackupPlan,
-) -> None:
-    if "root" not in plan or "altered_path" not in plan:
-        raise ValueError("Altered reference repair requires a rooted alteration plan")
-    expected, content = altered_reference_plan(case, _retained_snapshot(output, "expected.json"))
-    if (
-        plan != expected
-        or safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content
-    ):
-        raise ValueError("Altered reference plan contradicts captured source references")
-    computed = InstallVerifier().verify_altered_reference(
-        plan,
-        content,
-        _retained_snapshot(output, "steps/0/after.json"),
-        _retained_snapshot(output, "steps/1/before.json"),
-    )
-    saved = _step_preparation(
-        _read_json_evidence(output, "steps/1/preparation/result.json"), output
-    )
-    if computed != saved["verification"]:
-        raise ValueError("Altered reference preparation contradicts retained observations")
-
-
-def _check_missing_reference(
-    case: InstallTestCase, output: Path, plan: MissingReferencePlan
-) -> None:
-    sources = _retained_snapshot(output, "expected.json")
-    if plan != missing_reference_plan(case, sources):
-        raise ValueError("Missing reference plan contradicts captured source references")
-    installed = _retained_snapshot(output, "steps/0/after.json")
-    degraded = _retained_snapshot(output, "steps/1/before.json")
-    verifier = InstallVerifier()
-    computed = verifier.verify_missing_reference(plan, installed, degraded)
-    saved = _step_preparation(
-        _read_json_evidence(output, "steps/1/preparation/result.json"), output
-    )
-    if computed != saved["verification"]:
-        raise ValueError("Missing reference preparation contradicts retained observations")
-
-
-def _check_markdown_preparation(
-    case: InstallTestCase, plan: FileAlterationPlan, content: bytes, output: Path
-) -> None:
-    computed = InstallVerifier().verify_markdown_repair(
-        case,
-        plan,
-        content,
-        _retained_snapshot(output, "steps/0/after.json"),
-        _retained_snapshot(output, "steps/1/before.json"),
-    )
-    saved = _step_preparation(
-        _read_json_evidence(output, "steps/1/preparation/result.json"), output
-    )
-    if computed != saved["verification"]:
-        raise ValueError("Markdown preparation contradicts retained observations")
-
-
-def _check_case_repair_plan(
-    plan: ReferenceRepairPlan | FileAlterationPlan,
-    case: InstallTestCase,
-    output: Path,
-    sources: list[dict[str, object]],
-) -> None:
-    if case.name in {
-        "repair-markdown-section",
-        "repair-missing-markdown-section",
-        "repair-json-entry",
-        "repair-missing-json-hook",
-        "repair-altered-json-hook",
-        "repair-duplicate-json-hook",
-    }:
-        _check_shared_preparation(plan, case, output)
-    elif case.name == "repair-skill":
-        _check_skill_repair_plan(plan, case, output)
-        content = safe_evidence_path(output, plan["altered_content_file"]).read_bytes()
-        computed = InstallVerifier().verify_skill_repair(
-            plan,
-            content,
-            _retained_snapshot(output, "steps/0/after.json"),
-            _retained_snapshot(output, "steps/1/before.json"),
-            destination_roots(case)["skill"],
-        )
-        saved = _step_preparation(
-            _read_json_evidence(output, "steps/1/preparation/result.json"), output
-        )
-        if computed != saved["verification"]:
-            raise ValueError("Skill preparation contradicts retained observations")
-    else:
-        if "deleted_path" not in plan:
-            raise ValueError("Reference repair requires a deletion")
-        _check_repair_plan(plan, case, output, sources)
-
-
-def _presence_only(case: InstallTestCase) -> tuple[str, str] | None:
-    if case.name == "first-install" and case.spec.version_source is None:
-        return destination_roots(case)["version"], destinations(case)["version"]
-    return None
-
-
-def _check_command_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
-    if result.evidence != {"journal": "journal.log", "expected_contents": "expected/"}:
-        raise ValueError("Prepared step result requires its retained source and journal references")
-    _check_expected_sources(case, output)
-    for relative in (result.preparation["log"], "journal.log"):
-        safe_evidence_path(output, relative).read_bytes()
-    for index, step in enumerate(result.steps):
-        if step["command"] is None:
-            continue
-        _check_managed_command(step["command"], case, index, _managed_transport(case, output))
-        _check_declared_environment(case, step["command"], output, index)
-        verification = step["verification"]
-        assert verification is not None
-        _check_snapshot(
-            output,
-            f"steps/{index}/after.json",
-            complete=verification.complete,
-            presence_only=_presence_only(case),
-        )
-        saved = _verification(_read_json_evidence(output, f"steps/{index}/verification.json"))
-        if saved != step["verification"]:
-            raise ValueError("Step verification differs from its saved evidence")
-        for name in ("stdout_file", "stderr_file"):
-            reference = step["command"][name]
-            if not isinstance(reference, str):
-                raise ValueError("Missing command evidence")
-            safe_evidence_path(output, reference).read_bytes()
-
-
-def _check_expected_sources(case: InstallTestCase, output: Path) -> None:
-    """Require the announced source inventory and bytes without rechecking installation."""
-    entries = _check_snapshot(output, "expected.json")
-    sources = {text(entry["path"]): entry for entry in entries}
-    required = {
-        case.spec.skill_source: "file",
-        case.spec.markdown_source: "file",
-        case.spec.references_source: "directory",
-    }
-    if case.spec.version_source is not None:
-        required[case.spec.version_source] = "file"
-    for path, kind in required.items():
-        if path not in sources or sources[path]["kind"] != kind:
-            raise ValueError(f"Missing retained source inventory entry: {path}")
-    for entry in entries:
-        if entry["kind"] == "file" and entry.get("content_file") is None:
-            raise ValueError(f"Source requires retained content: {entry['path']}")
-
-
-def _check_repair_plan(
-    plan: ReferenceRepairPlan,
-    case: InstallTestCase,
-    output: Path,
-    sources: list[dict[str, object]],
-) -> None:
-    # Binding to the retained source inventory is transport consistency, not a
-    # second installation or degradation verdict on the host.
-    source = case.spec.references_source + "/"
-    files = sorted(
-        text(e["path"])
-        for e in sources
-        if e["kind"] == "file" and text(e["path"]).startswith(source)
-    )
-
-    destination = destinations(case)["references"] + "/"
-    if len(files) < 2 or [plan["deleted_path"], plan["altered_path"]] != [
-        destination + path[len(source) :] for path in files[:2]
-    ]:
-        raise ValueError("Repair paths do not match retained source selection")
-    content = safe_evidence_path(output, plan["altered_content_file"]).read_bytes()
-    if (
-        content
-        != safe_evidence_path(output, "expected/" + files[1]).read_bytes()
-        + b"\nSandbox repair witness.\n"
-    ):
-        raise ValueError("Altered content is inconsistent with the retained source")
-
-
-def _check_skill_repair_plan(
-    plan: ReferenceRepairPlan | FileAlterationPlan, case: InstallTestCase, output: Path
-) -> None:
-    if "deleted_path" in plan or plan["altered_path"] != destinations(case)["skill"]:
-        raise ValueError("Skill repair path does not match the case")
-    source = safe_evidence_path(output, "expected/" + case.spec.skill_source).read_bytes()
-    content = safe_evidence_path(output, plan["altered_content_file"]).read_bytes()
-    if content != source + b"\nSandbox skill repair witness.\n":
-        raise ValueError("Altered skill content is inconsistent with the retained source")
-
-
-def _check_skill_backup_plan(plan: SkillBackupPlan, case: InstallTestCase, output: Path) -> None:
-    expected, content = skill_backup_plan(case, _retained_snapshot(output, "expected.json"))
-    if plan != expected:
-        raise ValueError("Backup plan does not match the case")
-    if safe_evidence_path(output, plan["backup_content_file"]).read_bytes() != content:
-        raise ValueError("Backup witness is inconsistent with the retained source")
-    computed = InstallVerifier().verify_skill_backup(
-        expected,
-        content,
-        _retained_snapshot(output, "steps/0/after.json"),
-        _retained_snapshot(output, "steps/1/before.json"),
-        destination_roots(case)["skill"],
-    )
-    saved = _step_preparation(
-        _read_json_evidence(output, "steps/1/preparation/result.json"), output
-    )
-    if computed != saved["verification"]:
-        raise ValueError("Backup preparation contradicts retained observations")
-
-
-def _check_preparation_location(result: InstallTestResult, case: InstallTestCase) -> None:
-    for index, step in enumerate(result.steps):
-        if "preparation" in step and (
-            case.name
-            not in {
-                "repair-references",
-                "repair-missing-reference",
-                "repair-altered-reference",
-                "repair-skill",
-                "preserve-skill-backup",
-                "repair-markdown-section",
-                "repair-missing-markdown-section",
-                "repair-json-entry",
-                "repair-missing-json-hook",
-                "repair-altered-json-hook",
-                "repair-duplicate-json-hook",
-            }
-            or index != 1
-        ):
-            raise ValueError("Unexpected step preparation")
-
-
-def _check_repeated_command(first: StepEvidence, second: StepEvidence) -> None:
-    if second["command"] is not None:
-        assert first["command"] is not None
-        first_args = first["command"]["args"]
-        if "--managed-hooks-resolution" in first_args:
-            first_args = first_args[:-2]
-        if (
-            first_args != second["command"]["args"]
-            or first["command"]["cwd"] != second["command"]["cwd"]
-        ):
-            raise ValueError(
-                "Dependent installation must repeat the first installation command and directory"
-            )
-
-
-def _check_content_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
-    """Files involved in preparation must retain actual bytes, not just digests."""
-    dest = destinations(case)
-    paths = {
-        "repair-markdown-section": {dest["markdown"]},
-        "repair-missing-markdown-section": {dest["markdown"]},
-        "repair-json-entry": {dest["json"]},
-        "repair-missing-json-hook": {dest["json"]},
-        "repair-altered-json-hook": {dest["json"]},
-        "repair-duplicate-json-hook": {dest["json"]},
-    }.get(case.name, {dest["skill"], dest["skill"] + ".bak"})
-    for relative in ("steps/0/after.json", "steps/1/before.json", "steps/1/after.json"):
-        path = safe_evidence_path(output, relative)
-        if not path.exists():
-            continue  # A blocked preparation has no second command observation.
-        required: set[str] = (
-            _required_content_paths(case, relative)
-            if _successful_stage(result, relative)
-            else set()
-        )
-        _check_content_snapshot(
-            output,
-            relative,
-            paths,
-            required,
-            root=destination_roots(case)[
-                "json"
-                if case.name
-                in {
-                    "repair-json-entry",
-                    "repair-missing-json-hook",
-                    "repair-altered-json-hook",
-                    "repair-duplicate-json-hook",
-                }
-                else "markdown"
-                if case.name in {"repair-markdown-section", "repair-missing-markdown-section"}
-                else "skill"
-            ],
-        )
-
-
-def _successful_stage(result: InstallTestResult, relative: str) -> bool:
-    if relative == "steps/1/before.json":
-        preparation = result.steps[1].get("preparation")
-        return preparation is not None and preparation["ready"]
-    step = result.steps[0 if relative == "steps/0/after.json" else 1]
-    return step["command"] is not None and _check_attempted(step) == "passed"
-
-
-def _required_content_paths(case: InstallTestCase, relative: str) -> set[str]:
-    dest = destinations(case)
-    if case.name in {
-        "repair-markdown-section",
-        "repair-missing-markdown-section",
-        "repair-json-entry",
-        "repair-missing-json-hook",
-        "repair-altered-json-hook",
-        "repair-duplicate-json-hook",
-    }:
-        return {
-            dest[
-                "json"
-                if case.name
-                in {
-                    "repair-json-entry",
-                    "repair-missing-json-hook",
-                    "repair-altered-json-hook",
-                    "repair-duplicate-json-hook",
-                }
-                else "markdown"
-            ]
-        }
-    paths = {dest["skill"]}
-    if relative == "steps/1/after.json" or (
-        case.name == "preserve-skill-backup" and relative == "steps/1/before.json"
-    ):
-        paths.add(dest["skill"] + ".bak")
-    return paths
-
-
-def _check_content_snapshot(
-    output: Path, relative: str, paths: set[str], required: set[str], *, root: str = "project"
-) -> None:
-    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
-    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
-    retained: set[str] = set()
-    for value in _list(snapshot["entries"]):
-        entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
-        if entry["root"] == root and entry["path"] in paths:
-            _check_retained_content(entry, obstacles)
-            if entry["kind"] == "file" and entry.get("content_file") is not None:
-                retained.add(text(entry["path"]))
-    if missing := required - retained:
-        raise ValueError(
-            f"Successful stage {relative} requires retained content: {sorted(missing)}"
-        )
-
-
-def _check_retained_content(entry: dict[str, object], obstacles: list[ObservationObstacle]) -> None:
-    if entry["kind"] != "file" or entry.get("content_file") is not None:
-        return
-    if not any(o["root"] == entry["root"] and o["path"] == entry["path"] for o in obstacles):
-        raise ValueError("Observed file requires retained content, not only a digest")
-
-
-def _check_managed_evidence(
-    result: InstallTestResult,
-    case: InstallTestCase,
-    output: Path,
-) -> None:
-    transported = _managed_transport(case, output)
-    if case.spec.json_hook_management != "registry":
-        return
-    paths = set(sidecars(case).values())
-    for index, step in enumerate(result.steps):
-        command = step["command"]
-        if command is None:
-            continue
-        _check_managed_command(command, case, index, transported)
-        for phase in ("before", "after"):
-            _check_managed_snapshot(output, f"steps/{index}/{phase}.json", case, paths)
-        if _check_attempted(step) == "passed":
-            _check_content_snapshot(
-                output,
-                f"steps/{index}/after.json",
-                paths,
-                {sidecars(case)["state"], sidecars(case)["lock"]},
-            )
-
-
-def _check_managed_snapshot(
-    output: Path, relative: str, case: InstallTestCase, paths: set[str]
-) -> None:
-    snapshot = fields(_read_json_evidence(output, relative), "entries obstacles")
-    obstacles = [_obstacle(o) for o in _list(snapshot["obstacles"])]
-    for value in _list(snapshot["entries"]):
-        entry = _snapshot_entry(value, output, relative.removesuffix(".json"))
-        if entry["root"] == "project" and (
-            entry["path"] in paths or is_transaction_temporary(case, text(entry["path"]))
-        ):
-            _check_retained_content(entry, obstacles)
-
-
-def _check_managed_command(
-    command: CommandEvidence, case: InstallTestCase, index: int, transported: PurePosixPath | None
-) -> None:
-    args = command["args"]
-    expected_args = [args[0], *install_arguments(case)]
-    if index == 0 and transported is not None:
-        expected_args.extend(["--managed-hooks-resolution", str(transported)])
-    cwd = PurePosixPath(command["cwd"])
-    if transported is not None and transported.is_relative_to(cwd.parent):
-        raise ValueError("Resolution must stay outside isolated observed roots")
-    if args != expected_args:
-        raise ValueError("Installation command contradicts declared case arguments or resolution")
-
-
-def _managed_transport(case: InstallTestCase, output: Path) -> PurePosixPath | None:
-    if not needs_resolution(case):
-        if any(
-            (output / name).exists()
-            for name in ("managed-hooks-resolution.json", "managed-hooks-transport.json")
-        ):
-            raise ValueError("Empty initial hook contexts require no synthetic resolution")
-        return None
-    if _read_json_evidence(output, "managed-hooks-resolution.json") != resolution(case):
-        raise ValueError("Managed resolution contradicts independent initial witnesses")
-    transport = fields(_read_json_evidence(output, "managed-hooks-transport.json"), "resolution")
-    transported = PurePosixPath(text(transport["resolution"]))
-    if (
-        not transported.is_absolute()
-        or transported.name != "managed-hooks-resolution.json"
-        or ".." in transported.parts
-    ):
-        raise ValueError("Invalid managed resolution transport path")
-    return transported
-
-
-def _check_json_backup_evidence(
-    result: InstallTestResult, case: InstallTestCase, output: Path
-) -> None:
-    """Bind declared backups to retained pre-command settings after work cleanup."""
-    if case.spec.json_backup is None:
-        return
-    target = destinations(case)["json"]
-    root = destination_roots(case)["json"]
-    original = safe_evidence_path(output, f"steps/0/before/{root}/{target}").read_bytes()
-    backup = target + case.spec.json_backup
-    for index, step in enumerate(result.steps):
-        if step["command"] is None:
-            continue
-        relative = f"steps/{index}/after.json"
-        required: set[str] = {backup} if _check_attempted(step) == "passed" else set()
-        _check_content_snapshot(output, relative, {backup}, required, root=root)
-        entries = _check_snapshot(output, relative, complete=False)
-        retained = next(
-            (entry for entry in entries if entry["root"] == root and entry["path"] == backup),
-            None,
-        )
-        if retained is not None and retained.get("content_file") is not None:
-            content = safe_evidence_path(output, text(retained["content_file"])).read_bytes()
-            if _check_attempted(step) == "passed" and content != original:
-                raise ValueError("Successful JSON backup must retain exact initial settings bytes")
-
-
-def _check_version_evidence(result: InstallTestResult, case: InstallTestCase, output: Path) -> None:
-    if case.spec.version_source is None:
-        return
-    version = destinations(case)["version"]
-    root = destination_roots(case)["version"]
-    for index, step in enumerate(result.steps):
-        if step["command"] is None:
-            continue
-        required: set[str] = {version} if _check_attempted(step) == "passed" else set()
-        _check_content_snapshot(output, f"steps/{index}/after.json", {version}, required, root=root)
-
-
-def _check_declared_environment(
-    case: InstallTestCase, command: CommandEvidence, output: Path, index: int
-) -> None:
-    if case.spec.command is not None:
-        _check_environment(command, output, index)
-
-
-def _check_hook_preparation(
-    case: InstallTestCase, plan: FileAlterationPlan, content: bytes, output: Path
-) -> None:
-    computed = InstallVerifier().verify_json_repair(
-        case,
-        plan,
-        content,
-        _retained_snapshot(output, "steps/0/after.json"),
-        _retained_snapshot(output, "steps/1/before.json"),
-    )
-    saved = _step_preparation(
-        _read_json_evidence(output, "steps/1/preparation/result.json"), output
-    )
-    if computed != saved["verification"]:
-        raise ValueError("Hook preparation contradicts retained observations")
-
-
-def _check_shared_preparation(
-    plan: ReferenceRepairPlan | FileAlterationPlan, case: InstallTestCase, output: Path
-) -> None:
-    expected_plan, content = (
-        json_repair_plan(case)
-        if case.name
-        in {
-            "repair-json-entry",
-            "repair-missing-json-hook",
-            "repair-altered-json-hook",
-            "repair-duplicate-json-hook",
-        }
-        else markdown_repair_plan(case)
-    )
-    if plan != expected_plan:
-        raise ValueError("Shared file repair plan does not match the case")
-    if safe_evidence_path(output, plan["altered_content_file"]).read_bytes() != content:
-        raise ValueError("Prepared shared file content does not match the case witness")
-    if case.name in {
-        "repair-missing-json-hook",
-        "repair-altered-json-hook",
-        "repair-duplicate-json-hook",
-    }:
-        _check_hook_preparation(case, expected_plan, content, output)
-    elif case.name in {"repair-markdown-section", "repair-missing-markdown-section"}:
-        _check_markdown_preparation(case, expected_plan, content, output)
+    return _read_result(output_directory, case)

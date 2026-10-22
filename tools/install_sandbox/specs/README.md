@@ -1,246 +1,92 @@
-# Install sandbox spec authority
+# Install sandbox effect specifications
 
-This directory is the source-controlled target-fact catalog for the install
-sandbox. The YAML files are retained product-test inputs; they are not an
-implementation template and do not make their current schema permanent.
+`codebuddy.yaml` is the active specification for the dedicated CodeBuddy project
+installation. It describes a skill in HOME, a Markdown section and JSON hooks in
+PROJECT. Other YAML files are retained historical target facts and are not part
+of the current execution interface. The reference target and its consumer have
+been removed.
 
-## Current successor state
+## Data and responsibilities
 
-The upstream-refounded successor deliberately retains this catalog without
-restoring the former loader, typed models, lifecycle runner, quality gates, or
-workflows. The 24 retained YAML files are not consumed by the new reader.
+The YAML declares effects, source paths, destinations and host hook names. It
+contains no scenarios, execution defaults or test expectations. Shared conventions
+remain in code; no target-name dispatch or parallel catalog selects behavior.
 
-A later catalog slice must review the facts against the then-current Graphify
-installer, define the validation and loading boundary with the owner, and add
-targeted evidence before the harness may act on them. File presence alone does
-not authorize recreation of any historical module or private test surface.
+`EffectSpecReader` reads one explicit YAML file and validates structured effects.
+The default destination root is PROJECT and the common `directory` applies unless
+an effect overrides it with a different directory (including `.`). The skill
+source and reference tree, and the Markdown section source, are relative to the
+retained subject source directory supplied to the engine. A section defaults to
+`## graphify`. The supported hook family is `pretooluse-context`.
 
-The YAML is the independent oracle for expected Graphify-owned file effects.
-It must not be generated from the installer output or behavior it is meant to
-test.
+The subject context is a separate JSON object with these required fields:
 
-## Reference development format
+- `identity`: declared subject identity.
+- `invocation`: argument words following the prepared executable.
+- `version_source`: relative source path containing distribution metadata with
+  one `Version` header, required by a skill effect.
+- `rules`: explicit `hook_timeout`, `skill_lock`, `json_backup`, `skill_backup`
+  and `json_registry` values. The supported reinstall rules currently require
+  timeout `10`, persistent skill lock, `.graphify-bak` JSON backup, `.bak` skill
+  backup convention and no JSON registry.
 
-`reference/sandbox-reference.yaml` contains the new target facts. Supply
-`reference/` alone to `InstallSpecReader`; it discovers direct `*.yaml` files
-and derives target identities from their filename stems. This does not migrate
-the retained catalog or make its older format readable.
+These rules describe the subject being tested. They must be established
+independently of its installation output. The context has no scenario selection
+or tool profile.
 
-`spec.py` validates the new facts. The common initial witnesses and the
-first-install, reinstall, repair-references, repair-skill, preserve-skill-backup,
-repair-markdown-section, repair-missing-markdown-section, or repair-json-entry operations belong
-to the case, and `InstallTestCoordinator` assembles and writes
-the complete project case JSON. Product source paths are transported without
-reading or embedding their contents. No installation is executed by this entry.
-The local Python environment needs PyYAML for YAML reading.
+## Native host interface
 
-The reference format requires `json.hook_management: registry` and `json.hooks`,
-an explicit list of expectations with a unique stable `id`, `event`, `matcher`,
-and non-empty JSON `content`. Missing registry declarations or identities are
-rejected; the reader supplies no fallback for the former format. An empty list means no
-expected hooks. Declared content fields are compared in full; additional hook
-fields are allowed. Matching occurrences are counted across all groups with
-the same event and matcher, and each expectation must occur exactly once.
+The command accepts `--spec`, `--subject-context`, `--repo` and optional `--output`.
+The first two select the effect YAML and subject context JSON. `--repo` selects
+the subject checkout. `--output` selects a fresh result location; omitting it uses
+the managed output directory and its retention policy.
 
-The first-install and reinstall cases add an independent personal hook witness
-before the first command. Its entire content, context and count must survive;
-it is never recreated between commands. The verifier reads retained JSON and
-does not execute hooks. Hook positions may change; internal list order may not.
-All seven cases check the spec's hook expectations. The five other cases retain
-their existing witnesses and preparation responsibilities.
+The coordinator constructs one reinstall case with two dependent installation
+steps. It uses the existing Docker harness for isolation, package preparation,
+timeouts and resource cleanup. Local Component tests substitute a controlled
+transport at the harness boundary; there is no public local-execution backend.
+Only the controlled simulator path has been validated for the new model.
 
-The repair-references case prepares a deletion and an alteration between two
-verified project installations. Selection comes from the retained source
-inventory, and preparation diagnostics remain separate from product commands.
-The YAML needs no additional facts for this case.
+The active CodeBuddy YAML uses package-relative sources such as `skill.md`.
+The current Docker harness captures a raw checkout, where this repository's
+source is `graphify/skill.md`. Binding that package layout and its version
+metadata to a real subject remains separate work. Reading the active YAML does
+not demonstrate a working installation against this raw checkout.
 
-The repair-skill case alters only the installed skill after a verified first
-installation, then requires restoration and an exact backup of the altered
-content. The intermediate plan and observations are retained and validated
-before the second installation. Backup creation is permitted only for that
-repair step; the initial state and first installation have no backup. Sources,
-version stability and user preservation remain independently verified.
+## Explicit expectations and autonomous evidence
 
-The preserve-skill-backup case prepares an exact backup witness after a fully
-verified first installation, leaving the installed skill intact. The witness
-is the retained skill source followed by `\nSandbox previous backup witness.\n`
-with LF line endings. A complete preparation check permits only this new file;
-a partial, incorrect or unobservable preparation prevents the second command.
-The second installation must preserve the backup bytes while satisfying all
-existing installation and user-preservation criteria. The plan, expected
-witness and both observed backup contents are retained separately. The host
-checks evidence bindings and continuation conditions without repeating the
-installation verdict. No additional YAML facts are needed.
+Before installation, source bytes and inventories are captured. Construction
+produces typed expectations for content, directories, semantic Markdown and JSON,
+absences, personal content and permitted changes. Actual HOME and PROJECT roots
+are retained when known and bind the persistent skill-lock path. Each constraint
+records its phase and provenance. Expectations are persisted before the
+corresponding command.
 
-The repair-markdown-section case starts with a Graphify heading between two
-personal sections. After a verified installation it replaces only the managed
-section body with a known incorrect witness, retaining the heading and personal
-text. Preparation must be fully observed, match that witness and preserve all
-other entries before the second command. Reinstallation must restore the retained
-Markdown source and preserve both personal sections and all existing criteria.
-The host requires retained shared-document bytes and checks the plan and evidence
-bindings. No additional YAML facts are needed.
+The verifier compares explicit expectations with observations. It does not
+reconstruct installation destinations or versions and does not infer the phase.
+The second step runs only after the first command and verification succeed.
+Reinstall preservation uses that independently validated first observation;
+managed content still comes from the original retained sources.
 
-## Current ownership
+After extracting `evidence.zip`, call
+`tools.install_sandbox.host.result_reader.read_evidence(case_directory)` on the
+retained `evidence/cases/reinstall` directory. It needs no original YAML, subject
+context, subject checkout, executable or work directory. It reconstructs the
+expectations from retained inputs, checks their equality with stored expectations,
+validates phase continuity and recalculates verdicts. Partial failures retain the
+stage reached. Old transport formats are rejected; historical evidence requires
+its identified historical reader revision.
 
-The repair-json-entry case starts with two personal instruction entries and a
-personal setting in the shared JSON. After a fully verified installation it
-reads that JSON and removes only the exact Graphify registration. Preparation
-is checked against the independent case witnesses; all other entries must remain
-unchanged. Reinstallation must restore the registration exactly once and preserve
-personal JSON values, list order and files. JSON indentation is not prescribed.
-During JSON-entry repair, the independent preparation expectation describes
-personal values outside `hooks`. The complete observed hooks branch must remain
-identical between the verified installation and preparation, including extra
-fields; it is not reconstructed from the expected Graphify command. The three
-observed JSON documents and the independent preparation expectation are retained
-after cleanup. A failed or unobservable preparation blocks the
-second command. No additional YAML facts are needed.
+## Independent test data
 
-| Concern | Current owner |
-| --- | --- |
-| Catalog membership and target identity | `*.yaml` filename stems |
-| Supported and unsupported scopes, expected effects, command exceptions, limitations, and aggregate-uninstall eligibility | Each target YAML |
-| Schema vocabulary, validation, defaults, and typed conversion | `spec.py` for the reference format; retained catalog not migrated |
-| Scenario construction, command derivation, lifecycle execution, filesystem validation, and reporting | Outside this catalog; first-install, reinstall, repair-references, repair-skill, preserve-skill-backup, repair-markdown-section, repair-missing-markdown-section, and repair-json-entry project cases are implemented |
+`tests/install_sandbox/fixtures/generic-effects.yaml` uses the same supported
+composition with synthetic source and destination names. It is independent of
+the active YAML. Ingestion tests use this fixture; construction tests directly
+supply structured effects and sources; verifier tests directly supply expectations
+and observations; replay tests use dedicated evidence directories. Helpers do
+not invoke preceding transformations to manufacture isolated test inputs.
 
-## Classify data before changing it
-
-Use one of these categories:
-
-1. **Irreducible target fact.** A fact that differs by target and cannot be
-   inferred safely, such as an expected path, payload source, marker, or
-   documented target limitation. Keep it in that target's YAML.
-2. **Deterministic derivation.** A value that follows from filename, scope,
-   existing facts, or a target-independent convention. A future consumer
-   should derive it instead of storing it here.
-3. **Cross-target harness policy.** A generic rule such as lifecycle ordering
-   or unexpected-change validation. It belongs in a future harness policy,
-   not in a list of real target names.
-4. **Product observation.** Something the current installer happens to do.
-   Record it as evidence or a product defect; do not let a product bug redefine
-   its own expected result.
-
-`universal_uninstall_scopes` remains an explicit retained target fact because
-its value is not currently safe to infer from scope support, effects, or
-command mode. Retention does not commit the future loader or runner to the old
-shape. A later slice may replace it only after proving a target-independent
-derivation.
-
-## No parallel catalog
-
-Production target names must not be copied into a Python tuple, set, dispatch
-table, or test parameter list that becomes a second source of membership or
-policy. A future consumer must discover targets from this directory and apply
-generic mechanics to reviewed facts.
-
-## Change checklist
-
-Before adding or changing target data:
-
-- classify it as a target fact, derivation, harness policy, or observation;
-- show why a new field cannot be derived safely;
-- confirm expected results remain independent of the product being tested;
-- confirm no second catalog of production target names was introduced;
-- treat a failing product observation as a defect instead of weakening the
-  oracle; and
-- update this guide when the ownership boundary changes.
-
-The reference `skill.lock: persistent` declaration permits only the Linux persistent
-lock at `HOME/.cache/graphify/skill-locks/<digest>.lock`, even when XDG_CACHE_HOME
-differs. The digest is the first 16 hexadecimal characters of SHA-256 over the
-canonical absolute skill directory encoded as UTF-8. Its missing parents may be
-created; a new lock must be empty and an existing lock must retain exact bytes.
-Without the declaration no lock effect is permitted; other values are rejected.
-The runner retains the independent expectation and observed lock bytes. Cache
-neighbors remain covered by preservation checks. Observation obstacles prevent
-success. Symlink installation paths, transient writes, concurrency and native
-Windows/macOS behavior are outside this contract.
-
-The managed JSON registry oracle derives the complete expected state from these
-independent hook facts. It separately requires one entire matching managed hook,
-an empty persistent JSON lock, an absent transaction journal after success, and
-no JSON backup. All sidecars retain observable bytes after every attempted
-command, including failed commands; inaccessible entries cannot prove absence.
-The sidecars do not exempt neighboring files from preservation. Snapshots retain
-bytes and hashes, not a filesystem permission model; product tests own mode proof.
-
-The first-install and reinstall cases derive a one-use create resolution from the initial settings witness
-before its first command. Its target path, exact-byte SHA-256, expected registry
-absence and effect identities are retained outside the observed project/home
-roots. Only their first command receives that resolution. The five other cases start
-with empty hook contexts and exercise automatic creation without a resolution.
-Later installations use
-the persistent registry. JSON-entry repair preserves the observed hooks and
-registry while removing only the instruction registration. The host validates
-resolution, command and observation bindings and required retained sidecars,
-without repeating the container's installation verdict.
-
-## Dedicated local first-install facts
-
-Supply `codebuddy-local/` alone to select the accepted CodeBuddy first-install
-contract. The retained catalog remains unconsumed. Its explicit `command`
-contains argument words after the executable. Without that field, reference
-cases retain `install --platform <target> --project`. Explicit command words
-cannot inject flags or a managed JSON resolution.
-
-Optional `destinations` supplies all three file effects (`skill`, `markdown`,
-`json`), each with a `project` or `home` root and a safe relative path. References
-and version remain siblings of the declared skill. Overlapping effects are
-rejected. Omitting overrides retains the reference layout and serialized shape.
-`skill.version_source` names a separately retained source for the expected
-version; the local CodeBuddy subject includes the existing installed package's
-unchanged distribution metadata, captured before execution.
-
-`json.hook_management: none` explicitly disables registry management. It supports
-first installation, reinstallation, single missing or altered reference repair,
-skill repair, preservation of an existing skill backup, and both Markdown section
-repair cases. `repair-markdown-section` changes only the declared section body;
-`repair-missing-markdown-section` removes the entire heading and body. Both preserve
-the initial JSON backup and retain independent preparation and readback evidence.
-`json.list: null` declares no instruction registration;
-`json.backup` declares a safe suffix whose bytes must equal the initial JSON.
-Registry cases still require their instruction list, sidecars and resolutions.
-Sidecar names remain derived even in none mode so their absence is observable.
-The none-mode fixtures derive paths from facts and include two personal Markdown
-sections, personal hooks (including the audit timeout 17), another event,
-ordered metadata, home counterparts, neighboring files and a cache witness.
-
-The distinct `repair-missing-markdown-section` case first installs a conforming
-Graphify section between personal sections. Preparation removes that entire
-heading and body and verifies the exact remaining witness and preservation of
-all other entries before allowing the identical second install. The second
-install must restore exactly one source-conforming section; its position may
-change, including appending it, while personal text and its order remain intact.
-All other observed entries, including the original JSON backup, remain unchanged.
-Retained source, plan, preparation and installation observations allow the host
-reader to recompute both preparation and installation verdicts after cleanup.
-The existing `repair-markdown-section` case continues to alter the body only.
-
-The distinct `repair-missing-json-hook` case supports unmanaged JSON with at least
-one declared hook. It selects the first hook declaration (search in the independent
-CodeBuddy spec), verifies a conforming first installation, and removes only its
-complete observed object, including additional fields. Its group, personal hooks,
-other hooks and all other entries remain unchanged. An exact observed preparation
-is required before repeating the identical command. Reinstallation restores one
-spec-conforming hook while preserving the complete installed JSON content and
-array order, ignoring formatting, and the byte-exact initial backup and other
-files. Retained snapshots permit preparation and installation recomputation after
-cleanup. The instruction-list `repair-json-entry` contract remains unchanged.
-
-
-The independent `repair-altered-json-hook` and `repair-duplicate-json-hook` cases
-also start from unmanaged JSON and a fully conforming first installation. Their
-initial JSON includes two personal groups for the first declared hook's event
-and matcher, with distinct group attributes and ordered personal hooks, before
-any installation. Alteration changes only that observed hook object's timeout
-from 10 to 11. Duplication appends an exact copy of that observed object to the
-second personal group. Preparation must match precisely this transformation,
-with every other observed entry unchanged, before the second command can run.
-Reinstallation must leave exactly one conforming first-declared hook, preserve
-the read hook and all personal groups, attributes and order, and leave no altered
-witness. Either duplicate copy may survive in either position. JSON formatting
-is unconstrained; the initial JSON backup and other observed files retain exact
-bytes. Retained plans, snapshots and results permit the same independent
-preparation and installation verification after environment cleanup. Existing
-missing-hook and other cases retain their original initial witnesses.
+A small integration set joins the layers, including the real CLI, host and engine
+with an independent simulator for all three effects and Markdown alone. Active
+CodeBuddy YAML reading has a separate integration check. These proofs do not
+qualify a real installer or CodeBuddy application discovery.

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from tools.install_sandbox.contracts.case import InstallTestCase
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.spec import fields
 from tools.install_sandbox.contracts.timings import Timing, case_timings
 from tools.install_sandbox.host.evidence_reader import safe_evidence_path
@@ -56,7 +56,7 @@ def _record(value: object, expected: Timing) -> Timing:
     return Timing(expected.phase, expected.step, state, duration, diagnostic)
 
 
-def _read(output: Path, case: InstallTestCase) -> CaseTimingResult:
+def _read(output: Path, case: EffectInstallCase) -> CaseTimingResult:
     path = safe_evidence_path(output, "timings.json")
     data = fields(
         json.loads(path.read_text(), object_pairs_hook=_object), "version duration_seconds phases"
@@ -89,7 +89,7 @@ def _diagnostics(phases: list[Timing], duration: float | None) -> list[str]:
     return diagnostics
 
 
-def read_timings(output: Path, case: InstallTestCase) -> CaseTimingResult:
+def read_timings(output: Path, case: EffectInstallCase) -> CaseTimingResult:
     try:
         return _read(output, case)
     except (OSError, ValueError, OverflowError, RecursionError) as error:

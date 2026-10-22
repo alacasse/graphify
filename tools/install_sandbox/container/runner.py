@@ -1,45 +1,28 @@
-"""Conduct one validated local case and retain its established result and evidence."""
+"""Execute native reinstall phases against expectations retained before commands."""
 
-import json
 import time
-from copy import deepcopy
-from dataclasses import asdict
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import (
-    FilesystemSnapshot,
-    TestEnvironment,
-    altered_reference_plan,
-    missing_reference_plan,
-    reference_repair_plan,
-    skill_backup_plan,
-    skill_repair_plan,
-)
+from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
-from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
-from tools.install_sandbox.container.verifier import InstallVerifier
-from tools.install_sandbox.contracts.case import (
-    InstallTestCase,
-    destination_roots,
-    json_repair_plan,
-    markdown_repair_plan,
+from tools.install_sandbox.container.expectation_builder import (
+    bind_roots,
+    build_initial_expectations,
+    build_install_expectations,
+    build_reinstall_expectations,
 )
-from tools.install_sandbox.contracts.case_transport import ExecutionCase, load_case
+from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.managed_json import needs_resolution, resolution
+from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.results import (
-    AlteredReferencePlan,
-    FileAlterationPlan,
+    EvidenceWriteError,
     InstallTestResult,
-    MissingReferencePlan,
-    ReferenceRepairPlan,
-    SkillBackupPlan,
     StepEvidence,
-    StepPreparationEvidence,
-    VerificationResult,
 )
 
 
@@ -54,7 +37,7 @@ def _check_directories(subject: Path, case_file: Path, work: Path, output: Path)
             raise ValueError(f"Directory must be fresh or empty: {path}")
 
 
-def _new_result(case: ExecutionCase) -> InstallTestResult:
+def _new_result(case: EffectInstallCase) -> InstallTestResult:
     steps: list[StepEvidence] = [
         {
             "operation": operation,
@@ -80,10 +63,25 @@ def _new_result(case: ExecutionCase) -> InstallTestResult:
     )
 
 
+def step_status(step: StepEvidence) -> Literal["passed", "failed", "incomplete"]:
+    command, verdict = step["command"], step["verification"]
+    assert command is not None and verdict is not None
+    if command["state"] != "completed" or not verdict.complete:
+        return "incomplete"
+    return "failed" if command["exit_code"] != 0 or verdict.mismatches else "passed"
+
+
+@contextmanager
+def _phase(step: StepEvidence, stage: str) -> Generator[None]:
+    step["failure"] = {"stage": stage, "reason": ""}
+    yield
+    del step["failure"]
+
+
 class InstallTestRunner:
     def __init__(self, driver: InstallerDriver | None = None):
         self.driver = driver if driver is not None else InstallerDriver()
-        self.verifier = InstallVerifier()
+        self.verifier = EffectVerifier()
 
     def run_case(
         self,
@@ -96,315 +94,160 @@ class InstallTestRunner:
     ) -> InstallTestResult:
         started = time.monotonic_ns()
         subject, case_path, work, output = (
-            path.resolve()
-            for path in (reference_sources, case_file, work_directory, output_directory)
+            p.resolve() for p in (reference_sources, case_file, work_directory, output_directory)
         )
-        case = load_case(case_path.read_text(encoding="utf-8"))
+        case = EffectInstallCase.from_json(case_path.read_text(encoding="utf-8"))
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
-        if isinstance(case, EffectInstallCase):
-            case.write(output / "case.json")
+        case.write(output / "case.json")
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v2"})
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
-        writer.append_log("journal.log", "Validated case; starting preparation\n")
+        writer.append_log("journal.log", "Validated native case; starting preparation\n")
+        writer.append_log("preparation.log", "Package availability inherited from campaign\n")
         self._run(case, subject, prepared_executable, work, writer, result)
         with writer.measure("finalize"):
-            writer.append_log("journal.log", f"Case status: {result.status}; saving result\n")
             writer.write_result(result)
         writer.finish_timings(started)
         return result
 
     def _run(
         self,
-        case: ExecutionCase,
+        case: EffectInstallCase,
         subject: Path,
         executable: Path,
         work: Path,
         writer: TestResultWriter,
         result: InstallTestResult,
     ) -> None:
-        writer.append_log("preparation.log", "Package availability inherited from campaign\n")
-        with writer.measure("initial"):
-            initial = self._prepare_initial(case, subject, work, writer, result)
-        if initial is None:
-            return
-        environment, expected, before = initial
-        result.preparation["ready"] = True
-        self._run_steps(case, executable, environment, expected, before, writer, result)
-
-    def _prepare_initial(
-        self,
-        case: ExecutionCase,
-        subject: Path,
-        work: Path,
-        writer: TestResultWriter,
-        result: InstallTestResult,
-    ) -> tuple[TestEnvironment | EffectEnvironment, FilesystemSnapshot, FilesystemSnapshot] | None:
+        failure_stage = "environment"
         try:
-            environment = (
-                EffectEnvironment(case, work / "environment")
-                if isinstance(case, EffectInstallCase)
-                else TestEnvironment(case, work / "environment")
+            with writer.measure("initial"):
+                environment = EffectEnvironment(case, work / "environment")
+                environment.prepare()
+                (work / "command-tmp").mkdir()
+                roots = {"home": str(environment.home), "project": str(environment.project)}
+                writer.write_metadata("roots.json", roots)
+                failure_stage = "sources"
+                sources = environment.preserve_expected(subject, writer)
+                result.evidence["expected_contents"] = "expected/"
+                result.preparation["stage"] = "sources_retained"
+                failure_stage = "initial_expectations"
+                initial = bind_roots(build_initial_expectations(case, sources), roots)
+                writer.write_metadata("expectations/initial.json", initial.to_data())
+                failure_stage = "initial_observation"
+                before = environment.observe(writer, "before")
+                failure_stage = "initial_verification"
+                verdict = self.verifier.verify(initial, before)
+                writer.write_initial_verification(verdict)
+                result.preparation["stage"] = "initial_verified"
+                if not verdict.complete or verdict.mismatches:
+                    self._not_run(result, writer, "Initial verification failed")
+                    return
+                failure_stage = "install_expectations"
+                expectations = build_install_expectations(case, sources, before, roots)
+            result.preparation["ready"] = True
+        except (OSError, ValueError, EvidenceWriteError) as error:
+            writer.write_metadata(
+                "construction-failure.json",
+                {
+                    "stage": failure_stage,
+                    "kind": "validation" if isinstance(error, ValueError) else "io",
+                    "reason": str(error),
+                },
             )
-            environment.prepare()
-            if isinstance(case, InstallTestCase) and needs_resolution(case):
-                writer.write_managed_resolution(resolution(case))
-            (work / "command-tmp").mkdir()
-            expected = environment.preserve_expected(subject, writer)
-            result.evidence["expected_contents"] = "expected/"
-            result.preparation["stage"] = "sources_retained"
-            before = environment.observe(writer, "before")
-        except OSError as error:
             self._not_run(result, writer, f"Initial preparation failed: {error}")
-            return None
-        initial = (
-            EffectVerifier().verify_initial(case, expected, before)
-            if isinstance(case, EffectInstallCase)
-            else self.verifier.verify_initial(case, expected, before)
-        )
-        if isinstance(case, EffectInstallCase):
-            writer.write_initial_verification(initial)
-        result.preparation["stage"] = "initial_verified"
-        writer.append_log("preparation.log", json.dumps(asdict(initial)) + "\n")
-        if not initial.complete or initial.mismatches:
-            self._not_run(
-                result, writer, "Initial verification failed: " + json.dumps(asdict(initial))
-            )
-            return None
-        if isinstance(case, InstallTestCase) and case.name in {
-            "repair-references",
-            "repair-missing-reference",
-            "repair-altered-reference",
-        }:
-            try:
-                if case.name in {"repair-missing-reference", "repair-altered-reference"}:
-                    missing_reference_plan(case, expected)
-                else:
-                    reference_repair_plan(case, expected)
-            except ValueError as error:
-                self._not_run(result, writer, str(error))
-                return None
-        return environment, expected, before
+            return
+        self._steps(case, executable, environment, expectations, before, writer, result)
 
-    def _run_steps(
+    def _steps(
         self,
-        case: ExecutionCase,
+        case: EffectInstallCase,
         executable: Path,
-        environment: TestEnvironment | EffectEnvironment,
-        expected: FilesystemSnapshot,
+        environment: EffectEnvironment,
+        expectations: ExpectationSet,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
         result: InstallTestResult,
     ) -> None:
-        writer.append_log("journal.log", "Preparation ready; attempting install\n")
         for index, step in enumerate(result.steps):
-            installed = before
+            try:
+                expectations, after = self._step(
+                    case, executable, environment, expectations, before, writer, result, index
+                )
+            except (OSError, ValueError, EvidenceWriteError) as error:
+                failure = step.get("failure")
+                assert failure is not None
+                failure["reason"] = str(error)
+                writer.write_metadata(f"steps/{index}/failure.json", failure)
+                step["skip_reason"] = str(error) if step["command"] is None else None
+                result.status = "incomplete"
+            else:
+                result.status = step_status(step)
+                before = after
+            if result.status != "passed":
+                for dependent in result.steps[index + 1 :]:
+                    dependent["skip_reason"] = f"Step {index} {result.status}"
+                return
+
+    def _step(
+        self,
+        case: EffectInstallCase,
+        executable: Path,
+        environment: EffectEnvironment,
+        expectations: ExpectationSet,
+        before: FilesystemSnapshot,
+        writer: TestResultWriter,
+        result: InstallTestResult,
+        index: int,
+    ) -> tuple[ExpectationSet, FilesystemSnapshot]:
+        step = result.steps[index]
+        with _phase(step, "preparation"):
             if index:
                 with writer.measure("step_preparation", index):
-                    if isinstance(case, InstallTestCase) and case.name in {
-                        "repair-references",
-                        "repair-missing-reference",
-                        "repair-altered-reference",
-                        "repair-skill",
-                        "preserve-skill-backup",
-                        "repair-markdown-section",
-                        "repair-missing-markdown-section",
-                        "repair-json-entry",
-                        "repair-missing-json-hook",
-                        "repair-altered-json-hook",
-                        "repair-duplicate-json-hook",
-                    }:
-                        assert isinstance(environment, TestEnvironment)
-                        before = self._prepare_step(
-                            case, environment, expected, installed, writer, step
-                        )
-                        preparation = step.get("preparation")
-                        assert preparation is not None
-                        if not preparation["ready"]:
-                            result.status = "incomplete"
-                            break
-                    else:
-                        before = deepcopy(installed)
-                        writer.write_snapshot(before, "before", step_index=index)
-            before = self._install(
+                    previous = result.steps[0]["verification"]
+                    assert previous is not None
+                    expectations = build_reinstall_expectations(expectations, before, previous)
+                    writer.write_snapshot(before, "before", step_index=index)
+        with _phase(step, "expectations"):
+            writer.write_metadata(f"expectations/{expectations.phase}.json", expectations.to_data())
+        with _phase(step, "command"), writer.measure("command", index) as timing:
+            command = self.driver.install(
                 case,
                 executable,
-                environment,
-                expected,
-                installed,
-                writer,
-                step,
-                index,
+                environment.project,
+                environment.home,
+                environment.project.parent.parent / "command-tmp",
             )
-            result.status = self._step_status(step)
-            if result.status != "passed":
-                reason = f"Step {index} {result.status}; dependent installation not attempted"
-                for dependent in result.steps[index + 1 :]:
-                    dependent["skip_reason"] = reason
-                writer.append_log("journal.log", reason + "\n")
-                break
-
-    def _prepare_step(
-        self,
-        case: InstallTestCase,
-        environment: TestEnvironment,
-        expected: FilesystemSnapshot,
-        installed: FilesystemSnapshot,
-        writer: TestResultWriter,
-        step: StepEvidence,
-    ) -> FilesystemSnapshot:
-        if case.name == "repair-altered-reference":
-            return self._prepare_altered_reference(
-                case, environment, expected, installed, writer, step
-            )
-        if case.name == "repair-missing-reference":
-            return self._prepare_missing_reference(
-                case, environment, expected, installed, writer, step
-            )
-        if case.name in {
-            "repair-markdown-section",
-            "repair-missing-markdown-section",
-            "repair-json-entry",
-            "repair-missing-json-hook",
-            "repair-altered-json-hook",
-            "repair-duplicate-json-hook",
-        }:
-            return self._prepare_shared_file(case, environment, installed, writer, step)
-        if case.name == "preserve-skill-backup":
-            plan, content = skill_backup_plan(case, expected)
-            writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing previous skill backup witness\n")
-            reason = environment.prepare_skill_backup(plan, content)
-            prepared_state = environment.observe(writer, "before", step_index=1)
-            verification = self.verifier.verify_skill_backup(
-                plan, content, installed, prepared_state, destination_roots(case)["skill"]
-            )
-        elif case.name == "repair-skill":
-            plan, content = skill_repair_plan(case, expected)
-            writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing skill alteration\n")
-            reason = environment.prepare_skill_repair(plan, content)
-            prepared_state = environment.observe(writer, "before", step_index=1)
-            verification = self.verifier.verify_skill_repair(
-                plan, content, installed, prepared_state, destination_roots(case)["skill"]
-            )
-        else:
-            plan, content = reference_repair_plan(case, expected)
-            writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing reference deletion and alteration\n")
-            reason = environment.prepare_reference_repair(plan, content)
-            prepared_state = environment.observe(writer, "before", step_index=1)
-            verification = self.verifier.verify_reference_repair(
-                plan, content, installed, prepared_state
-            )
-        self._record_preparation(writer, step, plan, reason, verification)
-        return prepared_state
-
-    def _prepare_altered_reference(
-        self,
-        case: InstallTestCase,
-        environment: TestEnvironment,
-        expected: FilesystemSnapshot,
-        installed: FilesystemSnapshot,
-        writer: TestResultWriter,
-        step: StepEvidence,
-    ) -> FilesystemSnapshot:
-        plan, content = altered_reference_plan(case, expected)
-        writer.write_step_preparation_plan(plan, content)
-        writer.append_log("journal.log", "Preparing single reference alteration\n")
-        reason = environment.prepare_altered_reference(plan, content)
-        prepared = environment.observe(writer, "before", step_index=1)
-        verification = self.verifier.verify_altered_reference(plan, content, installed, prepared)
-        self._record_preparation(writer, step, plan, reason, verification)
-        return prepared
-
-    def _prepare_missing_reference(
-        self,
-        case: InstallTestCase,
-        environment: TestEnvironment,
-        expected: FilesystemSnapshot,
-        installed: FilesystemSnapshot,
-        writer: TestResultWriter,
-        step: StepEvidence,
-    ) -> FilesystemSnapshot:
-        plan = missing_reference_plan(case, expected)
-        writer.write_missing_reference_plan(plan)
-        writer.append_log("journal.log", "Preparing single reference deletion\n")
-        reason = environment.prepare_missing_reference(plan)
-        prepared = environment.observe(writer, "before", step_index=1)
-        verification = self.verifier.verify_missing_reference(plan, installed, prepared)
-        self._record_preparation(writer, step, plan, reason, verification)
-        return prepared
-
-    def _prepare_shared_file(
-        self,
-        case: InstallTestCase,
-        environment: TestEnvironment,
-        installed: FilesystemSnapshot,
-        writer: TestResultWriter,
-        step: StepEvidence,
-    ) -> FilesystemSnapshot:
-        if case.name in {
-            "repair-json-entry",
-            "repair-missing-json-hook",
-            "repair-altered-json-hook",
-            "repair-duplicate-json-hook",
-        }:
-            plan, content = json_repair_plan(case)
-            writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing controlled JSON repair witness\n")
-            reason = (
-                environment.prepare_json_hook_repair(plan)
-                if case.name
-                in {
-                    "repair-missing-json-hook",
-                    "repair-altered-json-hook",
-                    "repair-duplicate-json-hook",
+            timing.duration_seconds = command.duration_seconds
+            if command.duration_seconds is None:
+                timing.state = "unavailable"
+                timing.diagnostic = "Command executor did not supply a duration"
+        with _phase(step, "command_evidence"):
+            step["command"] = {
+                "args": command.args,
+                "cwd": command.cwd,
+                "state": command.state,
+                "exit_code": command.exit_code,
+                "reason": command.reason,
+                "stdout_file": None,
+                "stderr_file": None,
+            }
+            step["command"] = writer.write_command(command, step_index=index)
+            step["skip_reason"] = None
+        with writer.measure("checks", index):
+            with _phase(step, "observation"):
+                after = environment.observe(writer, "after", step_index=index)
+                step["observations"] = {
+                    "before": f"steps/{index}/before.json",
+                    "after": f"steps/{index}/after.json",
                 }
-                else environment.prepare_json_repair(plan)
-            )
-            prepared = environment.observe(writer, "before", step_index=1)
-            verification = self.verifier.verify_json_repair(
-                case, plan, content, installed, prepared
-            )
-        else:
-            plan, content = markdown_repair_plan(case)
-            writer.write_step_preparation_plan(plan, content)
-            writer.append_log("journal.log", "Preparing Markdown section alteration\n")
-            reason = environment.prepare_markdown_repair(plan, content)
-            prepared = environment.observe(writer, "before", step_index=1)
-            verification = self.verifier.verify_markdown_repair(
-                case, plan, content, installed, prepared
-            )
-        self._record_preparation(writer, step, plan, reason, verification)
-        return prepared
-
-    @staticmethod
-    def _record_preparation(
-        writer: TestResultWriter,
-        step: StepEvidence,
-        plan: AlteredReferencePlan
-        | MissingReferencePlan
-        | FileAlterationPlan
-        | ReferenceRepairPlan
-        | SkillBackupPlan,
-        reason: str | None,
-        verification: VerificationResult,
-    ) -> None:
-        if reason is None and (not verification.complete or verification.mismatches):
-            reason = "Step preparation verification failed"
-        evidence: StepPreparationEvidence = {
-            "plan": plan,
-            "ready": reason is None,
-            "reason": reason,
-            "before": "steps/1/before.json",
-            "verification": verification,
-        }
-        step["preparation"] = evidence
-        writer.write_step_preparation(evidence)
-        if reason is not None:
-            step["skip_reason"] = reason
-            writer.append_log("journal.log", reason + "; dependent installation not attempted\n")
+            with _phase(step, "verification"):
+                verdict = self.verifier.verify(expectations, after)
+                step["verification"] = verdict
+            with _phase(step, "verification_evidence"):
+                writer.write_verification(verdict, step_index=index)
+        return expectations, after
 
     @staticmethod
     def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:
@@ -412,88 +255,3 @@ class InstallTestRunner:
         for step in result.steps:
             step["skip_reason"] = reason
         writer.append_log("preparation.log", reason + "\n")
-        writer.append_log("journal.log", "Preparation prevented installation\n")
-
-    def _install(
-        self,
-        case: ExecutionCase,
-        executable: Path,
-        environment: TestEnvironment | EffectEnvironment,
-        expected: FilesystemSnapshot,
-        before: FilesystemSnapshot,
-        writer: TestResultWriter,
-        step: StepEvidence,
-        index: int,
-    ) -> FilesystemSnapshot:
-        with writer.measure("command", index) as timing:
-            command = self.driver.install(
-                case,
-                executable,
-                environment.project,
-                environment.home,
-                environment.project.parent.parent / "command-tmp",
-                writer.output_directory / "managed-hooks-resolution.json"
-                if index == 0 and isinstance(case, InstallTestCase) and needs_resolution(case)
-                else None,
-            )
-            timing.duration_seconds = command.duration_seconds
-            if command.duration_seconds is None:
-                timing.state = "unavailable"
-                timing.diagnostic = "Command executor did not supply a duration"
-        with writer.measure("checks", index):
-            return self._check_install(
-                case, environment, expected, before, writer, step, index, command
-            )
-
-    def _check_install(
-        self,
-        case: ExecutionCase,
-        environment: TestEnvironment | EffectEnvironment,
-        expected: FilesystemSnapshot,
-        before: FilesystemSnapshot,
-        writer: TestResultWriter,
-        step: StepEvidence,
-        index: int,
-        command: InstallerCommandResult,
-    ) -> FilesystemSnapshot:
-        step["skip_reason"] = None
-        step["command"] = writer.write_command(command, step_index=index)
-        writer.append_log(
-            "journal.log",
-            f"Step {index} command {command.state}: {command.exit_code}; {command.reason}\n",
-        )
-        after = environment.observe(writer, "after", step_index=index)
-        if isinstance(case, EffectInstallCase):
-            verification = EffectVerifier().verify(case, expected, before, after)
-        else:
-            backup = None
-            if index and case.name == "repair-skill":
-                backup = skill_repair_plan(case, expected)[1]
-            elif index and case.name == "preserve-skill-backup":
-                backup = skill_backup_plan(case, expected)[1]
-            verification = self.verifier.verify(
-                case,
-                expected,
-                before,
-                after,
-                skill_backup=backup,
-                allow_markdown_relocation=index > 0
-                and case.name == "repair-missing-markdown-section",
-            )
-        step["verification"] = verification
-        step["observations"] = {
-            "before": f"steps/{index}/before.json",
-            "after": f"steps/{index}/after.json",
-        }
-        writer.write_verification(verification, step_index=index)
-        return after
-
-    @staticmethod
-    def _step_status(step: StepEvidence) -> Literal["passed", "failed", "incomplete"]:
-        command, verification = step["command"], step["verification"]
-        assert command is not None and verification is not None
-        if command["state"] != "completed" or not verification.complete:
-            return "incomplete"
-        if command["exit_code"] != 0 or verification.mismatches:
-            return "failed"
-        return "passed"

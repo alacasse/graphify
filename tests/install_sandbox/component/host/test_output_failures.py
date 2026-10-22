@@ -29,7 +29,7 @@ def test_archive_failure_preserves_raw_pass_and_reports_real_location(
     assert (
         result.output_directory is not None and result.output_directory.parent.name == "in-progress"
     )
-    assert (result.output_directory / "evidence/cases/first-install/result.json").is_file()
+    assert (result.output_directory / "evidence/cases/reinstall/result.json").is_file()
     assert not (result.output_directory / "evidence.zip").exists()
     assert f"controlled archive {failure} failure" in result.report.render()
 
@@ -57,7 +57,7 @@ def test_raw_removal_failure_keeps_verified_archive_and_success(
     assert result.report.archive == "verified" and result.report.raw_evidence
     with zipfile.ZipFile(result.output_directory / "evidence.zip") as archive:
         assert archive.testzip() is None
-        assert archive.read("evidence/cases/first-install/result.json")
+        assert archive.read("evidence/cases/reinstall/result.json")
     assert "raw removal failure" in result.report.render()
 
 
@@ -110,7 +110,7 @@ def test_signal_preserves_recoverable_evidence_and_original_verdict(
     assert (
         result.output_directory is not None and result.output_directory.parent.name == "in-progress"
     )
-    raw = result.output_directory / "evidence/cases/first-install/result.json"
+    raw = result.output_directory / "evidence/cases/reinstall/result.json"
     assert raw.is_file()
     assert (result.output_directory / "evidence.zip").exists() == (phase == "after")
 

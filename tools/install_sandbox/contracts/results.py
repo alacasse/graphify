@@ -41,8 +41,7 @@ class PreparationEvidence(TypedDict):
     ready: bool
     reason: str | None
     log: str
-    # Absent only in historical results; verification completed does not imply success.
-    stage: NotRequired[Literal["started", "sources_retained", "initial_verified"]]
+    stage: Literal["started", "sources_retained", "initial_verified"]
 
 
 class CommandEvidence(TypedDict):
@@ -55,45 +54,13 @@ class CommandEvidence(TypedDict):
     stderr_file: str | None
 
 
-class FileAlterationPlan(TypedDict):
-    altered_path: str
-    altered_content_file: str
-
-
-class AlteredReferencePlan(FileAlterationPlan):
-    root: str
-
-
-class MissingReferencePlan(TypedDict):
-    root: str
-    deleted_path: str
-
-
-class ReferenceRepairPlan(FileAlterationPlan):
-    deleted_path: str
-
-
-class SkillBackupPlan(TypedDict):
-    backup_path: str
-    backup_content_file: str
-
-
-class StepPreparationEvidence(TypedDict):
-    plan: (
-        AlteredReferencePlan
-        | MissingReferencePlan
-        | ReferenceRepairPlan
-        | FileAlterationPlan
-        | SkillBackupPlan
-    )
-    ready: bool
-    reason: str | None
-    before: str
-    verification: VerificationResult
+class ExecutionFailure(TypedDict):
+    stage: str
+    reason: str
 
 
 class StepEvidence(TypedDict):
-    preparation: NotRequired[StepPreparationEvidence]
+    failure: NotRequired[ExecutionFailure]
     operation: str
     skip_reason: str | None
     command: CommandEvidence | None

@@ -93,20 +93,6 @@ def verification(value: object) -> VerificationResult:
     return result
 
 
-def lock_expectation(output: Path) -> tuple[PurePosixPath, PurePosixPath, str]:
-    expectation = fields(read_json_evidence(output, "skill-lock.json"), "home skill_directory path")
-    home, skill = (PurePosixPath(text(expectation[k])) for k in ("home", "skill_directory"))
-    if not home.is_absolute() or not skill.is_absolute() or ".." in home.parts + skill.parts:
-        raise ValueError("Lock expectation requires canonical absolute roots")
-    if str(home) != expectation["home"] or str(skill) != expectation["skill_directory"]:
-        raise ValueError("Lock roots must retain their canonical spelling")
-    digest = hashlib.sha256(str(skill).encode("utf-8")).hexdigest()[:16]
-    path = f".cache/graphify/skill-locks/{digest}.lock"
-    if expectation["path"] != path:
-        raise ValueError("Lock path does not match retained skill directory")
-    return home, skill, path
-
-
 def read_json_evidence(output: Path, relative: str) -> object:
     return json.loads(
         safe_evidence_path(output, relative).read_bytes(), object_pairs_hook=json_object
@@ -207,13 +193,6 @@ def retained_snapshot(output: Path, relative: str) -> FilesystemSnapshot:
             if entry.get("sha256") not in {None, hashlib.sha256(retained).hexdigest()}:
                 raise ValueError("Retained content contradicts its snapshot digest")
             snapshot.contents[(entry["root"], entry["path"])] = retained
-    lock = output / "skill-lock.json"
-    if lock.exists():
-        snapshot.skill_lock = text(
-            fields(read_json_evidence(output, "skill-lock.json"), "home skill_directory path")[
-                "path"
-            ]
-        )
     return snapshot
 
 

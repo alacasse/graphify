@@ -109,7 +109,8 @@ def test_simultaneous_processes_reserve_different_names(tmp_path: Path) -> None:
         "root=Path(sys.argv[1]); "
         f"clock=lambda: datetime.fromisoformat({START.isoformat()!r}); "
         "result=CampaignOutput(managed_root=root/'out',now=clock).run("
-        "specs_directory=root/'missing-specs',target='missing',subject_checkout=root/'subject'); "
+        "spec_file=root/'missing-effects.yaml',subject_context_file=root/'context.json',"
+        "subject_checkout=root/'subject'); "
         "print(result.output_directory)"
     )
     processes = [

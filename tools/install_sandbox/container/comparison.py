@@ -295,3 +295,40 @@ def personal_json(
     else:
         result.pop("hooks", None)
     return result
+
+
+def markdown_byte_parts(content: bytes, marker: str) -> tuple[bytes, bytes, bytes] | None:
+    """Split one exact heading through its next level-one/two heading in bytes."""
+    lines = content.splitlines(keepends=True)
+    encoded = marker.encode("utf-8")
+    starts = [i for i, line in enumerate(lines) if line.rstrip(b"\r\n") == encoded]
+    if len(starts) != 1:
+        return None
+    start = starts[0]
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith((b"# ", b"## "))),
+        len(lines),
+    )
+    return b"".join(lines[:start]), b"".join(lines[start:end]), b"".join(lines[end:])
+
+
+def verify_markdown_composed(
+    expected: bytes,
+    exterior: bytes,
+    after: bytes,
+    result: VerificationResult,
+    *,
+    root: str,
+    path: str,
+    marker: str,
+) -> None:
+    """Require exact source and exterior bytes with unrestricted section placement."""
+    parts = markdown_byte_parts(after, marker)
+    if parts is None:
+        mismatch(result, "section_count", root, path, "one section", "zero or multiple sections")
+        return
+    prefix, section, suffix = parts
+    if section != expected:
+        mismatch(result, "content_mismatch", root, path, "exact source section", "different bytes")
+    if prefix + suffix != exterior:
+        mismatch(result, "user_content_lost", root, path, "exact exterior bytes", "different bytes")

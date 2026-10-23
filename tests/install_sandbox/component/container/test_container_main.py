@@ -16,6 +16,7 @@ from tools.install_sandbox.container.__main__ import main
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.host.build_context import prepare_context
+from tools.install_sandbox.host.result_reader import read_evidence
 
 
 def _arguments(root: Path) -> list[str]:
@@ -58,7 +59,7 @@ def test_saved_case_status_is_separate_from_program_exit(
         assert any(item["type"] == "section_count" for item in saved["mismatches"])
 
 
-def test_result_write_failure_keeps_evidence_and_returns_nonzero(
+def test_initial_checkpoint_write_failure_prevents_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -77,7 +78,9 @@ def test_result_write_failure_keeps_evidence_and_returns_nonzero(
     assert main(_arguments(tmp_path), runner=runner) == 1
     assert "Cannot finalize result.json" in capsys.readouterr().err
     assert not (tmp_path / "results/result.json").exists()
-    assert (tmp_path / "results/steps/0/after.json").is_file()
+    assert (tmp_path / "results/case.json").is_file()
+    assert not (tmp_path / "results/steps").exists()
+    assert not (tmp_path / "work").exists()
     assert (tmp_path / "results/result.json.tmp").is_file()
 
 
@@ -103,7 +106,10 @@ def test_unexpected_stop_is_not_success(
     assert main(_arguments(tmp_path), runner=runner) == (130 if interrupted else 1)
     diagnostic = capsys.readouterr().err
     assert ("interrupted" if interrupted else "Controlled unexpected stop") in diagnostic
-    assert not (tmp_path / "results/result.json").exists()
+    result = read_evidence(tmp_path / "results")
+    assert result.status == "incomplete"
+    assert result.steps[0]["progress"] == "incomplete"
+    assert result.steps[1]["progress"] == "not_started"
     assert (tmp_path / "results/preparation.log").is_file()
 
 

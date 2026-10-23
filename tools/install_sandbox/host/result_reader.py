@@ -2,11 +2,13 @@
 
 import json
 from pathlib import Path
+from typing import Literal, cast
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
+    IntermediateEvidence,
     PreparationEvidence,
     StepEvidence,
 )
@@ -75,7 +77,8 @@ def _step(value: object, output: Path) -> StepEvidence:
     failed = _has_failure(value)
     data = fields(
         value,
-        "operation skip_reason command verification observations" + (" failure" if failed else ""),
+        "operation progress skip_reason command verification observations"
+        + (" failure" if failed else ""),
     )
     observations = data["observations"]
     references = (
@@ -88,6 +91,7 @@ def _step(value: object, output: Path) -> StepEvidence:
     )
     step: StepEvidence = {
         "operation": text(data["operation"]),
+        "progress": _progress(data["progress"]),
         "skip_reason": _optional_text(data["skip_reason"]),
         "command": None if data["command"] is None else _command(data["command"], output),
         "verification": None
@@ -99,6 +103,32 @@ def _step(value: object, output: Path) -> StepEvidence:
         failure = fields(data["failure"], "stage reason")
         step["failure"] = {"stage": text(failure["stage"]), "reason": text(failure["reason"])}
     return step
+
+
+def _progress(value: object) -> Literal["not_started", "incomplete", "finished"]:
+    progress = text(value)
+    if progress not in {"not_started", "incomplete", "finished"}:
+        raise ValueError("Invalid execution progress")
+    return cast(Literal["not_started", "incomplete", "finished"], progress)
+
+
+def _intermediate(value: object, output: Path) -> IntermediateEvidence | None:
+    if value is None:
+        return None
+    data = fields(value, "progress operation_ref expectations_ref observations verification reason")
+    return {
+        "progress": _progress(data["progress"]),
+        "operation_ref": _evidence(data["operation_ref"], output),
+        "expectations_ref": _evidence(data["expectations_ref"], output),
+        "observations": {
+            key: _evidence(value, output)
+            for key, value in fields(data["observations"], "before after").items()
+        },
+        "verification": None
+        if data["verification"] is None
+        else _verification(data["verification"]),
+        "reason": _optional_text(data["reason"]),
+    }
 
 
 def _preparation(value: object, output: Path) -> PreparationEvidence:
@@ -157,7 +187,8 @@ def _check_references(result: InstallTestResult, step: StepEvidence, index: int)
 
 def _check_skipped(step: StepEvidence) -> None:
     if (
-        "failure" in step
+        step["progress"] != "not_started"
+        or "failure" in step
         or step["skip_reason"] is None
         or any(step[key] is not None for key in ("command", "verification", "observations"))
     ):
@@ -166,11 +197,23 @@ def _check_skipped(step: StepEvidence) -> None:
 
 def _check_attempted(step: StepEvidence) -> str:
     command, verification = step["command"], step["verification"]
+    if step["progress"] == "not_started":
+        raise ValueError("Attempted step cannot be declared not started")
     if step["skip_reason"] is not None:
         raise ValueError("An attempted step cannot have a skip reason")
     if command is None or verification is None or step["observations"] is None:
-        raise ValueError("An attempted case requires command, verification and observations")
-    if command["state"] != "completed" or not verification.complete:
+        if step["progress"] == "incomplete":
+            return "incomplete"
+        raise ValueError("A finished step requires command, verification and observations")
+    if step["progress"] == "finished" and (
+        command["state"] != "completed" or not verification.complete
+    ):
+        raise ValueError("Finished step requires complete command and verification")
+    if (
+        step["progress"] == "incomplete"
+        or command["state"] != "completed"
+        or not verification.complete
+    ):
         return "incomplete"
     if command["exit_code"] != 0 or verification.mismatches:
         return "failed"
@@ -181,11 +224,14 @@ def _check_next_step(result: InstallTestResult, step: StepEvidence, index: int) 
     if "failure" in step:
         return _check_failed_phase(step)
     status = _check_attempted(step)
-    _check_references(result, step, index)
+    if step["command"] is not None and step["observations"] is not None:
+        _check_references(result, step, index)
     return status
 
 
 def _check_failed_phase(step: StepEvidence) -> str:
+    if step["progress"] != "incomplete":
+        raise ValueError("Failed execution stage must be incomplete")
     failure = step.get("failure")
     assert failure is not None
     stage = failure["stage"]
@@ -206,6 +252,21 @@ def _check_failed_phase(step: StepEvidence) -> str:
     return "incomplete"
 
 
+def _intermediate_status(intermediate: IntermediateEvidence) -> str:
+    verdict = intermediate["verification"]
+    if intermediate["progress"] != "finished":
+        return "incomplete"
+    if verdict is None or not verdict.complete:
+        raise ValueError("Finished intermediate preparation requires complete verification")
+    return "failed" if verdict.mismatches or verdict.obstacles else "passed"
+
+
+def _transition_status(result: InstallTestResult, index: int, status: str) -> str:
+    if index == 1 and result.intermediate_preparation is not None and status == "passed":
+        return _intermediate_status(result.intermediate_preparation)
+    return status
+
+
 def _check_consistency(result: InstallTestResult) -> None:
     _check_preparation_stage(result)
     if not result.preparation["ready"]:
@@ -216,10 +277,15 @@ def _check_consistency(result: InstallTestResult) -> None:
         return
     status = "passed"
     for index, step in enumerate(result.steps):
+        status = _transition_status(result, index, status)
         if status != "passed":
             _check_skipped(step)
             continue
-        status = _check_next_step(result, step, index)
+        if step["progress"] == "not_started":
+            _check_skipped(step)
+            status = "incomplete"
+        else:
+            status = _check_next_step(result, step, index)
 
     if result.status != status:
         raise ValueError("Case status contradicts command or verification facts")
@@ -230,7 +296,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
     payload = safe_evidence_path(output_directory, "result.json").read_text(encoding="utf-8")
     data = fields(
         json.loads(payload, object_pairs_hook=_json_object),
-        "case preparation steps status evidence",
+        "case preparation steps status evidence intermediate_preparation",
     )
     identity = fields(data["case"], "name target scope")
     expected = {"name": case.name, "target": case.target, "scope": case.scope}
@@ -252,6 +318,11 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
             for key, value in fields(data["evidence"], "journal expected_contents").items()
         },
     )
+    result.intermediate_preparation = _intermediate(
+        data["intermediate_preparation"], output_directory
+    )
+    if (result.intermediate_preparation is None) != (case.intermediate_preparation is None):
+        raise ValueError("Intermediate evidence contradicts case definition")
     _check_consistency(result)
     check_effect_result(result, case, output_directory)
     return result
@@ -260,7 +331,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
 def read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
-        "format": "explicit-expectations-v2"
+        "format": "explicit-expectations-v3"
     }:
         raise ValueError("Unsupported evidence format; use its identified historical reader")
     case = EffectInstallCase.from_json(

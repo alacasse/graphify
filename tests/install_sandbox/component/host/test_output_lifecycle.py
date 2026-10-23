@@ -35,11 +35,12 @@ def test_archive_is_readable_after_move_and_extraction(
         assert not any(name.endswith("evidence.zip") for name in archive.namelist())
     evidence = tmp_path / "extracted/evidence"
     assert read_evidence(evidence / "cases/reinstall").status == "passed"
+    assert read_evidence(evidence / "cases/missing-section").status == "passed"
     payload = json.loads((output / "campaign.json").read_text())
     assert (
         payload["passed"] and payload["cases"][0]["output_directory"] == "evidence/cases/reinstall"
     )
-    assert len(payload["output_lifecycle"]["writers"]) == 2
+    assert len(payload["output_lifecycle"]["writers"]) == 3
     assert all(w["state"] == "stopped" for w in payload["output_lifecycle"]["writers"])
 
 
@@ -112,7 +113,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 2
+        == 3
     )
 
 

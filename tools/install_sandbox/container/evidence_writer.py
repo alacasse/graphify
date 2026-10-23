@@ -91,17 +91,27 @@ class TestResultWriter:
                 raise EvidenceWriteError(
                     f"Cannot create expected evidence directory: {error}"
                 ) from error
+        prefix = "expected" if name == "expected" else f"steps/{step_index}/{name}"
+        self._snapshot(snapshot, prefix)
+
+    def write_intermediate_snapshot(self, snapshot: FilesystemSnapshot, name: str) -> None:
+        if name not in {"before", "after"}:
+            raise ValueError("Invalid intermediate observation phase")
+        self._snapshot(snapshot, f"intermediate/{name}")
+
+    def _snapshot(self, snapshot: FilesystemSnapshot, prefix: str) -> None:
         for entry in snapshot.entries:
             key = (entry["root"], entry["path"])
             if key in snapshot.contents:
-                prefix = "expected" if name == "expected" else f"steps/{step_index}/{name}/{key[0]}"
-                relative = f"{prefix}/{key[1]}"
+                relative = (
+                    f"{prefix}/{key[1]}" if prefix == "expected" else f"{prefix}/{key[0]}/{key[1]}"
+                )
                 self._write_bytes(relative, snapshot.contents[key])
                 entry["content_file"] = relative
-                if name == "expected":
-                    entry["sha256"] = hashlib.sha256(snapshot.contents[key]).hexdigest()
-        relative = "expected.json" if name == "expected" else f"steps/{step_index}/{name}.json"
-        self._write_json(relative, {"entries": snapshot.entries, "obstacles": snapshot.obstacles})
+                entry["sha256"] = hashlib.sha256(snapshot.contents[key]).hexdigest()
+        self._write_json(
+            f"{prefix}.json", {"entries": snapshot.entries, "obstacles": snapshot.obstacles}
+        )
 
     def write_metadata(self, relative: str, value: object) -> None:
         self._write_json(relative, value)

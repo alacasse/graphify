@@ -2,7 +2,7 @@
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TypedDict, cast
 
@@ -13,6 +13,7 @@ from tools.install_sandbox.contracts.effects import (
     SkillEffect,
     physical_destinations,
 )
+from tools.install_sandbox.contracts.intermediate import IntermediatePreparation
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 
 
@@ -225,10 +226,16 @@ class EffectInstallCase:
     subject: SubjectContext
     initial_files: list[InitialFile]
     operations: list[str]
+    intermediate_preparation: IntermediatePreparation | None = None
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v2"
+        data["format"] = "explicit-expectations-v3"
+        data["intermediate_preparation"] = (
+            None
+            if self.intermediate_preparation is None
+            else self.intermediate_preparation.to_data()
+        )
         data["effects"] = self.effects.to_data()
         payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         self.from_json(payload)
@@ -241,17 +248,25 @@ class EffectInstallCase:
     def from_json(cls, payload: str) -> "EffectInstallCase":
         data = fields(
             json.loads(payload, object_pairs_hook=unique_object),
-            "format name target scope effects subject initial_files operations",
+            "format name target scope effects subject initial_files operations "
+            "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v2" or data["name"] != "reinstall":
+        if data["format"] != "explicit-expectations-v3":
             raise ValueError("Unsupported effects case format or operation")
-        case = build_reinstall_case(
+        builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
             SubjectContext.from_data(data["subject"]),
             text(data["target"]),
         )
+        matches = [case for case in builds.cases if case.name == data["name"]]
+        if not matches:
+            raise ValueError("Unsupported effects case")
+        case = matches[0]
+        preparation = data["intermediate_preparation"]
+        parsed = None if preparation is None else IntermediatePreparation.from_data(preparation)
         if (
-            data["scope"] != case.scope
+            parsed != case.intermediate_preparation
+            or data["scope"] != case.scope
             or data["operations"] != case.operations
             or data["initial_files"] != case.initial_files
         ):
@@ -275,3 +290,44 @@ def build_reinstall_case(
         effect_initial_files(spec),
         ["install", "install"],
     )
+
+
+@dataclass(frozen=True)
+class EffectCaseBuild:
+    cases: tuple[EffectInstallCase, ...]
+    unavailable: dict[str, str]
+
+
+def build_effect_cases(
+    spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
+) -> EffectCaseBuild:
+    """Derive applicable native cases from effects and supported subject rules."""
+    reinstall = build_reinstall_case(spec, subject, target)
+    markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
+    if len(markdown) != 1:
+        return EffectCaseBuild(
+            (reinstall,), {"missing-section": "Requires exactly one Markdown section effect"}
+        )
+    effect = markdown[0]
+    preparation = IntermediatePreparation(
+        effect.destination,
+        effect.marker,
+        b"## Personal before\nKeep before.\n\n",
+        b"## Personal after\nKeep after.\n\n",
+    )
+    initial = [dict(item) for item in reinstall.initial_files]
+    for item in initial:
+        if (item["root"], item["path"]) == (effect.destination.root, effect.destination.path):
+            item["content"] = (
+                preparation.before
+                + effect.marker.encode("utf-8")
+                + b"\nReplace this placeholder.\n\n"
+                + preparation.after
+            ).decode("utf-8")
+    missing = replace(
+        reinstall,
+        name="missing-section",
+        initial_files=initial,
+        intermediate_preparation=preparation,
+    )
+    return EffectCaseBuild((reinstall, missing), {})

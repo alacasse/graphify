@@ -65,6 +65,7 @@ def test_skipped_phase_rejects_retained_execution_evidence(proof: Path, leftover
     data["status"] = "failed"
     data["steps"][0]["command"]["exit_code"] = 7
     data["steps"][1] = {
+        "progress": "not_started",
         "operation": "install",
         "skip_reason": "First phase failed",
         "command": None,
@@ -131,6 +132,7 @@ def test_rejected_initial_verification_forbids_retained_execution(
     result["preparation"].update(ready=False, reason="Initial verification failed")
     result["steps"] = [
         {
+            "progress": "not_started",
             "operation": "install",
             "skip_reason": "Initial verification failed",
             "command": None,

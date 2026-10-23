@@ -66,8 +66,16 @@ class LiteralInstaller:
             self._hooks(project)
         path = project / "GUIDE.md"
         content = path.read_text()
-        if "## graphify" not in content:
-            path.write_text(content + "\n## graphify\nConsult the synthetic map.\n")
+        if "Replace this placeholder." in content:
+            path.write_text(
+                content.replace(
+                    "## graphify\nReplace this placeholder.\n\n",
+                    "## graphify\nConsult the synthetic map.\n",
+                )
+            )
+        elif "## graphify" not in content:
+            separator = "" if "## Personal before" in content else "\n"
+            path.write_text(content + separator + "## graphify\nConsult the synthetic map.\n")
         return InstallerCommandResult(args, str(project), "completed", 0, None)
 
     @staticmethod
@@ -128,7 +136,7 @@ class ControlledTransport:
             reference_sources=self.subject,
             prepared_executable=self.executable,
             case_file=case_file,
-            work_directory=self.root / "environment",
+            work_directory=self.root / "environment" / case_file.stem,
             output_directory=output_directory,
         )
         return completed()

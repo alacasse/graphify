@@ -16,6 +16,6 @@ if __name__ == "__main__":
         reference_sources=source,
         prepared_executable=source.parent / "literal-installer",
         case_file=case,
-        work_directory=output.parents[2] / "work" / "native",
+        work_directory=output.parents[2] / "work" / "native" / case.stem,
         output_directory=output,
     )

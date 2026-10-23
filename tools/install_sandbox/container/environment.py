@@ -43,6 +43,23 @@ def _obstacle(
     )
 
 
+def same_observation(left: FilesystemSnapshot, right: FilesystemSnapshot) -> bool:
+    """Compare logical observations independently of their archive locations."""
+
+    def inventory(snapshot: FilesystemSnapshot) -> list[tuple[str, str, str, bool | None]]:
+        return sorted(
+            (entry["root"], entry["path"], entry["kind"], entry.get("listing_complete"))
+            for entry in snapshot.entries
+        )
+
+    return (
+        not left.obstacles
+        and not right.obstacles
+        and inventory(left) == inventory(right)
+        and left.contents == right.contents
+    )
+
+
 class ObservedEnvironment:
     """Capture project/home trees for both case representations, retaining file bytes."""
 

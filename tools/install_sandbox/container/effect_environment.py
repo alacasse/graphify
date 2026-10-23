@@ -44,3 +44,10 @@ class EffectEnvironment(ObservedEnvironment):
             self._capture(snapshot, "subject", subject, path)
         writer.write_snapshot(snapshot, "expected")
         return snapshot
+
+    def observe_intermediate(self, writer: TestResultWriter, phase: str) -> FilesystemSnapshot:
+        snapshot = FilesystemSnapshot()
+        for root, directory in (("project", self.project), ("home", self.home)):
+            self._capture(snapshot, root, directory, ".")
+        writer.write_intermediate_snapshot(snapshot, phase)
+        return snapshot

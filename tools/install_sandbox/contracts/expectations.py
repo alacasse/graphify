@@ -8,8 +8,8 @@ from typing import cast
 from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.spec import HookExpectation, fields, text
 
-_PHASES = {"initial", "install", "reinstall"}
-_KINDS = {"file", "directory", "absent", "markdown", "json-hooks"}
+_PHASES = {"initial", "install", "intermediate", "reinstall"}
+_KINDS = {"file", "directory", "absent", "markdown", "markdown-composed", "json-hooks"}
 
 
 def _decode(value: object) -> bytes | None:
@@ -44,9 +44,11 @@ class Expectation:
                 raise ValueError("Invalid expectation root")
         else:
             Destination(self.root, self.path)
-        if self.kind in {"file", "markdown"} and self.content is None:
+        if self.kind in {"file", "markdown", "markdown-composed"} and self.content is None:
             raise ValueError("Expected explicit file content")
-        if self.kind == "markdown" and (self.baseline is None or self.marker is None):
+        if self.kind in {"markdown", "markdown-composed"} and (
+            self.baseline is None or self.marker is None
+        ):
             raise ValueError("Expected Markdown marker and personal baseline")
         if self.kind == "json-hooks" and (self.baseline is None or not self.hooks):
             raise ValueError("Expected JSON hooks and personal baseline")
@@ -123,7 +125,7 @@ class ExpectationSet:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "explicit-expectations-v1",
+            "format": "explicit-expectations-v2",
             "phase": self.phase,
             "expectations": [item.to_data() for item in self.expectations],
             "allowed_changes": [list(item) for item in self.allowed_changes],
@@ -139,7 +141,7 @@ class ExpectationSet:
         data = fields(
             value, "format phase expectations allowed_changes baseline roots lock_destination"
         )
-        if data["format"] != "explicit-expectations-v1":
+        if data["format"] != "explicit-expectations-v2":
             raise ValueError("Unsupported expectations transport")
         for key in ("expectations", "allowed_changes", "baseline"):
             if not isinstance(data[key], list):

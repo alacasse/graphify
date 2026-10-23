@@ -8,7 +8,7 @@ from typing import Literal
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot
+from tools.install_sandbox.container.environment import FilesystemSnapshot, same_observation
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.expectation_builder import (
     bind_roots,
@@ -17,6 +17,7 @@ from tools.install_sandbox.container.expectation_builder import (
     build_reinstall_expectations,
 )
 from tools.install_sandbox.container.installer import InstallerDriver
+from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.results import (
@@ -40,6 +41,7 @@ def _check_directories(subject: Path, case_file: Path, work: Path, output: Path)
 def _new_result(case: EffectInstallCase) -> InstallTestResult:
     steps: list[StepEvidence] = [
         {
+            "progress": "not_started",
             "operation": operation,
             "skip_reason": "Preparation not completed",
             "command": None,
@@ -60,6 +62,16 @@ def _new_result(case: EffectInstallCase) -> InstallTestResult:
         steps,
         "not_run",
         {"journal": "journal.log", "expected_contents": None},
+        None
+        if case.intermediate_preparation is None
+        else {
+            "progress": "not_started",
+            "operation_ref": None,
+            "expectations_ref": None,
+            "observations": {"before": None, "after": None},
+            "verification": None,
+            "reason": "First installation not completed",
+        },
     )
 
 
@@ -76,6 +88,17 @@ def _phase(step: StepEvidence, stage: str) -> Generator[None]:
     step["failure"] = {"stage": stage, "reason": ""}
     yield
     del step["failure"]
+
+
+def _record_failure(
+    step: StepEvidence, error: Exception, writer: TestResultWriter, index: int
+) -> None:
+    failure = step.get("failure")
+    if failure is None:
+        raise error
+    failure["reason"] = str(error)
+    writer.write_metadata(f"steps/{index}/failure.json", failure)
+    step["skip_reason"] = str(error) if step["command"] is None else None
 
 
 class InstallTestRunner:
@@ -100,9 +123,10 @@ class InstallTestRunner:
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
         case.write(output / "case.json")
-        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v2"})
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v3"})
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
+        writer.write_result(result)
         writer.append_log("journal.log", "Validated native case; starting preparation\n")
         writer.append_log("preparation.log", "Package availability inherited from campaign\n")
         self._run(case, subject, prepared_executable, work, writer, result)
@@ -158,36 +182,47 @@ class InstallTestRunner:
             )
             self._not_run(result, writer, f"Initial preparation failed: {error}")
             return
-        self._steps(case, executable, environment, expectations, before, writer, result)
+        self._steps(case, executable, environment, sources, expectations, before, writer, result)
 
     def _steps(
         self,
         case: EffectInstallCase,
         executable: Path,
         environment: EffectEnvironment,
+        sources: FilesystemSnapshot,
         expectations: ExpectationSet,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
         result: InstallTestResult,
     ) -> None:
         for index, step in enumerate(result.steps):
+            if index and case.intermediate_preparation is not None:
+                transition = conduct_intermediate(
+                    case, sources, expectations, before, environment, writer, result
+                )
+                if transition is None:
+                    return
+                expectations, before = transition
+            step["progress"] = "incomplete"
+            step["skip_reason"] = None
+            result.status = "incomplete"
+            writer.write_result(result)
             try:
                 expectations, after = self._step(
                     case, executable, environment, expectations, before, writer, result, index
                 )
             except (OSError, ValueError, EvidenceWriteError) as error:
-                failure = step.get("failure")
-                assert failure is not None
-                failure["reason"] = str(error)
-                writer.write_metadata(f"steps/{index}/failure.json", failure)
-                step["skip_reason"] = str(error) if step["command"] is None else None
-                result.status = "incomplete"
+                _record_failure(step, error, writer, index)
+                outcome = "incomplete"
             else:
-                result.status = step_status(step)
+                outcome = step_status(step)
                 before = after
-            if result.status != "passed":
+                step["progress"] = "incomplete" if outcome == "incomplete" else "finished"
+            result.status = "incomplete" if outcome == "passed" and index == 0 else outcome
+            writer.write_result(result)
+            if outcome != "passed":
                 for dependent in result.steps[index + 1 :]:
-                    dependent["skip_reason"] = f"Step {index} {result.status}"
+                    dependent["skip_reason"] = f"Step {index} {outcome}"
                 return
 
     def _step(
@@ -205,10 +240,9 @@ class InstallTestRunner:
         with _phase(step, "preparation"):
             if index:
                 with writer.measure("step_preparation", index):
-                    previous = result.steps[0]["verification"]
-                    assert previous is not None
-                    expectations = build_reinstall_expectations(expectations, before, previous)
-                    writer.write_snapshot(before, "before", step_index=index)
+                    expectations = self._prepare_second(
+                        case, environment, expectations, before, writer, result
+                    )
         with _phase(step, "expectations"):
             writer.write_metadata(f"expectations/{expectations.phase}.json", expectations.to_data())
         with _phase(step, "command"), writer.measure("command", index) as timing:
@@ -235,6 +269,7 @@ class InstallTestRunner:
             }
             step["command"] = writer.write_command(command, step_index=index)
             step["skip_reason"] = None
+        writer.write_result(result)
         with writer.measure("checks", index):
             with _phase(step, "observation"):
                 after = environment.observe(writer, "after", step_index=index)
@@ -248,6 +283,24 @@ class InstallTestRunner:
             with _phase(step, "verification_evidence"):
                 writer.write_verification(verdict, step_index=index)
         return expectations, after
+
+    @staticmethod
+    def _prepare_second(
+        case: EffectInstallCase,
+        environment: EffectEnvironment,
+        expectations: ExpectationSet,
+        before: FilesystemSnapshot,
+        writer: TestResultWriter,
+        result: InstallTestResult,
+    ) -> ExpectationSet:
+        previous = result.steps[0]["verification"]
+        assert previous is not None
+        if case.intermediate_preparation is None:
+            expectations = build_reinstall_expectations(expectations, before, previous)
+        observed = environment.observe(writer, "before", step_index=1)
+        if not same_observation(before, observed):
+            raise ValueError("Environment changed before the second installation")
+        return expectations
 
     @staticmethod
     def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:

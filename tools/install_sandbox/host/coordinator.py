@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.contracts.effect_case import (
+    EffectCaseBuild,
     EffectInstallCase,
     SubjectContext,
-    build_reinstall_case,
+    build_effect_cases,
     unique_object,
 )
 from tools.install_sandbox.contracts.effects import EffectSpec
@@ -60,7 +61,7 @@ def _collect_result(
         result = read_evidence(output)
         retained = EffectInstallCase.from_json((output / "case.json").read_text(encoding="utf-8"))
         if retained != case:
-            raise ValueError("Retained case differs from the submitted reinstall case")
+            raise ValueError("Retained case differs from the submitted effect case")
     except FileNotFoundError as error:
         return CoordinatedResult(container, None, f"Result unavailable: {error}", output)
     except OSError as error:
@@ -199,7 +200,7 @@ class InstallTestCoordinator:
                 interrupts=interrupts,
                 observer=observer,
             )
-            subject, output, effects, context, cases = self._prepare_campaign(
+            subject, output, effects, context, built = self._prepare_campaign(
                 spec_file,
                 subject_context_file,
                 subject_checkout,
@@ -208,7 +209,11 @@ class InstallTestCoordinator:
             )
         result = CampaignResult(
             output,
-            [CampaignCase(c.name, output / "cases" / c.name) for c in cases],
+            [CampaignCase(c.name, output / "cases" / c.name) for c in built.cases]
+            + [
+                CampaignCase(name, output / "cases" / name, not_run_reason=reason, state="not_run")
+                for name, reason in built.unavailable.items()
+            ],
             timings=[inputs],
             prepare_only=prepare_only,
         )
@@ -220,7 +225,7 @@ class InstallTestCoordinator:
                 result.timings.extend(result.preparation.timings)
                 _save_progress(result, progress)
                 if not prepare_only:
-                    self._conduct_cases(harness, cases, result, progress)
+                    self._conduct_cases(harness, list(built.cases), result, progress)
             except (Exception, KeyboardInterrupt) as error:
                 result.interrupted = isinstance(error, KeyboardInterrupt)
                 result.error = f"Campaign stopped: {type(error).__name__}: {error}"
@@ -265,7 +270,7 @@ class InstallTestCoordinator:
         subject: Path,
         output: Path,
         prepare_only: bool = False,
-    ) -> tuple[Path, Path, EffectSpec, SubjectContext, list[EffectInstallCase]]:
+    ) -> tuple[Path, Path, EffectSpec, SubjectContext, EffectCaseBuild]:
         subject = subject.expanduser().resolve(strict=True)
         destination = output.expanduser()
         output = destination.resolve()
@@ -276,11 +281,12 @@ class InstallTestCoordinator:
         )
         if prepare_only and subject_context.package_root is None:
             raise ValueError("Preparation-only requires a package root and exact subject revision")
-        cases = (
-            []
+        built = (
+            EffectCaseBuild((), {})
             if prepare_only
-            else [build_reinstall_case(effects, subject_context, subject_context.identity)]
+            else build_effect_cases(effects, subject_context, subject_context.identity)
         )
+        cases = built.cases
         output.mkdir(parents=True, exist_ok=True)
         (output / "inputs").mkdir()
         if cases:
@@ -288,7 +294,7 @@ class InstallTestCoordinator:
         for case in cases:
             (output / "cases" / case.name).mkdir()
             case.write(output / "inputs" / f"{case.name}.json")
-        return subject, output, effects, subject_context, cases
+        return subject, output, effects, subject_context, built
 
     def _conduct_cases(
         self,
@@ -304,7 +310,7 @@ class InstallTestCoordinator:
             )
             _save_progress(result, progress)
             return
-        for case, entry in zip(cases, result.cases, strict=True):
+        for case, entry in zip(cases, result.cases[: len(cases)], strict=True):
             if harness.interrupted:
                 self._skip_remaining(result, "Campaign interrupted")
                 break
@@ -355,7 +361,7 @@ class InstallTestCoordinator:
         for entry in result.cases:
             if entry.state == "running":
                 entry.state, entry.error = "incomplete", reason
-            elif entry.result is None:
+            elif entry.result is None and entry.state != "not_run":
                 entry.state, entry.not_run_reason = "not_run", reason
 
 

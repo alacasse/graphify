@@ -61,11 +61,21 @@ class ExecutionFailure(TypedDict):
 
 class StepEvidence(TypedDict):
     failure: NotRequired[ExecutionFailure]
+    progress: Literal["not_started", "incomplete", "finished"]
     operation: str
     skip_reason: str | None
     command: CommandEvidence | None
     verification: VerificationResult | None
     observations: dict[str, str | None] | None
+
+
+class IntermediateEvidence(TypedDict):
+    progress: Literal["not_started", "incomplete", "finished"]
+    operation_ref: str | None
+    expectations_ref: str | None
+    observations: dict[str, str | None]
+    verification: VerificationResult | None
+    reason: str | None
 
 
 @dataclass
@@ -75,6 +85,7 @@ class InstallTestResult:
     steps: list[StepEvidence]
     status: Literal["passed", "failed", "not_run", "incomplete"]
     evidence: dict[str, str | None]
+    intermediate_preparation: IntermediateEvidence | None = None
 
 
 class EvidenceWriteError(RuntimeError):

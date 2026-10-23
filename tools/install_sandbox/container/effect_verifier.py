@@ -93,9 +93,14 @@ def _constraint(
 
 
 def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> None:
-    if item.kind == "markdown":
+    if item.kind in {"markdown", "markdown-composed"}:
         assert item.content is not None and item.baseline is not None and item.marker is not None
-        checks.verify_markdown_section(
+        compare = (
+            checks.verify_markdown_composed
+            if item.kind == "markdown-composed"
+            else checks.verify_markdown_section
+        )
+        compare(
             item.content,
             item.baseline,
             current,

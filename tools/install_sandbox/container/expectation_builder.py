@@ -16,7 +16,7 @@ from tools.install_sandbox.contracts.expectations import Expectation, Expectatio
 from tools.install_sandbox.contracts.results import VerificationResult
 
 
-def _bytes(snapshot: FilesystemSnapshot, root: str, path: str) -> bytes:
+def retained_bytes(snapshot: FilesystemSnapshot, root: str, path: str) -> bytes:
     entry = snapshot.entry(root, path)
     content = snapshot.contents.get((root, path))
     if entry is None or entry["kind"] != "file" or content is None:
@@ -32,7 +32,7 @@ def _complete(snapshot: FilesystemSnapshot, roots: tuple[str, ...]) -> None:
         raise ValueError("Duplicate observed destination")
     for entry in snapshot.entries:
         if entry["kind"] == "file":
-            _bytes(snapshot, entry["root"], entry["path"])
+            retained_bytes(snapshot, entry["root"], entry["path"])
         elif entry["kind"] != "directory" or not entry.get("listing_complete"):
             raise ValueError("Incomplete retained inventory")
     for root in roots:
@@ -42,7 +42,7 @@ def _complete(snapshot: FilesystemSnapshot, roots: tuple[str, ...]) -> None:
 
 
 def _version(case: EffectInstallCase, sources: FilesystemSnapshot) -> bytes:
-    content = _bytes(sources, "subject", case.subject.version_source)
+    content = retained_bytes(sources, "subject", case.subject.version_source)
     versions = BytesParser().parsebytes(content).get_all("Version", [])
     if len(versions) != 1 or not versions[0].strip():
         raise ValueError("Expected exactly one retained metadata Version")
@@ -61,7 +61,7 @@ def _references(effect: SkillEffect, sources: FilesystemSnapshot) -> tuple[Expec
         ):
             continue
         destination = effect.destination.path + "/references" + path[len(effect.references) :]
-        content = _bytes(sources, "subject", path) if source["kind"] == "file" else None
+        content = retained_bytes(sources, "subject", path) if source["kind"] == "file" else None
         constraints.append(
             Expectation(
                 source["kind"],
@@ -87,7 +87,7 @@ def _skill_constraints(
             path + "/SKILL.md",
             "install",
             "source:subject:" + effect.source,
-            _bytes(sources, "subject", effect.source),
+            retained_bytes(sources, "subject", effect.source),
         ),
         Expectation(
             "file",
@@ -114,7 +114,7 @@ def _source_constraints(case: EffectInstallCase, sources: FilesystemSnapshot) ->
         if isinstance(effect, SkillEffect):
             _skill_constraints(case, effect, sources)
         elif isinstance(effect, MarkdownSectionEffect):
-            content = _bytes(sources, "subject", effect.source).decode("utf-8")
+            content = retained_bytes(sources, "subject", effect.source).decode("utf-8")
             if not content.startswith(effect.marker + "\n"):
                 raise ValueError("Retained Markdown source does not start with its marker")
             if sum(line == effect.marker for line in content.splitlines()) != 1:
@@ -177,7 +177,7 @@ def _allowed(constraints: tuple[Expectation, ...]) -> tuple[tuple[str, str], ...
     return tuple(sorted(paths))
 
 
-def _baseline(snapshot: FilesystemSnapshot, phase: str) -> tuple[Expectation, ...]:
+def preservation_baseline(snapshot: FilesystemSnapshot, phase: str) -> tuple[Expectation, ...]:
     _complete(snapshot, ("home", "project"))
     return tuple(
         Expectation(
@@ -205,7 +205,7 @@ def _json_constraints(
             path,
             "install",
             "effect:json-hooks",
-            baseline=_bytes(before, root, path),
+            baseline=retained_bytes(before, root, path),
             hooks=effect.hooks,
         ),
         Expectation(
@@ -214,7 +214,7 @@ def _json_constraints(
             backup,
             "install",
             "observation:prior:" + origin,
-            _bytes(before, root, origin),
+            retained_bytes(before, root, origin),
         ),
     ]
     result.extend(
@@ -231,7 +231,7 @@ def build_install_expectations(
     roots: dict[str, str],
 ) -> ExpectationSet:
     _source_constraints(case, sources)
-    baseline = _baseline(before, "install")
+    baseline = preservation_baseline(before, "install")
     constraints: list[Expectation] = []
     lock = None
     for effect in case.effects.effects:
@@ -240,6 +240,21 @@ def build_install_expectations(
             lock = effect.destination
             constraints.extend(_skill_constraints(case, effect, sources))
         elif isinstance(effect, MarkdownSectionEffect):
+            preparation = case.intermediate_preparation
+            if preparation is not None and preparation.destination == effect.destination:
+                constraints.append(
+                    Expectation(
+                        "file",
+                        root,
+                        path,
+                        "install",
+                        "case:fragments+source",
+                        preparation.before
+                        + retained_bytes(sources, "subject", effect.source)
+                        + preparation.after,
+                    )
+                )
+                continue
             constraints.append(
                 Expectation(
                     "markdown",
@@ -247,8 +262,8 @@ def build_install_expectations(
                     path,
                     "install",
                     "source:subject:" + effect.source,
-                    _bytes(sources, "subject", effect.source),
-                    _bytes(before, root, path),
+                    retained_bytes(sources, "subject", effect.source),
+                    retained_bytes(before, root, path),
                     effect.marker,
                 )
             )
@@ -293,5 +308,5 @@ def build_reinstall_expectations(
     return replace(
         installed.in_phase("reinstall"),
         allowed_changes=(),
-        baseline=_baseline(first_after, "reinstall"),
+        baseline=preservation_baseline(first_after, "reinstall"),
     )

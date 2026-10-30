@@ -7,6 +7,8 @@ now matched only as an exact heading line.
 """
 from __future__ import annotations
 
+import pytest
+
 from graphify.__main__ import _replace_or_append_section
 
 MARKER = "## graphify"
@@ -60,3 +62,51 @@ def test_prefers_last_heading_when_duplicated():
     # user's "mid" content are left intact
     assert "mid" in after
     assert "knowledge graph at graphify-out/" in after
+
+
+@pytest.mark.parametrize("ending", ["\n", "\n\n", "\r\n"])
+def test_replacement_preserves_exact_source_and_personal_fragments(ending):
+    prefix = "## Personal before\r\nKeep trailing spaces.  \r\n\r\n\r\n"
+    suffix = "## Personal after\r\nKeep after.  "
+    source = "## graphify\nManaged instructions." + ending
+    before = prefix + "## graphify\nReplace this placeholder.\n\n" + suffix
+    after = _replace_or_append_section(before, MARKER, source)
+    assert after == prefix + source + suffix
+    assert _replace_or_append_section(after, MARKER, source) == after
+
+
+def test_replacement_at_end_preserves_all_source_newlines():
+    source = "## graphify\nManaged instructions.  \n\n"
+    assert _replace_or_append_section("## graphify\nOld text.\n", MARKER, source) == source
+
+
+@pytest.mark.parametrize(
+    ("personal", "separator"),
+    [
+        ("", ""),
+        ("# Personal", "\n\n"),
+        ("# Personal  \n", "\n"),
+        ("# Personal  \n\n\n", ""),
+        ("  \n\n", ""),
+    ],
+)
+def test_append_keeps_personal_whitespace_and_source(personal, separator):
+    source = "## graphify\nManaged instructions.\n"
+    after = _replace_or_append_section(personal, MARKER, source)
+    assert after == personal + separator + source
+    assert _replace_or_append_section(after, MARKER, source) == after
+
+
+def test_h1_replacement_keeps_nested_headings_and_exact_neighbors():
+    prefix = "# Before\nPersonal.  \n\n\n"
+    suffix = "# After\nKeep this."
+    source = "# graphify\nManaged.\n"
+    before = prefix + "# graphify\nOld.\n## Nested\nOld nested.\n" + suffix
+    assert _replace_or_append_section(before, "# graphify", source, "# ") == (
+        prefix + source + suffix
+    )
+
+
+def test_unicode_line_separator_does_not_turn_a_mention_into_a_heading():
+    personal = "Personal\u2028## graphify\u2028Keep this.\n"
+    assert _replace_or_append_section(personal, MARKER, NEW) == personal + "\n" + NEW

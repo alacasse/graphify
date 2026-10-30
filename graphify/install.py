@@ -815,9 +815,10 @@ def _replace_or_append_section(
     lines = content.split("\n")
     starts = [i for i, line in enumerate(lines) if line.strip() == marker]
     if not starts:
-        if content.strip():
-            return content.rstrip() + "\n\n" + new_section.lstrip()
-        return new_section.lstrip()
+        separator = ""
+        if content and not content.endswith(("\n\n", "\r\n\r\n")):
+            separator = "\n" if content.endswith("\n") else "\n\n"
+        return content + separator + new_section
 
     start = starts[-1]
     end = len(lines)
@@ -826,20 +827,12 @@ def _replace_or_append_section(
             end = j
             break
 
-    head = "\n".join(lines[:start]).rstrip()
-    tail = "\n".join(lines[end:]).lstrip()
-    section = new_section.strip()
-
-    parts: list[str] = []
-    if head:
-        parts.append(head)
-    parts.append(section)
-    if tail:
-        parts.append(tail)
-    out = "\n\n".join(parts)
-    if not out.endswith("\n"):
-        out += "\n"
-    return out
+    # Keep personal text and packaged instructions verbatim, including separators.
+    # Rebuilding with strip/join adds a blank line before the following heading
+    # and can erase meaningful whitespace from the personal prefix or suffix.
+    start_offset = sum(len(line) + 1 for line in lines[:start])
+    end_offset = sum(len(line) + 1 for line in lines[:end])
+    return content[:start_offset] + new_section + content[end_offset:]
 
 
 def _remove_marker_section(content: str, marker: str, boundary_prefix: str = "## ") -> "str | None":

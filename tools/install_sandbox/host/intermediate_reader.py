@@ -109,7 +109,7 @@ def _check_expectations(
         _available(output, evidence["expectations_ref"], "expectations/intermediate.json")
         is not None
     ):
-        expectations(output, plan.after_removal_expectations)
+        expectations(output, plan.after_preparation_expectations)
         if (output / "expectations/reinstall.json").exists():
             expectations(output, plan.second_install_expectations)
         elif evidence["progress"] == "finished" or any(evidence["observations"].values()):
@@ -161,10 +161,11 @@ def _after(
     actual_document = after.contents.get(key)
     if (
         actual_document is not None
-        and actual_document != document[: operation.start] + document[operation.end :]
+        and actual_document
+        != document[: operation.start] + operation.replacement + document[operation.end :]
     ):
         raise ValueError("Intermediate observation contradicts the applied byte operation")
-    computed = EffectVerifier().verify(plan.after_removal_expectations, after)
+    computed = EffectVerifier().verify(plan.after_preparation_expectations, after)
     stored = _available(output, None, "intermediate/verification.json")
     if stored is not None:
         saved = verification(read_json_evidence(output, stored))

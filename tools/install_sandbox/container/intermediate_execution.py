@@ -48,7 +48,7 @@ def apply_prepared_range(
         if current != retained:
             raise ValueError("Document changed since its validated observation")
         stream.seek(0)
-        stream.write(current[: operation.start] + current[operation.end :])
+        stream.write(current[: operation.start] + operation.replacement + current[operation.end :])
         stream.truncate()
 
 
@@ -61,14 +61,14 @@ def _archive_plan(
     record["operation_ref"] = "intermediate/operation.json"
     writer.write_result(result)
     writer.write_metadata(
-        "expectations/intermediate.json", plan.after_removal_expectations.to_data()
+        "expectations/intermediate.json", plan.after_preparation_expectations.to_data()
     )
     record["expectations_ref"] = "expectations/intermediate.json"
     writer.write_result(result)
     writer.write_metadata("expectations/reinstall.json", plan.second_install_expectations.to_data())
 
 
-def _remove_and_observe(
+def _replace_and_observe(
     plan: PreparationPlan,
     first_after: FilesystemSnapshot,
     environment: EffectEnvironment,
@@ -91,7 +91,7 @@ def _remove_and_observe(
     after = environment.observe_intermediate(writer, "after")
     record["observations"]["after"] = "intermediate/after.json"
     writer.write_result(result)
-    verdict = EffectVerifier().verify(plan.after_removal_expectations, after)
+    verdict = EffectVerifier().verify(plan.after_preparation_expectations, after)
     writer.write_metadata("intermediate/verification.json", asdict(verdict))
     record["verification"] = verdict
     record["progress"] = "finished" if verdict.complete else "incomplete"
@@ -127,7 +127,7 @@ def conduct_intermediate(
         if isinstance(plan, PreparationBlocked):
             raise ValueError(plan.reason)
         _archive_plan(plan, writer, result)
-        after = _remove_and_observe(plan, first_after, environment, writer, result)
+        after = _replace_and_observe(plan, first_after, environment, writer, result)
     except (OSError, ValueError, EvidenceWriteError) as error:
         record["reason"] = str(error)
         result.status = "incomplete"

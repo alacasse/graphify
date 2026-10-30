@@ -9,6 +9,7 @@ from tools.install_sandbox.contracts.effect_case import (
     EffectInstallCase,
     EffectRules,
     SubjectContext,
+    build_effect_cases,
     build_reinstall_case,
 )
 from tools.install_sandbox.contracts.effects import (
@@ -19,6 +20,7 @@ from tools.install_sandbox.contracts.effects import (
     SkillEffect,
     effect_identity,
 )
+from tools.install_sandbox.contracts.intermediate import PreparedByteRange
 from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
@@ -233,3 +235,83 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
     spec = EffectSpec(effects)
     with pytest.raises(ValueError, match="Multiple skill effects"):
         build_reinstall_case(spec, context())
+
+
+def test_three_cases_have_strict_independent_preparations() -> None:
+    cases = build_effect_cases(structured_spec(), context()).cases
+    assert [case.name for case in cases] == ["reinstall", "missing-section", "altered-section"]
+    for case in cases:
+        assert EffectInstallCase.from_json(case.to_json()) == case
+    raw = json.loads(cases[2].to_json())
+    assert raw["format"] == "explicit-expectations-v4"
+    assert (
+        raw["intermediate_preparation"]["body"]
+        == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
+    )
+    raw["intermediate_preparation"]["body"] = "Y2hhbmdlZA=="
+    with pytest.raises(ValueError):
+        EffectInstallCase.from_json(json.dumps(raw))
+
+
+@pytest.mark.parametrize("version", ["explicit-expectations-v2", "explicit-expectations-v3"])
+def test_old_case_formats_are_rejected(version: str) -> None:
+    raw = json.loads(build_reinstall_case(structured_spec(), context()).to_json())
+    raw["format"] = version
+    with pytest.raises(ValueError, match="Unsupported effects case format"):
+        EffectInstallCase.from_json(json.dumps(raw))
+
+
+@pytest.mark.parametrize("change", ["legacy", "missing", "unknown", "bad-base64"])
+def test_prepared_replacement_transport_is_strict(change: str) -> None:
+    operation = PreparedByteRange(
+        "a" * 64,
+        "steps/0/after.json",
+        Destination("project", "GUIDE.md"),
+        "b" * 64,
+        12,
+        23,
+        b"replacement",
+    )
+    raw = operation.to_data()
+    assert PreparedByteRange.from_data(raw) == operation
+    if change == "legacy":
+        raw["format"] = "prepared-byte-range-v1"
+    elif change == "missing":
+        del raw["replacement"]
+    elif change == "unknown":
+        raw["extra"] = True
+    else:
+        raw["replacement"] = "!"
+    with pytest.raises(ValueError):
+        PreparedByteRange.from_data(raw)
+
+
+def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None:
+    spec = EffectSpec(
+        (
+            MarkdownSectionEffect("first.md", Destination("project", "FIRST.md")),
+            MarkdownSectionEffect("second.md", Destination("project", "SECOND.md")),
+        )
+    )
+    built = build_effect_cases(spec, context())
+    assert [case.name for case in built.cases] == ["reinstall"]
+    assert built.unavailable == {
+        "missing-section": "Requires exactly one Markdown section effect",
+        "altered-section": "Requires exactly one Markdown section effect",
+    }
+
+
+@pytest.mark.parametrize("change", ["kind", "missing-body", "invalid-body", "extra"])
+def test_altered_case_rejects_malformed_preparation(change: str) -> None:
+    raw = json.loads(build_effect_cases(structured_spec(), context()).cases[2].to_json())
+    preparation = raw["intermediate_preparation"]
+    if change == "kind":
+        preparation["kind"] = "unknown"
+    elif change == "missing-body":
+        del preparation["body"]
+    elif change == "invalid-body":
+        preparation["body"] = True
+    else:
+        preparation["extra"] = "unsupported"
+    with pytest.raises(ValueError):
+        EffectInstallCase.from_json(json.dumps(raw))

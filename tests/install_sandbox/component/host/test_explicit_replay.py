@@ -49,9 +49,10 @@ def test_phase_continuity_tampering_is_rejected(proof: Path) -> None:
         read_evidence(proof)
 
 
-def test_historical_transport_is_explicitly_rejected(proof: Path) -> None:
+@pytest.mark.parametrize("version", ["effects-v1", "explicit-expectations-v3"])
+def test_historical_transport_is_explicitly_rejected(proof: Path, version: str) -> None:
     path = proof / "evidence-format.json"
-    path.write_text('{"format": "effects-v1"}')
+    path.write_text(json.dumps({"format": version}))
     with pytest.raises(ValueError, match="historical reader"):
         read_evidence(proof)
 

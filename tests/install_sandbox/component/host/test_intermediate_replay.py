@@ -144,3 +144,138 @@ def test_failed_first_observation_cannot_smuggle_finished_preparation(
     rewrite(tmp_path / "proof/result.json", forge)
     with pytest.raises(ValueError, match="conforming first"):
         read_evidence(tmp_path / "proof")
+
+
+@pytest.fixture
+def altered_proof(tmp_path: Path) -> Path:
+    """Reader-owned literal evidence: no producer or expectation builder is run."""
+    payload = json.loads(
+        (Path(__file__).parents[2] / "fixtures/retained-altered-proof.json").read_text()
+    )
+    for relative, content in payload.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return tmp_path
+
+
+def test_altered_replay_from_independent_retained_data(altered_proof: Path) -> None:
+    result = read_evidence(altered_proof)
+    assert result.status == "passed"
+    assert result.case["name"] == "altered-section"
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "case.json",
+        "intermediate/operation.json",
+        "intermediate/before.json",
+        "intermediate/after.json",
+        "intermediate/after/project/GUIDE.md",
+        "intermediate/verification.json",
+        "expectations/intermediate.json",
+        "expectations/reinstall.json",
+        "expected/instructions.md",
+        "steps/1/after.json",
+    ],
+)
+def test_altered_missing_proof_cannot_claim_success(altered_proof: Path, relative: str) -> None:
+    (altered_proof / relative).unlink()
+    with pytest.raises((ValueError, OSError)):
+        read_evidence(altered_proof)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("case_sha256", "0" * 64),
+        ("document_sha256", "0" * 64),
+        ("observation_ref", "steps/1/after.json"),
+        ("destination", {"root": "home", "path": "GUIDE.md"}),
+        ("start", 0),
+        ("end", 10**9),
+        ("replacement", "V3JvbmcgYm9keS4K"),
+        ("format", "prepared-byte-range-v1"),
+    ],
+)
+def test_altered_forged_operation_is_rejected(
+    altered_proof: Path, field: str, value: object
+) -> None:
+    rewrite(altered_proof / "intermediate/operation.json", lambda data: data.update({field: value}))
+    with pytest.raises(ValueError):
+        read_evidence(altered_proof)
+
+
+@pytest.mark.parametrize("artifact", ["case", "content", "observation", "verdict", "expectation"])
+def test_altered_forged_evidence_is_rejected(altered_proof: Path, artifact: str) -> None:
+    if artifact == "case":
+        rewrite(
+            altered_proof / "case.json",
+            lambda data: data["intermediate_preparation"].update(body="V3JvbmcuCg=="),
+        )
+    elif artifact == "content":
+        (altered_proof / "intermediate/after/project/GUIDE.md").write_text("Wrong observation.\n")
+    elif artifact == "observation":
+        rewrite(altered_proof / "intermediate/after.json", lambda data: data.update(entries=[]))
+    elif artifact == "verdict":
+        rewrite(
+            altered_proof / "intermediate/verification.json",
+            lambda data: data.update(complete=False),
+        )
+    else:
+        rewrite(
+            altered_proof / "expectations/intermediate.json",
+            lambda data: data["expectations"][0].update(content="V3JvbmcuCg=="),
+        )
+    with pytest.raises(ValueError):
+        read_evidence(altered_proof)
+
+
+def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: Path) -> None:
+    import shutil
+
+    rewrite(
+        altered_proof / "intermediate/operation.json",
+        lambda data: data.update(replacement="V3JvbmcgYm9keS4K"),
+    )
+    (altered_proof / "intermediate/after/project/GUIDE.md").write_text(
+        "## Personal before\nKeep before.\n\n## graphify\nWrong body.\n"
+        "## Personal after\nKeep after.\n\n"
+    )
+    verdict = {
+        "complete": True,
+        "obstacles": [],
+        "mismatches": [
+            {
+                "type": "content_mismatch",
+                "root": "project",
+                "path": "GUIDE.md",
+                "expected": "bytes identical to retained source",
+                "observed": "different bytes",
+            }
+        ],
+    }
+    (altered_proof / "intermediate/verification.json").write_text(json.dumps(verdict))
+
+    def fail(data: dict[str, Any]) -> None:
+        data["status"] = "failed"
+        data["intermediate_preparation"].update(
+            verification=verdict, reason="Intermediate preparation did not conform"
+        )
+        data["steps"][1] = {
+            "progress": "not_started",
+            "operation": "install",
+            "skip_reason": "Intermediate preparation failed; repair not evaluated",
+            "command": None,
+            "verification": None,
+            "observations": None,
+        }
+
+    rewrite(altered_proof / "result.json", fail)
+    shutil.rmtree(altered_proof / "steps/1")
+    result = read_evidence(altered_proof)
+    assert result.status == "failed" and result.steps[1]["progress"] == "not_started"
+    assert result.intermediate_preparation is not None
+    assert result.intermediate_preparation["verification"] is not None
+    assert result.intermediate_preparation["verification"].mismatches[0].type == "content_mismatch"

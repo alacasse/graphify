@@ -73,6 +73,13 @@ class LiteralInstaller:
                     "## graphify\nConsult the synthetic map.\n",
                 )
             )
+        elif "\nSandbox altered Markdown section.\n\n" in content:
+            path.write_text(
+                content.replace(
+                    "## graphify\n\nSandbox altered Markdown section.\n\n",
+                    "## graphify\nConsult the synthetic map.\n",
+                )
+            )
         elif "## graphify" not in content:
             separator = "" if "## Personal before" in content else "\n"
             path.write_text(content + separator + "## graphify\nConsult the synthetic map.\n")

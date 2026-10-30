@@ -45,7 +45,7 @@ def snapshot(files: dict[tuple[str, str], bytes]) -> FilesystemSnapshot:
     )
 
 
-def inputs():
+def inputs(index: int = 1, source: bytes = SOURCE):
     spec = EffectSpec((MarkdownSectionEffect("section.md", Destination(*KEY)),))
     subject = SubjectContext(
         "test",
@@ -53,11 +53,11 @@ def inputs():
         "VERSION",
         EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
     )
-    case = build_effect_cases(spec, subject).cases[1]
+    case = build_effect_cases(spec, subject).cases[index]
     initial = snapshot({(f["root"], f["path"]): f["content"].encode() for f in case.initial_files})
-    sources = snapshot({("subject", "section.md"): SOURCE})
+    sources = snapshot({("subject", "section.md"): source})
     installed = build_install_expectations(case, sources, initial, ROOTS)
-    first = snapshot({**initial.contents, KEY: BEFORE + SOURCE + AFTER})
+    first = snapshot({**initial.contents, KEY: BEFORE + source + AFTER})
     validation = EffectVerifier().verify(installed, first)
     return case, sources, installed, first, validation
 
@@ -119,12 +119,12 @@ def test_composed_repair_rejects_source_or_personal_changes(document: bytes) -> 
 def test_removal_oracle_is_independent_of_range_and_preserves_other_files() -> None:
     prepared, first = plan()
     first.contents[KEY] = BEFORE + AFTER
-    assert not EffectVerifier().verify(prepared.after_removal_expectations, first).mismatches
+    assert not EffectVerifier().verify(prepared.after_preparation_expectations, first).mismatches
     first.contents[KEY] = BEFORE + AFTER[1:]
-    assert EffectVerifier().verify(prepared.after_removal_expectations, first).mismatches
+    assert EffectVerifier().verify(prepared.after_preparation_expectations, first).mismatches
     first.contents[KEY] = BEFORE + AFTER
     first.contents[("project", "personal-effect-0.txt")] = b"changed"
-    assert EffectVerifier().verify(prepared.after_removal_expectations, first).mismatches
+    assert EffectVerifier().verify(prepared.after_preparation_expectations, first).mismatches
 
 
 def test_preparation_rechecks_observation_and_exact_case_bytes() -> None:
@@ -145,7 +145,10 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
         case.subject,
     )
     assert [built.name for built in empty.cases] == ["reinstall"]
-    assert empty.unavailable == {"missing-section": "Requires exactly one Markdown section effect"}
+    assert empty.unavailable == {
+        name: "Requires exactly one Markdown section effect"
+        for name in ("missing-section", "altered-section")
+    }
 
 
 def test_operation_hashes_exact_archived_case_bytes() -> None:
@@ -157,3 +160,33 @@ def test_operation_hashes_exact_archived_case_bytes() -> None:
     assert isinstance(prepared, PreparationPlan)
     assert prepared.operation.case_sha256 == hashlib.sha256(archived).hexdigest()
     assert prepared.operation.case_sha256 != hashlib.sha256(case.to_json().encode()).hexdigest()
+
+
+def test_altered_body_bounds_and_independent_oracle() -> None:
+    case, sources, installed, first, validation = inputs(2)
+    prepared = prepare_intermediate(
+        case, sources, first, "steps/0/after.json", validation, installed, case.to_json().encode()
+    )
+    assert isinstance(prepared, PreparationPlan)
+    operation = prepared.operation
+    header = b"## graphify\n"
+    body = b"\nSandbox altered Markdown section.\n\n"
+    assert operation.start == len(BEFORE + header)
+    assert operation.end == len(BEFORE + SOURCE)
+    assert operation.replacement == body
+    assert b"### Detail" in first.contents[KEY][operation.start : operation.end]
+    first.contents[KEY] = BEFORE + header + body + AFTER
+    assert not EffectVerifier().verify(prepared.after_preparation_expectations, first).mismatches
+    first.contents[KEY] = BEFORE + header[:-1] + body + AFTER
+    assert EffectVerifier().verify(prepared.after_preparation_expectations, first).mismatches
+
+
+@pytest.mark.parametrize(
+    "source", [b"## graphify\n", b"## graphify\n\nSandbox altered Markdown section.\n\n"]
+)
+def test_altered_preparation_requires_a_real_body_change(source: bytes) -> None:
+    case, sources, installed, first, validation = inputs(2, source)
+    result = prepare_intermediate(
+        case, sources, first, "steps/0/after.json", validation, installed, case.to_json().encode()
+    )
+    assert isinstance(result, PreparationBlocked)

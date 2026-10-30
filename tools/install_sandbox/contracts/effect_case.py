@@ -230,7 +230,7 @@ class EffectInstallCase:
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v3"
+        data["format"] = "explicit-expectations-v4"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -251,7 +251,7 @@ class EffectInstallCase:
             "format name target scope effects subject initial_files operations "
             "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v3":
+        if data["format"] != "explicit-expectations-v4":
             raise ValueError("Unsupported effects case format or operation")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
@@ -306,7 +306,11 @@ def build_effect_cases(
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
     if len(markdown) != 1:
         return EffectCaseBuild(
-            (reinstall,), {"missing-section": "Requires exactly one Markdown section effect"}
+            (reinstall,),
+            {
+                name: "Requires exactly one Markdown section effect"
+                for name in ("missing-section", "altered-section")
+            },
         )
     effect = markdown[0]
     preparation = IntermediatePreparation(
@@ -330,4 +334,13 @@ def build_effect_cases(
         initial_files=initial,
         intermediate_preparation=preparation,
     )
-    return EffectCaseBuild((reinstall, missing), {})
+    altered = replace(
+        missing,
+        name="altered-section",
+        intermediate_preparation=replace(
+            preparation,
+            kind="altered-markdown-body",
+            body=b"\nSandbox altered Markdown section.\n\n",
+        ),
+    )
+    return EffectCaseBuild((reinstall, missing, altered), {})

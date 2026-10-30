@@ -25,7 +25,7 @@ class PreparationBlocked:
 @dataclass(frozen=True)
 class PreparationPlan:
     operation: PreparedByteRange
-    after_removal_expectations: ExpectationSet
+    after_preparation_expectations: ExpectationSet
     second_install_expectations: ExpectationSet
 
 
@@ -79,8 +79,27 @@ def _plan(
     if document != preparation.before + source + preparation.after:
         raise ValueError("First installation differs from exact retained fragments and source")
     exterior = preparation.before + preparation.after
+    start, end = len(parts[0]), len(parts[0]) + len(parts[1])
+    replacement = b""
+    expected = exterior
+    if preparation.kind == "altered-markdown-body":
+        header = preparation.marker.encode("utf-8") + b"\n"
+        if not parts[1].startswith(header) or preparation.body is None:
+            raise ValueError("Section has no applicable LF-terminated body")
+        start += len(header)
+        replacement = preparation.body
+        if start >= end or document[start:end] == replacement:
+            raise ValueError("Preparation must change an applicable section body")
+        expected = preparation.before + header + replacement + preparation.after
     removed = Expectation(
-        "file", destination.root, destination.path, "intermediate", "case:fragments", exterior
+        "file",
+        destination.root,
+        destination.path,
+        "intermediate",
+        "case:fragments+marker+body"
+        if preparation.kind == "altered-markdown-body"
+        else "case:fragments",
+        expected,
     )
     repaired = Expectation(
         "markdown-composed",
@@ -97,8 +116,9 @@ def _plan(
         observation_ref,
         destination,
         hashlib.sha256(document).hexdigest(),
-        len(parts[0]),
-        len(parts[0]) + len(parts[1]),
+        start,
+        end,
+        replacement,
     )
     return PreparationPlan(
         operation,

@@ -41,10 +41,14 @@ def test_cli_real_engine_and_autonomous_reread(
         )
         == 0
     )
-    assert len(transport.installer.calls) == 4
+    assert len(transport.installer.calls) == 6
     assert not (output / "evidence").exists()
     report = json.loads((output / "campaign.json").read_text())
-    assert [case["name"] for case in report["cases"]] == ["reinstall", "missing-section"]
+    assert [case["name"] for case in report["cases"]] == [
+        "reinstall",
+        "missing-section",
+        "altered-section",
+    ]
     saved = {case["name"]: case["result"]["test"] for case in report["cases"]}
     shutil.rmtree(subject)
     spec.unlink()
@@ -54,7 +58,7 @@ def test_cli_real_engine_and_autonomous_reread(
     restored = tmp_path / "restored"
     with zipfile.ZipFile(output / "evidence.zip") as archive:
         archive.extractall(restored)
-    for name in ("reinstall", "missing-section"):
+    for name in ("reinstall", "missing-section", "altered-section"):
         reread = read_evidence(restored / "evidence/cases" / name)
         assert reread.status == "passed"
         assert asdict(reread) == saved[name]

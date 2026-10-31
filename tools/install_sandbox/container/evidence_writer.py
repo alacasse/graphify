@@ -5,18 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.install_sandbox.container.installer import InstallerCommandResult
-from tools.install_sandbox.contracts.repair_progress import DurableArtifact
 from tools.install_sandbox.contracts.results import (
+    ArtifactReceipt,
+    CheckpointReceipt,
     CommandEvidence,
     EvidenceWriteError,
     InstallTestResult,
+    SnapshotEntry,
     VerificationResult,
 )
 from tools.install_sandbox.contracts.timings import (
@@ -26,9 +29,10 @@ from tools.install_sandbox.contracts.timings import (
     measure,
     skip_pending,
 )
+from tools.install_sandbox.rules.repair_protocol import PendingCheckpoint, artifact_digest
 
 if TYPE_CHECKING:
-    from tools.install_sandbox.container.environment import FilesystemSnapshot
+    from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 
 
 class TestResultWriter:
@@ -36,6 +40,7 @@ class TestResultWriter:
 
     def __init__(self, output_directory: Path):
         self.output_directory = output_directory
+        self.halted = False
         self.timings: list[Timing] = []
         self.timing_diagnostics: list[str] = []
         self.timing_duration: float | None = None
@@ -44,16 +49,49 @@ class TestResultWriter:
         except OSError as error:
             raise EvidenceWriteError(f"Cannot create evidence directory: {error}") from error
 
-    def acknowledge(self, relative: str) -> DurableArtifact:
+    def acknowledge(self, relative: str, payload: object) -> ArtifactReceipt:
+        """Bind a receipt to the persisted payload, not merely a filename."""
+        from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 
         path = self.output_directory / relative
-        if (
-            path.is_symlink()
-            or not path.is_file()
-            or not path.resolve().is_relative_to(self.output_directory.resolve())
-        ):
+        if path.is_symlink() or not path.is_file():
             raise EvidenceWriteError("Artifact has not been retained")
-        return DurableArtifact(relative)
+        if not path.resolve().is_relative_to(self.output_directory.resolve()):
+            raise EvidenceWriteError("Artifact escaped the evidence directory")
+        if isinstance(payload, FilesystemSnapshot):
+            self._check_snapshot_receipt(path, payload, relative.removesuffix(".json"))
+        elif artifact_digest(json.loads(path.read_bytes())) != artifact_digest(payload):
+            raise EvidenceWriteError("Published artifact differs from retained facts")
+        return ArtifactReceipt(relative, artifact_digest(payload))
+
+    def _check_snapshot_receipt(self, path: Path, payload: FilesystemSnapshot, prefix: str) -> None:
+        expected = self._manifest(payload, prefix)
+        for entry in expected["entries"]:
+            content = entry.get("content_file")
+            if (
+                content is not None
+                and (self.output_directory / content).read_bytes()
+                != (payload.contents[(entry["root"], entry["path"])])
+            ):
+                raise EvidenceWriteError("Published snapshot differs from retained facts")
+        if json.loads(path.read_bytes()) != {**expected, "obstacles": payload.obstacles}:
+            raise EvidenceWriteError("Published manifest differs from retained facts")
+
+    def write_checkpoint(
+        self, result: InstallTestResult, pending: PendingCheckpoint
+    ) -> CheckpointReceipt:
+        candidate = replace(result, intermediate_preparation=dict(pending.checkpoint))
+        self.write_result(candidate)
+        result.intermediate_preparation = candidate.intermediate_preparation
+        return CheckpointReceipt(
+            pending.session_id,
+            pending.generation,
+            artifact_digest(
+                json.loads((self.output_directory / "result.json").read_bytes())[
+                    "intermediate_preparation"
+                ]
+            ),
+        )
 
     def initialize_timings(self, case_name: str, step_count: int) -> None:
         self.timings = case_timings(case_name, step_count)
@@ -111,19 +149,30 @@ class TestResultWriter:
             raise ValueError("Invalid intermediate observation phase")
         self._snapshot(snapshot, f"intermediate/{name}")
 
-    def _snapshot(self, snapshot: FilesystemSnapshot, prefix: str) -> None:
+    @staticmethod
+    def _manifest(snapshot: FilesystemSnapshot, prefix: str) -> dict[str, list[SnapshotEntry]]:
+        entries: list[SnapshotEntry] = []
         for entry in snapshot.entries:
+            retained = entry.copy()
+            retained.pop("content_file", None)
+            retained.pop("sha256", None)
             key = (entry["root"], entry["path"])
             if key in snapshot.contents:
                 relative = (
                     f"{prefix}/{key[1]}" if prefix == "expected" else f"{prefix}/{key[0]}/{key[1]}"
                 )
-                self._write_bytes(relative, snapshot.contents[key])
-                entry["content_file"] = relative
-                entry["sha256"] = hashlib.sha256(snapshot.contents[key]).hexdigest()
-        self._write_json(
-            f"{prefix}.json", {"entries": snapshot.entries, "obstacles": snapshot.obstacles}
-        )
+                retained["content_file"] = relative
+                retained["sha256"] = hashlib.sha256(snapshot.contents[key]).hexdigest()
+            entries.append(retained)
+        return {"entries": entries}
+
+    def _snapshot(self, snapshot: FilesystemSnapshot, prefix: str) -> None:
+        manifest = self._manifest(snapshot, prefix)
+        for entry in manifest["entries"]:
+            relative = entry.get("content_file")
+            if relative is not None:
+                self._write_bytes(relative, snapshot.contents[(entry["root"], entry["path"])])
+        self._write_json(f"{prefix}.json", {**manifest, "obstacles": snapshot.obstacles})
 
     def write_metadata(self, relative: str, value: object) -> None:
         self._write_json(relative, value)
@@ -135,7 +184,28 @@ class TestResultWriter:
         self._write_json(f"steps/{step_index}/verification.json", asdict(result))
 
     def _write_json(self, relative: str, value: object) -> None:
-        self._write_bytes(relative, (json.dumps(value, indent=2) + "\n").encode("utf-8"))
+        destination = self.output_directory / relative
+        temporary: Path | None = None
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(value, stream, indent=2)
+                stream.write("\n")
+            temporary.replace(destination)
+        except OSError as error:
+            raise EvidenceWriteError(f"Cannot publish evidence {relative}: {error}") from error
+        finally:
+            if temporary is not None:
+                with suppress(OSError):
+                    temporary.unlink(missing_ok=True)
 
     def _write_bytes(self, relative: str, content: bytes, *, append: bool = False) -> None:
         destination = self.output_directory / relative
@@ -168,10 +238,4 @@ class TestResultWriter:
         }
 
     def write_result(self, result: InstallTestResult) -> None:
-        self._write_json("result.json.tmp", asdict(result))
-        try:
-            (self.output_directory / "result.json.tmp").replace(
-                self.output_directory / "result.json"
-            )
-        except OSError as error:
-            raise EvidenceWriteError(f"Cannot finalize result.json: {error}") from error
+        self._write_json("result.json", asdict(result))

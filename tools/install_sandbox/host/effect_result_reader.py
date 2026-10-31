@@ -2,16 +2,9 @@
 
 from pathlib import Path, PurePosixPath
 
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.container.expectation_builder import (
-    bind_roots,
-    build_initial_expectations,
-    build_install_expectations,
-    build_reinstall_expectations,
-)
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
@@ -28,6 +21,14 @@ from tools.install_sandbox.host.evidence_reader import (
     verification,
 )
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.expectation_builder import (
+    bind_roots,
+    build_initial_expectations,
+    build_install_expectations,
+    build_reinstall_expectations,
+)
+from tools.install_sandbox.rules.repair_protocol import RepairInputs
 
 
 def _snapshot(output: Path, relative: str) -> FilesystemSnapshot:
@@ -49,7 +50,7 @@ def _snapshot(output: Path, relative: str) -> FilesystemSnapshot:
 def _same_observation(first: FilesystemSnapshot, second: FilesystemSnapshot) -> bool:
     def inventory(snapshot: FilesystemSnapshot) -> list[dict[str, object]]:
         return [
-            {key: value for key, value in entry.items() if key != "content_file"}
+            {key: value for key, value in entry.items() if key not in {"content_file", "sha256"}}
             for entry in sorted(snapshot.entries, key=lambda e: (e["root"], e["path"]))
         ]
 
@@ -84,8 +85,9 @@ def _roots(output: Path) -> dict[str, str]:
     return roots
 
 
-def check_effect_result(result: InstallTestResult, case: EffectInstallCase, output: Path) -> None:
-    _check_intermediate_gate(result, output)
+def check_effect_result(
+    result: InstallTestResult, case: EffectInstallCase, output: Path
+) -> str | None:
     retained = EffectInstallCase.from_json(
         safe_evidence_path(output, "case.json").read_text(encoding="utf-8")
     )
@@ -100,42 +102,24 @@ def check_effect_result(result: InstallTestResult, case: EffectInstallCase, outp
         if result.preparation["ready"]:
             raise ValueError("Ready preparation contradicts retained construction failure")
         _failed_initial(result, case, output)
-        return
+        return _unstarted_repair(result, output)
     roots = _roots(output)
     sources = _snapshot(output, "expected.json")
     initial = bind_roots(build_initial_expectations(case, sources), roots)
-    _initial_and_steps(result, case, output, roots, sources, initial)
+    return _initial_and_steps(result, case, output, roots, sources, initial)
 
 
-def _check_intermediate_gate(result: InstallTestResult, output: Path) -> None:
-    evidence = result.intermediate_preparation
-    if evidence is None:
-        return
-    step = result.steps[0]
-    verdict, command = step["verification"], step["command"]
-    conforming = (
-        step["progress"] == "finished"
-        and verdict is not None
-        and verdict.complete
-        and not verdict.mismatches
-        and not verdict.obstacles
-        and command is not None
-        and command["state"] == "completed"
-        and command["exit_code"] == 0
+def _unstarted_repair(result: InstallTestResult, output: Path) -> str | None:
+    if result.intermediate_preparation is None:
+        return None
+    inputs = RepairInputs(
+        safe_evidence_path(output, "case.json").read_bytes(),
+        FilesystemSnapshot(),
+        ExpectationSet("install", ()),
+        FilesystemSnapshot(),
+        result.steps[0],
     )
-    if conforming:
-        return
-    if (
-        evidence["progress"] != "not_started"
-        or evidence["operation_ref"]
-        or evidence["expectations_ref"]
-        or evidence["verification"]
-        or any(evidence["observations"].values())
-    ):
-        raise ValueError("Intermediate preparation requires a conforming first installation")
-    _absent(
-        output, ("intermediate", "expectations/intermediate.json", "expectations/reinstall.json")
-    )
+    return replay_intermediate(result, output, inputs, _snapshot).diagnostic
 
 
 def _initial_and_steps(
@@ -145,7 +129,7 @@ def _initial_and_steps(
     roots: dict[str, str],
     sources: FilesystemSnapshot,
     initial: ExpectationSet,
-) -> None:
+) -> str | None:
     _expectations(output, initial)
     before = _snapshot(output, "steps/0/before.json")
     computed = EffectVerifier().verify(initial, before)
@@ -156,11 +140,11 @@ def _initial_and_steps(
         if computed.complete and not computed.mismatches:
             raise ValueError("Failed preparation contradicts conforming initial observations")
         _no_initial_execution(output)
-        return
+        return _unstarted_repair(result, output)
     if not computed.complete or computed.mismatches:
         raise ValueError("Installation requires successful initial verification")
     installed = build_install_expectations(case, sources, before, roots)
-    _steps(result, case, output, roots, installed, before, sources)
+    return _steps(result, case, output, roots, installed, before, sources)
 
 
 def _failed_initial(result: InstallTestResult, case: EffectInstallCase, output: Path) -> None:
@@ -267,13 +251,16 @@ def _steps(
     expected: ExpectationSet,
     previous: FilesystemSnapshot,
     sources: FilesystemSnapshot,
-) -> None:
+) -> str | None:
     first_command: tuple[list[str], str] | None = None
     previous_verdict: VerificationResult | None = None
+    diagnostic: str | None = None
+    installed = expected
     for index, step in enumerate(result.steps):
-        expected, previous = _phase_transition(
-            result, case, output, index, sources, expected, previous, previous_verdict
-        )
+        if index:
+            expected, previous, diagnostic = _transition(
+                result, case, output, sources, installed, expected, previous, previous_verdict
+            )
         if "failure" in step:
             _failed_phase(
                 step,
@@ -286,9 +273,7 @@ def _steps(
                 roots,
                 first_command,
             )
-            for later in range(index + 1, len(result.steps)):
-                _no_phase_evidence(output, later)
-            return
+            return _failed_following(result, output, index, diagnostic)
         command = step["command"]
         if _unexecuted_phase(step, case, output, index):
             continue
@@ -306,26 +291,48 @@ def _steps(
         if EffectVerifier().verify(expected, after) != saved:
             raise ValueError("Verification contradicts retained explicit expectations")
         previous, previous_verdict = after, saved
+    return diagnostic
 
 
-def _phase_transition(
+def _failed_following(
+    result: InstallTestResult, output: Path, index: int, diagnostic: str | None
+) -> str | None:
+    for later in range(index + 1, len(result.steps)):
+        _no_phase_evidence(output, later)
+    return _unstarted_repair(result, output) if index == 0 else diagnostic
+
+
+def _transition(
     result: InstallTestResult,
     case: EffectInstallCase,
     output: Path,
-    index: int,
     sources: FilesystemSnapshot,
+    installed: ExpectationSet,
     expected: ExpectationSet,
     previous: FilesystemSnapshot,
     verdict: VerificationResult | None,
-) -> tuple[ExpectationSet, FilesystemSnapshot]:
-    if not index:
-        return expected, previous
+) -> tuple[ExpectationSet, FilesystemSnapshot, str | None]:
     if case.intermediate_preparation is not None:
-        repair = _repair_transition(result, case, output, sources, expected, previous, verdict)
-        return repair if repair is not None else (expected, previous)
-    if _needs_reinstall(result.steps[index]) and verdict is not None:
-        return build_reinstall_expectations(expected, previous, verdict), previous
-    return expected, previous
+        inspection = replay_intermediate(
+            result,
+            output,
+            RepairInputs(
+                safe_evidence_path(output, "case.json").read_bytes(),
+                sources,
+                installed,
+                previous,
+                result.steps[0],
+            ),
+            _snapshot,
+        )
+        if inspection.ready is None:
+            if result.steps[1]["progress"] != "not_started":
+                raise ValueError("Repair requires published conforming preparation")
+            return expected, previous, inspection.diagnostic
+        return inspection.ready.expectations, inspection.ready.baseline, inspection.diagnostic
+    if _needs_reinstall(result.steps[1]) and verdict is not None:
+        expected = build_reinstall_expectations(expected, previous, verdict)
+    return expected, previous, None
 
 
 def _needs_reinstall(step: StepEvidence) -> bool:
@@ -351,41 +358,6 @@ def _unexecuted_phase(
     else:
         _no_phase_evidence(output, index)
     return True
-
-
-def _repair_transition(
-    result: InstallTestResult,
-    case: EffectInstallCase,
-    output: Path,
-    sources: FilesystemSnapshot,
-    expected: ExpectationSet,
-    previous: FilesystemSnapshot,
-    verdict: VerificationResult | None,
-) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
-    if verdict is None or not verdict.complete or verdict.mismatches:
-        intermediate = result.intermediate_preparation
-        if intermediate is None or intermediate["progress"] != "not_started":
-            raise ValueError("Failed first installation cannot start intermediate preparation")
-        _absent(
-            output,
-            ("intermediate", "expectations/intermediate.json", "expectations/reinstall.json"),
-        )
-        return None
-    repair = replay_intermediate(
-        result,
-        case,
-        output,
-        sources,
-        expected,
-        previous,
-        verdict,
-        _snapshot,
-        _same_observation,
-        _expectations,
-    )
-    if repair is None and result.steps[1]["progress"] != "not_started":
-        raise ValueError("Repair requires successful intermediate preparation")
-    return repair
 
 
 def _partial_checkpoint(

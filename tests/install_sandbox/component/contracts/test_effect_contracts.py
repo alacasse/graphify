@@ -243,7 +243,7 @@ def test_three_cases_have_strict_independent_preparations() -> None:
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(cases[2].to_json())
-    assert raw["format"] == "explicit-expectations-v4"
+    assert raw["format"] == "explicit-expectations-v5"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
@@ -253,7 +253,9 @@ def test_three_cases_have_strict_independent_preparations() -> None:
         EffectInstallCase.from_json(json.dumps(raw))
 
 
-@pytest.mark.parametrize("version", ["explicit-expectations-v2", "explicit-expectations-v3"])
+@pytest.mark.parametrize(
+    "version", ["explicit-expectations-v2", "explicit-expectations-v3", "explicit-expectations-v4"]
+)
 def test_old_case_formats_are_rejected(version: str) -> None:
     raw = json.loads(build_reinstall_case(structured_spec(), context()).to_json())
     raw["format"] = version

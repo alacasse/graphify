@@ -8,10 +8,10 @@ import pytest
 
 from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.container.environment import FilesystemSnapshot
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
-from tools.install_sandbox.container.repair_scenario import PreparationPlan, MarkdownRepairScenario
+from tools.install_sandbox.rules.repair_scenario import PreparationPlan, MarkdownRepairScenario
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import (
     SubjectContext,
@@ -111,7 +111,7 @@ def test_first_install_failure_blocks_removal_and_repair(tmp_path: Path) -> None
     assert result.status == "failed" and len(installer.calls) == 1
     assert result.steps[1]["progress"] == "not_started"
     assert result.intermediate_preparation is not None
-    assert result.intermediate_preparation["progress"] == "not_started"
+    assert result.intermediate_preparation["stage"] == "not_started"
 
 
 @pytest.mark.parametrize("failure", ["wrong-range", "partial", "unobservable", "changed"])
@@ -123,7 +123,7 @@ def test_failed_preparation_blocks_second_command(
     from tools.install_sandbox.container import intermediate_execution as transition
 
     if failure == "wrong-range":
-        original = transition.MarkdownRepairScenario.bind
+        original = MarkdownRepairScenario.bind
 
         def wrong_range(
             self: MarkdownRepairScenario,
@@ -133,13 +133,11 @@ def test_failed_preparation_blocks_second_command(
             installed: ExpectationSet,
             case_bytes: bytes,
         ) -> PreparationPlan:
-            plan = original(
-                self, first_after, observation_ref, validation, installed, case_bytes
-            )
+            plan = original(self, first_after, observation_ref, validation, installed, case_bytes)
             assert isinstance(plan, PreparationPlan)
             return replace(plan, operation=replace(plan.operation, end=plan.operation.end + 1))
 
-        monkeypatch.setattr(transition.MarkdownRepairScenario, "bind", wrong_range)
+        monkeypatch.setattr(MarkdownRepairScenario, "bind", wrong_range)
     elif failure == "partial":
 
         def partial(
@@ -150,11 +148,11 @@ def test_failed_preparation_blocks_second_command(
         ) -> None:
             # The durable intent must precede even a partially successful mutation.
             saved = json.loads((tmp_path / "proof/result.json").read_text())
-            assert saved["intermediate_preparation"]["progress"] == "incomplete"
+            assert saved["intermediate_preparation"]["stage"] == "before_retained"
             (environment.project / "GUIDE.md").write_text(BEFORE)
             raise OSError("Controlled partial mutation")
 
-        monkeypatch.setattr(BoundMarkdownMutation, "apply", partial)
+        monkeypatch.setattr(transition, "apply_markdown_mutation", partial)
     else:
         observe = EffectEnvironment.observe_intermediate
 
@@ -175,7 +173,15 @@ def test_failed_preparation_blocks_second_command(
     assert result.steps[1]["progress"] == "not_started"
     record = result.intermediate_preparation
     assert record is not None
-    assert record["progress"] == ("finished" if failure == "wrong-range" else "incomplete")
+    assert (
+        record["stage"]
+        == {
+            "wrong-range": "verification_retained",
+            "partial": "before_retained",
+            "unobservable": "mutation_recorded",
+            "changed": "before_retained",
+        }[failure]
+    )
 
 
 def test_simple_reinstall_rejects_unexplained_intermediate_change(
@@ -218,25 +224,25 @@ def test_unpersisted_preparation_intent_prevents_mutation(
 
     def cannot_persist(writer: TestResultWriter, result: InstallTestResult) -> None:
         record = result.intermediate_preparation
-        if record is not None and record["progress"] == "incomplete":
+        if record is not None and record["stage"] == "started":
             raise EvidenceWriteError("Controlled intent persistence failure")
         write_result(writer, result)
 
     monkeypatch.setattr(TestResultWriter, "write_result", cannot_persist)
     installer = LiteralInstaller()
-    with pytest.raises(EvidenceWriteError, match="intent persistence"):
-        InstallTestRunner(InstallerDriver(installer.execute)).run_case(
-            reference_sources=subject,
-            prepared_executable=tmp_path / "controlled-executable",
-            case_file=tmp_path / "case.json",
-            work_directory=tmp_path / "work",
-            output_directory=tmp_path / "proof",
-        )
+    result = InstallTestRunner(InstallerDriver(installer.execute)).run_case(
+        reference_sources=subject,
+        prepared_executable=tmp_path / "controlled-executable",
+        case_file=tmp_path / "case.json",
+        work_directory=tmp_path / "work",
+        output_directory=tmp_path / "proof",
+    )
+    assert result.status == "incomplete"
     assert len(installer.calls) == 1
     assert (tmp_path / "work/environment/project/GUIDE.md").read_text() == BEFORE + SECTION + AFTER
     assert not (tmp_path / "proof/intermediate/operation.json").exists()
     saved = json.loads((tmp_path / "proof/result.json").read_text())
-    assert saved["intermediate_preparation"]["progress"] == "not_started"
+    assert saved["intermediate_preparation"]["stage"] == "not_started"
 
 
 @pytest.mark.parametrize("obstructed", [False, True])
@@ -250,18 +256,18 @@ def test_removal_rejects_foreign_changes_and_incomplete_observations(
     ) -> FilesystemSnapshot:
         if phase == "after" and not obstructed:
             (environment.project / "foreign-file").write_bytes(b"Unrelated change during removal")
-        snapshot = observe(environment, writer, phase)
-        if phase == "after" and obstructed:
-            snapshot.obstacles.append(
-                {
-                    "operation": "read_file",
-                    "root": "project",
-                    "path": "GUIDE.md",
-                    "reason": "Controlled observation obstacle",
-                }
-            )
-            writer.write_intermediate_snapshot(snapshot, phase)
-        return snapshot
+        if phase != "after" or not obstructed:
+            return observe(environment, writer, phase)
+        read_bytes = Path.read_bytes
+
+        def unreadable(path: Path) -> bytes:
+            if path == environment.project / "GUIDE.md":
+                raise PermissionError("Controlled observation obstacle")
+            return read_bytes(path)
+
+        with monkeypatch.context() as capture:
+            capture.setattr(Path, "read_bytes", unreadable)
+            return observe(environment, writer, phase)
 
     monkeypatch.setattr(EffectEnvironment, "observe_intermediate", altered)
     result, installer = conduct(tmp_path)
@@ -269,5 +275,6 @@ def test_removal_rejects_foreign_changes_and_incomplete_observations(
     assert result.status == ("incomplete" if obstructed else "failed")
     assert result.steps[1]["progress"] == "not_started"
     preparation = result.intermediate_preparation
-    assert preparation is not None and preparation["verification"] is not None
-    assert preparation["verification"].complete is not obstructed
+    assert preparation is not None and preparation["stage"] == "verification_retained"
+    verdict = json.loads((tmp_path / "proof/intermediate/verification.json").read_text())
+    assert verdict["complete"] is not obstructed

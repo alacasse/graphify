@@ -2,10 +2,11 @@
 
 from pathlib import Path
 
-from tools.install_sandbox.container.environment import FilesystemSnapshot, ObservedEnvironment
+from tools.install_sandbox.container.environment import ObservedEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import MarkdownSectionEffect, SkillEffect
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 
 
 def source_paths(case: EffectInstallCase) -> list[str]:

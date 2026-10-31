@@ -32,7 +32,7 @@ def prepare_context(subject: Path, directory: Path) -> Path:
         "Containerfile.dockerignore",
     ):
         shutil.copyfile(sandbox / "image" / filename, context / filename)
-    for directory_name in ("contracts", "container"):
+    for directory_name in ("contracts", "container", "rules"):
         shutil.copytree(
             sandbox / directory_name,
             context / directory_name,

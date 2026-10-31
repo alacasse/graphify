@@ -5,10 +5,10 @@ from dataclasses import replace
 
 import pytest
 
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.container.expectation_builder import build_install_expectations
-from tools.install_sandbox.container.repair_scenario import (
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.rules.expectation_builder import build_install_expectations
+from tools.install_sandbox.rules.repair_scenario import (
     PreparationBlocked,
     PreparationPlan,
     MarkdownRepairScenario,

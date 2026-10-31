@@ -7,23 +7,23 @@ from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot, same_observation
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
-from tools.install_sandbox.container.expectation_builder import (
-    bind_roots,
-    build_initial_expectations,
-    build_install_expectations,
-    build_reinstall_expectations,
-)
 from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
 from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
     InstallTestResult,
     StepEvidence,
+)
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.expectation_builder import (
+    bind_roots,
+    build_initial_expectations,
+    build_install_expectations,
+    build_reinstall_expectations,
 )
 
 
@@ -64,14 +64,7 @@ def _new_result(case: EffectInstallCase) -> InstallTestResult:
         {"journal": "journal.log", "expected_contents": None},
         None
         if case.intermediate_preparation is None
-        else {
-            "progress": "not_started",
-            "operation_ref": None,
-            "expectations_ref": None,
-            "observations": {"before": None, "after": None},
-            "verification": None,
-            "reason": "First installation not completed",
-        },
+        else {"stage": "not_started", "generation": 0, "reason": None},
     )
 
 
@@ -123,15 +116,16 @@ class InstallTestRunner:
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
         case.write(output / "case.json")
-        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v4"})
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v5"})
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
         writer.write_result(result)
         writer.append_log("journal.log", "Validated native case; starting preparation\n")
         writer.append_log("preparation.log", "Package availability inherited from campaign\n")
         self._run(case, subject, prepared_executable, work, writer, result)
-        with writer.measure("finalize"):
-            writer.write_result(result)
+        if not writer.halted:
+            with writer.measure("finalize"):
+                writer.write_result(result)
         writer.finish_timings(started)
         return result
 
@@ -243,8 +237,11 @@ class InstallTestRunner:
                     expectations = self._prepare_second(
                         case, environment, expectations, before, writer, result
                     )
-        with _phase(step, "expectations"):
-            writer.write_metadata(f"expectations/{expectations.phase}.json", expectations.to_data())
+        if not (index and case.intermediate_preparation is not None):
+            with _phase(step, "expectations"):
+                writer.write_metadata(
+                    f"expectations/{expectations.phase}.json", expectations.to_data()
+                )
         with _phase(step, "command"), writer.measure("command", index) as timing:
             command = self.driver.install(
                 case,

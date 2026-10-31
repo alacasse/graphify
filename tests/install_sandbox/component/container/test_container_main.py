@@ -68,7 +68,7 @@ def test_initial_checkpoint_write_failure_prevents_execution(
     original = Path.replace
 
     def replace(path: Path, target: Path) -> Path:
-        if path.name == "result.json.tmp":
+        if target.name == "result.json":
             raise PermissionError("Controlled result rename denied")
         return original(path, target)
 
@@ -76,12 +76,12 @@ def test_initial_checkpoint_write_failure_prevents_execution(
     local.prepare_executable()
     runner = InstallTestRunner()
     assert main(_arguments(tmp_path), runner=runner) == 1
-    assert "Cannot finalize result.json" in capsys.readouterr().err
+    assert "Cannot publish evidence result.json" in capsys.readouterr().err
     assert not (tmp_path / "results/result.json").exists()
     assert (tmp_path / "results/case.json").is_file()
     assert not (tmp_path / "results/steps").exists()
     assert not (tmp_path / "work").exists()
-    assert (tmp_path / "results/result.json.tmp").is_file()
+    assert not list((tmp_path / "results").glob(".result.json.*.tmp"))
 
 
 @pytest.mark.parametrize("interrupted", [False, True])

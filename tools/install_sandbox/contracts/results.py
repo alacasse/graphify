@@ -70,12 +70,22 @@ class StepEvidence(TypedDict):
 
 
 class IntermediateEvidence(TypedDict):
-    progress: Literal["not_started", "incomplete", "finished"]
-    operation_ref: str | None
-    expectations_ref: str | None
-    observations: dict[str, str | None]
-    verification: VerificationResult | None
+    stage: str
+    generation: int
     reason: str | None
+
+
+@dataclass(frozen=True)
+class ArtifactReceipt:
+    reference: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class CheckpointReceipt:
+    session_id: str
+    generation: int
+    sha256: str
 
 
 @dataclass

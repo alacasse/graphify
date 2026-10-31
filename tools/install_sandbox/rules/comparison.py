@@ -3,7 +3,7 @@
 import json
 from typing import cast
 
-from tools.install_sandbox.container.environment import FilesystemSnapshot
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationMismatch, VerificationResult
 from tools.install_sandbox.contracts.spec import HookExpectation
 

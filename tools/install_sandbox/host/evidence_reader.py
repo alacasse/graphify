@@ -8,10 +8,8 @@ from typing import cast
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
-    ObservationObstacle,
     SnapshotEntry,
-    VerificationMismatch,
-    VerificationResult,
+    parse_obstacle,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 
@@ -42,12 +40,6 @@ def json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return data
 
 
-def string(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("Expected a string")
-    return value
-
-
 def json_list(value: object) -> list[object]:
     if not isinstance(value, list):
         raise ValueError("Expected a list")
@@ -62,39 +54,6 @@ def boolean(value: object) -> bool:
 
 def optional_text(value: object) -> str | None:
     return None if value is None else text(value)
-
-
-def parse_obstacle(value: object) -> ObservationObstacle:
-    data = fields(value, "operation root path reason")
-    return {
-        "operation": text(data["operation"]),
-        "root": text(data["root"]),
-        "path": text(data["path"]),
-        "reason": text(data["reason"]),
-    }
-
-
-def mismatch(value: object) -> VerificationMismatch:
-    data = fields(value, "type root path expected observed")
-    return VerificationMismatch(
-        text(data["type"]),
-        text(data["root"]),
-        text(data["path"]),
-        string(data["expected"]),
-        string(data["observed"]),
-    )
-
-
-def verification(value: object) -> VerificationResult:
-    data = fields(value, "complete mismatches obstacles")
-    result = VerificationResult(
-        boolean(data["complete"]),
-        [mismatch(item) for item in json_list(data["mismatches"])],
-        [parse_obstacle(item) for item in json_list(data["obstacles"])],
-    )
-    if result.complete and result.obstacles:
-        raise ValueError("Complete verification cannot contain observation obstacles")
-    return result
 
 
 def read_json_evidence(output: Path, relative: str) -> object:

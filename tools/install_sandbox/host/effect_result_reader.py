@@ -18,7 +18,6 @@ from tools.install_sandbox.host.evidence_reader import (
     read_json_evidence,
     retained_snapshot,
     safe_evidence_path,
-    verification,
 )
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
@@ -133,7 +132,7 @@ def _initial_and_steps(
     _expectations(output, initial)
     before = _snapshot(output, "steps/0/before.json")
     computed = EffectVerifier().verify(initial, before)
-    saved = verification(read_json_evidence(output, "initial-verification.json"))
+    saved = VerificationResult.from_data(read_json_evidence(output, "initial-verification.json"))
     if result.preparation.get("stage") != "initial_verified" or computed != saved:
         raise ValueError("Initial stage or verification contradicts observations")
     if not result.preparation["ready"]:
@@ -231,7 +230,7 @@ def _failed_initial_verification(
         if kind != "io":
             raise ValueError("Initial verification persistence failure requires an I/O diagnostic")
         return
-    saved = verification(read_json_evidence(output, "initial-verification.json"))
+    saved = VerificationResult.from_data(read_json_evidence(output, "initial-verification.json"))
     if computed != saved or not computed.complete or computed.mismatches:
         raise ValueError("Install expectations require conforming initial verification")
     try:
@@ -551,7 +550,9 @@ def _step_evidence(
     }:
         raise ValueError("Command requires its own observations")
     _command_outputs(command, output, index)
-    saved = verification(read_json_evidence(output, f"steps/{index}/verification.json"))
+    saved = VerificationResult.from_data(
+        read_json_evidence(output, f"steps/{index}/verification.json")
+    )
     if saved != step["verification"]:
         raise ValueError("Verification differs from saved evidence")
     return saved

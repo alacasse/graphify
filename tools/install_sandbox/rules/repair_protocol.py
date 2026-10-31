@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import re
 import uuid
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, is_dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -25,49 +23,21 @@ from tools.install_sandbox.contracts.results import (
 )
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import preservation_baseline
+from tools.install_sandbox.rules.repair_actions import (
+    ARTIFACTS,
+    ApplyMarkdownMutation,
+    ArtifactDescriptor,
+    Completion,
+    JsonArtifact,
+    ObserveSnapshot,
+    Request,
+    RetainEvidence,
+    SnapshotArtifact,
+    artifact_digest,
+)
 from tools.install_sandbox.rules.repair_scenario import MarkdownRepairScenario, PreparationBlocked
 
-ARTIFACTS = (
-    ("operation", "intermediate/operation.json", "operation_retained"),
-    (
-        "preparation_expectations",
-        "expectations/intermediate.json",
-        "preparation_expectations_retained",
-    ),
-    ("repair_plan", "intermediate/repair-plan.json", "repair_plan_retained"),
-    ("before", "intermediate/before.json", "before_retained"),
-    ("performed", "intermediate/performed.json", "mutation_recorded"),
-    ("after", "intermediate/after.json", "after_retained"),
-    ("verification", "intermediate/verification.json", "verification_retained"),
-    ("effective_expectations", "expectations/reinstall.json", "ready"),
-)
-STAGES = ("not_started", "started", *(item[2] for item in ARTIFACTS))
-
-
-def _data(value: object) -> object:
-    if isinstance(value, FilesystemSnapshot):
-        entries = [
-            {k: v for k, v in item.items() if k not in {"content_file", "sha256"}}
-            for item in value.entries
-        ]
-        return {
-            "entries": sorted(entries, key=lambda item: (item["root"], item["path"])),
-            "contents": [[*key, content.hex()] for key, content in sorted(value.contents.items())],
-            "obstacles": copy.deepcopy(value.obstacles),
-        }
-    if isinstance(value, (BoundMarkdownMutation, PerformedMutation, ExpectationSet)):
-        return value.to_data()
-    if isinstance(value, VerificationResult):
-        return asdict(value)
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    return value
-
-
-def artifact_digest(payload: object) -> str:
-    """Hash logical content, independently of snapshot blob locations."""
-    encoded = json.dumps(_data(payload), sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+STAGES = ("not_started", "started", *(item.checkpoint for item in ARTIFACTS))
 
 
 def checkpoint_digest(checkpoint: IntermediateEvidence, status: str) -> str:
@@ -98,14 +68,6 @@ class PendingCheckpoint:
 
 
 @dataclass(frozen=True)
-class Action:
-    kind: str
-    reference: str
-    payload: object
-    generation: int
-
-
-@dataclass(frozen=True)
 class Ready:
     expectations: ExpectationSet
     baseline: FilesystemSnapshot
@@ -132,6 +94,8 @@ class RepairSession:
         self._inputs = copy.deepcopy(inputs)
         self.session_id = uuid.uuid4().hex
         self._index = -1
+        self._active: Request | None = None
+        self._aborted = False
         self._payloads: dict[str, object] = {}
         self._reason: str | None = None
         self._pending: PendingCheckpoint | None = None
@@ -195,7 +159,16 @@ class RepairSession:
         )
         return copy.deepcopy(self._pending)
 
+    def abort(self) -> None:
+        """Permanently halt physical execution without changing recorded facts."""
+        self._aborted = True
+
+    def _require_live(self) -> None:
+        if self._aborted:
+            raise ValueError("Repair session aborted")
+
     def confirm_checkpoint(self, receipt: CheckpointReceipt) -> None:
+        self._require_live()
         pending = self._pending
         if pending is None or (
             receipt.session_id != pending.session_id
@@ -206,7 +179,8 @@ class RepairSession:
         self._checkpoint = copy.deepcopy(pending.checkpoint)
         self._pending = None
 
-    def next_action(self) -> Action | Ready | Stop:
+    def next_action(self) -> Request | Ready | Stop:
+        self._require_live()
         if self._pending is not None:
             raise ValueError("Pending checkpoint publication blocks dependent actions")
         outcome = self._stop()
@@ -215,13 +189,17 @@ class RepairSession:
         assert self._plan is not None
         if self._index == len(ARTIFACTS) - 1:
             return Ready(copy.deepcopy(self._effective()), copy.deepcopy(self._after()))
-        kind, reference, _ = ARTIFACTS[self._index + 1]
-        return Action(
-            kind,
-            reference,
-            copy.deepcopy(self._action_payload(kind)),
-            self._checkpoint["generation"] + 1,
-        )
+        if self._active is None:
+            kind = ARTIFACTS[self._index + 1].kind
+            if kind == "before" or kind == "after":
+                self._active = ObserveSnapshot(kind)
+            elif kind == "performed":
+                operation = self._payloads["operation"]
+                assert isinstance(operation, BoundMarkdownMutation)
+                self._active = ApplyMarkdownMutation(operation)
+            else:
+                self._active = RetainEvidence(self._retained_value(kind))
+        return self._active
 
     def _stop(self) -> Stop | None:
         """One terminal decision for pending publication, execution and replay."""
@@ -236,7 +214,7 @@ class RepairSession:
         )
         return Stop(reason, "failed" if failed else "incomplete")
 
-    def _action_payload(self, kind: str) -> object:
+    def _retained_value(self, kind: str) -> object:
         assert self._plan is not None
         match kind:
             case "operation":
@@ -245,8 +223,6 @@ class RepairSession:
                 return self._plan.after_preparation_expectations
             case "repair_plan":
                 return self._plan.second_install_expectations
-            case "performed":
-                return self._payloads["operation"]
             case "verification":
                 return EffectVerifier().verify(
                     self._plan.after_preparation_expectations, self._after()
@@ -254,7 +230,7 @@ class RepairSession:
             case "effective_expectations":
                 return self._effective()
             case _:
-                return None
+                raise ValueError("No retained value for physical request")
 
     def _after(self) -> FilesystemSnapshot:
         value = self._payloads["after"]
@@ -268,35 +244,56 @@ class RepairSession:
             baseline=preservation_baseline(self._after(), "reinstall"),
         )
 
-    def record(
-        self, kind: str, payload: object, artifact_receipt: ArtifactReceipt
-    ) -> PendingCheckpoint:
-        action = self.next_action()
-        if not isinstance(action, Action) or action.kind != kind:
-            raise ValueError("Artifact does not follow the published prefix")
+    def _prepared(self, completion: object) -> tuple[JsonArtifact | SnapshotArtifact, str | None]:
+        request = self.next_action()
         if (
-            artifact_receipt.reference != action.reference
-            or artifact_receipt.sha256 != artifact_digest(payload)
+            not isinstance(request, (RetainEvidence, ObserveSnapshot, ApplyMarkdownMutation))
+            or not isinstance(completion, Completion)
+            or not completion.belongs_to(request)
+        ):
+            raise ValueError("Completion does not follow the published prefix or active request")
+        descriptor = ARTIFACTS[self._index + 1]
+        payload = completion.value
+        artifact = descriptor.encode(payload)
+        expected = request.completion.value if isinstance(request, RetainEvidence) else None
+        reason = self._validate(descriptor.kind, payload, expected)
+        return artifact, reason
+
+    def prepare(self, completion: Completion) -> JsonArtifact | SnapshotArtifact:
+        """Validate and encode a detached artifact without accepting facts or diagnostics."""
+        artifact, _ = self._prepared(completion)
+        return artifact
+
+    def record(
+        self, completion: Completion, artifact_receipt: ArtifactReceipt
+    ) -> PendingCheckpoint:
+        artifact, reason = self._prepared(completion)
+        if (
+            artifact_receipt.reference != artifact.reference
+            or artifact_receipt.sha256 != artifact_digest(artifact)
         ):
             raise ValueError("Artifact acknowledgement differs from retained content")
-        saved = copy.deepcopy(payload)
-        self._validate(kind, saved, action.payload)
-        self._payloads[kind] = saved
+        descriptor = ARTIFACTS[self._index + 1]
+        self._payloads[descriptor.kind] = completion.value
+        self._reason = reason or self._reason
         self._index += 1
-        return self._make_pending(ARTIFACTS[self._index][2], action.generation)
+        self._active = None
+        return self._make_pending(descriptor.checkpoint, self._checkpoint["generation"] + 1)
 
-    def _validate(self, kind: str, payload: object, expected: object) -> None:
+    def _validate(self, kind: str, payload: object, expected: object) -> str | None:
+        reason = None
         if kind in {"operation", "performed"}:
             self._validate_mutation(kind, payload)
         elif kind in {"before", "after"}:
-            self._validate_observation(kind, payload)
+            reason = self._validate_observation(kind, payload)
         elif artifact_digest(payload) != artifact_digest(expected):
             raise ValueError("Evidence contradicts independently reconstructed expectations")
         if kind == "verification":
             if not isinstance(payload, VerificationResult):
                 raise ValueError("Expected preparation verdict")
             if not _conforming(payload):
-                self._reason = "Preparation verification failed or incomplete"
+                reason = "Preparation verification failed or incomplete"
+        return reason
 
     def _validate_mutation(self, kind: str, payload: object) -> None:
         assert self._plan is not None
@@ -312,19 +309,20 @@ class RepairSession:
         ):
             raise ValueError("Performed mutation contradicts retained operation")
 
-    def _validate_observation(self, kind: str, payload: object) -> None:
+    def _validate_observation(self, kind: str, payload: object) -> str | None:
         if not isinstance(payload, FilesystemSnapshot):
             raise ValueError("Expected preparation observation")
         _validate_snapshot(payload)
         if kind == "before":
             if not same_observation(self._inputs.first_after, payload):
-                self._reason = "Environment changed before mutation or observation obstructed"
-            return
+                return "Environment changed before mutation or observation obstructed"
+            return None
         performed = self._payloads["performed"]
         operation = self._payloads["operation"]
         assert isinstance(performed, PerformedMutation)
         assert isinstance(operation, BoundMarkdownMutation)
         performed.verify(operation, payload)
+        return None
 
 
 def begin(inputs: RepairInputs) -> RepairSession:
@@ -355,16 +353,38 @@ def inspect(
     session.confirm_checkpoint(
         CheckpointReceipt(initial.session_id, initial.generation, initial.sha256)
     )
-    for kind, reference, _ in ARTIFACTS[:total]:
-        payload = inventory[reference]
+    for descriptor in ARTIFACTS[:total]:
+        payload = inventory[descriptor.reference]
+        completion = _replay_completion(session.next_action(), descriptor, payload)
         pending = session.record(
-            kind, payload, ArtifactReceipt(reference, artifact_digest(payload))
+            completion, ArtifactReceipt(descriptor.reference, artifact_digest(payload))
         )
         session.confirm_checkpoint(
             CheckpointReceipt(pending.session_id, pending.generation, pending.sha256)
         )
     _validate_staging(staged, total, count)
     return _inspection_result(session, published, stage, total, count)
+
+
+def _replay_completion(
+    request: Request | Ready | Stop, descriptor: ArtifactDescriptor, payload: object
+) -> Completion:
+    """Reconstruct a request-bound completion from independently decoded facts."""
+    if isinstance(request, RetainEvidence):
+        descriptor.encode(payload)
+        completion = request.completion
+        if artifact_digest(payload) != artifact_digest(completion.value):
+            raise ValueError("Evidence contradicts independently reconstructed expectations")
+        return completion
+    if isinstance(request, ObserveSnapshot):
+        if not isinstance(payload, FilesystemSnapshot):
+            raise ValueError("Expected preparation observation")
+        return request.complete(payload)
+    if isinstance(request, ApplyMarkdownMutation):
+        if not isinstance(payload, PerformedMutation):
+            raise ValueError("Expected performed mutation")
+        return request.complete(payload)
+    raise ValueError("Artifact does not follow the published prefix")
 
 
 def _inspection_result(
@@ -391,7 +411,7 @@ def _inventory_prefix(
     published: IntermediateEvidence,
     inventory: Mapping[str, object],
 ) -> tuple[str, int, int]:
-    if set(inventory) - {reference for _, reference, _ in ARTIFACTS}:
+    if set(inventory) - {item.reference for item in ARTIFACTS}:
         raise ValueError("Unknown preparation evidence")
     if set(published) != {"stage", "generation", "reason"}:
         raise ValueError("Malformed preparation checkpoint")
@@ -406,7 +426,7 @@ def _inventory_prefix(
     expected_generation = STAGES.index(stage)
     if published["generation"] != expected_generation:
         raise ValueError("Checkpoint generation contradicts its stage")
-    present = [reference in inventory for _, reference, _ in ARTIFACTS]
+    present = [item.reference in inventory for item in ARTIFACTS]
     if present != sorted(present, reverse=True):
         raise ValueError("Preparation artifacts do not form an ordered prefix")
     return stage, count, sum(present)
@@ -416,8 +436,8 @@ def _validate_staging(staged: tuple[str, ...], total: int, count: int) -> None:
     if staged:
         if total != count or total >= len(ARTIFACTS):
             raise ValueError("Snapshot staging requires its immediately preceding checkpoint")
-        next_kind, next_reference, _ = ARTIFACTS[total]
-        target = PurePosixPath(next_reference)
+        descriptor = ARTIFACTS[total]
+        target = PurePosixPath(descriptor.reference)
         for path in staged:
             candidate = PurePosixPath(path)
             temporary = (
@@ -427,8 +447,8 @@ def _validate_staging(staged: tuple[str, ...], total: int, count: int) -> None:
                 )
                 is not None
             )
-            snapshot_blob = next_kind in {"before", "after"} and path.startswith(
-                f"intermediate/{next_kind}/"
+            snapshot_blob = descriptor.transport == "snapshot" and path.startswith(
+                f"intermediate/{descriptor.kind}/"
             )
             empty_parent = path.endswith("/") and candidate == target.parent
             if not temporary and not snapshot_blob and not empty_parent:

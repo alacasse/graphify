@@ -8,7 +8,9 @@ from typing import Any
 import pytest
 
 from tests.install_sandbox.component.container.test_missing_section_run import conduct
+from tools.install_sandbox.contracts.results import ArtifactReceipt
 from tools.install_sandbox.host.result_reader import read_evidence
+from tools.install_sandbox.rules.repair_actions import JsonArtifact, SnapshotArtifact
 
 
 def rewrite(path: Path, edit: Callable[[dict[str, Any]], None]) -> None:
@@ -84,7 +86,7 @@ def test_changed_in_bounds_range_cannot_claim_another_mutation(tmp_path: Path) -
         tmp_path / "proof/intermediate/operation.json",
         lambda data: data.update(end=data["end"] + 1),
     )
-    with pytest.raises(ValueError, match="Performed mutation contradicts retained operation"):
+    with pytest.raises(ValueError, match="contradicts"):
         read_evidence(tmp_path / "proof")
 
 
@@ -104,14 +106,16 @@ def test_reinstall_expectations_write_failure_replays_incomplete_before_mutation
 ) -> None:
     from tools.install_sandbox.container.evidence_writer import TestResultWriter
 
-    original = TestResultWriter.write_metadata
+    original = TestResultWriter.retain
 
-    def interrupted(writer: TestResultWriter, relative: str, value: object) -> None:
-        if relative == "intermediate/repair-plan.json":
+    def interrupted(
+        writer: TestResultWriter, artifact: JsonArtifact | SnapshotArtifact
+    ) -> ArtifactReceipt:
+        if artifact.reference == "intermediate/repair-plan.json":
             raise OSError("Controlled repair expectations archive failure")
-        original(writer, relative, value)
+        return original(writer, artifact)
 
-    monkeypatch.setattr(TestResultWriter, "write_metadata", interrupted)
+    monkeypatch.setattr(TestResultWriter, "retain", interrupted)
     result, installer = conduct(tmp_path)
     assert result.status == "incomplete" and len(installer.calls) == 1
     assert result.intermediate_preparation is not None
@@ -125,8 +129,8 @@ def test_failed_first_observation_cannot_smuggle_finished_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tools.install_sandbox.container.effect_environment import EffectEnvironment
-    from tools.install_sandbox.contracts.observation import FilesystemSnapshot
     from tools.install_sandbox.container.evidence_writer import TestResultWriter
+    from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 
     original = EffectEnvironment.observe
 
@@ -240,10 +244,7 @@ def test_altered_forged_evidence_is_rejected(altered_proof: Path, artifact: str)
 def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: Path) -> None:
     import shutil
 
-    rewrite(
-        altered_proof / "intermediate/operation.json",
-        lambda data: data.update(replacement="V3JvbmcgYm9keS4K"),
-    )
+    # The requested operation stays intact; the physical outcome is nonconforming.
     (altered_proof / "intermediate/after/project/GUIDE.md").write_text(
         "## Personal before\nKeep before.\n\n## graphify\nWrong body.\n"
         "## Personal after\nKeep after.\n\n"

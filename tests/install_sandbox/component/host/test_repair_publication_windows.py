@@ -3,23 +3,24 @@
 import json
 import shutil
 from collections.abc import Callable
-from typing import Any, cast
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
 from tools.install_sandbox.container import intermediate_execution as transition
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
 from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import SnapshotEntry
+from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
+from tools.install_sandbox.rules.repair_actions import SnapshotArtifact
 
 
 class ProcessStopped(BaseException):
@@ -69,8 +70,8 @@ def run_stopped(
     writes = 0
     mutations = 0
     stopped_writers: list[Writer] = []
-    original_write = cast(Callable[[Writer, str, object], None], getattr(Writer, "_write_json"))
-    original_bytes = cast(Callable[..., None], getattr(Writer, "_write_bytes"))
+    original_write = cast(Callable[[Writer, str, object], None], vars(Writer)["_write_json"])
+    original_bytes = cast(Callable[..., None], vars(Writer)["_write_bytes"])
     original_mutate = transition.apply_markdown_mutation
 
     def mutate(
@@ -202,7 +203,7 @@ def test_snapshot_publication_preserves_logical_input(tmp_path: Path) -> None:
     )
     before = copy.deepcopy(snapshot)
     writer = Writer(tmp_path)
-    writer.write_intermediate_snapshot(snapshot, "before")
+    writer.retain(SnapshotArtifact("intermediate/before.json", snapshot))
     assert snapshot == before
     manifest = json.loads((tmp_path / "intermediate/before.json").read_text())
     assert manifest["entries"][0]["content_file"] == "intermediate/before/project/GUIDE.md"

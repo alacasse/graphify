@@ -108,8 +108,7 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
     fault = vector.get("fault")
     original_apply = apply_markdown_mutation
     original_observe = EffectEnvironment.observe_intermediate
-    original_write = TestResultWriter.write_metadata
-    original_snapshot = TestResultWriter.write_intermediate_snapshot
+    original_retain = TestResultWriter.retain
     original_regular_observe = EffectEnvironment.observe
     original_file = ObservedEnvironment._file
     capture_stage = None
@@ -121,12 +120,12 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
         if fault == "preparation-neighbor-change":
             (environment.project / "unexpected-neighbor").write_text("Changed neighbor.\n")
 
-    def observe(self, writer, phase):
+    def observe(self, phase):
         nonlocal capture_stage
         capture_stage = "partial-" + phase + "-mutation"
         if fault == "capture-" + phase + "-mutation":
             raise OSError("Injected capture failure")
-        return original_observe(self, writer, phase)
+        return original_observe(self, phase)
 
     def regular_observe(self, writer, phase, *, step_index=0):
         nonlocal capture_stage
@@ -154,27 +153,21 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
             return
         return original_file(self, snapshot, entry, path)
 
-    def write(self, name, data):
+    def retain(self, artifact):
         wanted = {
             "persist-before-mutation": "intermediate/operation.json",
             "persist-after-mutation": "intermediate/after.json",
         }.get(fault)
-        if name == wanted:
+        if artifact.reference == wanted:
             raise OSError("Injected persistence failure")
-        return original_write(self, name, data)
-
-    def snapshot(self, observation, phase):
-        if fault == "persist-after-mutation" and phase == "after":
-            raise OSError("Injected persistence failure")
-        return original_snapshot(self, observation, phase)
+        return original_retain(self, artifact)
 
     with (
         patch.object(EffectEnvironment, "observe", regular_observe),
         patch.object(ObservedEnvironment, "_file", capture_file),
-        patch.object(TestResultWriter, "write_intermediate_snapshot", snapshot),
         patch.object(intermediate_execution, "apply_markdown_mutation", apply),
         patch.object(EffectEnvironment, "observe_intermediate", observe),
-        patch.object(TestResultWriter, "write_metadata", write),
+        patch.object(TestResultWriter, "retain", retain),
     ):
         result = InstallTestRunner(InstallerDriver(execute)).run_case(
             reference_sources=subject,

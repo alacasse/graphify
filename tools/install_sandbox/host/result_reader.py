@@ -11,6 +11,7 @@ from tools.install_sandbox.contracts.results import (
     IntermediateEvidence,
     PreparationEvidence,
     StepEvidence,
+    VerificationResult,
 )
 from tools.install_sandbox.contracts.spec import fields, text
 from tools.install_sandbox.host.effect_result_reader import check_effect_result
@@ -31,9 +32,6 @@ from tools.install_sandbox.host.evidence_reader import (
 )
 from tools.install_sandbox.host.evidence_reader import (
     safe_evidence_path,
-)
-from tools.install_sandbox.host.evidence_reader import (
-    verification as _verification,
 )
 
 
@@ -96,7 +94,7 @@ def _step(value: object, output: Path) -> StepEvidence:
         "command": None if data["command"] is None else _command(data["command"], output),
         "verification": None
         if data["verification"] is None
-        else _verification(data["verification"]),
+        else VerificationResult.from_data(data["verification"]),
         "observations": references,
     }
     if failed:

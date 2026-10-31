@@ -328,7 +328,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
     return result
 
 
-def read_evidence(output_directory: Path) -> InstallTestResult:
+def _read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
         "format": "explicit-expectations-v4"
@@ -338,3 +338,14 @@ def read_evidence(output_directory: Path) -> InstallTestResult:
         safe_evidence_path(output_directory, "case.json").read_text(encoding="utf-8")
     )
     return _read_result(output_directory, case)
+
+
+class MalformedEvidence(ValueError):
+    """The retained archive cannot support its claimed durable facts."""
+
+
+def read_evidence(output_directory: Path) -> InstallTestResult:
+    try:
+        return _read_evidence(output_directory)
+    except (ValueError, OSError, UnicodeError) as error:
+        raise MalformedEvidence(str(error)) from error

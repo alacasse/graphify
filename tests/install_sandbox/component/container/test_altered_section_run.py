@@ -11,15 +11,14 @@ from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
-from tools.install_sandbox.container.intermediate_builder import PreparationPlan
+from tools.install_sandbox.container.repair_scenario import PreparationPlan, MarkdownRepairScenario
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import (
-    EffectInstallCase,
     SubjectContext,
     build_effect_cases,
 )
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.intermediate import PreparedByteRange
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.results import VerificationResult
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
@@ -144,7 +143,7 @@ def damage_observation(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     monkeypatch.setattr(EffectEnvironment, "observe_intermediate", unavailable)
 
 
-def damaged_operation(operation: PreparedByteRange, failure: str) -> PreparedByteRange:
+def damaged_operation(operation: BoundMarkdownMutation, failure: str) -> BoundMarkdownMutation:
     from dataclasses import replace
 
     if failure == "wrong-range":
@@ -178,11 +177,10 @@ def test_failed_preparation_blocks_second_command(
     from tools.install_sandbox.container import intermediate_execution as transition
 
     if failure in {"wrong-range", "wrong-body", "heading", "unchanged"}:
-        original = transition.prepare_intermediate
+        original = transition.MarkdownRepairScenario.bind
 
         def wrong_range(
-            case: EffectInstallCase,
-            sources: FilesystemSnapshot,
+            self: MarkdownRepairScenario,
             first_after: FilesystemSnapshot,
             observation_ref: str,
             validation: VerificationResult,
@@ -190,17 +188,17 @@ def test_failed_preparation_blocks_second_command(
             case_bytes: bytes,
         ) -> PreparationPlan:
             plan = original(
-                case, sources, first_after, observation_ref, validation, installed, case_bytes
+                self, first_after, observation_ref, validation, installed, case_bytes
             )
             assert isinstance(plan, PreparationPlan)
             return replace(plan, operation=damaged_operation(plan.operation, failure))
 
-        monkeypatch.setattr(transition, "prepare_intermediate", wrong_range)
+        monkeypatch.setattr(transition.MarkdownRepairScenario, "bind", wrong_range)
     elif failure == "partial":
 
         def partial(
+            operation: BoundMarkdownMutation,
             environment: EffectEnvironment,
-            operation: PreparedByteRange,
             case_bytes: bytes,
             first_after: FilesystemSnapshot,
         ) -> None:
@@ -210,7 +208,7 @@ def test_failed_preparation_blocks_second_command(
             (environment.project / "GUIDE.md").write_text(BEFORE)
             raise OSError("Controlled partial mutation")
 
-        monkeypatch.setattr(transition, "apply_prepared_range", partial)
+        monkeypatch.setattr(BoundMarkdownMutation, "apply", partial)
     else:
         damage_observation(monkeypatch, failure)
 

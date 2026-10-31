@@ -3,9 +3,12 @@
 import base64
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
+if TYPE_CHECKING:
+    from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.contracts.effects import Destination
+from tools.install_sandbox.contracts.results import VerificationResult
 from tools.install_sandbox.contracts.spec import HookExpectation, fields, text
 
 _PHASES = {"initial", "install", "intermediate", "reinstall"}
@@ -24,7 +27,7 @@ def _encode(value: bytes | None) -> str | None:
     return None if value is None else base64.b64encode(value).decode("ascii")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Expectation:
     kind: str
     root: str
@@ -53,6 +56,9 @@ class Expectation:
         if self.kind == "json-hooks" and (self.baseline is None or not self.hooks):
             raise ValueError("Expected JSON hooks and personal baseline")
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Expectation) and self.to_data() == other.to_data()
+
     def to_data(self) -> dict[str, object]:
         return {
             "kind": self.kind,
@@ -71,11 +77,24 @@ class Expectation:
 
     @classmethod
     def from_data(cls, value: object) -> "Expectation":
-        data = fields(value, "kind root path phase provenance content baseline marker hooks")
+        data = fields(
+            value,
+            "kind root path phase provenance content baseline marker hooks"
+            + (
+                " initial_prefix"
+                if isinstance(value, dict)
+                and cast(dict[str, object], value).get("kind") == "markdown-composed"
+                else ""
+            ),
+        )
         hooks = data["hooks"]
         if not isinstance(hooks, list):
             raise ValueError("Expected hook constraints")
-        return cls(
+        owner = {
+            "markdown-composed": ComposedMarkdownExpectation,
+            "file": ExactDocumentExpectation,
+        }.get(text(data["kind"]), cls)
+        item = owner(
             text(data["kind"]),
             text(data["root"]),
             text(data["path"]),
@@ -86,6 +105,9 @@ class Expectation:
             None if data["marker"] is None else text(data["marker"]),
             tuple(HookExpectation.from_data(h) for h in cast(list[object], hooks)),
         )
+        if data["kind"] == "markdown-composed":
+            item = replace(item, initial_prefix=_decode(data["initial_prefix"]))
+        return item
 
 
 def _validate_roots(roots: dict[str, str] | None) -> None:
@@ -177,3 +199,83 @@ class ExpectationSet:
             expectations=tuple(replace(e, phase=phase) for e in self.expectations),
             baseline=tuple(replace(e, phase=phase) for e in self.baseline),
         )
+
+
+@dataclass(frozen=True, eq=False)
+class ExactDocumentExpectation(Expectation):
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if (
+            self.kind != "file"
+            or self.baseline is not None
+            or self.marker is not None
+            or self.hooks
+        ):
+            raise ValueError("Exact document accepts only exact content")
+
+    def verify(self, observation: "FilesystemSnapshot", result: VerificationResult) -> None:
+        from tools.install_sandbox.container.comparison import compare_bytes
+
+        assert self.content is not None
+        compare_bytes(observation, self.path, self.content, result, self.root)
+
+
+@dataclass(frozen=True, eq=False)
+class ComposedMarkdownExpectation(Expectation):
+    initial_prefix: bytes = b""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.kind != "markdown-composed" or self.hooks:
+            raise ValueError("Invalid composed Markdown expectation")
+
+    def to_data(self) -> dict[str, object]:
+        return {**super().to_data(), "initial_prefix": _encode(self.initial_prefix)}
+
+    def verify(self, observation: "FilesystemSnapshot", result: VerificationResult) -> None:
+        from tools.install_sandbox.container.comparison import file, verify_markdown_composed
+
+        assert self.content is not None and self.baseline is not None and self.marker is not None
+        current = file(observation, self.path, result, self.root)
+        if current is not None:
+            verify_markdown_composed(
+                self.content,
+                self.baseline,
+                current,
+                result,
+                root=self.root,
+                path=self.path,
+                marker=self.marker,
+            )
+
+
+@dataclass(frozen=True)
+class PhysicalPreservation:
+    baseline: tuple[Expectation, ...]
+    permitted_content_changes: tuple[tuple[str, str], ...]
+
+    def verify(self, observed: "FilesystemSnapshot", result: VerificationResult) -> None:
+        from tools.install_sandbox.container.comparison import mismatch
+
+        before = {(e.root, e.path): e for e in self.baseline}
+        after = {(e["root"], e["path"]): e for e in observed.entries}
+        for key in sorted(before.keys() | after.keys()):
+            prior, current = before.get(key), after.get(key)
+            if key in self.permitted_content_changes and (
+                prior is None or (current is not None and prior.kind == current["kind"])
+            ):
+                continue
+            if (
+                prior is not None
+                and current is not None
+                and prior.kind == current["kind"]
+                and (prior.kind == "directory" or prior.content == observed.contents.get(key))
+            ):
+                continue
+            mismatch(
+                result,
+                "unexpected_change",
+                *key,
+                "entry preserved",
+                "entry added, removed or changed",
+            )

@@ -2,7 +2,11 @@
 
 from tools.install_sandbox.container import comparison as checks
 from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
+from tools.install_sandbox.contracts.expectations import (
+    Expectation,
+    ExpectationSet,
+    PhysicalPreservation,
+)
 from tools.install_sandbox.contracts.results import ObservationObstacle, VerificationResult
 
 
@@ -25,7 +29,7 @@ def _complete(snapshot: FilesystemSnapshot, result: VerificationResult) -> None:
         elif entry["kind"] == "file":
             if (root, path) not in snapshot.contents:
                 _obstacle(result, root, path, "Retained file bytes unavailable")
-        else:
+        elif entry["kind"] != "other":
             _obstacle(result, root, path, "Unsupported observed entry")
     _roots_complete(snapshot, result)
 
@@ -93,14 +97,9 @@ def _constraint(
 
 
 def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> None:
-    if item.kind in {"markdown", "markdown-composed"}:
+    if item.kind == "markdown":
         assert item.content is not None and item.baseline is not None and item.marker is not None
-        compare = (
-            checks.verify_markdown_composed
-            if item.kind == "markdown-composed"
-            else checks.verify_markdown_section
-        )
-        compare(
+        checks.verify_markdown_section(
             item.content,
             item.baseline,
             current,
@@ -113,37 +112,6 @@ def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> 
         _json(item, current, result)
 
 
-def _preservation(
-    expected: ExpectationSet, observed: FilesystemSnapshot, result: VerificationResult
-) -> None:
-    if not expected.baseline:
-        return
-    before = {(e.root, e.path): e for e in expected.baseline}
-    after = {(e["root"], e["path"]): e for e in observed.entries}
-    allowed = set(expected.allowed_changes)
-    for key in sorted(before.keys() | after.keys()):
-        prior, current = before.get(key), after.get(key)
-        if key in allowed and (
-            prior is None or (current is not None and prior.kind == current["kind"])
-        ):
-            continue
-        if (
-            prior is not None
-            and current is not None
-            and prior.kind == current["kind"]
-            and (prior.kind == "directory" or prior.content == observed.contents.get(key))
-        ):
-            continue
-        checks.mismatch(
-            result,
-            "unexpected_change",
-            key[0],
-            key[1],
-            "entry preserved",
-            "entry added, removed or changed",
-        )
-
-
 class EffectVerifier:
     """The only inputs are constraints and the observation being compared."""
 
@@ -153,7 +121,14 @@ class EffectVerifier:
         if expected.roots is None:
             _obstacle(result, "project", ".", "Expectations have no retained root binding")
         for item in expected.expectations:
-            _constraint(item, observed, result)
-        _preservation(expected, observed, result)
+            verifier = getattr(item, "verify", None)
+            if verifier is None:
+                _constraint(item, observed, result)
+            else:
+                verifier(observed, result)
+        if expected.baseline:
+            PhysicalPreservation(expected.baseline, expected.allowed_changes).verify(
+                observed, result
+            )
         result.complete = not result.obstacles
         return result

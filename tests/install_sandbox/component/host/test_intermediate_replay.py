@@ -256,6 +256,15 @@ def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: 
             }
         ],
     }
+    import hashlib
+
+    performed = {
+        "operation": json.loads((altered_proof / "intermediate/operation.json").read_text()),
+        "document_sha256": hashlib.sha256(
+            (altered_proof / "intermediate/after/project/GUIDE.md").read_bytes()
+        ).hexdigest(),
+    }
+    (altered_proof / "intermediate/performed.json").write_text(json.dumps(performed))
     (altered_proof / "intermediate/verification.json").write_text(json.dumps(verdict))
 
     def fail(data: dict[str, Any]) -> None:

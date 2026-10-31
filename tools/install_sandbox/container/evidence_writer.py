@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.install_sandbox.container.installer import InstallerCommandResult
+from tools.install_sandbox.contracts.repair_progress import DurableArtifact
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     EvidenceWriteError,
@@ -42,6 +43,17 @@ class TestResultWriter:
             output_directory.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             raise EvidenceWriteError(f"Cannot create evidence directory: {error}") from error
+
+    def acknowledge(self, relative: str) -> DurableArtifact:
+
+        path = self.output_directory / relative
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not path.resolve().is_relative_to(self.output_directory.resolve())
+        ):
+            raise EvidenceWriteError("Artifact has not been retained")
+        return DurableArtifact(relative)
 
     def initialize_timings(self, case_name: str, step_count: int) -> None:
         self.timings = case_timings(case_name, step_count)

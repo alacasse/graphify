@@ -70,6 +70,11 @@ def artifact_digest(payload: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def checkpoint_digest(checkpoint: IntermediateEvidence, status: str) -> str:
+    """Bind acknowledgement to the checkpoint and its atomically published case status."""
+    return artifact_digest({"checkpoint": checkpoint, "status": status})
+
+
 def _conforming(verdict: VerificationResult) -> bool:
     return verdict.complete and not verdict.mismatches and not verdict.obstacles
 
@@ -86,6 +91,7 @@ class RepairInputs:
 @dataclass(frozen=True)
 class PendingCheckpoint:
     checkpoint: IntermediateEvidence
+    status: Literal["failed", "incomplete"]
     session_id: str
     generation: int
     sha256: str
@@ -182,8 +188,10 @@ class RepairSession:
             "generation": generation,
             "reason": self._reason,
         }
+        outcome = self._stop()
+        status = outcome.diagnostic if outcome is not None else "incomplete"
         self._pending = PendingCheckpoint(
-            checkpoint, self.session_id, generation, artifact_digest(checkpoint)
+            checkpoint, status, self.session_id, generation, checkpoint_digest(checkpoint, status)
         )
         return copy.deepcopy(self._pending)
 
@@ -201,17 +209,9 @@ class RepairSession:
     def next_action(self) -> Action | Ready | Stop:
         if self._pending is not None:
             raise ValueError("Pending checkpoint publication blocks dependent actions")
-        if self._blocked is not None or self._reason is not None:
-            verdict = self._payloads.get("verification")
-            failed = (
-                isinstance(verdict, VerificationResult)
-                and verdict.complete
-                and bool(verdict.mismatches)
-            )
-            return Stop(
-                self._blocked or self._reason or "Stopped",
-                "failed" if failed else "incomplete",
-            )
+        outcome = self._stop()
+        if outcome is not None:
+            return outcome
         assert self._plan is not None
         if self._index == len(ARTIFACTS) - 1:
             return Ready(copy.deepcopy(self._effective()), copy.deepcopy(self._after()))
@@ -222,6 +222,19 @@ class RepairSession:
             copy.deepcopy(self._action_payload(kind)),
             self._checkpoint["generation"] + 1,
         )
+
+    def _stop(self) -> Stop | None:
+        """One terminal decision for pending publication, execution and replay."""
+        reason = self._blocked or self._reason
+        if reason is None:
+            return None
+        verdict = self._payloads.get("verification")
+        failed = (
+            isinstance(verdict, VerificationResult)
+            and verdict.complete
+            and bool(verdict.mismatches)
+        )
+        return Stop(reason, "failed" if failed else "incomplete")
 
     def _action_payload(self, kind: str) -> object:
         assert self._plan is not None

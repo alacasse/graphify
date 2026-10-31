@@ -29,7 +29,11 @@ from tools.install_sandbox.contracts.timings import (
     measure,
     skip_pending,
 )
-from tools.install_sandbox.rules.repair_protocol import PendingCheckpoint, artifact_digest
+from tools.install_sandbox.rules.repair_protocol import (
+    PendingCheckpoint,
+    artifact_digest,
+    checkpoint_digest,
+)
 
 if TYPE_CHECKING:
     from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -80,17 +84,17 @@ class TestResultWriter:
     def write_checkpoint(
         self, result: InstallTestResult, pending: PendingCheckpoint
     ) -> CheckpointReceipt:
-        candidate = replace(result, intermediate_preparation=dict(pending.checkpoint))
+        candidate = replace(
+            result, intermediate_preparation=dict(pending.checkpoint), status=pending.status
+        )
         self.write_result(candidate)
         result.intermediate_preparation = candidate.intermediate_preparation
+        result.status = candidate.status
+        published = json.loads((self.output_directory / "result.json").read_bytes())
         return CheckpointReceipt(
             pending.session_id,
             pending.generation,
-            artifact_digest(
-                json.loads((self.output_directory / "result.json").read_bytes())[
-                    "intermediate_preparation"
-                ]
-            ),
+            checkpoint_digest(published["intermediate_preparation"], published["status"]),
         )
 
     def initialize_timings(self, case_name: str, step_count: int) -> None:

@@ -40,10 +40,10 @@ def inject_failure_and_stop(patches: pytest.MonkeyPatch, window: str) -> None:
     publish = cast(Callable[[Writer, str, object], None], vars(Writer)["_write_json"])
     confirm = RepairSession.confirm_checkpoint
 
-    def nonconforming(environment: EffectEnvironment, writer: Writer, phase: str):
+    def nonconforming(environment: EffectEnvironment, phase: str):
         if phase == "after":
             (environment.project / "foreign-file").write_bytes(b"Unexpected preparation effect.\n")
-        return observe(environment, writer, phase)
+        return observe(environment, phase)
 
     def publish_at_window(writer: Writer, relative: str, value: object) -> None:
         target = publication_target(relative, value)
@@ -81,9 +81,7 @@ def assert_no_dependent_effects(proof: Path, window: str) -> None:
         assert verdict["obstacles"] == []
 
 
-def failed_archive(
-    root: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, window: str
-) -> Path:
+def failed_archive(root: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, window: str) -> Path:
     subject, spec, context = arrange(root)
     cases = build_effect_cases(
         EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))

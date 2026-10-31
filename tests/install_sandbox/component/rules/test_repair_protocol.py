@@ -1,8 +1,7 @@
-"""Publication gates, detached baselines, and replayed prefixes."""
+"""Protected requests, pure preparation, and independently replayed evidence prefixes."""
 
 import copy
 import hashlib
-from pathlib import Path
 from typing import cast
 
 import pytest
@@ -10,20 +9,29 @@ import pytest
 from tests.install_sandbox.component.container.test_repair_scenario import KEY, inputs
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
 from tools.install_sandbox.contracts.expectations import ExpectationSet
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
+    IntermediateEvidence,
     StepEvidence,
     VerificationResult,
 )
-from tools.install_sandbox.rules.repair_protocol import (
+from tools.install_sandbox.rules.repair_actions import (
     ARTIFACTS,
-    Action,
+    ApplyMarkdownMutation,
+    Completion,
+    JsonArtifact,
+    ObserveSnapshot,
+    RetainEvidence,
+    SnapshotArtifact,
+    artifact_digest,
+)
+from tools.install_sandbox.rules.repair_protocol import (
     Ready,
     RepairInputs,
     RepairSession,
     Stop,
-    artifact_digest,
     begin,
     inspect,
 )
@@ -61,28 +69,105 @@ def confirm(session: RepairSession) -> CheckpointReceipt:
     return receipt
 
 
-def record(session: RepairSession, payload: object) -> None:
-    action = session.next_action()
-    assert isinstance(action, Action)
-    session.record(
-        action.kind, payload, ArtifactReceipt(action.reference, artifact_digest(payload))
+# Deliberately independent of the production catalogue.
+REFERENCES = (
+    "intermediate/operation.json",
+    "expectations/intermediate.json",
+    "intermediate/repair-plan.json",
+    "intermediate/before.json",
+    "intermediate/performed.json",
+    "intermediate/after.json",
+    "intermediate/verification.json",
+    "expectations/reinstall.json",
+)
+
+
+def retained(session: RepairSession) -> RetainEvidence:
+    request = session.next_action()
+    assert isinstance(request, RetainEvidence)
+    return request
+
+
+def observed(session: RepairSession) -> ObserveSnapshot:
+    request = session.next_action()
+    assert isinstance(request, ObserveSnapshot)
+    return request
+
+
+def applied(session: RepairSession) -> ApplyMarkdownMutation:
+    request = session.next_action()
+    assert isinstance(request, ApplyMarkdownMutation)
+    return request
+
+
+def completion_for(
+    request: RetainEvidence | ObserveSnapshot | ApplyMarkdownMutation | Ready | Stop,
+    ctx: RepairInputs,
+    *,
+    corrupt: bool = False,
+    unavailable: bool = False,
+) -> Completion:
+    if isinstance(request, RetainEvidence):
+        return request.completion
+    if isinstance(request, ObserveSnapshot) and request.phase == "before":
+        return request.complete(ctx.first_after)
+    if isinstance(request, ApplyMarkdownMutation):
+        operation = request.operation
+    else:
+        assert isinstance(request, ObserveSnapshot)
+        prior = begin(ctx)
+        confirm(prior)
+        first = prior.next_action()
+        assert isinstance(first, RetainEvidence)
+        operation = first.completion.value
+    assert isinstance(operation, BoundMarkdownMutation)
+    after = copy.deepcopy(ctx.first_after)
+    document = after.contents[KEY]
+    after.contents[KEY] = (
+        document[: operation.start] + operation.replacement + document[operation.end :]
     )
+    if corrupt:
+        after.contents[KEY] += b"personal edit"
+    if isinstance(request, ApplyMarkdownMutation):
+        return request.complete(
+            PerformedMutation(operation, hashlib.sha256(after.contents[KEY]).hexdigest())
+        )
+    if unavailable:
+        after.contents.pop(KEY)
+        after.obstacles.append(
+            {"operation": "read_file", "root": KEY[0], "path": KEY[1], "reason": "Denied"}
+        )
+    return request.complete(after)
 
 
-def through(session: RepairSession, kind: str) -> dict[str, object]:
+def accept(session: RepairSession, completion: Completion) -> JsonArtifact | SnapshotArtifact:
+    artifact = session.prepare(completion)
+    session.record(completion, ArtifactReceipt(artifact.reference, artifact_digest(artifact)))
+    return artifact
+
+
+def advance(
+    session: RepairSession,
+    ctx: RepairInputs,
+    count: int,
+    *,
+    corrupt: bool = False,
+    unavailable: bool = False,
+) -> dict[str, object]:
     inventory: dict[str, object] = {}
     confirm(session)
-    while True:
-        action = session.next_action()
-        assert isinstance(action, Action)
-        if action.kind == kind:
-            return inventory
-        record(session, action.payload)
-        inventory[action.reference] = action.payload
+    for reference in REFERENCES[:count]:
+        completion = completion_for(
+            session.next_action(), ctx, corrupt=corrupt, unavailable=unavailable
+        )
+        artifact = accept(session, completion)
+        assert artifact.reference == reference
+        inventory[reference] = completion.value
         confirm(session)
+    return inventory
 
 
-def test_pending_checkpoint_blocks_actions_and_rejects_foreign_consumed_receipts() -> None:
+def test_pending_checkpoint_and_consumed_or_foreign_receipts():
     session = begin(context())
     pending = session.pending
     assert pending is not None
@@ -90,224 +175,230 @@ def test_pending_checkpoint_blocks_actions_and_rejects_foreign_consumed_receipts
         session.next_action()
     with pytest.raises(ValueError, match="acknowledgement"):
         session.confirm_checkpoint(CheckpointReceipt("foreign", pending.generation, pending.sha256))
-    with pytest.raises(ValueError, match="acknowledgement"):
-        session.confirm_checkpoint(
-            CheckpointReceipt(pending.session_id, pending.generation, "wrong")
-        )
     receipt = confirm(session)
     with pytest.raises(ValueError, match="acknowledgement"):
         session.confirm_checkpoint(receipt)
-    action = session.next_action()
-    assert isinstance(action, Action)
-    with pytest.raises(ValueError, match="acknowledgement"):
-        session.record(action.kind, action.payload, ArtifactReceipt(action.reference, "wrong"))
-    record(session, action.payload)
+    completion = retained(session).completion
+    artifact = session.prepare(completion)
+    for receipt in (
+        ArtifactReceipt("wrong", artifact_digest(artifact)),
+        ArtifactReceipt(artifact.reference, "wrong"),
+    ):
+        with pytest.raises(ValueError, match="acknowledgement"):
+            session.record(completion, receipt)
+    accept(session, completion)
     with pytest.raises(ValueError, match="Pending"):
-        session.next_action()
+        session.prepare(completion)
+    confirm(session)
+    with pytest.raises(ValueError, match="active request"):
+        session.record(completion, ArtifactReceipt(artifact.reference, artifact_digest(artifact)))
 
 
-def test_inputs_actions_and_pending_are_detached_from_mutable_callers() -> None:
-    original = context()
-    session = begin(original)
+def test_foreign_completion_and_independently_constructed_completion_rejected():
+    left, right = begin(context()), begin(context())
+    confirm(left)
+    confirm(right)
+    own, foreign = retained(left), retained(right)
+    assert own != foreign
+    assert own.completion != foreign.completion
+    with pytest.raises(ValueError, match="active request"):
+        left.prepare(foreign.completion)
+    with pytest.raises(TypeError, match="constructed by their request"):
+        Completion(object(), object())
+
+
+def test_inputs_completion_artifacts_and_pending_are_detached():
+    ctx = context()
+    session = begin(ctx)
+    ctx.first_after.contents.clear()
+    ctx.sources.contents.clear()
     pending = session.pending
     assert pending is not None
     pending.checkpoint["stage"] = "ready"
-    original.first_after.contents.clear()
-    original.first_after.entries.clear()
-    original.sources.contents.clear()
-    assert original.installed.roots is not None
-    original.installed.roots["home"] = "/wrong"
-    assert session.pending is not None and session.pending.checkpoint["stage"] == "started"
+    assert session.pending is not None
+    assert session.pending.checkpoint["stage"] == "started"
     confirm(session)
-    operation = session.next_action()
-    assert isinstance(operation, Action)
-    record(session, operation.payload)
+    accept(session, retained(session).completion)
     confirm(session)
-    expectations = session.next_action()
-    assert isinstance(expectations, Action)
-    assert isinstance(expectations.payload, ExpectationSet)
-    assert expectations.payload.roots is not None
-    assert expectations.payload.roots["home"] == "/sandbox/home"
+    completion = retained(session).completion
+    value = completion.value
+    assert isinstance(value, ExpectationSet) and value.roots is not None
+    value.roots["home"] = "/wrong"
+    artifact = session.prepare(completion)
+    assert isinstance(artifact, JsonArtifact)
+    document = artifact.document
+    assert isinstance(document, dict)
+    document.clear()
+    assert artifact.document and value.roots["home"] == "/wrong"
+    saved = completion.value
+    assert isinstance(saved, ExpectationSet) and saved.roots is not None
+    assert saved.roots["home"] == "/sandbox/home"
 
 
-@pytest.mark.parametrize("successor", range(len(ARTIFACTS)))
-def test_honest_artifact_one_ahead_is_valid_but_cannot_authorize_dependents(successor: int) -> None:
+def test_prepare_changed_before_is_pure_and_abort_is_idempotent():
     ctx = context()
     session = begin(ctx)
-    inventory = through(session, "before")
-    before = copy.deepcopy(ctx.first_after)
-    operation = inventory["intermediate/operation.json"]
-    assert isinstance(operation, BoundMarkdownMutation)
-    after = copy.deepcopy(before)
-    document = before.contents[KEY]
-    after.contents[KEY] = (
-        document[: operation.start] + operation.replacement + document[operation.end :]
-    )
-    performed = PerformedMutation(operation, hashlib.sha256(after.contents[KEY]).hexdigest())
-    # Rebuild every prefix from independently selected physical observations.
-    session = begin(ctx)
-    confirm(session)
-    inventory: dict[str, object] = {}
-    for index in range(successor + 1):
-        action = session.next_action()
-        assert isinstance(action, Action)
-        payload = {"before": before, "after": after, "performed": performed}.get(
-            action.kind, action.payload
-        )
-        checkpoint = session.checkpoint
-        record(session, payload)
-        inventory[action.reference] = payload
-        if index == successor:
-            result = inspect(ctx, checkpoint, inventory)
-            assert result.diagnostic == "incomplete" and result.ready is None
-            break
-        confirm(session)
-
-
-def test_ready_uses_prepared_baseline_and_failed_mutation_cannot_launder_changes() -> None:
-    for corrupt in (False, True):
-        ctx = context()
-        session = begin(ctx)
-        inventory = through(session, "before")
-        record(session, ctx.first_after)
-        confirm(session)
-        operation = inventory["intermediate/operation.json"]
-        assert isinstance(operation, BoundMarkdownMutation)
-        after = copy.deepcopy(ctx.first_after)
-        document = after.contents[KEY]
-        after.contents[KEY] = document[: operation.start] + document[operation.end :]
-        if corrupt:
-            after.contents[KEY] += b"unexpected personal edit"
-        record(
-            session, PerformedMutation(operation, hashlib.sha256(after.contents[KEY]).hexdigest())
-        )
-        confirm(session)
-        record(session, after)
-        after.contents.clear()
-        confirm(session)
-        action = session.next_action()
-        assert isinstance(action, Action) and action.kind == "verification"
-        record(session, action.payload)
-        confirm(session)
-        next_action = session.next_action()
-        if corrupt:
-            assert isinstance(next_action, Stop) and next_action.diagnostic == "failed"
-        else:
-            assert isinstance(next_action, Action) and next_action.kind == "effective_expectations"
-            assert next_action.payload != inventory["intermediate/repair-plan.json"]
-            record(session, next_action.payload)
-            confirm(session)
-            assert isinstance(session.next_action(), Ready)
-
-
-def test_blocked_and_unstarted_inventory_is_always_checked() -> None:
-    ctx = context()
-    ctx.first_step["progress"] = "incomplete"
-    with pytest.raises(ValueError):
-        inspect(
-            ctx,
-            {"stage": "not_started", "generation": 0, "reason": None},
-            {"expectations/reinstall.json": object()},
-        )
-
-
-def test_future_staging_and_missing_predecessors_are_invalid() -> None:
-    ctx = context()
-    session = begin(ctx)
-    confirm(session)
-    with pytest.raises(ValueError, match="staging"):
-        inspect(ctx, session.checkpoint, {}, ("intermediate/after/0.bin",))
-    with pytest.raises(ValueError, match="ordered prefix"):
-        inspect(ctx, session.checkpoint, {"intermediate/performed.json": object()})
-
-
-def test_external_verdict_mutation_cannot_authorize_preparation() -> None:
-    ctx = context()
-    verdict = ctx.first_step["verification"]
-    assert verdict is not None
-    from tools.install_sandbox.contracts.results import VerificationMismatch
-
-    verdict.mismatches.append(VerificationMismatch("content", *KEY, "good", "bad"))
-    session = begin(ctx)
-    verdict.mismatches.clear()
-    assert isinstance(session.next_action(), Stop)
-
-
-def test_returned_verdict_mutation_cannot_authorize_effective_expectations() -> None:
-    ctx = context()
-    session = begin(ctx)
-    inventory = through(session, "before")
-    record(session, ctx.first_after)
-    confirm(session)
-    operation = inventory["intermediate/operation.json"]
-    assert isinstance(operation, BoundMarkdownMutation)
-    after = copy.deepcopy(ctx.first_after)
-    record(session, PerformedMutation(operation, hashlib.sha256(after.contents[KEY]).hexdigest()))
-    confirm(session)
-    record(session, after)
-    confirm(session)
-    action = session.next_action()
-    assert isinstance(action, Action)
-    record(session, action.payload)
-    assert isinstance(action.payload, VerificationResult)
-    action.payload.mismatches.clear()
-    confirm(session)
-    assert isinstance(session.next_action(), Stop)
-
-
-def test_changed_before_observation_stops_mutation_and_rejects_later_evidence() -> None:
-    ctx = context()
-    session = begin(ctx)
-    inventory = through(session, "before")
+    advance(session, ctx, 3)
+    request = observed(session)
     changed = copy.deepcopy(ctx.first_after)
     changed.contents[KEY] += b"external edit"
-    action = session.next_action()
-    assert isinstance(action, Action)
-    record(session, changed)
-    inventory[action.reference] = changed
+    completion = request.complete(changed)
+    before = session.checkpoint
+    artifact = session.prepare(completion)
+    assert isinstance(artifact, SnapshotArtifact)
+    artifact.snapshot.contents.clear()
+    changed.contents.clear()
+    saved_value = completion.value
+    assert isinstance(saved_value, FilesystemSnapshot)
+    assert artifact.snapshot.contents and saved_value.contents
+    assert session.checkpoint == before and session.pending is None
+    assert session.next_action() is request
+    accept(session, completion)
+    assert session.pending is not None
+    assert session.pending.checkpoint["reason"]
+    saved = session.pending
+    assert saved is not None
+    session.abort()
+    session.abort()
+    for operation in (
+        session.next_action,
+        lambda: session.prepare(completion),
+        lambda: session.record(
+            completion, ArtifactReceipt(artifact.reference, artifact_digest(artifact))
+        ),
+        lambda: session.confirm_checkpoint(
+            CheckpointReceipt(saved.session_id, saved.generation, saved.sha256)
+        ),
+    ):
+        with pytest.raises(ValueError, match="aborted"):
+            operation()
+    assert session.pending == saved and session.checkpoint == before
+
+
+@pytest.mark.parametrize("successor", range(8))
+def test_one_unpublished_successor_is_valid_without_authorizing_dependents(successor: int) -> None:
+    ctx = context()
+    session = begin(ctx)
+    inventory = advance(session, ctx, successor)
+    published = session.checkpoint
+    completion = completion_for(session.next_action(), ctx)
+    accept(session, completion)
+    inventory[REFERENCES[successor]] = completion.value
+    result = inspect(ctx, published, inventory)
+    assert result.diagnostic == "incomplete" and result.ready is None
+
+
+@pytest.mark.parametrize(
+    "corrupt,unavailable,diagnostic",
+    [(False, False, "passed"), (True, False, "failed"), (False, True, "incomplete")],
+)
+def test_ready_or_terminal_verification_replays_at_atomic_publication(
+    corrupt: bool, unavailable: bool, diagnostic: str
+) -> None:
+    ctx = context()
+    session = begin(ctx)
+    inventory = advance(session, ctx, 6, corrupt=corrupt, unavailable=unavailable)
+    published = session.checkpoint
+    request = retained(session)
+    completion = request.completion
+    exposed = completion.value
+    assert isinstance(exposed, VerificationResult)
+    exposed.mismatches.clear()
+    artifact = accept(session, completion)
+    inventory[artifact.reference] = completion.value
+    assert inspect(ctx, published, inventory).diagnostic == "incomplete"
+    # Publication is authoritative even before the live session confirms it.
+    pending = session.pending
+    assert pending is not None
+    assert inspect(ctx, pending.checkpoint, inventory).diagnostic == (
+        diagnostic if diagnostic != "passed" else "incomplete"
+    )
+    confirm(session)
+    if diagnostic == "passed":
+        completion = retained(session).completion
+        artifact = accept(session, completion)
+        inventory[artifact.reference] = completion.value
+        confirm(session)
+        assert isinstance(session.next_action(), Ready)
+    else:
+        assert isinstance(session.next_action(), Stop)
+    assert inspect(ctx, session.checkpoint, inventory).diagnostic == diagnostic
+
+
+def test_wrong_result_types_and_contradictory_observations_rejected_without_changes():
+    ctx = context()
+    session = begin(ctx)
+    advance(session, ctx, 3)
+    request = observed(session)
+    with pytest.raises(ValueError, match="observation"):
+        request.complete(cast(FilesystemSnapshot, object()))
+    broken = copy.deepcopy(ctx.first_after)
+    broken.contents.pop(KEY)
+    checkpoint = session.checkpoint
+    with pytest.raises(ValueError, match="explicit matching obstacle"):
+        session.prepare(request.complete(broken))
+    assert session.checkpoint == checkpoint and session.pending is None
+    accept(session, request.complete(ctx.first_after))
+    confirm(session)
+    mutation = applied(session)
+    with pytest.raises(ValueError, match="performed mutation"):
+        mutation.complete(cast(PerformedMutation, ctx.first_after))
+    accept(session, mutation.complete(PerformedMutation(mutation.operation, "0" * 64)))
+    confirm(session)
+    with pytest.raises(ValueError, match="contradicts"):
+        session.prepare(observed(session).complete(ctx.first_after))
+
+
+def test_changed_before_stops_effects_and_rejects_later_evidence():
+    ctx = context()
+    session = begin(ctx)
+    inventory = advance(session, ctx, 3)
+    changed = copy.deepcopy(ctx.first_after)
+    changed.contents[KEY] += b"external edit"
+    completion = observed(session).complete(changed)
+    artifact = accept(session, completion)
+    inventory[artifact.reference] = completion.value
     confirm(session)
     assert isinstance(session.next_action(), Stop)
     assert inspect(ctx, session.checkpoint, inventory).diagnostic == "incomplete"
-    operation = inventory["intermediate/operation.json"]
-    assert isinstance(operation, BoundMarkdownMutation)
-    inventory["intermediate/performed.json"] = PerformedMutation(operation, "0" * 64)
+    inventory["intermediate/performed.json"] = object()
     with pytest.raises(ValueError, match="published prefix"):
         inspect(ctx, session.checkpoint, inventory)
 
 
-def test_performed_digest_contradiction_is_invalid_even_before_verdict() -> None:
+def test_replay_rejects_tampered_retention_and_future_or_missing_evidence():
     ctx = context()
     session = begin(ctx)
-    inventory = through(session, "before")
-    record(session, ctx.first_after)
-    confirm(session)
-    operation = inventory["intermediate/operation.json"]
-    assert isinstance(operation, BoundMarkdownMutation)
-    record(session, PerformedMutation(operation, "0" * 64))
-    confirm(session)
+    inventory = advance(session, ctx, 2)
+    expectations = inventory["expectations/intermediate.json"]
+    assert isinstance(expectations, ExpectationSet) and expectations.roots is not None
+    expectations.roots["home"] = "/wrong"
     with pytest.raises(ValueError, match="contradicts"):
-        record(session, ctx.first_after)
-
-
-def test_atomic_temporary_files_are_allowed_only_for_next_unpublished_artifact() -> None:
-    ctx = context()
-    session = begin(ctx)
-    confirm(session)
+        inspect(ctx, session.checkpoint, inventory)
+    fresh = begin(ctx)
+    confirm(fresh)
+    with pytest.raises(ValueError, match="staging"):
+        inspect(ctx, fresh.checkpoint, {}, ("intermediate/after/0.bin",))
+    with pytest.raises(ValueError, match="ordered prefix"):
+        inspect(ctx, fresh.checkpoint, {"intermediate/performed.json": object()})
     assert (
-        inspect(ctx, session.checkpoint, {}, ("intermediate/.operation.json.token.tmp",)).diagnostic
+        inspect(ctx, fresh.checkpoint, {}, ("intermediate/.operation.json.token.tmp",)).diagnostic
         == "incomplete"
     )
-    with pytest.raises(ValueError, match="staging"):
-        inspect(ctx, session.checkpoint, {}, ("intermediate/.performed.json.token.tmp",))
-    action = session.next_action()
-    assert isinstance(action, Action)
-    with pytest.raises(ValueError, match="preceding checkpoint"):
-        inspect(
-            ctx,
-            session.checkpoint,
-            {action.reference: action.payload},
-            ("expectations/.intermediate.json.token.tmp",),
-        )
+
+
+def test_catalogue_codecs_roundtrip_logical_facts():
+    ctx = context()
+    session = begin(ctx)
+    confirm(session)
+    for descriptor in ARTIFACTS:
+        completion = completion_for(session.next_action(), ctx)
+        artifact = session.prepare(completion)
+        raw = artifact.document if isinstance(artifact, JsonArtifact) else artifact.snapshot
+        decoded = descriptor.decode(raw)
+        assert artifact_digest(decoded) == artifact_digest(completion.value)
+        accept(session, completion)
+        confirm(session)
 
 
 @pytest.mark.parametrize(
@@ -320,68 +411,47 @@ def test_atomic_temporary_files_are_allowed_only_for_next_unpublished_artifact()
     ],
 )
 def test_malformed_checkpoint_is_invalid(checkpoint: object) -> None:
-    from tools.install_sandbox.contracts.results import IntermediateEvidence
-
     with pytest.raises(ValueError):
         inspect(context(), cast(IntermediateEvidence, checkpoint), {})
 
 
-def test_missing_snapshot_bytes_without_read_obstacle_are_invalid() -> None:
+def test_foreign_performed_operation_cannot_be_retained() -> None:
+    from dataclasses import replace
+
     ctx = context()
     session = begin(ctx)
-    through(session, "before")
-    broken = copy.deepcopy(ctx.first_after)
-    broken.contents.pop(KEY)
-    with pytest.raises(ValueError, match="explicit matching obstacle"):
-        record(session, broken)
+    advance(session, ctx, 4)
+    request = applied(session)
+    other = replace(request.operation, replacement=b"different mutation")
+    completion = request.complete(PerformedMutation(other, "0" * 64))
+    checkpoint = session.checkpoint
+    with pytest.raises(ValueError, match="contradicts"):
+        session.prepare(completion)
+    assert session.checkpoint == checkpoint and session.pending is None
+    assert session.next_action() is request
 
 
-def test_snapshot_read_obstacle_stops_preparation_honestly() -> None:
+def test_unavailable_before_is_retainable_but_cannot_authorize_mutation() -> None:
     ctx = context()
     session = begin(ctx)
-    through(session, "before")
-    blocked = copy.deepcopy(ctx.first_after)
-    blocked.contents.pop(KEY)
-    blocked.obstacles.append(
+    advance(session, ctx, 3)
+    observation = copy.deepcopy(ctx.first_after)
+    observation.contents.pop(KEY)
+    observation.obstacles.append(
         {"operation": "read_file", "root": KEY[0], "path": KEY[1], "reason": "Denied"}
     )
-    record(session, blocked)
+    accept(session, observed(session).complete(observation))
     confirm(session)
-    result = session.next_action()
-    assert isinstance(result, Stop) and result.diagnostic == "incomplete"
+    assert isinstance(session.next_action(), Stop)
 
 
-@pytest.mark.parametrize("field,value", [("stage", "ready"), ("reason", "altered")])
-def test_writer_checkpoint_receipt_binds_actual_published_checkpoint(
-    tmp_path: Path,
-    field: str,
-    value: str,
-) -> None:
-    from tools.install_sandbox.container.evidence_writer import TestResultWriter
-    from tools.install_sandbox.contracts.results import InstallTestResult
-
-    session = begin(context())
-    pending = session.pending
-    assert pending is not None
-    if field == "stage":
-        pending.checkpoint["stage"] = value
-    else:
-        pending.checkpoint["reason"] = value
-    result = InstallTestResult(
-        {"name": "test", "target": "controlled", "scope": "project"},
-        {
-            "source": "campaign",
-            "ready": True,
-            "reason": None,
-            "log": "preparation.log",
-            "stage": "initial_verified",
-        },
-        [],
-        "incomplete",
-        {},
-    )
-    receipt = TestResultWriter(tmp_path).write_checkpoint(result, pending)
-    with pytest.raises(ValueError, match="acknowledgement"):
-        session.confirm_checkpoint(receipt)
-    with pytest.raises(ValueError, match="Pending"):
-        session.next_action()
+def test_same_digest_wrong_logical_type_is_rejected_during_replay() -> None:
+    ctx = context()
+    session = begin(ctx)
+    inventory = advance(session, ctx, 1)
+    operation = inventory[REFERENCES[0]]
+    assert isinstance(operation, BoundMarkdownMutation)
+    # A decoded dictionary could hash identically but is not a decoded operation.
+    inventory[REFERENCES[0]] = operation.to_data()
+    with pytest.raises(ValueError, match="Wrong result type"):
+        inspect(ctx, session.checkpoint, inventory)

@@ -13,10 +13,11 @@ from tests.install_sandbox.component.container.test_missing_section_run import (
     conduct as conduct_missing,
 )
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as ResultWriter
-from tools.install_sandbox.contracts.results import InstallTestResult
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.results import ArtifactReceipt, InstallTestResult
 from tools.install_sandbox.host.result_reader import MalformedEvidence, read_evidence
+from tools.install_sandbox.rules.repair_actions import JsonArtifact, SnapshotArtifact
 
 
 @pytest.fixture
@@ -27,14 +28,12 @@ def stopped_archive(
     scenario, status = request.param
     observe = EffectEnvironment.observe_intermediate
 
-    def stop(
-        environment: EffectEnvironment, writer: ResultWriter, phase: str
-    ) -> FilesystemSnapshot:
+    def stop(environment: EffectEnvironment, phase: str) -> FilesystemSnapshot:
         if phase == "after":
             if status == "incomplete":
                 raise OSError("Controlled interruption before preparation observation")
             (environment.project / "foreign-file").write_bytes(b"Unexpected preparation effect.\n")
-        return observe(environment, writer, phase)
+        return observe(environment, phase)
 
     monkeypatch.setattr(EffectEnvironment, "observe_intermediate", stop)
     conduct = conduct_missing if scenario == "missing-section" else conduct_altered
@@ -89,14 +88,17 @@ def test_stopped_preparation_rejects_present_forged_repair_expectations(
 def test_effective_expectations_ahead_of_checkpoint_are_validated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, tampering: str
 ) -> None:
-    write = ResultWriter.write_metadata
+    retain = ResultWriter.retain
 
-    def interrupted(writer: ResultWriter, relative: str, value: object) -> None:
-        write(writer, relative, value)
-        if relative == "expectations/reinstall.json":
+    def interrupted(
+        writer: ResultWriter, artifact: JsonArtifact | SnapshotArtifact
+    ) -> ArtifactReceipt:
+        receipt = retain(writer, artifact)
+        if artifact.reference == "expectations/reinstall.json":
             raise OSError("Interrupted after effective expectations publication")
+        return receipt
 
-    monkeypatch.setattr(ResultWriter, "write_metadata", interrupted)
+    monkeypatch.setattr(ResultWriter, "retain", interrupted)
     conduct = conduct_missing if scenario == "missing-section" else conduct_altered
     result, installer = conduct(tmp_path)
     assert result.status == "incomplete"

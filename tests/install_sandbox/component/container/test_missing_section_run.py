@@ -8,20 +8,20 @@ import pytest
 
 from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
-from tools.install_sandbox.rules.repair_scenario import PreparationPlan, MarkdownRepairScenario
 from tools.install_sandbox.container.runner import InstallTestRunner
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import (
     SubjectContext,
     build_effect_cases,
 )
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import InstallTestResult, VerificationResult
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
+from tools.install_sandbox.rules.repair_scenario import MarkdownRepairScenario, PreparationPlan
 
 # Literal outputs are deliberately independent from both builder fragments and its slice.
 BEFORE = "## Personal before\nKeep before.\n\n"
@@ -156,14 +156,12 @@ def test_failed_preparation_blocks_second_command(
     else:
         observe = EffectEnvironment.observe_intermediate
 
-        def unavailable(
-            environment: EffectEnvironment, writer: TestResultWriter, phase: str
-        ) -> FilesystemSnapshot:
+        def unavailable(environment: EffectEnvironment, phase: str) -> FilesystemSnapshot:
             if failure == "unobservable" and phase == "after":
                 raise OSError("Controlled missing observation")
             if failure == "changed" and phase == "before":
                 (environment.project / "GUIDE.md").write_text(BEFORE + AFTER)
-            return observe(environment, writer, phase)
+            return observe(environment, phase)
 
         monkeypatch.setattr(EffectEnvironment, "observe_intermediate", unavailable)
 
@@ -251,13 +249,11 @@ def test_removal_rejects_foreign_changes_and_incomplete_observations(
 ) -> None:
     observe = EffectEnvironment.observe_intermediate
 
-    def altered(
-        environment: EffectEnvironment, writer: TestResultWriter, phase: str
-    ) -> FilesystemSnapshot:
+    def altered(environment: EffectEnvironment, phase: str) -> FilesystemSnapshot:
         if phase == "after" and not obstructed:
             (environment.project / "foreign-file").write_bytes(b"Unrelated change during removal")
         if phase != "after" or not obstructed:
-            return observe(environment, writer, phase)
+            return observe(environment, phase)
         read_bytes = Path.read_bytes
 
         def unreadable(path: Path) -> bytes:
@@ -267,7 +263,7 @@ def test_removal_rejects_foreign_changes_and_incomplete_observations(
 
         with monkeypatch.context() as capture:
             capture.setattr(Path, "read_bytes", unreadable)
-            return observe(environment, writer, phase)
+            return observe(environment, phase)
 
     monkeypatch.setattr(EffectEnvironment, "observe_intermediate", altered)
     result, installer = conduct(tmp_path)

@@ -1,26 +1,44 @@
 """Counterexamples for object invariants and durable publication windows."""
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
+
 import pytest
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.contracts.results import SnapshotEntry
-from experiment_adapter import run_fixture, replay
+
+from experiment_adapter import replay, run_fixture
+from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.results import (
+    ArtifactReceipt,
+    CheckpointReceipt,
+    EvidenceWriteError,
+    InstallTestResult,
+    SnapshotEntry,
+)
+from tools.install_sandbox.rules.repair_actions import JsonArtifact, SnapshotArtifact
+from tools.install_sandbox.rules.repair_protocol import (
+    PendingCheckpoint,
+    RepairInputs,
+    RepairSession,
+)
 
 
 @pytest.mark.parametrize("phase", ["before", "after"])
 def test_failure_after_snapshot_blobs_before_publication_is_replayable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
 ):
-    original = Writer.write_intermediate_snapshot
+    original = Writer.retain
 
-    def interrupt(self: Writer, snapshot: FilesystemSnapshot, name: str) -> None:
-        original(self, snapshot, name)
-        if name == phase:
+    def interrupt(self: Writer, artifact: JsonArtifact | SnapshotArtifact) -> ArtifactReceipt:
+        receipt = original(self, artifact)
+        if artifact.reference == f"intermediate/{phase}.json":
             raise OSError("Interrupted after durable snapshot before acknowledgement")
+        return receipt
 
-    monkeypatch.setattr(Writer, "write_intermediate_snapshot", interrupt)
+    monkeypatch.setattr(Writer, "retain", interrupt)
     outcome = run_fixture(tmp_path, {"case": "missing-section"})
     assert outcome["run_status"] == outcome["replay_status"] == "incomplete"
     assert outcome["calls"] == 1
@@ -28,10 +46,19 @@ def test_failure_after_snapshot_blobs_before_publication_is_replayable(
     assert replay(Path(outcome["proof"])) == "incomplete"
 
 
-def test_writer_does_not_acknowledge_missing_artifact(tmp_path: Path) -> None:
+def test_writer_rejects_corrupted_retained_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tools.install_sandbox.contracts.results import EvidenceWriteError
+
     writer = Writer(tmp_path)
-    with pytest.raises(Exception, match="not been retained"):
-        writer.acknowledge("intermediate/after.json", {})
+
+    def corrupt(relative: str, document: object) -> None:
+        (tmp_path / relative).write_text('{"different": true}')
+
+    monkeypatch.setattr(writer, "_write_json", corrupt)
+    with pytest.raises(EvidenceWriteError, match="differs"):
+        writer.retain(JsonArtifact("artifact.json", {"expected": True}))
 
 
 def test_later_metadata_is_forbidden_without_durable_operation(tmp_path: Path) -> None:
@@ -60,15 +87,15 @@ def test_bad_mutation_operation_tamper_is_invalid(tmp_path: Path) -> None:
 def test_target_read_obstacle_after_mutation_replays_incomplete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
-    from tools.install_sandbox.container.environment import ObservedEnvironment
-    from tools.install_sandbox.contracts.results import SnapshotEntry
-
     from collections.abc import Callable
     from typing import cast
 
+    from tools.install_sandbox.container.environment import ObservedEnvironment
+    from tools.install_sandbox.contracts.results import SnapshotEntry
+
     original = cast(
         Callable[[ObservedEnvironment, FilesystemSnapshot, SnapshotEntry, Path], None],
-        getattr(ObservedEnvironment, "_file"),
+        vars(ObservedEnvironment)["_file"],
     )
     captures = 0
 
@@ -101,6 +128,7 @@ def test_target_read_obstacle_after_mutation_replays_incomplete(
 
 def test_performed_receipt_does_not_mask_missing_or_conflicting_bytes(tmp_path: Path) -> None:
     import json
+
     from tools.install_sandbox.contracts.bound_mutation import PerformedMutation
 
     outcome = run_fixture(tmp_path, {"case": "missing-section", "fault": "wrong-mutation"})
@@ -136,3 +164,143 @@ def test_performed_receipt_does_not_mask_missing_or_conflicting_bytes(tmp_path: 
     snapshot.contents[("project", "GUIDE.md")] = b"Present but different bytes."
     with pytest.raises(ValueError, match="contradicts"):
         performed.verify(performed.operation, snapshot)
+
+
+class ProcessDisappeared(BaseException):
+    pass
+
+
+class CapturedExecution(TypedDict, total=False):
+    session: RepairSession
+    writer: Writer
+    mutations: int
+    retry: Callable[[], object]
+
+
+def capture_execution(
+    monkeypatch: pytest.MonkeyPatch, captured: CapturedExecution
+) -> None:
+    from tools.install_sandbox.container import intermediate_execution
+
+    begin = intermediate_execution.begin
+    apply = intermediate_execution.apply_markdown_mutation
+    advance = cast(
+        Callable[
+            [RepairSession, RepairInputs, EffectEnvironment, Writer, InstallTestResult], object
+        ],
+        vars(intermediate_execution)["_advance"],
+    )
+
+    def capture_advance(
+        session: RepairSession, inputs: RepairInputs, environment: EffectEnvironment,
+        writer: Writer, result: InstallTestResult,
+    ) -> object:
+        captured["retry"] = lambda: advance(session, inputs, environment, writer, result)
+        return advance(session, inputs, environment, writer, result)
+
+    def begin_session(inputs: RepairInputs) -> RepairSession:
+        session = begin(inputs)
+        captured["session"] = session
+        return session
+
+    def mutate(
+        operation: BoundMarkdownMutation,
+        environment: EffectEnvironment,
+        case_bytes: bytes,
+        first_after: FilesystemSnapshot,
+    ) -> None:
+        apply(operation, environment, case_bytes, first_after)
+        captured["mutations"] = captured.get("mutations", 0) + 1
+
+    monkeypatch.setattr(intermediate_execution, "_advance", capture_advance)
+    monkeypatch.setattr(intermediate_execution, "begin", begin_session)
+    monkeypatch.setattr("experiment_adapter.apply_markdown_mutation", mutate)
+
+
+def interrupt_execution(
+    monkeypatch: pytest.MonkeyPatch, window: str, failure: type[BaseException]
+) -> CapturedExecution:
+    captured: CapturedExecution = {"mutations": 0}
+    original_retain = Writer.retain
+    original_checkpoint = Writer.write_checkpoint
+    original_confirm = RepairSession.confirm_checkpoint
+    capture_execution(monkeypatch, captured)
+
+    def retain(writer: Writer, artifact: JsonArtifact | SnapshotArtifact) -> ArtifactReceipt:
+        captured["writer"] = writer
+        if window == "mutation-retention" and artifact.reference == "intermediate/performed.json":
+            assert captured.get("mutations") == 1
+            raise failure("Controlled retention interruption")
+        return original_retain(writer, artifact)
+
+    def checkpoint(
+        writer: Writer, result: InstallTestResult, pending: PendingCheckpoint
+    ) -> CheckpointReceipt:
+        captured["writer"] = writer
+        if window == "initial" and not writer.halted:
+            raise failure("Controlled initial publication interruption")
+        return original_checkpoint(writer, result, pending)
+
+    def confirm(session: RepairSession, receipt: CheckpointReceipt) -> None:
+        if window == "confirmation" and session is captured.get("session"):
+            raise failure("Controlled confirmation interruption")
+        return original_confirm(session, receipt)
+
+    monkeypatch.setattr(Writer, "retain", retain)
+    monkeypatch.setattr(Writer, "write_checkpoint", checkpoint)
+    monkeypatch.setattr(RepairSession, "confirm_checkpoint", confirm)
+    return captured
+
+
+@pytest.mark.parametrize("window", ["initial", "mutation-retention", "confirmation"])
+@pytest.mark.parametrize("disappearance", [False, True])
+def test_escaping_failure_aborts_session_and_halts_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, window: str, disappearance: bool
+) -> None:
+    failure = ProcessDisappeared if disappearance else OSError
+    captured = interrupt_execution(monkeypatch, window, failure)
+    if disappearance:
+        with pytest.raises(ProcessDisappeared):
+            run_fixture(tmp_path, {"case": "missing-section"})
+    else:
+        outcome = run_fixture(tmp_path, {"case": "missing-section"})
+        assert outcome["run_status"] == outcome["replay_status"] == "incomplete"
+        assert outcome["calls"] == 1
+    assert "writer" in captured and "session" in captured and "retry" in captured
+    assert captured["writer"].halted
+    session = captured["session"]
+    with pytest.raises(ValueError):
+        session.next_action()
+    session.abort()  # Idempotent after a physical failure.
+    if window == "mutation-retention":
+        assert captured.get("mutations") == 1
+    published = tmp_path / "proof/result.json"
+    before_retry = published.read_bytes()
+    mutations = captured.get("mutations")
+    with pytest.raises((ValueError, EvidenceWriteError)):
+        captured["retry"]()
+    assert published.read_bytes() == before_retry
+    assert captured.get("mutations") == mutations
+    assert replay(tmp_path / "proof") == "incomplete"
+
+
+def test_writer_verifies_retained_snapshot_blobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tools.install_sandbox.contracts.results import EvidenceWriteError
+
+    writer = Writer(tmp_path)
+    snapshot = FilesystemSnapshot(
+        entries=[cast(SnapshotEntry, {"root": "project", "path": "target", "kind": "file"})],
+        contents={("project", "target"): b"Observed bytes"},
+    )
+    from collections.abc import Callable
+
+    write = cast(Callable[..., None], vars(Writer)["_write_bytes"])
+
+    def corrupt(relative: str, content: bytes, *, append: bool = False) -> None:
+        write(writer, relative, b"Corrupted bytes", append=append)
+
+    monkeypatch.setattr(writer, "_write_bytes", corrupt)
+    with pytest.raises(EvidenceWriteError, match="snapshot differs"):
+        writer.retain(SnapshotArtifact("intermediate/before.json", snapshot))

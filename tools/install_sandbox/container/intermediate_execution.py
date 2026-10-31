@@ -1,24 +1,25 @@
 """Perform only the actions authorized by the published repair protocol."""
 
-from dataclasses import asdict
-
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.markdown_mutation import (
     apply_markdown_mutation,
     capture_performed_mutation,
 )
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
     InstallTestResult,
-    VerificationResult,
+)
+from tools.install_sandbox.rules.repair_actions import (
+    ApplyMarkdownMutation,
+    Completion,
+    ObserveSnapshot,
+    RetainEvidence,
 )
 from tools.install_sandbox.rules.repair_protocol import (
-    Action,
     Ready,
     RepairInputs,
     RepairSession,
@@ -28,26 +29,17 @@ from tools.install_sandbox.rules.repair_protocol import (
 
 
 def _perform(
-    action: Action,
+    action: RetainEvidence | ObserveSnapshot | ApplyMarkdownMutation,
     inputs: RepairInputs,
     environment: EffectEnvironment,
-    writer: TestResultWriter,
-) -> object:
-    if action.kind in {"before", "after"}:
-        return environment.observe_intermediate(writer, action.kind)
-    payload = action.payload
-    if action.kind == "performed":
-        assert isinstance(payload, BoundMarkdownMutation)
-        apply_markdown_mutation(payload, environment, inputs.case_bytes, inputs.first_after)
-        payload = capture_performed_mutation(payload, environment)
-    if isinstance(payload, (BoundMarkdownMutation, PerformedMutation, ExpectationSet)):
-        serialized = payload.to_data()
-    elif isinstance(payload, VerificationResult):
-        serialized = asdict(payload)
-    else:
-        raise ValueError("Unknown repair action payload")
-    writer.write_metadata(action.reference, serialized)
-    return payload
+) -> Completion:
+    if isinstance(action, RetainEvidence):
+        return action.completion
+    if isinstance(action, ObserveSnapshot):
+        return action.complete(environment.observe_intermediate(action.phase))
+    operation = action.operation
+    apply_markdown_mutation(operation, environment, inputs.case_bytes, inputs.first_after)
+    return action.complete(capture_performed_mutation(operation, environment))
 
 
 def _advance(
@@ -57,17 +49,23 @@ def _advance(
     writer: TestResultWriter,
     result: InstallTestResult,
 ) -> Ready | Stop:
-    pending = session.pending
-    if pending is not None:
-        session.confirm_checkpoint(writer.write_checkpoint(result, pending))
-    while True:
-        action = session.next_action()
-        if isinstance(action, (Ready, Stop)):
-            return action
-        payload = _perform(action, inputs, environment, writer)
-        receipt = writer.acknowledge(action.reference, payload)
-        pending = session.record(action.kind, payload, receipt)
-        session.confirm_checkpoint(writer.write_checkpoint(result, pending))
+    try:
+        pending = session.pending
+        if pending is not None:
+            session.confirm_checkpoint(writer.write_checkpoint(result, pending))
+        while True:
+            action = session.next_action()
+            if isinstance(action, (Ready, Stop)):
+                return action
+            completion = _perform(action, inputs, environment)
+            artifact = session.prepare(completion)
+            receipt = writer.retain(artifact)
+            pending = session.record(completion, receipt)
+            session.confirm_checkpoint(writer.write_checkpoint(result, pending))
+    except BaseException:
+        session.abort()
+        writer.halted = True
+        raise
 
 
 def conduct_intermediate(

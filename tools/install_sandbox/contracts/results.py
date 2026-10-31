@@ -1,7 +1,9 @@
 """Observed facts, verification diagnostics and durable local evidence."""
 
 from dataclasses import dataclass, field
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict, cast
+
+from tools.install_sandbox.contracts.spec import fields, text
 
 
 class ObservationObstacle(TypedDict):
@@ -34,6 +36,48 @@ class VerificationResult:
     complete: bool = True
     mismatches: list[VerificationMismatch] = field(default_factory=list[VerificationMismatch])
     obstacles: list[ObservationObstacle] = field(default_factory=list[ObservationObstacle])
+
+    @classmethod
+    def from_data(cls, value: object) -> "VerificationResult":
+        """Decode the strict verdict shared by execution evidence and repair replay."""
+        data = fields(value, "complete mismatches obstacles")
+        complete = data["complete"]
+        if not isinstance(complete, bool):
+            raise ValueError("Expected a boolean")
+        result = cls(
+            complete,
+            [_verification_mismatch(item) for item in _verdict_list(data["mismatches"])],
+            [parse_obstacle(item) for item in _verdict_list(data["obstacles"])],
+        )
+        if result.complete and result.obstacles:
+            raise ValueError("Complete verification cannot contain observation obstacles")
+        return result
+
+
+def _verdict_list(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise ValueError("Expected a list")
+    return cast(list[object], value)
+
+
+def _verification_mismatch(value: object) -> VerificationMismatch:
+    data = fields(value, "type root path expected observed")
+    expected, observed = data["expected"], data["observed"]
+    if not isinstance(expected, str) or not isinstance(observed, str):
+        raise ValueError("Expected a string")
+    return VerificationMismatch(
+        text(data["type"]), text(data["root"]), text(data["path"]), expected, observed
+    )
+
+
+def parse_obstacle(value: object) -> ObservationObstacle:
+    data = fields(value, "operation root path reason")
+    return {
+        "operation": text(data["operation"]),
+        "root": text(data["root"]),
+        "path": text(data["path"]),
+        "reason": text(data["reason"]),
+    }
 
 
 class PreparationEvidence(TypedDict):

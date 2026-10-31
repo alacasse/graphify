@@ -29,9 +29,13 @@ from tools.install_sandbox.contracts.timings import (
     measure,
     skip_pending,
 )
+from tools.install_sandbox.rules.repair_actions import (
+    JsonArtifact,
+    SnapshotArtifact,
+    artifact_digest,
+)
 from tools.install_sandbox.rules.repair_protocol import (
     PendingCheckpoint,
-    artifact_digest,
     checkpoint_digest,
 )
 
@@ -53,20 +57,25 @@ class TestResultWriter:
         except OSError as error:
             raise EvidenceWriteError(f"Cannot create evidence directory: {error}") from error
 
-    def acknowledge(self, relative: str, payload: object) -> ArtifactReceipt:
-        """Bind a receipt to the persisted payload, not merely a filename."""
-        from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-
+    def retain(self, artifact: JsonArtifact | SnapshotArtifact) -> ArtifactReceipt:
+        """Retain a protocol-encoded transport and verify the persisted bytes."""
+        if self.halted:
+            raise EvidenceWriteError("Evidence writer has halted")
+        relative = artifact.reference
         path = self.output_directory / relative
-        if path.is_symlink() or not path.is_file():
-            raise EvidenceWriteError("Artifact has not been retained")
         if not path.resolve().is_relative_to(self.output_directory.resolve()):
             raise EvidenceWriteError("Artifact escaped the evidence directory")
-        if isinstance(payload, FilesystemSnapshot):
-            self._check_snapshot_receipt(path, payload, relative.removesuffix(".json"))
-        elif artifact_digest(json.loads(path.read_bytes())) != artifact_digest(payload):
+        if isinstance(artifact, JsonArtifact):
+            self._write_json(relative, artifact.document)
+        else:
+            self._snapshot(artifact.snapshot, relative.removesuffix(".json"))
+        if path.is_symlink() or not path.is_file():
+            raise EvidenceWriteError("Artifact has not been retained")
+        if isinstance(artifact, SnapshotArtifact):
+            self._check_snapshot_receipt(path, artifact.snapshot, relative.removesuffix(".json"))
+        elif artifact_digest(json.loads(path.read_bytes())) != artifact_digest(artifact):
             raise EvidenceWriteError("Published artifact differs from retained facts")
-        return ArtifactReceipt(relative, artifact_digest(payload))
+        return ArtifactReceipt(relative, artifact_digest(artifact))
 
     def _check_snapshot_receipt(self, path: Path, payload: FilesystemSnapshot, prefix: str) -> None:
         expected = self._manifest(payload, prefix)
@@ -84,6 +93,8 @@ class TestResultWriter:
     def write_checkpoint(
         self, result: InstallTestResult, pending: PendingCheckpoint
     ) -> CheckpointReceipt:
+        if self.halted:
+            raise EvidenceWriteError("Evidence writer has halted")
         candidate = replace(
             result, intermediate_preparation=dict(pending.checkpoint), status=pending.status
         )
@@ -147,11 +158,6 @@ class TestResultWriter:
                 ) from error
         prefix = "expected" if name == "expected" else f"steps/{step_index}/{name}"
         self._snapshot(snapshot, prefix)
-
-    def write_intermediate_snapshot(self, snapshot: FilesystemSnapshot, name: str) -> None:
-        if name not in {"before", "after"}:
-            raise ValueError("Invalid intermediate observation phase")
-        self._snapshot(snapshot, f"intermediate/{name}")
 
     @staticmethod
     def _manifest(snapshot: FilesystemSnapshot, prefix: str) -> dict[str, list[SnapshotEntry]]:

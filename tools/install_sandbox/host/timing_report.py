@@ -2,7 +2,7 @@
 
 from tools.install_sandbox.contracts.results import InstallTestResult
 from tools.install_sandbox.contracts.timings import Timing
-from tools.install_sandbox.host.coordinator import CampaignResult, CoordinatedResult
+from tools.install_sandbox.host.coordinator import CampaignResult
 
 _LABELS = {
     "inputs": "Prepare campaign inputs",
@@ -21,7 +21,6 @@ _LABELS = {
     "checks": "Observe, verify and save evidence",
     "step_preparation": "Prepare and check the next step",
     "finalize": "Finalize the case result",
-    "additional_checks": "Additional test checks",
 }
 _STATES = {
     "pending": "unavailable (not reached in saved measurements)",
@@ -50,40 +49,6 @@ def _line(record: Timing) -> str:
     )
     detail = f" — {record.diagnostic}" if record.diagnostic else ""
     return f"  {label}: {value}{detail}"
-
-
-def _remainder(total: float | None, records: list[Timing]) -> str:
-    if total is None or any(r.state not in {"measured", "not_run"} for r in records):
-        return "unavailable (phase measurements incomplete)"
-    remaining = total - sum(r.duration_seconds or 0 for r in records)
-    return format_duration(max(0.0, remaining))
-
-
-def render_timings(result: CoordinatedResult, additional_checks: Timing) -> str:
-    case = result.test.case["name"] if result.test is not None else "unavailable"
-    verdict = result.test.status if result.test is not None else "unavailable"
-    internal = result.container_timings
-    lines = [
-        f"Case: {case} — {verdict}",
-        f"Docker: {result.container.state}; cleanup complete: {result.container.cleanup_complete}",
-        f"Timing evidence: {'incomplete' if internal.diagnostics else 'complete'}",
-        "",
-        f"Coordinator total: {format_duration(result.duration_seconds)}",
-        *[_line(record) for record in result.timings],
-        f"  Host time not detailed: {_remainder(result.duration_seconds, result.timings)}",
-        "",
-        "Container detail (included in container execution, never added to the host total):",
-        *[_line(record) for record in internal.phases],
-        f"  Measured container work: {format_duration(internal.duration_seconds)}",
-        f"  Container work not detailed: {_remainder(internal.duration_seconds, internal.phases)}",
-        "  Container startup and exit are not individually measured.",
-        "",
-        _line(additional_checks).strip(),
-        "Helper setup and final report writing are outside the coordinator total.",
-        "Durations include waiting; cache, network and machine load can change them.",
-    ]
-    lines.extend(f"Timing diagnostic: {message}" for message in internal.diagnostics)
-    return "\n".join(lines) + "\n"
 
 
 def render_campaign(result: CampaignResult) -> str:

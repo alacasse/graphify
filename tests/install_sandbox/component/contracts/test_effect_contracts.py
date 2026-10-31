@@ -18,7 +18,6 @@ from tools.install_sandbox.contracts.effects import (
     JsonHooksEffect,
     MarkdownSectionEffect,
     SkillEffect,
-    effect_identity,
 )
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.spec import HookExpectation
@@ -147,12 +146,6 @@ def test_unsupported_rule_and_path_rejected() -> None:
         build_reinstall_case(spec, subject)
     with pytest.raises(ValueError, match="relative path"):
         Destination("project", "../escape")
-    assert effect_identity(spec.effects[1]) == (
-        "markdown-section",
-        "project",
-        "GUIDE.md",
-        "## graphify",
-    )
 
 
 def test_personal_witnesses_cannot_collide_with_effects() -> None:

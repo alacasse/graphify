@@ -50,11 +50,6 @@ class JsonHooksEffect:
 Effect = SkillEffect | MarkdownSectionEffect | JsonHooksEffect
 
 
-def effect_identity(effect: Effect) -> tuple[str, ...]:
-    identity = (effect.kind, effect.destination.root, effect.destination.path)
-    return identity + ((effect.marker,) if isinstance(effect, MarkdownSectionEffect) else ())
-
-
 def effect_from_data(value: object) -> Effect:
     if not isinstance(value, dict):
         raise ValueError("Expected effect object")

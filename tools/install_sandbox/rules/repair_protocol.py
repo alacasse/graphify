@@ -96,7 +96,6 @@ class Action:
     kind: str
     reference: str
     payload: object
-    session_id: str
     generation: int
 
 
@@ -109,7 +108,6 @@ class Ready:
 @dataclass(frozen=True)
 class Stop:
     reason: str
-    checkpoint: IntermediateEvidence
     diagnostic: Literal["failed", "incomplete"] = "incomplete"
 
 
@@ -212,7 +210,6 @@ class RepairSession:
             )
             return Stop(
                 self._blocked or self._reason or "Stopped",
-                self.checkpoint,
                 "failed" if failed else "incomplete",
             )
         assert self._plan is not None
@@ -223,7 +220,6 @@ class RepairSession:
             kind,
             reference,
             copy.deepcopy(self._action_payload(kind)),
-            self.session_id,
             self._checkpoint["generation"] + 1,
         )
 

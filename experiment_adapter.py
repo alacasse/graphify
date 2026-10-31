@@ -15,7 +15,8 @@ from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.environment import ObservedEnvironment
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
+from tools.install_sandbox.container import intermediate_execution
+from tools.install_sandbox.container.markdown_mutation import apply_markdown_mutation
 
 
 class FixtureVector(TypedDict, total=False):
@@ -105,7 +106,7 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
         return replace(result, exit_code=7) if vector.get("exit_stage") == stage else result
 
     fault = vector.get("fault")
-    original_apply = BoundMarkdownMutation.apply
+    original_apply = apply_markdown_mutation
     original_observe = EffectEnvironment.observe_intermediate
     original_write = TestResultWriter.write_metadata
     original_snapshot = TestResultWriter.write_intermediate_snapshot
@@ -171,7 +172,7 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
         patch.object(EffectEnvironment, "observe", regular_observe),
         patch.object(ObservedEnvironment, "_file", capture_file),
         patch.object(TestResultWriter, "write_intermediate_snapshot", snapshot),
-        patch.object(BoundMarkdownMutation, "apply", apply),
+        patch.object(intermediate_execution, "apply_markdown_mutation", apply),
         patch.object(EffectEnvironment, "observe_intermediate", observe),
         patch.object(TestResultWriter, "write_metadata", write),
     ):

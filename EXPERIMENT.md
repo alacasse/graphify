@@ -1,5 +1,28 @@
 # Plan B experiment
 
+## Improved protocol checkpoint — 2026-10-31
+
+This checkpoint preserves the completed local improvement before dead-surface
+cleanup. Execution and replay now share the repair protocol, expectations use
+one data representation, and dependencies follow host/container -> rules -> contracts.
+The previous tampered-expectations P2 is covered by regression tests.
+
+The reviewed source/test manifest is unchanged: SHA-256
+`4057dfd82ff95c27c41be94a4d341875c98df6e678fa5de8b4078607f8d27cb2` (126 files).
+The preceding review ran 675 component tests successfully; tests were not rerun
+merely to create this checkpoint.
+
+Known remaining work: remove the audited unused surfaces and migrate the old
+renderer tests first; then address the distinct terminal-checkpoint replay P2.
+An honest interruption after a nonconforming preparation verdict currently
+leaves a published `incomplete` result that replay rejects as malformed evidence.
+The combined failed/interrupted diagnostic still needs an explicit decision.
+No cleanup or P2 fix is included here; this is not acceptance for integration.
+
+The sections below preserve earlier experiment and checkpoint evidence and do
+not describe the current architecture unless explicitly stated above.
+
+
 Base: `a55b53dbb864c5a8a09b6738dbb459d521c78d79`; branch `codex/architecture-b-20261031`.
 
 ## Independent review checkpoint — 2026-10-31

@@ -11,3 +11,5 @@
 !prepare_dependencies.py
 !verified/
 !verified/**
+!rules/
+!rules/**

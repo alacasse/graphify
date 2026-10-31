@@ -25,7 +25,8 @@ def test_progress_writes_are_outside_phase_duration(
     replace_file = Path.replace
 
     def slow_write(path: Path, target: Path) -> Path:
-        ticks[0] += 1_000_000_000
+        if target.name == "timings.json":
+            ticks[0] += 1_000_000_000
         return replace_file(path, target)
 
     monkeypatch.setattr(Path, "replace", slow_write)

@@ -5,7 +5,6 @@ from dataclasses import replace
 from email.parser import BytesParser
 from pathlib import PurePosixPath
 
-from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import (
     JsonHooksEffect,
@@ -13,6 +12,7 @@ from tools.install_sandbox.contracts.effects import (
     SkillEffect,
 )
 from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
 
 

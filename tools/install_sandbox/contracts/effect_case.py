@@ -230,7 +230,7 @@ class EffectInstallCase:
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v4"
+        data["format"] = "explicit-expectations-v5"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -251,7 +251,7 @@ class EffectInstallCase:
             "format name target scope effects subject initial_files operations "
             "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v4":
+        if data["format"] != "explicit-expectations-v5":
             raise ValueError("Unsupported effects case format or operation")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),

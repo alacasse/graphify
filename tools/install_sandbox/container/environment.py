@@ -3,36 +3,14 @@
 from __future__ import annotations
 
 import stat
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tools.install_sandbox.contracts.results import ObservationObstacle, SnapshotEntry
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.results import SnapshotEntry
 
 if TYPE_CHECKING:
     from tools.install_sandbox.container.evidence_writer import TestResultWriter
-
-
-@dataclass
-class FilesystemSnapshot:
-    entries: list[SnapshotEntry] = field(default_factory=list[SnapshotEntry])
-    obstacles: list[ObservationObstacle] = field(default_factory=list[ObservationObstacle])
-    contents: dict[tuple[str, str], bytes] = field(default_factory=dict[tuple[str, str], bytes])
-
-    def entry(self, root: str, path: str) -> SnapshotEntry | None:
-        return next((e for e in self.entries if (e["root"], e["path"]) == (root, path)), None)
-
-    def absent(self, root: str, path: str) -> bool:
-        """An unlisted child is absent only under a completely listed parent."""
-        if self.entry(root, path) is not None:
-            return False
-        parent = str(Path(path).parent)
-        entry = self.entry(root, parent)
-        if entry is not None:
-            return entry["kind"] == "file" or (
-                entry["kind"] == "directory" and entry.get("listing_complete", False)
-            )
-        return parent != path and self.absent(root, parent)
 
 
 def _obstacle(
@@ -40,23 +18,6 @@ def _obstacle(
 ) -> None:
     snapshot.obstacles.append(
         {"operation": operation, "root": root, "path": path, "reason": str(error)}
-    )
-
-
-def same_observation(left: FilesystemSnapshot, right: FilesystemSnapshot) -> bool:
-    """Compare logical observations independently of their archive locations."""
-
-    def inventory(snapshot: FilesystemSnapshot) -> list[tuple[str, str, str, bool | None]]:
-        return sorted(
-            (entry["root"], entry["path"], entry["kind"], entry.get("listing_complete"))
-            for entry in snapshot.entries
-        )
-
-    return (
-        not left.obstacles
-        and not right.obstacles
-        and inventory(left) == inventory(right)
-        and left.contents == right.contents
     )
 
 

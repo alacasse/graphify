@@ -1,70 +1,73 @@
-"""Orchestrate domain transitions only after their evidence is retained."""
+"""Perform only the actions authorized by the published repair protocol."""
 
-from dataclasses import asdict, replace
+from dataclasses import asdict
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot, same_observation
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
-from tools.install_sandbox.container.expectation_builder import preservation_baseline
-from tools.install_sandbox.container.repair_scenario import (
-    MarkdownRepairScenario,
-    PreparationBlocked,
-    PreparationPlan,
+from tools.install_sandbox.container.markdown_mutation import (
+    apply_markdown_mutation,
+    capture_performed_mutation,
 )
-from tools.install_sandbox.contracts.bound_mutation import PerformedMutation
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.repair_progress import RepairProgress
-from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.results import (
+    EvidenceWriteError,
+    InstallTestResult,
+    VerificationResult,
+)
+from tools.install_sandbox.rules.repair_protocol import (
+    Action,
+    Ready,
+    RepairInputs,
+    RepairSession,
+    Stop,
+    begin,
+)
 
 
-def _publish(progress: RepairProgress, writer: TestResultWriter, result: InstallTestResult) -> None:
-    result.intermediate_preparation = progress.to_data()
-    writer.write_result(result)
+def _perform(
+    action: Action,
+    inputs: RepairInputs,
+    environment: EffectEnvironment,
+    writer: TestResultWriter,
+) -> object:
+    if action.kind in {"before", "after"}:
+        return environment.observe_intermediate(writer, action.kind)
+    payload = action.payload
+    if action.kind == "performed":
+        assert isinstance(payload, BoundMarkdownMutation)
+        apply_markdown_mutation(payload, environment, inputs.case_bytes, inputs.first_after)
+        payload = capture_performed_mutation(payload, environment)
+    if isinstance(payload, (BoundMarkdownMutation, PerformedMutation, ExpectationSet)):
+        serialized = payload.to_data()
+    elif isinstance(payload, VerificationResult):
+        serialized = asdict(payload)
+    else:
+        raise ValueError("Unknown repair action payload")
+    writer.write_metadata(action.reference, serialized)
+    return payload
 
 
-def _archive_plan(
-    plan: PreparationPlan, writer: TestResultWriter, result: InstallTestResult
-) -> None:
-    progress = RepairProgress.from_data(result.intermediate_preparation)
-    writer.write_metadata("intermediate/operation.json", plan.operation.to_data())
-    progress = progress.retained_operation(writer.acknowledge("intermediate/operation.json"))
-    _publish(progress, writer, result)
-    writer.write_metadata(
-        "expectations/intermediate.json", plan.after_preparation_expectations.to_data()
-    )
-    progress = progress.retained_expectations(writer.acknowledge("expectations/intermediate.json"))
-    _publish(progress, writer, result)
-    writer.write_metadata("expectations/reinstall.json", plan.second_install_expectations.to_data())
-
-
-def _prepare_and_observe(
-    plan: PreparationPlan,
-    first_after: FilesystemSnapshot,
+def _advance(
+    session: RepairSession,
+    inputs: RepairInputs,
     environment: EffectEnvironment,
     writer: TestResultWriter,
     result: InstallTestResult,
-) -> FilesystemSnapshot:
-    progress = RepairProgress.from_data(result.intermediate_preparation)
-    before = environment.observe_intermediate(writer, "before")
-    progress = progress.retained_before(writer.acknowledge("intermediate/before.json"))
-    _publish(progress, writer, result)
-    if not same_observation(first_after, before):
-        raise ValueError("Environment changed since validated first observation")
-    plan.operation.apply(
-        environment, (writer.output_directory / "case.json").read_bytes(), first_after
-    )
-    performed = PerformedMutation.capture(plan.operation, environment)
-    writer.write_metadata("intermediate/performed.json", performed.to_data())
-    after = environment.observe_intermediate(writer, "after")
-    progress = progress.retained_after(writer.acknowledge("intermediate/after.json"))
-    _publish(progress, writer, result)
-    verdict = EffectVerifier().verify(plan.after_preparation_expectations, after)
-    writer.write_metadata("intermediate/verification.json", asdict(verdict))
-    progress = progress.verified(writer.acknowledge("intermediate/verification.json"), verdict)
-    _publish(progress, writer, result)
-    return after
+) -> Ready | Stop:
+    pending = session.pending
+    if pending is not None:
+        session.confirm_checkpoint(writer.write_checkpoint(result, pending))
+    while True:
+        action = session.next_action()
+        if isinstance(action, (Ready, Stop)):
+            return action
+        payload = _perform(action, inputs, environment, writer)
+        receipt = writer.acknowledge(action.reference, payload)
+        pending = session.record(action.kind, payload, receipt)
+        session.confirm_checkpoint(writer.write_checkpoint(result, pending))
 
 
 def conduct_intermediate(
@@ -76,37 +79,21 @@ def conduct_intermediate(
     writer: TestResultWriter,
     result: InstallTestResult,
 ) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
-    progress = RepairProgress.from_data(result.intermediate_preparation).begin()
+    case_bytes = (writer.output_directory / "case.json").read_bytes()
+    if EffectInstallCase.from_json(case_bytes.decode("utf-8")) != case:
+        raise ValueError("Archived case differs from execution case")
+    inputs = RepairInputs(case_bytes, sources, installed, first_after, result.steps[0])
+    session = begin(inputs)
     result.status = "incomplete"
-    _publish(progress, writer, result)
     try:
-        verdict = result.steps[0]["verification"]
-        assert verdict is not None
-        plan = MarkdownRepairScenario.from_case(case, sources).bind(
-            first_after,
-            "steps/0/after.json",
-            verdict,
-            installed,
-            (writer.output_directory / "case.json").read_bytes(),
-        )
-        if isinstance(plan, PreparationBlocked):
-            raise ValueError(plan.reason)
-        _archive_plan(plan, writer, result)
-        after = _prepare_and_observe(plan, first_after, environment, writer, result)
-        progress = RepairProgress.from_data(result.intermediate_preparation)
-        if progress.permits_repair():
-            repaired = replace(
-                plan.second_install_expectations, baseline=preservation_baseline(after, "reinstall")
-            )
-            writer.write_metadata("expectations/reinstall.json", repaired.to_data())
-            return repaired, after
-        result.status = (
-            "failed" if progress.verification and progress.verification.complete else "incomplete"
-        )
-        progress = progress.interrupt("Intermediate preparation did not conform")
-    except (OSError, ValueError, EvidenceWriteError) as error:
-        progress = RepairProgress.from_data(result.intermediate_preparation).interrupt(error)
-        result.status = "incomplete"
-    result.steps[1]["skip_reason"] = "Intermediate preparation failed; repair not evaluated"
-    _publish(progress, writer, result)
+        outcome = _advance(session, inputs, environment, writer, result)
+    except (OSError, ValueError, EvidenceWriteError):
+        # Keep the last published prefix. No publication retry or dependent effect.
+        writer.halted = True
+        return None
+    if isinstance(outcome, Ready):
+        return outcome.expectations, outcome.baseline
+    result.status = outcome.diagnostic
+    result.steps[1]["skip_reason"] = outcome.reason
+    writer.write_result(result)
     return None

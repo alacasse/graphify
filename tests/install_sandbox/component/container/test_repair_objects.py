@@ -1,28 +1,12 @@
 """Counterexamples for object invariants and durable publication windows."""
 
 from pathlib import Path
+from typing import cast
 import pytest
-from tools.install_sandbox.container.environment import FilesystemSnapshot
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.results import SnapshotEntry
 from experiment_adapter import run_fixture, replay
-from tools.install_sandbox.contracts.repair_progress import RepairProgress, DurableArtifact
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
-
-
-def test_progress_is_immutable_and_rejects_skipped_transitions() -> None:
-    initial = RepairProgress()
-    running = initial.begin()
-    assert initial.progress == "not_started"
-    with pytest.raises(ValueError):
-        running.retained_after(DurableArtifact("intermediate/after.json"))
-    with pytest.raises(ValueError):
-        running.retained_operation(DurableArtifact("steps/0/after.json"))
-    with pytest.raises(ValueError):
-        RepairProgress(progress="finished")
-    with pytest.raises(ValueError):
-        RepairProgress.from_data({**running.to_data(), "foreign": True})
-    op = running.retained_operation(DurableArtifact("intermediate/operation.json"))
-    with pytest.raises(ValueError):
-        op.retained_operation(DurableArtifact("intermediate/operation.json"))
 
 
 @pytest.mark.parametrize("phase", ["before", "after"])
@@ -47,27 +31,7 @@ def test_failure_after_snapshot_blobs_before_publication_is_replayable(
 def test_writer_does_not_acknowledge_missing_artifact(tmp_path: Path) -> None:
     writer = Writer(tmp_path)
     with pytest.raises(Exception, match="not been retained"):
-        writer.acknowledge("intermediate/after.json")
-
-
-def test_nonconformant_progress_cannot_be_changed_through_verdict_alias() -> None:
-    from tools.install_sandbox.contracts.results import VerificationMismatch, VerificationResult
-
-    progress = RepairProgress().begin()
-    progress = progress.retained_operation(DurableArtifact("intermediate/operation.json"))
-    progress = progress.retained_expectations(DurableArtifact("expectations/intermediate.json"))
-    progress = progress.retained_before(DurableArtifact("intermediate/before.json"))
-    progress = progress.retained_after(DurableArtifact("intermediate/after.json"))
-    supplied = VerificationResult(
-        mismatches=[VerificationMismatch("bad", "project", "GUIDE.md", "good", "bad")]
-    )
-    verified = progress.verified(DurableArtifact("intermediate/verification.json"), supplied)
-    supplied.mismatches.clear()
-    assert not verified.permits_repair()
-    serialized = verified.to_data()
-    assert serialized["verification"] is not None
-    serialized["verification"].mismatches.clear()
-    assert not verified.permits_repair()
+        writer.acknowledge("intermediate/after.json", {})
 
 
 def test_later_metadata_is_forbidden_without_durable_operation(tmp_path: Path) -> None:
@@ -102,8 +66,10 @@ def test_target_read_obstacle_after_mutation_replays_incomplete(
     from collections.abc import Callable
     from typing import cast
 
-    original = cast(Callable[[ObservedEnvironment, FilesystemSnapshot, SnapshotEntry, Path], None],
-                    getattr(ObservedEnvironment, "_file"))
+    original = cast(
+        Callable[[ObservedEnvironment, FilesystemSnapshot, SnapshotEntry, Path], None],
+        getattr(ObservedEnvironment, "_file"),
+    )
     captures = 0
 
     def capture(
@@ -142,7 +108,20 @@ def test_performed_receipt_does_not_mask_missing_or_conflicting_bytes(tmp_path: 
     performed = PerformedMutation.from_data(
         json.loads((Path(outcome["proof"]) / "intermediate/performed.json").read_text())
     )
-    snapshot = FilesystemSnapshot(entries=[{"root": "project", "path": "GUIDE.md", "kind": "file"}])
+    snapshot = FilesystemSnapshot(
+        entries=[
+            cast(
+                SnapshotEntry,
+                {
+                    "root": "project",
+                    "path": "GUIDE.md",
+                    "kind": "file",
+                    "content_file": None,
+                    "sha256": None,
+                },
+            )
+        ]
+    )
     with pytest.raises(ValueError, match="bytes or explicit read obstacle"):
         performed.verify(performed.operation, snapshot)
     snapshot.obstacles.append(

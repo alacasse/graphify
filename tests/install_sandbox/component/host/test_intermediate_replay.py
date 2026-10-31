@@ -21,6 +21,7 @@ def rewrite(path: Path, edit: Callable[[dict[str, Any]], None]) -> None:
     "relative",
     [
         "intermediate/operation.json",
+        "intermediate/repair-plan.json",
         "intermediate/before.json",
         "intermediate/after.json",
         "intermediate/verification.json",
@@ -67,7 +68,10 @@ def test_executed_step_cannot_be_reclassified_as_not_started(tmp_path: Path, loc
             if location == "intermediate_preparation"
             else data["steps"][location == "second"]
         )
-        step["progress"] = "not_started"
+        if location == "intermediate_preparation":
+            step.update(stage="not_started", generation=0)
+        else:
+            step["progress"] = "not_started"
 
     rewrite(tmp_path / "proof/result.json", edit)
     with pytest.raises(ValueError):
@@ -80,7 +84,7 @@ def test_changed_in_bounds_range_cannot_claim_another_mutation(tmp_path: Path) -
         tmp_path / "proof/intermediate/operation.json",
         lambda data: data.update(end=data["end"] + 1),
     )
-    with pytest.raises(ValueError, match="byte operation"):
+    with pytest.raises(ValueError, match="Performed mutation contradicts retained operation"):
         read_evidence(tmp_path / "proof")
 
 
@@ -88,10 +92,10 @@ def test_failed_first_install_cannot_claim_started_intermediate(tmp_path: Path) 
     conduct(tmp_path, first_wrong=True)
 
     def edit(data: dict[str, Any]) -> None:
-        data["intermediate_preparation"]["progress"] = "incomplete"
+        data["intermediate_preparation"].update(stage="started", generation=1)
 
     rewrite(tmp_path / "proof/result.json", edit)
-    with pytest.raises(ValueError, match="conforming first"):
+    with pytest.raises(ValueError, match="Blocked preparation has incompatible evidence"):
         read_evidence(tmp_path / "proof")
 
 
@@ -103,7 +107,7 @@ def test_reinstall_expectations_write_failure_replays_incomplete_before_mutation
     original = TestResultWriter.write_metadata
 
     def interrupted(writer: TestResultWriter, relative: str, value: object) -> None:
-        if relative == "expectations/reinstall.json":
+        if relative == "intermediate/repair-plan.json":
             raise OSError("Controlled repair expectations archive failure")
         original(writer, relative, value)
 
@@ -111,7 +115,8 @@ def test_reinstall_expectations_write_failure_replays_incomplete_before_mutation
     result, installer = conduct(tmp_path)
     assert result.status == "incomplete" and len(installer.calls) == 1
     assert result.intermediate_preparation is not None
-    assert result.intermediate_preparation["observations"] == {"before": None, "after": None}
+    assert result.intermediate_preparation["stage"] == "preparation_expectations_retained"
+    assert not (tmp_path / "proof/intermediate/before.json").exists()
     assert (tmp_path / "proof/expectations/intermediate.json").is_file()
     assert not (tmp_path / "proof/expectations/reinstall.json").exists()
 
@@ -120,7 +125,7 @@ def test_failed_first_observation_cannot_smuggle_finished_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tools.install_sandbox.container.effect_environment import EffectEnvironment
-    from tools.install_sandbox.container.environment import FilesystemSnapshot
+    from tools.install_sandbox.contracts.observation import FilesystemSnapshot
     from tools.install_sandbox.container.evidence_writer import TestResultWriter
 
     original = EffectEnvironment.observe
@@ -138,11 +143,10 @@ def test_failed_first_observation_cannot_smuggle_finished_preparation(
 
     def forge(data: dict[str, Any]) -> None:
         intermediate = data["intermediate_preparation"]
-        intermediate["progress"] = "finished"
-        intermediate["verification"] = {"complete": True, "mismatches": [], "obstacles": []}
+        intermediate.update(stage="ready", generation=9)
 
     rewrite(tmp_path / "proof/result.json", forge)
-    with pytest.raises(ValueError, match="conforming first"):
+    with pytest.raises(ValueError, match="Blocked preparation has incompatible evidence"):
         read_evidence(tmp_path / "proof")
 
 
@@ -170,6 +174,7 @@ def test_altered_replay_from_independent_retained_data(altered_proof: Path) -> N
     [
         "case.json",
         "intermediate/operation.json",
+        "intermediate/repair-plan.json",
         "intermediate/before.json",
         "intermediate/after.json",
         "intermediate/after/project/GUIDE.md",
@@ -270,7 +275,9 @@ def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: 
     def fail(data: dict[str, Any]) -> None:
         data["status"] = "failed"
         data["intermediate_preparation"].update(
-            verification=verdict, reason="Intermediate preparation did not conform"
+            stage="verification_retained",
+            generation=8,
+            reason="Preparation verification failed or incomplete",
         )
         data["steps"][1] = {
             "progress": "not_started",
@@ -283,8 +290,14 @@ def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: 
 
     rewrite(altered_proof / "result.json", fail)
     shutil.rmtree(altered_proof / "steps/1")
+    (altered_proof / "expectations/reinstall.json").unlink()
     result = read_evidence(altered_proof)
     assert result.status == "failed" and result.steps[1]["progress"] == "not_started"
     assert result.intermediate_preparation is not None
-    assert result.intermediate_preparation["verification"] is not None
-    assert result.intermediate_preparation["verification"].mismatches[0].type == "content_mismatch"
+    assert result.intermediate_preparation["stage"] == "verification_retained"
+    assert (
+        json.loads((altered_proof / "intermediate/verification.json").read_text())["mismatches"][0][
+            "type"
+        ]
+        == "content_mismatch"
+    )

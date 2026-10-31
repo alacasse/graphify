@@ -2,12 +2,13 @@
 
 import json
 from dataclasses import replace
+from typing import TypedDict
 
 import pytest
 
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.container.expectation_builder import (
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.rules.expectation_builder import (
     bind_roots,
     build_initial_expectations,
     build_install_expectations,
@@ -383,3 +384,100 @@ def test_incomplete_first_observation_cannot_supply_reinstall_preservation() -> 
     observed.entries[0]["listing_complete"] = False
     with pytest.raises(ValueError, match="Incomplete retained inventory"):
         build_reinstall_expectations(installed, observed, VerificationResult())
+
+
+@pytest.mark.parametrize(
+    "kind", ["file", "directory", "absent", "markdown", "markdown-composed", "json-hooks"]
+)
+@pytest.mark.parametrize("conforming", [True, False])
+def test_uniform_expectation_roundtrip_preserves_verdict(kind: str, conforming: bool) -> None:
+    content = baseline = marker = None
+    hooks = ()
+    files: dict[tuple[str, str], bytes] = {}
+    directories = (("home", "."), ("project", "."))
+    if kind == "file":
+        content = b"Exact bytes\n"
+        files[("project", "target")] = content if conforming else b"Different\n"
+    elif kind == "directory":
+        if conforming:
+            directories += (("project", "target"),)
+    elif kind == "absent":
+        if not conforming:
+            files[("project", "target")] = b"Unexpected"
+    elif kind in {"markdown", "markdown-composed"}:
+        content, baseline, marker = b"## graphify\nSource\n", b"Personal\n", "## graphify"
+        files[("project", "target")] = baseline + (
+            content if conforming else b"## graphify\nWrong\n"
+        )
+    else:
+        baseline, hooks = b'{"theme":"dark"}', (HOOK,)
+        files[("project", "target")] = json.dumps(
+            {
+                "theme": "dark" if conforming else "light",
+                "hooks": {"Before": [{"matcher": "Shell", "hooks": [HOOK.content]}]},
+            }
+        ).encode()
+    expected = ExpectationSet(
+        "install",
+        (
+            Expectation(
+                kind,
+                "project",
+                "target",
+                "install",
+                "independent:test",
+                content,
+                baseline,
+                marker,
+                hooks,
+            ),
+        ),
+        roots=ROOTS,
+    )
+    observed = _snapshot(files, directories)
+    decoded = ExpectationSet.from_data(json.loads(json.dumps(expected.to_data())))
+    actual = EffectVerifier().verify(expected, observed)
+    assert actual == EffectVerifier().verify(decoded, observed)
+    assert actual.complete
+    assert bool(actual.mismatches) is not conforming
+
+
+class _ExtraFields(TypedDict, total=False):
+    content: bytes
+    baseline: bytes
+    marker: str
+    hooks: tuple[HookExpectation, ...]
+
+
+@pytest.mark.parametrize(
+    "kind, extra",
+    [
+        ("directory", {"content": b"not meaningful"}),
+        ("absent", {"marker": "## graphify"}),
+        ("file", {"content": b"exact", "baseline": b"foreign"}),
+        (
+            "markdown",
+            {
+                "content": b"section",
+                "baseline": b"personal",
+                "marker": "## graphify",
+                "hooks": (HOOK,),
+            },
+        ),
+        ("json-hooks", {"baseline": b"{}", "hooks": (HOOK,), "content": b"foreign"}),
+    ],
+)
+def test_expectation_rejects_fields_without_meaning_for_kind(
+    kind: str, extra: _ExtraFields
+) -> None:
+    with pytest.raises(ValueError):
+        Expectation(kind, "project", "target", "install", "test", **extra)
+
+
+def test_encoded_root_bindings_do_not_alias_expectation_inputs() -> None:
+    original = ExpectationSet("install", (), roots=dict(ROOTS))
+    encoded = original.to_data()
+    encoded_roots = encoded["roots"]
+    assert isinstance(encoded_roots, dict)
+    encoded_roots["project"] = "/changed/project"
+    assert original.roots == ROOTS

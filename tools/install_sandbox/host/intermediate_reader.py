@@ -1,230 +1,146 @@
-"""Replay the preparation transition from independent retained inputs."""
+"""Load confined retained artifacts and delegate preparation semantics to the protocol."""
 
+import re
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.container.expectation_builder import preservation_baseline
-from tools.install_sandbox.container.repair_scenario import (
-    MarkdownRepairScenario,
-    PreparationBlocked,
-    PreparationPlan,
-)
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.repair_progress import RepairProgress
-from tools.install_sandbox.contracts.results import (
-    InstallTestResult,
-    IntermediateEvidence,
-    VerificationResult,
-)
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.results import InstallTestResult
 from tools.install_sandbox.host.evidence_reader import (
+    check_snapshot,
     read_json_evidence,
     safe_evidence_path,
     verification,
 )
+from tools.install_sandbox.rules.repair_protocol import ARTIFACTS, Inspection, RepairInputs, inspect
 
 
 def replay_intermediate(
     result: InstallTestResult,
-    case: EffectInstallCase,
     output: Path,
-    sources: FilesystemSnapshot,
-    installed: ExpectationSet,
-    first: FilesystemSnapshot,
-    verdict: VerificationResult,
+    inputs: RepairInputs,
     snapshot: Callable[[Path, str], FilesystemSnapshot],
-    same: Callable[[FilesystemSnapshot, FilesystemSnapshot], bool],
-    expectations: Callable[[Path, ExpectationSet], None],
-) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
-    """Validate preparation links and continuity; return its repair inputs when complete."""
-    evidence = result.intermediate_preparation
-    assert evidence is not None
-    RepairProgress.from_data(evidence)
-    _check_artifact_sequence(output)
-    if evidence["progress"] == "not_started":
-        _check_unstarted(evidence, output)
-    if evidence["progress"] == "not_started":
-        return None
-    plan = MarkdownRepairScenario.from_case(case, sources).bind(
-        first,
-        "steps/0/after.json",
-        verdict,
-        installed,
-        safe_evidence_path(output, "case.json").read_bytes(),
+) -> Inspection:
+    published = result.intermediate_preparation
+    assert published is not None
+    inventory, staged = _inventory(output, snapshot)
+    return inspect(inputs, published, inventory, staged)
+
+
+def _inventory(
+    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
+) -> tuple[dict[str, object], tuple[str, ...]]:
+    inventory, referenced = _load_artifacts(output, snapshot)
+    staged = _intermediate_files(output, referenced)
+    staged.extend(_expectation_files(output))
+    return inventory, tuple(staged)
+
+
+def _load_artifacts(
+    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
+) -> tuple[dict[str, object], set[str]]:
+    inventory: dict[str, object] = {}
+    referenced: set[str] = set()
+    for kind, reference, _ in ARTIFACTS:
+        path = safe_evidence_path(output, reference)
+        if not path.exists():
+            continue
+        if not path.is_file():
+            raise ValueError("Preparation artifact must be a regular file")
+        if kind in {"before", "after"}:
+            inventory[reference] = snapshot(output, reference)
+            for entry in check_snapshot(output, reference, complete=False):
+                content = entry.get("content_file")
+                if isinstance(content, str):
+                    referenced.add(content)
+        else:
+            inventory[reference] = _decode(kind, read_json_evidence(output, reference))
+    return inventory, referenced
+
+
+def _decode(kind: str, raw: object) -> object:
+    if kind == "operation":
+        return BoundMarkdownMutation.from_data(raw)
+    if kind == "performed":
+        return PerformedMutation.from_data(raw)
+    if kind == "verification":
+        return verification(raw)
+    return ExpectationSet.from_data(raw)
+
+
+def _snapshot_directory(relative: str) -> bool:
+    return relative in {"intermediate/before", "intermediate/after"} or any(
+        relative == f"intermediate/{phase}/{root}"
+        or relative.startswith(f"intermediate/{phase}/{root}/")
+        for phase in ("before", "after")
+        for root in ("home", "project")
     )
-    if isinstance(plan, PreparationBlocked):
-        _blocked(evidence, output)
-        return None
-    operation_ref = _available(output, evidence["operation_ref"], "intermediate/operation.json")
-    if operation_ref is None:
-        _require_no_later(evidence, "operation")
-        _forbid_later_files(
-            output,
-            (
-                "expectations/intermediate.json",
-                "expectations/reinstall.json",
-                "intermediate/before.json",
-                "intermediate/performed.json",
-                "intermediate/after.json",
-                "intermediate/verification.json",
-            ),
-        )
-        return None
-    operation = BoundMarkdownMutation.from_data(read_json_evidence(output, operation_ref))
-    if operation.destination != plan.operation.destination:
-        raise ValueError("Mutation destination contradicts retained case")
-    operation.verify_binding(safe_evidence_path(output, "case.json").read_bytes(), first)
-    if (output / "intermediate/performed.json").exists():
-        performed = PerformedMutation.from_data(
-            read_json_evidence(output, "intermediate/performed.json")
-        )
-        if performed.operation != operation:
-            raise ValueError("Retained byte operation contradicts performed mutation")
-    _check_expectations(output, evidence, plan, expectations)
-    return _observations(output, evidence, plan, operation, first, snapshot, same)
 
 
-def _check_expectations(
-    output: Path,
-    evidence: IntermediateEvidence,
-    plan: PreparationPlan,
-    expectations: Callable[[Path, ExpectationSet], None],
-) -> None:
-    if (
-        _available(output, evidence["expectations_ref"], "expectations/intermediate.json")
+def _intermediate_files(output: Path, referenced: set[str]) -> list[str]:
+    intermediate = safe_evidence_path(output, "intermediate")
+    if not intermediate.exists():
+        return []
+    if not intermediate.is_dir():
+        raise ValueError("Preparation evidence requires a directory")
+    staged: list[str] = [] if any(intermediate.iterdir()) else ["intermediate/"]
+    known = {reference for _, reference, _ in ARTIFACTS}
+    for path in intermediate.rglob("*"):
+        relative = path.relative_to(output).as_posix()
+        safe_evidence_path(output, relative)
+        if path.is_dir():
+            if not _snapshot_directory(relative):
+                raise ValueError("Unknown preparation evidence directory")
+            if not any(reference.startswith(relative + "/") for reference in referenced):
+                staged.append(relative + "/")
+        elif relative not in known and relative not in referenced:
+            staged.append(_staged_file(path, relative))
+    return staged
+
+
+def _staged_file(path: Path, relative: str) -> str:
+    if not path.is_file():
+        raise ValueError("Preparation evidence must be regular")
+    if not _temporary(relative) and not any(
+        relative.startswith(f"intermediate/{phase}/{root}/")
+        for phase in ("before", "after")
+        for root in ("home", "project")
+    ):
+        raise ValueError("Unknown preparation evidence")
+    return relative
+
+
+def _expectation_files(output: Path) -> list[str]:
+    directory = safe_evidence_path(output, "expectations")
+    if not directory.exists():
+        return []
+    if not directory.is_dir():
+        raise ValueError("Expectations require a directory")
+    known = {reference for _, reference, _ in ARTIFACTS}
+    known.update({"expectations/initial.json", "expectations/install.json"})
+    staged: list[str] = []
+    for path in directory.iterdir():
+        relative = path.relative_to(output).as_posix()
+        safe_evidence_path(output, relative)
+        if not path.is_file():
+            raise ValueError("Expectation artifact must be regular")
+        if relative in known:
+            continue
+        if not _temporary(relative):
+            raise ValueError("Unknown expectation evidence")
+        staged.append(relative)
+    return staged
+
+
+def _temporary(relative: str) -> bool:
+    path = Path(relative)
+    return any(
+        path.parent == Path(reference).parent
+        and re.fullmatch(
+            re.escape("." + Path(reference).name + ".") + r"[A-Za-z0-9_-]+\.tmp", path.name
+        )
         is not None
-    ):
-        expectations(output, plan.after_preparation_expectations)
-        if (output / "expectations/reinstall.json").exists():
-            pass  # Checked against the prepared physical baseline when repair starts.
-        elif evidence["progress"] == "finished" or any(evidence["observations"].values()):
-            raise ValueError("Mutation requires retained repair expectations")
-    elif evidence["progress"] == "finished" or any(evidence["observations"].values()):
-        raise ValueError("Intermediate execution requires independent expectations")
-
-
-def _observations(
-    output: Path,
-    evidence: IntermediateEvidence,
-    plan: PreparationPlan,
-    operation: BoundMarkdownMutation,
-    first: FilesystemSnapshot,
-    snapshot: Callable[[Path, str], FilesystemSnapshot],
-    same: Callable[[FilesystemSnapshot, FilesystemSnapshot], bool],
-) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
-    refs = {
-        key: _available(output, ref, f"intermediate/{key}.json")
-        for key, ref in evidence["observations"].items()
-    }
-    if refs["before"] is None:
-        if refs["after"] or evidence["verification"] or evidence["progress"] == "finished":
-            raise ValueError("Intermediate execution requires its before observation")
-        return None
-    before = snapshot(output, refs["before"])
-    if not same(first, before):
-        if refs["after"] or evidence["verification"] or evidence["progress"] == "finished":
-            raise ValueError("Changed validated document cannot be mutated")
-        return None
-    if refs["after"] is None:
-        if evidence["verification"] or evidence["progress"] == "finished":
-            raise ValueError("Intermediate verdict requires its after observation")
-        return None
-    after = snapshot(output, refs["after"])
-    performed = PerformedMutation.from_data(
-        read_json_evidence(output, "intermediate/performed.json")
+        for _, reference, _ in ARTIFACTS
     )
-    performed.verify(operation, after)
-    return _after(output, evidence, plan, after)
-
-
-def _after(
-    output: Path,
-    evidence: IntermediateEvidence,
-    plan: PreparationPlan,
-    after: FilesystemSnapshot,
-) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
-    computed = EffectVerifier().verify(plan.after_preparation_expectations, after)
-    stored = _available(output, None, "intermediate/verification.json")
-    if stored is not None:
-        saved = verification(read_json_evidence(output, stored))
-        if computed != saved:
-            raise ValueError("Intermediate verification contradicts independent expectations")
-    else:
-        saved = None
-    if evidence["verification"] is None:
-        if evidence["progress"] == "finished":
-            raise ValueError("Finished intermediate preparation requires verification")
-        return None
-    if saved != evidence["verification"]:
-        raise ValueError("Intermediate verification contradicts independent expectations")
-    assert saved is not None
-    if not RepairProgress.from_data(evidence).permits_repair():
-        return None
-    return replace(
-        plan.second_install_expectations, baseline=preservation_baseline(after, "reinstall")
-    ), after
-
-
-def _available(output: Path, ref: str | None, canonical: str) -> str | None:
-    if ref is not None:
-        safe_evidence_path(output, ref).read_bytes()
-        return ref
-    return canonical if safe_evidence_path(output, canonical).exists() else None
-
-
-def _require_no_later(evidence: IntermediateEvidence, missing: str) -> None:
-    if (
-        evidence["progress"] == "finished"
-        or any(evidence["observations"].values())
-        or evidence["verification"]
-    ):
-        raise ValueError(f"Intermediate execution requires retained {missing}")
-
-
-def _blocked(evidence: IntermediateEvidence, output: Path) -> None:
-    _require_no_later(evidence, "plan")
-    if (
-        evidence["operation_ref"]
-        or evidence["expectations_ref"]
-        or (output / "intermediate").exists()
-    ):
-        raise ValueError("Blocked preparation contradicts execution evidence")
-
-
-def _check_unstarted(evidence: IntermediateEvidence, output: Path) -> None:
-    if (
-        any(evidence["observations"].values())
-        or evidence["operation_ref"]
-        or evidence["expectations_ref"]
-        or evidence["verification"]
-    ):
-        raise ValueError("Unstarted intermediate preparation has execution evidence")
-    if (output / "intermediate").exists() or (output / "expectations/intermediate.json").exists():
-        raise ValueError("Unstarted intermediate preparation has retained artifacts")
-
-
-def _forbid_later_files(output: Path, relatives: tuple[str, ...]) -> None:
-    for relative in relatives:
-        path = safe_evidence_path(output, relative)
-        if path.exists() or path.is_symlink():
-            raise ValueError("Forbidden later preparation artifact without retained predecessor")
-
-
-def _check_artifact_sequence(output: Path) -> None:
-    """Raw blobs may precede metadata; future metadata requires its predecessor."""
-    names = (
-        "intermediate/operation.json",
-        "expectations/intermediate.json",
-        "expectations/reinstall.json",
-        "intermediate/before.json",
-        "intermediate/performed.json",
-        "intermediate/after.json",
-        "intermediate/verification.json",
-    )
-    retained = [safe_evidence_path(output, name).exists() for name in names]
-    if retained != sorted(retained, reverse=True):
-        raise ValueError("Forbidden later preparation metadata without retained predecessor")

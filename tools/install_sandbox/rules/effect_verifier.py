@@ -1,13 +1,12 @@
 """Compare explicit expectations with independent observations, without target inference."""
 
-from tools.install_sandbox.container import comparison as checks
-from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.contracts.expectations import (
     Expectation,
     ExpectationSet,
-    PhysicalPreservation,
 )
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import ObservationObstacle, VerificationResult
+from tools.install_sandbox.rules import comparison as checks
 
 
 def _obstacle(result: VerificationResult, root: str, path: str, reason: str) -> None:
@@ -108,8 +107,21 @@ def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> 
             path=item.path,
             marker=item.marker,
         )
+    elif item.kind == "markdown-composed":
+        assert item.content is not None and item.baseline is not None and item.marker is not None
+        checks.verify_markdown_composed(
+            item.content,
+            item.baseline,
+            current,
+            result,
+            root=item.root,
+            path=item.path,
+            marker=item.marker,
+        )
     elif item.kind == "json-hooks":
         _json(item, current, result)
+    else:
+        raise ValueError("Unsupported expectation kind")
 
 
 class EffectVerifier:
@@ -121,14 +133,31 @@ class EffectVerifier:
         if expected.roots is None:
             _obstacle(result, "project", ".", "Expectations have no retained root binding")
         for item in expected.expectations:
-            verifier = getattr(item, "verify", None)
-            if verifier is None:
-                _constraint(item, observed, result)
-            else:
-                verifier(observed, result)
+            _constraint(item, observed, result)
         if expected.baseline:
-            PhysicalPreservation(expected.baseline, expected.allowed_changes).verify(
-                observed, result
-            )
+            _preservation(expected, observed, result)
         result.complete = not result.obstacles
         return result
+
+
+def _preservation(
+    expected: ExpectationSet, observed: FilesystemSnapshot, result: VerificationResult
+) -> None:
+    before = {(e.root, e.path): e for e in expected.baseline}
+    after = {(e["root"], e["path"]): e for e in observed.entries}
+    for key in sorted(before.keys() | after.keys()):
+        prior, current = before.get(key), after.get(key)
+        if key in expected.allowed_changes and (
+            prior is None or (current is not None and prior.kind == current["kind"])
+        ):
+            continue
+        if (
+            prior is not None
+            and current is not None
+            and prior.kind == current["kind"]
+            and (prior.kind == "directory" or prior.content == observed.contents.get(key))
+        ):
+            continue
+        checks.mismatch(
+            result, "unexpected_change", *key, "entry preserved", "entry added, removed or changed"
+        )

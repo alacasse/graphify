@@ -115,18 +115,13 @@ def _progress(value: object) -> Literal["not_started", "incomplete", "finished"]
 def _intermediate(value: object, output: Path) -> IntermediateEvidence | None:
     if value is None:
         return None
-    data = fields(value, "progress operation_ref expectations_ref observations verification reason")
+    data = fields(value, "stage generation reason")
+    generation = data["generation"]
+    if type(generation) is not int or generation < 0:
+        raise ValueError("Expected nonnegative checkpoint generation")
     return {
-        "progress": _progress(data["progress"]),
-        "operation_ref": _evidence(data["operation_ref"], output),
-        "expectations_ref": _evidence(data["expectations_ref"], output),
-        "observations": {
-            key: _evidence(value, output)
-            for key, value in fields(data["observations"], "before after").items()
-        },
-        "verification": None
-        if data["verification"] is None
-        else _verification(data["verification"]),
+        "stage": text(data["stage"]),
+        "generation": generation,
         "reason": _optional_text(data["reason"]),
     }
 
@@ -252,32 +247,15 @@ def _check_failed_phase(step: StepEvidence) -> str:
     return "incomplete"
 
 
-def _intermediate_status(intermediate: IntermediateEvidence) -> str:
-    verdict = intermediate["verification"]
-    if intermediate["progress"] != "finished":
-        return "incomplete"
-    if verdict is None or not verdict.complete:
-        raise ValueError("Finished intermediate preparation requires complete verification")
-    return "failed" if verdict.mismatches or verdict.obstacles else "passed"
-
-
-def _transition_status(result: InstallTestResult, index: int, status: str) -> str:
-    if index == 1 and result.intermediate_preparation is not None and status == "passed":
-        return _intermediate_status(result.intermediate_preparation)
-    return status
-
-
-def _check_consistency(result: InstallTestResult) -> None:
+def _check_consistency(result: InstallTestResult, repair_diagnostic: str | None) -> None:
     _check_preparation_stage(result)
     if not result.preparation["ready"]:
-        for step in result.steps:
-            _check_skipped(step)
-        if result.status != "not_run" or result.preparation["reason"] is None:
-            raise ValueError("Unavailable preparation requires not_run and a reason")
+        _check_unavailable(result)
         return
     status = "passed"
     for index, step in enumerate(result.steps):
-        status = _transition_status(result, index, status)
+        if index == 1 and repair_diagnostic is not None and status == "passed":
+            status = repair_diagnostic
         if status != "passed":
             _check_skipped(step)
             continue
@@ -289,6 +267,13 @@ def _check_consistency(result: InstallTestResult) -> None:
 
     if result.status != status:
         raise ValueError("Case status contradicts command or verification facts")
+
+
+def _check_unavailable(result: InstallTestResult) -> None:
+    for step in result.steps:
+        _check_skipped(step)
+    if result.status != "not_run" or result.preparation["reason"] is None:
+        raise ValueError("Unavailable preparation requires not_run and a reason")
 
 
 def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTestResult:
@@ -323,15 +308,15 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
     )
     if (result.intermediate_preparation is None) != (case.intermediate_preparation is None):
         raise ValueError("Intermediate evidence contradicts case definition")
-    _check_consistency(result)
-    check_effect_result(result, case, output_directory)
+    repair_diagnostic = check_effect_result(result, case, output_directory)
+    _check_consistency(result, repair_diagnostic)
     return result
 
 
 def _read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
-        "format": "explicit-expectations-v4"
+        "format": "explicit-expectations-v5"
     }:
         raise ValueError("Unsupported evidence format; use its identified historical reader")
     case = EffectInstallCase.from_json(

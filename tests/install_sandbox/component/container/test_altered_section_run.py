@@ -8,10 +8,10 @@ import pytest
 
 from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
-from tools.install_sandbox.container.environment import FilesystemSnapshot
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
-from tools.install_sandbox.container.repair_scenario import PreparationPlan, MarkdownRepairScenario
+from tools.install_sandbox.rules.repair_scenario import PreparationPlan, MarkdownRepairScenario
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import (
     SubjectContext,
@@ -123,7 +123,7 @@ def test_first_install_failure_blocks_preparation_and_repair(tmp_path: Path) -> 
     assert result.status == "failed" and len(installer.calls) == 1
     assert result.steps[1]["progress"] == "not_started"
     assert result.intermediate_preparation is not None
-    assert result.intermediate_preparation["progress"] == "not_started"
+    assert result.intermediate_preparation["stage"] == "not_started"
 
 
 def damage_observation(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
@@ -177,7 +177,7 @@ def test_failed_preparation_blocks_second_command(
     from tools.install_sandbox.container import intermediate_execution as transition
 
     if failure in {"wrong-range", "wrong-body", "heading", "unchanged"}:
-        original = transition.MarkdownRepairScenario.bind
+        original = MarkdownRepairScenario.bind
 
         def wrong_range(
             self: MarkdownRepairScenario,
@@ -187,13 +187,11 @@ def test_failed_preparation_blocks_second_command(
             installed: ExpectationSet,
             case_bytes: bytes,
         ) -> PreparationPlan:
-            plan = original(
-                self, first_after, observation_ref, validation, installed, case_bytes
-            )
+            plan = original(self, first_after, observation_ref, validation, installed, case_bytes)
             assert isinstance(plan, PreparationPlan)
             return replace(plan, operation=damaged_operation(plan.operation, failure))
 
-        monkeypatch.setattr(transition.MarkdownRepairScenario, "bind", wrong_range)
+        monkeypatch.setattr(MarkdownRepairScenario, "bind", wrong_range)
     elif failure == "partial":
 
         def partial(
@@ -204,11 +202,11 @@ def test_failed_preparation_blocks_second_command(
         ) -> None:
             # The durable intent must precede even a partially successful mutation.
             saved = json.loads((tmp_path / "proof/result.json").read_text())
-            assert saved["intermediate_preparation"]["progress"] == "incomplete"
+            assert saved["intermediate_preparation"]["stage"] == "before_retained"
             (environment.project / "GUIDE.md").write_text(BEFORE)
             raise OSError("Controlled partial mutation")
 
-        monkeypatch.setattr(BoundMarkdownMutation, "apply", partial)
+        monkeypatch.setattr(transition, "apply_markdown_mutation", partial)
     else:
         damage_observation(monkeypatch, failure)
 
@@ -222,10 +220,14 @@ def test_failed_preparation_blocks_second_command(
     assert result.steps[1]["progress"] == "not_started"
     record = result.intermediate_preparation
     assert record is not None
-    assert record["progress"] == (
-        "finished"
+    assert record["stage"] == (
+        "verification_retained"
         if failure in {"wrong-range", "wrong-body", "heading", "foreign", "unchanged"}
-        else "incomplete"
+        else {
+            "partial": "before_retained",
+            "unobservable": "mutation_recorded",
+            "changed": "before_retained",
+        }[failure]
     )
 
 

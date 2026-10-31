@@ -5,23 +5,21 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
-from tools.install_sandbox.container.comparison import markdown_byte_parts
-from tools.install_sandbox.container.effect_verifier import EffectVerifier
-from tools.install_sandbox.container.environment import FilesystemSnapshot
-from tools.install_sandbox.container.expectation_builder import (
-    preservation_baseline,
-    retained_bytes,
-)
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import MarkdownSectionEffect
 from tools.install_sandbox.contracts.expectations import (
-    ComposedMarkdownExpectation,
-    ExactDocumentExpectation,
     Expectation,
     ExpectationSet,
 )
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
+from tools.install_sandbox.rules.comparison import markdown_byte_parts
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.expectation_builder import (
+    preservation_baseline,
+    retained_bytes,
+)
 
 
 @dataclass(frozen=True)
@@ -124,7 +122,7 @@ class MarkdownRepairScenario(ABC):
         exterior = preparation.before + preparation.after
         start, end, replacement = self.mutation(parts, document)
         expected = self.expected_preparation()
-        removed = ExactDocumentExpectation(
+        removed = Expectation(
             "file",
             destination.root,
             destination.path,
@@ -132,7 +130,7 @@ class MarkdownRepairScenario(ABC):
             self.provenance,
             expected,
         )
-        repaired = ComposedMarkdownExpectation(
+        repaired = Expectation(
             "markdown-composed",
             destination.root,
             destination.path,
@@ -141,7 +139,6 @@ class MarkdownRepairScenario(ABC):
             source,
             exterior,
             preparation.marker,
-            initial_prefix=preparation.before,
         )
         operation = BoundMarkdownMutation(
             hashlib.sha256(case_bytes).hexdigest(),

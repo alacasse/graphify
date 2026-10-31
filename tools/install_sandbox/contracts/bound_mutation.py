@@ -2,15 +2,11 @@
 
 import base64
 import hashlib
-import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from tools.install_sandbox.container.effect_environment import EffectEnvironment
-    from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.contracts.effects import Destination
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 
 
@@ -53,25 +49,6 @@ class BoundMarkdownMutation:
         ):
             raise ValueError("Operation document binding or bounds invalid")
         return document
-
-    def apply(
-        self, environment: "EffectEnvironment", case_bytes: bytes, first_after: "FilesystemSnapshot"
-    ) -> None:
-        preparation = environment.case.intermediate_preparation
-        if preparation is None or preparation.destination != self.destination:
-            raise ValueError("Operation destination differs from case")
-        retained = self.verify_binding(case_bytes, first_after)
-        root = environment.project if self.destination.root == "project" else environment.home
-        path = root / self.destination.path
-        if path.resolve() != path or not path.is_file():
-            raise ValueError("Operation requires original regular document")
-        with os.fdopen(os.open(path, os.O_RDWR | os.O_NOFOLLOW), "r+b") as stream:
-            current = stream.read()
-            if current != retained:
-                raise ValueError("Document changed since validated observation")
-            stream.seek(0)
-            stream.write(current[: self.start] + self.replacement + current[self.end :])
-            stream.truncate()
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -116,17 +93,6 @@ class PerformedMutation:
     def __post_init__(self) -> None:
         if re.fullmatch(r"[0-9a-f]{64}", self.document_sha256) is None:
             raise ValueError("Expected actual document SHA-256 digest")
-
-    @classmethod
-    def capture(
-        cls, operation: BoundMarkdownMutation, environment: "EffectEnvironment"
-    ) -> "PerformedMutation":
-        root = environment.project if operation.destination.root == "project" else environment.home
-        path = root / operation.destination.path
-        if path.resolve() != path or not path.is_file():
-            raise ValueError("Performed mutation requires a regular document")
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as stream:
-            return cls(operation, hashlib.sha256(stream.read()).hexdigest())
 
     def to_data(self) -> dict[str, object]:
         return {"operation": self.operation.to_data(), "document_sha256": self.document_sha256}

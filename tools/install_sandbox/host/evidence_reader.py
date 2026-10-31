@@ -5,7 +5,7 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from tools.install_sandbox.container.environment import FilesystemSnapshot
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     ObservationObstacle,
@@ -19,11 +19,15 @@ from tools.install_sandbox.contracts.spec import fields, relative_path, text
 def safe_evidence_path(output_directory: Path, relative: str) -> Path:
     """Resolve a result-relative evidence reference without leaving its directory."""
     relative_path(relative.removesuffix("/"))
-    root = output_directory.resolve()
-    try:
-        destination = (root / relative).resolve()
-    except RuntimeError as error:
-        raise ValueError(f"Cannot resolve evidence path: {relative!r}") from error
+    root = output_directory.absolute()
+    for candidate in (root, *root.parents):
+        if candidate.is_symlink():
+            raise ValueError("Evidence directory contains a symlink")
+    destination = root
+    for part in PurePosixPath(relative).parts:
+        destination /= part
+        if destination.is_symlink():
+            raise ValueError(f"Evidence path contains a symlink: {relative!r}")
     if not destination.is_relative_to(root) or destination == root:
         raise ValueError(f"Evidence path escapes the result directory: {relative!r}")
     return destination

@@ -8,10 +8,10 @@ import pytest
 from tools.install_sandbox.container.effect_verifier import EffectVerifier
 from tools.install_sandbox.container.environment import FilesystemSnapshot
 from tools.install_sandbox.container.expectation_builder import build_install_expectations
-from tools.install_sandbox.container.intermediate_builder import (
+from tools.install_sandbox.container.repair_scenario import (
     PreparationBlocked,
     PreparationPlan,
-    prepare_intermediate,
+    MarkdownRepairScenario,
 )
 from tools.install_sandbox.contracts.effect_case import (
     EffectInstallCase,
@@ -25,7 +25,7 @@ from tools.install_sandbox.contracts.effects import (
     MarkdownSectionEffect,
     SkillEffect,
 )
-from tools.install_sandbox.contracts.intermediate import PreparedByteRange
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 
 ROOTS = {"home": "/sandbox/home", "project": "/sandbox/project"}
 BEFORE = b"## Personal before\nKeep before.\n\n"
@@ -64,8 +64,8 @@ def inputs(index: int = 1, source: bytes = SOURCE):
 
 def plan():
     case, sources, installed, first, validation = inputs()
-    result = prepare_intermediate(
-        case, sources, first, "steps/0/after.json", validation, installed, case.to_json().encode()
+    result = MarkdownRepairScenario.from_case(case, sources).bind(
+        first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(result, PreparationPlan)
     return result, first
@@ -80,7 +80,7 @@ def test_case_bytes_round_trip_and_bound_operation() -> None:
     assert operation.case_sha256 == hashlib.sha256(archived).hexdigest()
     assert operation.document_sha256 == hashlib.sha256(BEFORE + SOURCE + AFTER).hexdigest()
     assert (operation.start, operation.end) == (len(BEFORE), len(BEFORE + SOURCE))
-    assert PreparedByteRange.from_data(operation.to_data()) == operation
+    assert BoundMarkdownMutation.from_data(operation.to_data()) == operation
     assert first.contents[KEY][operation.start : operation.end] == SOURCE
 
 
@@ -130,8 +130,8 @@ def test_removal_oracle_is_independent_of_range_and_preserves_other_files() -> N
 def test_preparation_rechecks_observation_and_exact_case_bytes() -> None:
     case, sources, installed, first, validation = inputs()
     first.contents[KEY] = BEFORE + b"changed" + AFTER
-    blocked = prepare_intermediate(
-        case, sources, first, "steps/0/after.json", validation, installed, case.to_json().encode()
+    blocked = MarkdownRepairScenario.from_case(case, sources).bind(
+        first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(blocked, PreparationBlocked)
     with pytest.raises(ValueError):
@@ -154,8 +154,8 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
 def test_operation_hashes_exact_archived_case_bytes() -> None:
     case, sources, installed, first, validation = inputs()
     archived = b"\n" + case.to_json().encode()
-    prepared = prepare_intermediate(
-        case, sources, first, "steps/0/after.json", validation, installed, archived
+    prepared = MarkdownRepairScenario.from_case(case, sources).bind(
+        first, "steps/0/after.json", validation, installed, archived
     )
     assert isinstance(prepared, PreparationPlan)
     assert prepared.operation.case_sha256 == hashlib.sha256(archived).hexdigest()
@@ -164,8 +164,8 @@ def test_operation_hashes_exact_archived_case_bytes() -> None:
 
 def test_altered_body_bounds_and_independent_oracle() -> None:
     case, sources, installed, first, validation = inputs(2)
-    prepared = prepare_intermediate(
-        case, sources, first, "steps/0/after.json", validation, installed, case.to_json().encode()
+    prepared = MarkdownRepairScenario.from_case(case, sources).bind(
+        first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(prepared, PreparationPlan)
     operation = prepared.operation
@@ -186,7 +186,7 @@ def test_altered_body_bounds_and_independent_oracle() -> None:
 )
 def test_altered_preparation_requires_a_real_body_change(source: bytes) -> None:
     case, sources, installed, first, validation = inputs(2, source)
-    result = prepare_intermediate(
-        case, sources, first, "steps/0/after.json", validation, installed, case.to_json().encode()
+    result = MarkdownRepairScenario.from_case(case, sources).bind(
+        first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(result, PreparationBlocked)

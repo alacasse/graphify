@@ -28,7 +28,7 @@ def test_snapshot_retains_binary_bytes_and_complete_nested_inventory(tmp_path: P
     assert not snapshot.obstacles
 
 
-def test_symlink_is_obstacle_and_never_followed(tmp_path: Path) -> None:
+def test_symlink_has_observed_type_and_is_never_followed(tmp_path: Path) -> None:
     environment = observed(tmp_path)
     external = tmp_path / "external"
     external.mkdir()
@@ -36,7 +36,9 @@ def test_symlink_is_obstacle_and_never_followed(tmp_path: Path) -> None:
     (environment.home / "linked").symlink_to(external, target_is_directory=True)
     snapshot = environment.observe(ResultWriter(tmp_path / "proof"), "after")
     assert not snapshot.contents
-    assert snapshot.obstacles[0]["path"] == "linked"
+    assert not snapshot.obstacles
+    entry = snapshot.entry("home", "linked")
+    assert entry is not None and entry["kind"] == "other"
     assert snapshot.entry("home", "linked/private") is None
 
 

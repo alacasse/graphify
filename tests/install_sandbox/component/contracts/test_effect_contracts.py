@@ -20,7 +20,7 @@ from tools.install_sandbox.contracts.effects import (
     SkillEffect,
     effect_identity,
 )
-from tools.install_sandbox.contracts.intermediate import PreparedByteRange
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
@@ -263,7 +263,7 @@ def test_old_case_formats_are_rejected(version: str) -> None:
 
 @pytest.mark.parametrize("change", ["legacy", "missing", "unknown", "bad-base64"])
 def test_prepared_replacement_transport_is_strict(change: str) -> None:
-    operation = PreparedByteRange(
+    operation = BoundMarkdownMutation(
         "a" * 64,
         "steps/0/after.json",
         Destination("project", "GUIDE.md"),
@@ -273,7 +273,7 @@ def test_prepared_replacement_transport_is_strict(change: str) -> None:
         b"replacement",
     )
     raw = operation.to_data()
-    assert PreparedByteRange.from_data(raw) == operation
+    assert BoundMarkdownMutation.from_data(raw) == operation
     if change == "legacy":
         raw["format"] = "prepared-byte-range-v1"
     elif change == "missing":
@@ -283,7 +283,7 @@ def test_prepared_replacement_transport_is_strict(change: str) -> None:
     else:
         raw["replacement"] = "!"
     with pytest.raises(ValueError):
-        PreparedByteRange.from_data(raw)
+        BoundMarkdownMutation.from_data(raw)
 
 
 def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.install_sandbox.host.result_reader import read_evidence
+from tools.install_sandbox.host.result_reader import MalformedEvidence, read_evidence
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def test_autonomous_replay_from_dedicated_retained_data(proof: Path) -> None:
 @pytest.mark.parametrize("phase", ["initial", "install", "reinstall"])
 def test_missing_phase_expectations_are_rejected(proof: Path, phase: str) -> None:
     (proof / f"expectations/{phase}.json").unlink()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(MalformedEvidence):
         read_evidence(proof)
 
 

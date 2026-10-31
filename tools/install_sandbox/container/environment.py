@@ -100,7 +100,7 @@ class ObservedEnvironment:
             self._file(snapshot, entry, path)
         else:
             entry["kind"] = "other"
-            _obstacle(snapshot, "observe_entry", root, relative, "Unsupported filesystem entry")
+            # A successfully lstat-ed nonregular entry is a complete physical fact.
 
     def _directory(
         self, snapshot: FilesystemSnapshot, entry: SnapshotEntry, directory: Path

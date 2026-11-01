@@ -5,7 +5,8 @@ from tools.install_sandbox.contracts.timings import Timing
 from tools.install_sandbox.host.coordinator import CampaignResult
 
 _LABELS = {
-    "inputs": "Prepare campaign inputs",
+    "construction": "Read inputs and construct campaign cases (before coordinator)",
+    "materialization": "Materialize campaign inputs",
     "verify": "Verify the prepared package and clean its container",
     "case": "Prepare the case",
     "preflight": "Check Docker",

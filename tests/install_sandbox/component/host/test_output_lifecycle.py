@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.install_sandbox.component.host.native_support import arrange
 from tests.install_sandbox.component.host.output_support import RUNTIME, arrange_output
 from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 from tools.install_sandbox.host.result_reader import read_evidence
@@ -41,6 +42,9 @@ def test_archive_is_readable_after_move_and_extraction(
     assert (
         payload["passed"] and payload["cases"][0]["output_directory"] == "evidence/cases/reinstall"
     )
+    timings = {item["phase"]: item for item in payload["timings"]}
+    assert timings["construction"]["state"] == "measured"
+    assert timings["materialization"]["state"] == "measured"
     assert len(payload["output_lifecycle"]["writers"]) == 4
     assert all(w["state"] == "stopped" for w in payload["output_lifecycle"]["writers"])
 
@@ -49,25 +53,16 @@ def test_refusal_has_report_without_starting_docker(tmp_path: Path) -> None:
     result = CampaignOutput(managed_root=tmp_path / "out", now=lambda: NOW).run(
         spec_file=tmp_path / "effects.yaml",
         subject_context_file=tmp_path / "context.json",
-        subject_checkout=tmp_path,
-    )
-    # A result cannot be placed inside an arbitrary subject directory.
-    assert result.exit_code == 2 and result.output_directory is None
-    (tmp_path / "subject").mkdir()
-    result = CampaignOutput(managed_root=tmp_path / "out", now=lambda: NOW).run(
-        spec_file=tmp_path / "effects.yaml",
-        subject_context_file=tmp_path / "context.json",
         subject_checkout=tmp_path / "subject",
     )
-    assert result.exit_code == 2 and result.output_directory is not None
-    assert (result.output_directory / "campaign.json").is_file()
+    assert result.exit_code == 2 and result.output_directory is None
+    assert not (tmp_path / "out").exists()
     assert result.report.writers == [] and result.report.execution == {}
-    assert result.report.finished_at == NOW.isoformat()
-    assert "No such file" in result.report.render()
+    assert result.report.finished_at is None
 
 
 def test_existing_internal_destination_is_never_modified(tmp_path: Path) -> None:
-    (tmp_path / "subject").mkdir()
+    arrange(tmp_path)
     destination = tmp_path / "out/chosen"
     destination.mkdir(parents=True)
     result = CampaignOutput(managed_root=tmp_path / "out").run(

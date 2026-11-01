@@ -11,6 +11,7 @@ import pytest
 from tests.install_sandbox.component.host.native_support import ControlledTransport, arrange
 from tools.install_sandbox.__main__ import main
 from tools.install_sandbox.host import coordinator
+from tools.install_sandbox.host.campaign_definition import load_campaign_definition
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
@@ -82,9 +83,9 @@ def test_unavailable_case_reason_is_retained_in_campaign(
 
     monkeypatch.setattr(coordinator, "ContainerHarness", harness)
     result = coordinator.InstallTestCoordinator().run_campaign(
-        spec_file=spec,
-        subject_context_file=context,
-        subject_checkout=subject,
+        definition=load_campaign_definition(
+            spec_file=spec, subject_context_file=context, subject_checkout=subject
+        ),
         output_directory=tmp_path / "proof",
     )
     unavailable = next(case for case in result.cases if case.name == "missing-section")

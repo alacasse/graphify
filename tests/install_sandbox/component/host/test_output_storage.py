@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.install_sandbox.component.host.native_support import arrange
 from tests.install_sandbox.component.host.output_support import START, refused
 from tools.install_sandbox.host import output_lifecycle, output_storage
 from tools.install_sandbox.host.docker_runtime import SignalCapture
@@ -102,14 +103,18 @@ def test_archive_rejects_external_symlink_without_removing_source(
 
 
 def test_simultaneous_processes_reserve_different_names(tmp_path: Path) -> None:
-    (tmp_path / "subject").mkdir()
+    arrange(tmp_path)
     code = (
         "from datetime import datetime; from pathlib import Path; import sys; "
         "from tools.install_sandbox.host.output_lifecycle import CampaignOutput; "
+        "from tools.install_sandbox.host.coordinator import InstallTestCoordinator; "
+        "from unittest.mock import Mock; "
+        "InstallTestCoordinator.run_campaign=Mock("
+        "side_effect=OSError('Controlled post-allocation failure')); "
         "root=Path(sys.argv[1]); "
         f"clock=lambda: datetime.fromisoformat({START.isoformat()!r}); "
         "result=CampaignOutput(managed_root=root/'out',now=clock).run("
-        "spec_file=root/'missing-effects.yaml',subject_context_file=root/'context.json',"
+        "spec_file=root/'effects.yaml',subject_context_file=root/'context.json',"
         "subject_checkout=root/'subject'); "
         "print(result.output_directory)"
     )

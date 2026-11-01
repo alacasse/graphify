@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.install_sandbox.component.host.native_support import arrange
 from tests.install_sandbox.component.host.output_support import START, refused
 from tools.install_sandbox.host import output_retention
 from tools.install_sandbox.host.output_report import Writer, read_report
@@ -32,9 +33,11 @@ def _child(root: Path, body: str) -> subprocess.Popen[str]:
         "from tools.install_sandbox.host.output_lifecycle import CampaignOutput\n"
         "from tools.install_sandbox.host.coordinator import InstallTestCoordinator\n"
         "from tools.install_sandbox.host import output_lifecycle\n"
+        "def fail(*args, **kwargs):\n    raise OSError('Controlled post-allocation failure')\n"
+        "InstallTestCoordinator.run_campaign=fail\n"
         f"root=Path({str(root)!r})\n" + body + "\nresult=CampaignOutput(managed_root=root/'out', "
         f"now=lambda:datetime.fromisoformat({START.isoformat()!r})).run("
-        "spec_file=root/'missing-effects.yaml', subject_context_file=root/'context.json',"
+        "spec_file=root/'effects.yaml', subject_context_file=root/'context.json',"
         " subject_checkout=root/'subject')\n"
         "print(result.report.render(), flush=True)\n"
         "raise SystemExit(result.exit_code)\n"
@@ -48,7 +51,7 @@ def _child(root: Path, body: str) -> subprocess.Popen[str]:
 
 
 def test_abrupt_process_loss_uses_first_confirmed_stop(tmp_path: Path) -> None:
-    (tmp_path / "subject").mkdir()
+    arrange(tmp_path)
     body = (
         "def crash(*args, **kwargs):\n    os._exit(7)\nInstallTestCoordinator.run_campaign=crash\n"
     )
@@ -71,7 +74,7 @@ def test_abrupt_process_loss_uses_first_confirmed_stop(tmp_path: Path) -> None:
 def test_real_signals_cover_the_whole_user_path(
     tmp_path: Path, number: signal.Signals, phase: str
 ) -> None:
-    (tmp_path / "subject").mkdir()
+    arrange(tmp_path)
     if phase == "before_execution":
         body = (
             "def wait_for_signal(*args, **kwargs):\n"

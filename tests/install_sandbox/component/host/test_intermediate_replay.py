@@ -73,7 +73,7 @@ def test_executed_step_cannot_be_reclassified_as_not_started(tmp_path: Path, loc
         if location == "intermediate_preparation":
             step.update(stage="not_started", generation=0)
         else:
-            step["progress"] = "not_started"
+            step["phase"] = "idle"
 
     rewrite(tmp_path / "proof/result.json", edit)
     with pytest.raises(ValueError):
@@ -280,20 +280,15 @@ def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: 
             generation=8,
             reason="Preparation verification failed or incomplete",
         )
-        data["steps"][1] = {
-            "progress": "not_started",
-            "operation": "install",
-            "skip_reason": "Intermediate preparation failed; repair not evaluated",
-            "command": None,
-            "verification": None,
-            "observations": None,
-        }
+        from tools.install_sandbox.contracts.results import StepState
+
+        data["steps"][1] = StepState.idle("install").to_data()
 
     rewrite(altered_proof / "result.json", fail)
     shutil.rmtree(altered_proof / "steps/1")
     (altered_proof / "expectations/reinstall.json").unlink()
     result = read_evidence(altered_proof)
-    assert result.status == "failed" and result.steps[1]["progress"] == "not_started"
+    assert result.status == "failed" and result.steps[1].phase == "idle"
     assert result.intermediate_preparation is not None
     assert result.intermediate_preparation["stage"] == "verification_retained"
     assert (

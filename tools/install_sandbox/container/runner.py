@@ -1,10 +1,8 @@
 """Execute native reinstall phases against expectations retained before commands."""
 
 import time
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from dataclasses import replace
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
@@ -16,9 +14,24 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same
 from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
     InstallTestResult,
-    StepEvidence,
+    StepState,
 )
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.step_lifecycle import (
+    CommandRetained,
+    CommandReturned,
+    ExpectationsRetained,
+    ObservationRetained,
+    PreparationObserved,
+    Prepared,
+    StopStep,
+    Terminate,
+    VerificationComputed,
+    VerificationRetained,
+    advance,
+    start,
+    status,
+)
 from tools.install_sandbox.rules.expectation_builder import (
     bind_roots,
     build_initial_expectations,
@@ -39,17 +52,7 @@ def _check_directories(subject: Path, case_file: Path, work: Path, output: Path)
 
 
 def _new_result(case: EffectInstallCase) -> InstallTestResult:
-    steps: list[StepEvidence] = [
-        {
-            "progress": "not_started",
-            "operation": operation,
-            "skip_reason": "Preparation not completed",
-            "command": None,
-            "verification": None,
-            "observations": None,
-        }
-        for operation in case.operations
-    ]
+    steps = [StepState.idle(operation) for operation in case.operations]
     return InstallTestResult(
         {"name": case.name, "target": case.target, "scope": case.scope},
         {
@@ -68,30 +71,24 @@ def _new_result(case: EffectInstallCase) -> InstallTestResult:
     )
 
 
-def step_status(step: StepEvidence) -> Literal["passed", "failed", "incomplete"]:
-    command, verdict = step["command"], step["verification"]
-    assert command is not None and verdict is not None
-    if command["state"] != "completed" or not verdict.complete:
-        return "incomplete"
-    return "failed" if command["exit_code"] != 0 or verdict.mismatches else "passed"
-
-
-@contextmanager
-def _phase(step: StepEvidence, stage: str) -> Generator[None]:
-    step["failure"] = {"stage": stage, "reason": ""}
-    yield
-    del step["failure"]
-
-
-def _record_failure(
-    step: StepEvidence, error: Exception, writer: TestResultWriter, index: int
+def _publish_step(
+    result: InstallTestResult, state: StepState, writer: TestResultWriter, index: int
 ) -> None:
-    failure = step.get("failure")
-    if failure is None:
-        raise error
-    failure["reason"] = str(error)
-    writer.write_metadata(f"steps/{index}/failure.json", failure)
-    step["skip_reason"] = str(error) if step["command"] is None else None
+    """Adopt a declaration only after its atomic result publication succeeds."""
+    steps = list(result.steps)
+    steps[index] = state
+    outcome = status(state)
+    case_status = "incomplete" if outcome == "passed" and index < len(steps) - 1 else outcome
+    candidate = replace(result, steps=steps, status=case_status)
+    if state.phase == "stopped" or (
+        state.phase == "terminal" and (outcome != "passed" or index == len(steps) - 1)
+    ):
+        with writer.measure("finalize"):
+            writer.write_result(candidate)
+    else:
+        writer.write_result(candidate)
+    result.steps = candidate.steps
+    result.status = candidate.status
 
 
 class InstallTestRunner:
@@ -116,17 +113,20 @@ class InstallTestRunner:
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
         case.write(output / "case.json")
-        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v5"})
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v6"})
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
         writer.write_result(result)
         writer.append_log("journal.log", "Validated native case; starting preparation\n")
         writer.append_log("preparation.log", "Package availability inherited from campaign\n")
-        self._run(case, subject, prepared_executable, work, writer, result)
-        if not writer.halted:
-            with writer.measure("finalize"):
-                writer.write_result(result)
-        writer.finish_timings(started)
+        try:
+            self._run(case, subject, prepared_executable, work, writer, result)
+        except BaseException:
+            writer.halted = True
+            raise
+        finally:
+            # Timings never authorize progression or overwrite the last result.
+            writer.finish_timings(started)
         return result
 
     def _run(
@@ -165,7 +165,9 @@ class InstallTestRunner:
                 failure_stage = "install_expectations"
                 expectations = build_install_expectations(case, sources, before, roots)
             result.preparation["ready"] = True
-        except (OSError, ValueError, EvidenceWriteError) as error:
+        except EvidenceWriteError:
+            raise
+        except (OSError, ValueError) as error:
             writer.write_metadata(
                 "construction-failure.json",
                 {
@@ -189,7 +191,9 @@ class InstallTestRunner:
         writer: TestResultWriter,
         result: InstallTestResult,
     ) -> None:
-        for index, step in enumerate(result.steps):
+        for index, operation in enumerate(case.operations):
+            if index and status(result.steps[index - 1]) != "passed":
+                return
             if index and case.intermediate_preparation is not None:
                 transition = conduct_intermediate(
                     case, sources, expectations, before, environment, writer, result
@@ -197,27 +201,14 @@ class InstallTestRunner:
                 if transition is None:
                     return
                 expectations, before = transition
-            step["progress"] = "incomplete"
-            step["skip_reason"] = None
-            result.status = "incomplete"
-            writer.write_result(result)
-            try:
-                expectations, after = self._step(
-                    case, executable, environment, expectations, before, writer, result, index
-                )
-            except (OSError, ValueError, EvidenceWriteError) as error:
-                _record_failure(step, error, writer, index)
-                outcome = "incomplete"
-            else:
-                outcome = step_status(step)
-                before = after
-                step["progress"] = "incomplete" if outcome == "incomplete" else "finished"
-            result.status = "incomplete" if outcome == "passed" and index == 0 else outcome
-            writer.write_result(result)
-            if outcome != "passed":
-                for dependent in result.steps[index + 1 :]:
-                    dependent["skip_reason"] = f"Step {index} {outcome}"
+            state = start(operation)
+            _publish_step(result, state, writer, index)
+            completed = self._step(
+                case, executable, environment, expectations, before, writer, result, index, state
+            )
+            if completed is None:
                 return
+            expectations, before = completed
 
     def _step(
         self,
@@ -229,79 +220,87 @@ class InstallTestRunner:
         writer: TestResultWriter,
         result: InstallTestResult,
         index: int,
-    ) -> tuple[ExpectationSet, FilesystemSnapshot]:
-        step = result.steps[index]
-        with _phase(step, "preparation"):
+        state: StepState,
+    ) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
+        try:
             if index:
                 with writer.measure("step_preparation", index):
-                    expectations = self._prepare_second(
-                        case, environment, expectations, before, writer, result
+                    previous = result.steps[0].verification
+                    assert previous is not None
+                    if case.intermediate_preparation is None:
+                        expectations = build_reinstall_expectations(expectations, before, previous)
+                    observed = environment.observe(writer, "before", step_index=index)
+                    usable = not observed.obstacles and same_observation(before, observed)
+                    state = advance(
+                        state, PreparationObserved(f"steps/{index}/before.json", usable)
                     )
-        if not (index and case.intermediate_preparation is not None):
-            with _phase(step, "expectations"):
+                    if not usable:
+                        raise ValueError(
+                            "Environment changed or was obstructed before the second installation"
+                        )
+            else:
+                state = advance(state, PreparationObserved("steps/0/before.json"))
+            state = advance(state, Prepared())
+            if not (index and case.intermediate_preparation is not None):
                 writer.write_metadata(
                     f"expectations/{expectations.phase}.json", expectations.to_data()
                 )
-        with _phase(step, "command"), writer.measure("command", index) as timing:
-            command = self.driver.install(
-                case,
-                executable,
-                environment.project,
-                environment.home,
-                environment.project.parent.parent / "command-tmp",
+            state = advance(state, ExpectationsRetained(f"expectations/{expectations.phase}.json"))
+            with writer.measure("command", index) as timing:
+                command = self.driver.install(
+                    case,
+                    executable,
+                    environment.project,
+                    environment.home,
+                    environment.project.parent.parent / "command-tmp",
+                )
+                timing.duration_seconds = command.duration_seconds
+                if command.duration_seconds is None:
+                    timing.state = "unavailable"
+                    timing.diagnostic = "Command executor did not supply a duration"
+            state = advance(
+                state,
+                CommandReturned(
+                    {
+                        "args": command.args,
+                        "cwd": command.cwd,
+                        "state": command.state,
+                        "exit_code": command.exit_code,
+                        "reason": command.reason,
+                        "stdout_file": None,
+                        "stderr_file": None,
+                    }
+                ),
             )
-            timing.duration_seconds = command.duration_seconds
-            if command.duration_seconds is None:
-                timing.state = "unavailable"
-                timing.diagnostic = "Command executor did not supply a duration"
-        with _phase(step, "command_evidence"):
-            step["command"] = {
-                "args": command.args,
-                "cwd": command.cwd,
-                "state": command.state,
-                "exit_code": command.exit_code,
-                "reason": command.reason,
-                "stdout_file": None,
-                "stderr_file": None,
-            }
-            step["command"] = writer.write_command(command, step_index=index)
-            step["skip_reason"] = None
-        writer.write_result(result)
-        with writer.measure("checks", index):
-            with _phase(step, "observation"):
+            retained = writer.write_command(command, step_index=index)
+            assert retained["stdout_file"] is not None and retained["stderr_file"] is not None
+            state = advance(
+                state, CommandRetained(retained["stdout_file"], retained["stderr_file"])
+            )
+            _publish_step(result, state, writer, index)
+            with writer.measure("checks", index):
                 after = environment.observe(writer, "after", step_index=index)
-                step["observations"] = {
-                    "before": f"steps/{index}/before.json",
-                    "after": f"steps/{index}/after.json",
-                }
-            with _phase(step, "verification"):
+                state = advance(state, ObservationRetained(f"steps/{index}/after.json"))
                 verdict = self.verifier.verify(expectations, after)
-                step["verification"] = verdict
-            with _phase(step, "verification_evidence"):
+                state = advance(state, VerificationComputed(verdict))
                 writer.write_verification(verdict, step_index=index)
-        return expectations, after
-
-    @staticmethod
-    def _prepare_second(
-        case: EffectInstallCase,
-        environment: EffectEnvironment,
-        expectations: ExpectationSet,
-        before: FilesystemSnapshot,
-        writer: TestResultWriter,
-        result: InstallTestResult,
-    ) -> ExpectationSet:
-        previous = result.steps[0]["verification"]
-        assert previous is not None
-        if case.intermediate_preparation is None:
-            expectations = build_reinstall_expectations(expectations, before, previous)
-        observed = environment.observe(writer, "before", step_index=1)
-        if not same_observation(before, observed):
-            raise ValueError("Environment changed before the second installation")
-        return expectations
+                state = advance(state, VerificationRetained(f"steps/{index}/verification.json"))
+            state = advance(state, Terminate())
+        except EvidenceWriteError:
+            # Authority was not retained. Keep the previous declaration and stop all effects.
+            writer.halted = True
+            raise
+        except (OSError, ValueError) as error:
+            state = advance(state, StopStep(str(error)))
+            writer.write_metadata(f"steps/{index}/failure.json", state.to_data())
+            _publish_step(result, state, writer, index)
+            return None
+        _publish_step(result, state, writer, index)
+        return (expectations, after) if status(state) == "passed" else None
 
     @staticmethod
     def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:
         result.preparation["reason"] = reason
-        for step in result.steps:
-            step["skip_reason"] = reason
         writer.append_log("preparation.log", reason + "\n")
+        with writer.measure("finalize"):
+            writer.write_result(result)

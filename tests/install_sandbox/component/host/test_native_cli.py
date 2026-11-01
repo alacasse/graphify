@@ -61,7 +61,9 @@ def test_cli_real_engine_and_autonomous_reread(
     for name in ("reinstall", "missing-section", "altered-section"):
         reread = read_evidence(restored / "evidence/cases" / name)
         assert reread.status == "passed"
-        assert asdict(reread) == saved[name]
+        decoded = asdict(reread)
+        decoded["steps"] = [step.to_data() for step in reread.steps]
+        assert decoded == saved[name]
 
 
 def test_unavailable_case_reason_is_retained_in_campaign(

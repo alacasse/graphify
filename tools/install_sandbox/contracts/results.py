@@ -98,19 +98,215 @@ class CommandEvidence(TypedDict):
     stderr_file: str | None
 
 
-class ExecutionFailure(TypedDict):
-    stage: str
+StepPhase = Literal[
+    "idle",
+    "preparation",
+    "expectations",
+    "command",
+    "command_evidence",
+    "observation",
+    "verification",
+    "verification_evidence",
+    "termination",
+    "terminal",
+    "stopped",
+]
+
+
+@dataclass(frozen=True)
+class CommandFacts:
+    args: tuple[str, ...]
+    cwd: str
+    state: str
+    exit_code: int | None
+    reason: str | None
+    stdout_file: str | None = None
+    stderr_file: str | None = None
+
+    @classmethod
+    def from_data(cls, value: object) -> "CommandFacts":
+        data = fields(value, "args cwd state exit_code reason stdout_file stderr_file")
+        args = _verdict_list(data["args"])
+        if not args or any(not isinstance(item, str) for item in args):
+            raise ValueError("Command arguments must be nonempty strings")
+        state = text(data["state"])
+        code = data["exit_code"]
+        if state not in {"completed", "interrupted", "not_started"}:
+            raise ValueError("Invalid command state")
+        if state == "completed" and type(code) is not int:
+            raise ValueError("Completed command requires an exit code")
+        if code is not None and type(code) is not int:
+            raise ValueError("Command exit code must be an integer")
+        if state == "not_started" and code is not None:
+            raise ValueError("Unstarted command cannot have an exit code")
+        return cls(
+            tuple(cast(list[str], args)),
+            text(data["cwd"]),
+            state,
+            code,
+            _optional_text(data["reason"]),
+            _optional_text(data["stdout_file"]),
+            _optional_text(data["stderr_file"]),
+        )
+
+    def to_data(self) -> CommandEvidence:
+        return {
+            "args": list(self.args),
+            "cwd": self.cwd,
+            "state": self.state,
+            "exit_code": self.exit_code,
+            "reason": self.reason,
+            "stdout_file": self.stdout_file,
+            "stderr_file": self.stderr_file,
+        }
+
+
+@dataclass(frozen=True)
+class VerificationFacts:
+    complete: bool
+    mismatches: tuple[VerificationMismatch, ...]
+    obstacles: tuple[tuple[str, str, str, str], ...]
+
+    @classmethod
+    def capture(cls, verdict: VerificationResult) -> "VerificationFacts":
+        return cls(
+            verdict.complete,
+            tuple(verdict.mismatches),
+            tuple(
+                (item["operation"], item["root"], item["path"], item["reason"])
+                for item in verdict.obstacles
+            ),
+        )
+
+    def result(self) -> VerificationResult:
+        return VerificationResult(
+            self.complete,
+            list(self.mismatches),
+            [
+                {"operation": item[0], "root": item[1], "path": item[2], "reason": item[3]}
+                for item in self.obstacles
+            ],
+        )
+
+
+@dataclass(frozen=True)
+class StepFacts:
+    prepared: bool = False
+    command: CommandFacts | None = None
+    verification: VerificationFacts | None = None
+
+
+@dataclass(frozen=True)
+class StepRetained:
+    before: str | None = None
+    before_usable: bool = True
+    expectations: str | None = None
+    command: bool = False
+    after: str | None = None
+    verification: str | None = None
+
+
+@dataclass(frozen=True)
+class StepStop:
+    phase: str
     reason: str
 
 
-class StepEvidence(TypedDict):
-    failure: NotRequired[ExecutionFailure]
-    progress: Literal["not_started", "incomplete", "finished"]
+@dataclass(frozen=True)
+class StepState:
     operation: str
-    skip_reason: str | None
-    command: CommandEvidence | None
-    verification: VerificationResult | None
-    observations: dict[str, str | None] | None
+    phase: StepPhase = "idle"
+    facts: StepFacts = field(default_factory=StepFacts)
+    retained: StepRetained = field(default_factory=StepRetained)
+    stop: StepStop | None = None
+
+    @classmethod
+    def idle(cls, operation: str) -> "StepState":
+        return cls(text(operation))
+
+    @property
+    def command(self) -> CommandEvidence | None:
+        return self.facts.command.to_data() if self.facts.command is not None else None
+
+    @property
+    def verification(self) -> VerificationResult | None:
+        return self.facts.verification.result() if self.facts.verification is not None else None
+
+    @property
+    def observations(self) -> dict[str, str | None]:
+        return {"before": self.retained.before, "after": self.retained.after}
+
+    def to_data(self) -> dict[str, object]:
+        from dataclasses import asdict
+
+        verdict = self.verification
+        return {
+            "operation": self.operation,
+            "phase": self.phase,
+            "facts": {
+                "prepared": self.facts.prepared,
+                "command": self.command,
+                "verification": asdict(verdict) if verdict is not None else None,
+            },
+            "retained": asdict(self.retained),
+            "stop": asdict(self.stop) if self.stop else None,
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "StepState":
+        data = fields(value, "operation phase facts retained stop")
+        fact = fields(data["facts"], "prepared command verification")
+        retained = fields(
+            data["retained"], "before before_usable expectations command after verification"
+        )
+        if any(
+            type(item) is not bool
+            for item in (fact["prepared"], retained["before_usable"], retained["command"])
+        ):
+            raise ValueError("Step flags must be booleans")
+        phases = {
+            "idle",
+            "preparation",
+            "expectations",
+            "command",
+            "command_evidence",
+            "observation",
+            "verification",
+            "verification_evidence",
+            "termination",
+            "terminal",
+            "stopped",
+        }
+        if not isinstance(data["phase"], str) or data["phase"] not in phases:
+            raise ValueError("Unknown step phase")
+        stop = None
+        if data["stop"] is not None:
+            stopped = fields(data["stop"], "phase reason")
+            stop = StepStop(text(stopped["phase"]), text(stopped["reason"]))
+        return cls(
+            text(data["operation"]),
+            cast(StepPhase, data["phase"]),
+            StepFacts(
+                cast(bool, fact["prepared"]),
+                CommandFacts.from_data(fact["command"]) if fact["command"] is not None else None,
+                VerificationFacts.capture(VerificationResult.from_data(fact["verification"]))
+                if fact["verification"] is not None
+                else None,
+            ),
+            StepRetained(
+                _optional_text(retained["before"]),
+                cast(bool, retained["before_usable"]),
+                _optional_text(retained["expectations"]),
+                cast(bool, retained["command"]),
+                _optional_text(retained["after"]),
+                _optional_text(retained["verification"]),
+            ),
+            stop,
+        )
+
+
+def _optional_text(value: object) -> str | None:
+    return None if value is None else text(value)
 
 
 class IntermediateEvidence(TypedDict):
@@ -136,7 +332,7 @@ class CheckpointReceipt:
 class InstallTestResult:
     case: dict[str, str]
     preparation: PreparationEvidence
-    steps: list[StepEvidence]
+    steps: list[StepState]
     status: Literal["passed", "failed", "not_run", "incomplete"]
     evidence: dict[str, str | None]
     intermediate_preparation: IntermediateEvidence | None = None

@@ -159,7 +159,7 @@ def test_expectations_precede_commands_and_failure_blocks_reinstall(
     )
     assert result.status == expected_status
     if first_exit or verification_failure:
-        assert result.steps[1]["command"] is None
+        assert result.steps[1].command is None
         assert not (output / "expectations/reinstall.json").exists()
 
 
@@ -251,6 +251,21 @@ def test_partial_execution_stages_remain_autonomously_readable(
 
     inject_phase_failure(monkeypatch, failure_stage)
     output = tmp_path / "evidence"
+    if failure_stage == "expectations":
+        from tools.install_sandbox.contracts.results import EvidenceWriteError
+
+        with pytest.raises(EvidenceWriteError):
+            result = runner.InstallTestRunner(InstallerDriver(execute)).run_case(
+                reference_sources=subject,
+                prepared_executable=tmp_path / "controlled-command",
+                case_file=case_file,
+                work_directory=tmp_path / "work",
+                output_directory=output,
+            )
+        assert not calls
+        assert read_evidence(output).status == "incomplete"
+        assert not (output / "steps/0/failure.json").exists()
+        return
     result = runner.InstallTestRunner(InstallerDriver(execute)).run_case(
         reference_sources=subject,
         prepared_executable=tmp_path / "controlled-command",
@@ -262,8 +277,8 @@ def test_partial_execution_stages_remain_autonomously_readable(
     assert len(calls) == (0 if failure_stage == "expectations" else 1)
     assert read_evidence(output) == result
     if failure_stage == "observation":
-        assert result.steps[0]["command"] is not None
-        assert result.steps[0]["verification"] is None
+        assert result.steps[0].command is not None
+        assert result.steps[0].verification is None
 
 
 def inject_initial_persistence_failure(monkeypatch: pytest.MonkeyPatch, failed_file: str) -> None:
@@ -308,12 +323,14 @@ def inject_initial_persistence_failure(monkeypatch: pytest.MonkeyPatch, failed_f
         "initial-verification.json",
     ],
 )
-def test_initial_persistence_failure_retains_replayable_substage(
+def test_initial_persistence_failure_stops_without_republishing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failed_file: str,
 ) -> None:
-    from tools.install_sandbox.host.result_reader import read_evidence
+    import json
+
+    from tools.install_sandbox.contracts.results import EvidenceWriteError
 
     case_file = tmp_path / "case.json"
     explicit_case().write(case_file)
@@ -326,22 +343,15 @@ def test_initial_persistence_failure_retains_replayable_substage(
         raise AssertionError("Initial failure must prevent every command")
 
     inject_initial_persistence_failure(monkeypatch, failed_file)
-    result = runner.InstallTestRunner(InstallerDriver(execute)).run_case(
-        reference_sources=subject,
-        prepared_executable=tmp_path / "controlled-command",
-        case_file=case_file,
-        work_directory=tmp_path / "work",
-        output_directory=output,
-    )
-    assert result.status == "not_run"
-    assert result.preparation["stage"] == "sources_retained"
-    assert read_evidence(output) == result
-    if failed_file == "expectations/initial.json":
-        import json
-
-        failure_file = output / "construction-failure.json"
-        failure = json.loads(failure_file.read_text())
-        failure["kind"] = "validation"
-        failure_file.write_text(json.dumps(failure))
-        with pytest.raises(ValueError, match="successfully rebuilt expectations"):
-            read_evidence(output)
+    with pytest.raises(EvidenceWriteError):
+        runner.InstallTestRunner(InstallerDriver(execute)).run_case(
+            reference_sources=subject,
+            prepared_executable=tmp_path / "controlled-command",
+            case_file=case_file,
+            work_directory=tmp_path / "work",
+            output_directory=output,
+        )
+    published = json.loads((output / "result.json").read_text())
+    assert published["preparation"]["stage"] == "started"
+    assert not (output / "construction-failure.json").exists()
+    assert not (output / "steps/0/environment.json").exists()

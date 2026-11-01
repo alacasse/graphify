@@ -71,8 +71,8 @@ def inject_failure_and_stop(patches: pytest.MonkeyPatch, window: str) -> None:
 def assert_no_dependent_effects(proof: Path, window: str) -> None:
     assert not (proof / "expectations/reinstall.json").exists()
     saved = json.loads((proof / "result.json").read_text())
-    assert saved["steps"][1]["progress"] == "not_started"
-    assert saved["steps"][1]["command"] is None
+    assert saved["steps"][1]["phase"] == "idle"
+    assert saved["steps"][1]["facts"]["command"] is None
     assert not (proof / "steps/1").exists()
     if window != "before-verdict":
         verdict = json.loads((proof / "intermediate/verification.json").read_text())

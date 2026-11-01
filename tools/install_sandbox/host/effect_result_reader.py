@@ -1,6 +1,7 @@
 """Validate native retained inputs, explicit phases, continuity and verdicts."""
 
 from pathlib import Path, PurePosixPath
+from typing import Literal, cast
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
@@ -8,7 +9,7 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
-    StepEvidence,
+    StepState,
     VerificationResult,
 )
 from tools.install_sandbox.contracts.spec import fields, text
@@ -20,6 +21,7 @@ from tools.install_sandbox.host.evidence_reader import (
     safe_evidence_path,
 )
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
+from tools.install_sandbox.host.step_artifacts import inventory
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     bind_roots,
@@ -28,6 +30,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
 )
 from tools.install_sandbox.rules.repair_protocol import RepairInputs
+from tools.install_sandbox.rules.step_lifecycle import Artifact, RetainedFacts, inspect
 
 
 def _snapshot(output: Path, relative: str) -> FilesystemSnapshot:
@@ -87,6 +90,17 @@ def _roots(output: Path) -> dict[str, str]:
 def check_effect_result(
     result: InstallTestResult, case: EffectInstallCase, output: Path
 ) -> str | None:
+    steps_directory = safe_evidence_path(output, "steps")
+    if steps_directory.exists():
+        if not steps_directory.is_dir():
+            raise ValueError("Steps evidence requires a directory")
+        for child in steps_directory.iterdir():
+            safe_evidence_path(output, child.relative_to(output).as_posix())
+            if (
+                child.name not in {str(index) for index in range(len(result.steps))}
+                or not child.is_dir()
+            ):
+                raise ValueError("Unknown step evidence directory")
     retained = EffectInstallCase.from_json(
         safe_evidence_path(output, "case.json").read_text(encoding="utf-8")
     )
@@ -260,45 +274,15 @@ def _steps(
             expected, previous, diagnostic = _transition(
                 result, case, output, sources, installed, expected, previous, previous_verdict
             )
-        if "failure" in step:
-            _failed_phase(
-                step,
-                case,
-                output,
-                index,
-                expected,
-                previous,
-                previous_verdict,
-                roots,
-                first_command,
-            )
-            return _failed_following(result, output, index, diagnostic)
-        command = step["command"]
-        if _unexecuted_phase(step, case, output, index):
-            continue
-        if _is_checkpoint(step):
-            _partial_checkpoint(step, case, output, index, roots, first_command, previous, expected)
-            continue
-        assert command is not None
-        _expectations(output, expected)
-        first_command = _command_binding(command, case, output, index, roots, first_command)
-        saved = _step_evidence(step, command, output, index)
-        before = _snapshot(output, f"steps/{index}/before.json")
-        if not _same_observation(previous, before):
-            raise ValueError("Phase continuity contradicts previous observation")
-        after = _snapshot(output, f"steps/{index}/after.json")
-        if EffectVerifier().verify(expected, after) != saved:
-            raise ValueError("Verification contradicts retained explicit expectations")
-        previous, previous_verdict = after, saved
+        after, verdict = _inspect_step(
+            step, case, output, index, roots, first_command, previous, expected
+        )
+        if step.command is not None:
+            first_command = step.command["args"], step.command["cwd"]
+        if after is not None:
+            previous = after
+        previous_verdict = verdict
     return diagnostic
-
-
-def _failed_following(
-    result: InstallTestResult, output: Path, index: int, diagnostic: str | None
-) -> str | None:
-    for later in range(index + 1, len(result.steps)):
-        _no_phase_evidence(output, later)
-    return _unstarted_repair(result, output) if index == 0 else diagnostic
 
 
 def _transition(
@@ -325,89 +309,13 @@ def _transition(
             _snapshot,
         )
         if inspection.ready is None:
-            if result.steps[1]["progress"] != "not_started":
+            if result.steps[1].phase != "idle":
                 raise ValueError("Repair requires published conforming preparation")
             return expected, previous, inspection.diagnostic
         return inspection.ready.expectations, inspection.ready.baseline, inspection.diagnostic
-    if _needs_reinstall(result.steps[1]) and verdict is not None:
+    if result.steps[1].phase != "idle" and verdict is not None:
         expected = build_reinstall_expectations(expected, previous, verdict)
     return expected, previous, None
-
-
-def _needs_reinstall(step: StepEvidence) -> bool:
-    failure = step.get("failure")
-    return step["progress"] != "not_started" and (
-        failure is None or failure["stage"] != "preparation"
-    )
-
-
-def _is_checkpoint(step: StepEvidence) -> bool:
-    return step["progress"] == "incomplete" and any(
-        step[key] is None for key in ("command", "verification", "observations")
-    )
-
-
-def _unexecuted_phase(
-    step: StepEvidence, case: EffectInstallCase, output: Path, index: int
-) -> bool:
-    if step["progress"] != "not_started":
-        return False
-    if index and case.intermediate_preparation is not None:
-        _absent(output, (f"steps/{index}",))
-    else:
-        _no_phase_evidence(output, index)
-    return True
-
-
-def _partial_checkpoint(
-    step: StepEvidence,
-    case: EffectInstallCase,
-    output: Path,
-    index: int,
-    roots: dict[str, str],
-    first_command: tuple[list[str], str] | None,
-    previous: FilesystemSnapshot,
-    expected: ExpectationSet,
-) -> None:
-    """Check every available artifact of an interrupted progress checkpoint."""
-    observations = step["observations"] or {}
-    for phase in ("before", "after"):
-        relative = f"steps/{index}/{phase}.json"
-        ref = observations.get(phase)
-        if ref is not None and ref != relative:
-            raise ValueError("Interrupted observation belongs to another phase")
-        _partial_observation(output, relative, ref, phase, previous, expected, step["verification"])
-    command = step["command"]
-    if command is not None:
-        _partial_command_binding(command, case, roots, first_command)
-        for key in ("stdout_file", "stderr_file"):
-            reference = command[key]
-            if reference is not None:
-                safe_evidence_path(output, reference).read_bytes()
-
-
-def _partial_observation(
-    output: Path,
-    relative: str,
-    ref: str | None,
-    phase: str,
-    previous: FilesystemSnapshot,
-    expected: ExpectationSet,
-    verdict: VerificationResult | None,
-) -> None:
-    if not (output / relative).exists():
-        if ref is not None:
-            raise ValueError("Interrupted phase lost a referenced observation")
-        return
-    observed = _snapshot(output, relative)
-    if phase == "before" and not _same_observation(previous, observed):
-        raise ValueError("Interrupted phase continuity contradicts previous observation")
-    if (
-        phase == "after"
-        and verdict is not None
-        and EffectVerifier().verify(expected, observed) != verdict
-    ):
-        raise ValueError("Interrupted verification contradicts observations")
 
 
 def _absent(output: Path, relatives: tuple[str, ...]) -> None:
@@ -422,100 +330,125 @@ def _no_phase_evidence(output: Path, index: int) -> None:
     _absent(output, (f"steps/{index}", f"expectations/{phase}.json"))
 
 
-def _failed_phase(
-    step: StepEvidence,
+def _inspect_step(
+    step: StepState,
     case: EffectInstallCase,
     output: Path,
     index: int,
-    expected: ExpectationSet,
+    roots: dict[str, str],
+    first_command: tuple[list[str], str] | None,
     previous: FilesystemSnapshot,
-    previous_verdict: VerificationResult | None,
-    roots: dict[str, str],
-    first_command: tuple[list[str], str] | None,
-) -> None:
-    failure = step.get("failure")
-    assert failure is not None
-    if read_json_evidence(output, f"steps/{index}/failure.json") != failure:
-        raise ValueError("Failed execution stage differs from saved failure evidence")
-    stage = failure["stage"]
-    if stage == "preparation":
-        if not index:
-            raise ValueError("First phase has no dependent step preparation")
-        _absent(
-            output,
-            (
-                *(
-                    ("expectations/reinstall.json",)
-                    if case.intermediate_preparation is None
-                    else ()
-                ),
-                f"steps/{index}/after.json",
-                f"steps/{index}/verification.json",
-                f"steps/{index}/environment.json",
-            ),
-        )
-        return
-    before = _snapshot(output, f"steps/{index}/before.json")
-    if not _same_observation(previous, before):
-        raise ValueError("Failed phase continuity contradicts previous observation")
-    if stage == "expectations":
-        _absent(
-            output,
-            (
-                f"steps/{index}/after.json",
-                f"steps/{index}/verification.json",
-                f"steps/{index}/environment.json",
-            ),
-        )
-        return
-    _expectations(output, expected)
-    _failed_command_phase(step, case, output, index, expected, roots, first_command)
-
-
-def _failed_command_phase(
-    step: StepEvidence,
-    case: EffectInstallCase,
-    output: Path,
-    index: int,
     expected: ExpectationSet,
-    roots: dict[str, str],
-    first_command: tuple[list[str], str] | None,
-) -> None:
-    failure = step.get("failure")
-    assert failure is not None
-    stage = failure["stage"]
-    if stage == "command":
-        _absent(
-            output,
-            (
-                f"steps/{index}/after.json",
-                f"steps/{index}/verification.json",
-                f"steps/{index}/environment.json",
-            ),
+) -> tuple[FilesystemSnapshot | None, VerificationResult | None]:
+    loaded, staged = inventory(output, index, _snapshot)
+    prefix = f"steps/{index}"
+    failure = loaded.get(f"{prefix}/failure.json")
+    stopped = None if failure is None else StepState.from_data(failure)
+    claim = stopped or step
+    repair_owns_expectations = bool(
+        index
+        and case.intermediate_preparation is not None
+        and (
+            claim.phase == "idle"
+            or claim.phase == "preparation"
+            or (claim.stop is not None and claim.stop.phase == "preparation")
         )
-        return
-    command = step["command"]
-    assert command is not None
-    if stage == "command_evidence":
+    )
+    phase = "install" if index == 0 else "reinstall"
+    expectation_reference = f"expectations/{phase}.json"
+    has_expectations = safe_evidence_path(output, expectation_reference).exists()
+    if has_expectations:
+        _expectations(output, expected)
+    before = loaded.get(f"{prefix}/before.json")
+    after = loaded.get(f"{prefix}/after.json")
+    before_usable = isinstance(before, FilesystemSnapshot) and _same_observation(previous, before)
+    if isinstance(before, FilesystemSnapshot) and before.obstacles:
+        before_usable = False
+    if index == 0 and not before_usable:
+        raise ValueError("Initial step continuity contradicts previous observation")
+    for name, reference in claim.observations.items():
+        if reference is None:
+            continue
+        if reference != f"{prefix}/{name}.json":
+            raise ValueError("Evidence references must belong to their own step")
+        if reference not in loaded:
+            raise ValueError("Missing referenced observation")
+    command = claim.command
+    if command is not None:
         _partial_command_binding(command, case, roots, first_command)
-        _absent(output, (f"steps/{index}/after.json", f"steps/{index}/verification.json"))
-        return
-    _command_binding(command, case, output, index, roots, first_command)
-    _command_outputs(command, output, index)
-    if stage == "observation":
-        _absent(output, (f"steps/{index}/verification.json",))
-        return
-    after = _snapshot(output, f"steps/{index}/after.json")
-    if step["observations"] != {
-        "before": f"steps/{index}/before.json",
-        "after": f"steps/{index}/after.json",
-    }:
-        raise ValueError("Failed verification requires its phase observations")
-    computed = EffectVerifier().verify(expected, after)
-    if stage == "verification":
-        _absent(output, (f"steps/{index}/verification.json",))
-    elif computed != step["verification"]:
-        raise ValueError("Partial verification contradicts retained explicit expectations")
+        outputs: tuple[tuple[Literal["stdout_file", "stderr_file"], str], ...] = (
+            ("stdout_file", "stdout.txt"),
+            ("stderr_file", "stderr.txt"),
+        )
+        for key, filename in outputs:
+            reference = command[key]
+            if reference is not None and (
+                reference != f"{prefix}/{filename}" or reference not in loaded
+            ):
+                raise ValueError("Command requires its own retained output")
+    if f"{prefix}/environment.json" in loaded:
+        binding = command or {
+            "args": ["retained", *case.subject.invocation],
+            "cwd": roots["project"],
+            "state": "not_started",
+            "exit_code": None,
+            "reason": None,
+            "stdout_file": None,
+            "stderr_file": None,
+        }
+        check_environment(binding, output, index)
+    saved = loaded.get(f"{prefix}/verification.json")
+    verdict = None if saved is None else VerificationResult.from_data(saved)
+    if verdict is not None:
+        if (
+            not isinstance(after, FilesystemSnapshot)
+            or EffectVerifier().verify(expected, after) != verdict
+        ):
+            raise ValueError("Verification contradicts retained explicit expectations")
+    if claim.verification is not None and (
+        not isinstance(after, FilesystemSnapshot)
+        or EffectVerifier().verify(expected, after) != claim.verification
+    ):
+        raise ValueError("Verification contradicts retained explicit expectations")
+    stop = stopped.stop if stopped is not None else None
+    kinds = {
+        f"{prefix}/before.json": "before",
+        f"{prefix}/after.json": "after",
+        f"{prefix}/environment.json": "environment",
+        f"{prefix}/verification.json": "verification",
+        f"{prefix}/failure.json": "failure",
+        expectation_reference: "expectations",
+    }
+    facts = RetainedFacts(
+        expectations=has_expectations and not repair_owns_expectations,
+        external_expectations=has_expectations and repair_owns_expectations,
+        before=isinstance(before, FilesystemSnapshot) and not (index == 0 and step.phase == "idle"),
+        before_usable=before_usable,
+        environment=f"{prefix}/environment.json" in loaded,
+        stdout=f"{prefix}/stdout.txt" in loaded,
+        stderr=f"{prefix}/stderr.txt" in loaded,
+        after=isinstance(after, FilesystemSnapshot),
+        verification=verdict,
+        stop=stop,
+        stopped_state=stopped,
+        staged=tuple(
+            frozenset(cast(Artifact, kinds[owner]) for owner in entry.owners if owner in kinds)
+            for entry in staged
+            if not (repair_owns_expectations and entry.owners == frozenset({expectation_reference}))
+        ),
+    )
+    if (
+        claim.retained.expectations is not None
+        and claim.retained.expectations != expectation_reference
+    ):
+        raise ValueError("Expectations reference must belong to its own step")
+    if (
+        claim.retained.verification is not None
+        and claim.retained.verification != f"{prefix}/verification.json"
+    ):
+        raise ValueError("Verification reference must belong to its own step")
+    inspect(step, facts)
+    return after if isinstance(after, FilesystemSnapshot) else None, verdict
 
 
 def _partial_command_binding(
@@ -528,48 +461,3 @@ def _partial_command_binding(
         raise ValueError("Partial command facts contradict invocation or retained roots")
     if first_command is not None and (command["args"], command["cwd"]) != first_command:
         raise ValueError("Partial reinstallation must repeat the same command")
-
-
-def _command_outputs(command: CommandEvidence, output: Path, index: int) -> None:
-    for key, filename in (("stdout_file", "stdout.txt"), ("stderr_file", "stderr.txt")):
-        relative = f"steps/{index}/{filename}"
-        if command[key] != relative:
-            raise ValueError("Command requires its own retained output")
-        safe_evidence_path(output, relative).read_bytes()
-
-
-def _step_evidence(
-    step: StepEvidence,
-    command: CommandEvidence,
-    output: Path,
-    index: int,
-) -> VerificationResult:
-    if step["observations"] != {
-        "before": f"steps/{index}/before.json",
-        "after": f"steps/{index}/after.json",
-    }:
-        raise ValueError("Command requires its own observations")
-    _command_outputs(command, output, index)
-    saved = VerificationResult.from_data(
-        read_json_evidence(output, f"steps/{index}/verification.json")
-    )
-    if saved != step["verification"]:
-        raise ValueError("Verification differs from saved evidence")
-    return saved
-
-
-def _command_binding(
-    command: CommandEvidence,
-    case: EffectInstallCase,
-    output: Path,
-    index: int,
-    roots: dict[str, str],
-    first: tuple[list[str], str] | None,
-) -> tuple[list[str], str]:
-    if command["args"][1:] != list(case.subject.invocation) or command["cwd"] != roots["project"]:
-        raise ValueError("Command contradicts invocation or retained roots")
-    identity = command["args"], command["cwd"]
-    if first is not None and identity != first:
-        raise ValueError("Reinstallation must repeat the same command")
-    check_environment(command, output, index)
-    return identity

@@ -108,7 +108,7 @@ def test_invalid_repair_is_observed_failure(tmp_path: Path, repair: str) -> None
     result, installer = conduct(tmp_path, repair=repair)
     assert result.status == "failed"
     assert len(installer.calls) == 2
-    verification = result.steps[1]["verification"]
+    verification = result.steps[1].verification
     assert verification is not None and verification.complete and verification.mismatches
 
 
@@ -120,7 +120,7 @@ def test_foreign_effect_during_repair_fails(tmp_path: Path) -> None:
 def test_first_install_failure_blocks_preparation_and_repair(tmp_path: Path) -> None:
     result, installer = conduct(tmp_path, first_wrong=True)
     assert result.status == "failed" and len(installer.calls) == 1
-    assert result.steps[1]["progress"] == "not_started"
+    assert result.steps[1].phase == "idle"
     assert result.intermediate_preparation is not None
     assert result.intermediate_preparation["stage"] == "not_started"
 
@@ -214,7 +214,7 @@ def test_failed_preparation_blocks_second_command(
         if failure in {"wrong-range", "wrong-body", "heading", "foreign", "unchanged"}
         else "incomplete"
     )
-    assert result.steps[1]["progress"] == "not_started"
+    assert result.steps[1].phase == "idle"
     record = result.intermediate_preparation
     assert record is not None
     assert record["stage"] == (
@@ -235,5 +235,5 @@ def test_repair_preserves_other_effects_and_initial_backup(
     result, installer = conduct(tmp_path, changed_effect=changed_effect)
     assert result.status == "failed"
     assert len(installer.calls) == 2
-    verification = result.steps[1]["verification"]
+    verification = result.steps[1].verification
     assert verification is not None and verification.complete and verification.mismatches

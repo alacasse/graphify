@@ -69,7 +69,7 @@ def test_counterexamples_fail_and_replay_after_input_removal(
     result = run(tmp_path, InstallerDriver(execute))
     assert result.status == "failed"
     assert len(installer.calls) == phase
-    verdict = result.steps[phase - 1]["verification"]
+    verdict = result.steps[phase - 1].verification
     assert verdict is not None and any(item.path == path for item in verdict.mismatches)
     remove_inputs(tmp_path)
     assert read_evidence(tmp_path / "proof") == result
@@ -81,7 +81,7 @@ def test_new_nested_source_is_required_without_yaml_change(tmp_path: Path) -> No
     installer = LiteralInstaller()
     result = run(tmp_path, InstallerDriver(installer.execute))
     assert result.status == "failed" and len(installer.calls) == 1
-    verdict = result.steps[0]["verification"]
+    verdict = result.steps[0].verification
     assert verdict is not None
     assert any(item.path.endswith("references/new/nested.md") for item in verdict.mismatches)
     remove_inputs(tmp_path)

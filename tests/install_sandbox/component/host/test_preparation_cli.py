@@ -157,4 +157,4 @@ def test_bound_sources_feed_normal_engine_only_through_controlled_transport(
     assert reread.status == "passed"
     saved = json.loads((tmp_path / "proof/cases/reinstall/result.json").read_text())
     assert asdict(reread)["status"] == saved["status"]
-    assert all(step["command"] is not None for step in reread.steps)
+    assert all(step.command is not None for step in reread.steps)

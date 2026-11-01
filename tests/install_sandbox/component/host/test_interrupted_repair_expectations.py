@@ -40,7 +40,7 @@ def stopped_archive(
     result, installer = conduct(tmp_path)
     assert result.status == status
     assert len(installer.calls) == 1
-    assert result.steps[1]["progress"] == "not_started"
+    assert result.steps[1].phase == "idle"
     # conduct removes all live inputs before replaying the archive itself.
     assert not (tmp_path / "subject").exists()
     assert not (tmp_path / "work").exists()
@@ -103,7 +103,7 @@ def test_effective_expectations_ahead_of_checkpoint_are_validated(
     result, installer = conduct(tmp_path)
     assert result.status == "incomplete"
     assert len(installer.calls) == 1
-    assert result.steps[1]["progress"] == "not_started"
+    assert result.steps[1].phase == "idle"
     assert result.intermediate_preparation is not None
     assert result.intermediate_preparation["stage"] == "verification_retained"
     proof = tmp_path / "proof"

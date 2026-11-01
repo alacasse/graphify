@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import copy
-import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from pathlib import PurePosixPath
 from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
+from tools.install_sandbox.contracts.evidence_layout import StagedEvidence
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
@@ -333,7 +332,7 @@ def inspect(
     context: RepairInputs,
     published: IntermediateEvidence,
     inventory: Mapping[str, object],
-    staged: tuple[str, ...] = (),
+    staged: tuple[StagedEvidence, ...] = (),
 ) -> Inspection:
     """Validate every present artifact, including exactly one unpublished successor."""
     session = begin(context)
@@ -362,7 +361,7 @@ def inspect(
         session.confirm_checkpoint(
             CheckpointReceipt(pending.session_id, pending.generation, pending.sha256)
         )
-    _validate_staging(staged, total, count)
+    _validate_staging(staged, total, count, session.next_action())
     return _inspection_result(session, published, stage, total, count)
 
 
@@ -432,27 +431,19 @@ def _inventory_prefix(
     return stage, count, sum(present)
 
 
-def _validate_staging(staged: tuple[str, ...], total: int, count: int) -> None:
-    if staged:
-        if total != count or total >= len(ARTIFACTS):
-            raise ValueError("Snapshot staging requires its immediately preceding checkpoint")
-        descriptor = ARTIFACTS[total]
-        target = PurePosixPath(descriptor.reference)
-        for path in staged:
-            candidate = PurePosixPath(path)
-            temporary = (
-                candidate.parent == target.parent
-                and re.fullmatch(
-                    re.escape("." + target.name + ".") + r"[A-Za-z0-9_-]+\.tmp", candidate.name
-                )
-                is not None
-            )
-            snapshot_blob = descriptor.transport == "snapshot" and path.startswith(
-                f"intermediate/{descriptor.kind}/"
-            )
-            empty_parent = path.endswith("/") and candidate == target.parent
-            if not temporary and not snapshot_blob and not empty_parent:
-                raise ValueError("Future or unrelated evidence staging")
+def _validate_staging(
+    staged: tuple[StagedEvidence, ...], total: int, count: int, action: Request | Ready | Stop
+) -> None:
+    if not staged:
+        return
+    if total != count or total >= len(ARTIFACTS) or isinstance(action, (Stop, Ready)):
+        raise ValueError("Evidence staging requires an authorized next action")
+    descriptor = ARTIFACTS[total]
+    forms = {"json_temporary", "directory"}
+    if descriptor.transport == "snapshot":
+        forms.add("snapshot_blob")
+    if any(descriptor.reference not in item.owners or item.form not in forms for item in staged):
+        raise ValueError("Future or unrelated evidence staging")
 
 
 def _validate_snapshot(snapshot: FilesystemSnapshot) -> None:

@@ -302,3 +302,69 @@ def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: 
         ]
         == "content_mismatch"
     )
+
+
+@pytest.mark.parametrize("terminal", ["before", "verification"])
+def test_incomplete_terminal_preparation_rejects_next_temporary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: str
+) -> None:
+    from tools.install_sandbox.container.effect_environment import EffectEnvironment
+
+    original = EffectEnvironment.observe_intermediate
+
+    def obstruct(environment: EffectEnvironment, phase: str):
+        observation = original(environment, phase)
+        if phase == ("before" if terminal == "before" else "after"):
+            if terminal == "before":
+                key = next(iter(observation.contents))
+                observation.contents[key] += b"external edit"
+            else:
+                key = next(iter(observation.contents))
+                observation.contents.pop(key)
+                observation.obstacles.append(
+                    {
+                        "root": key[0],
+                        "path": key[1],
+                        "operation": "read_file",
+                        "reason": "Controlled unavailable bytes",
+                    }
+                )
+        return observation
+
+    monkeypatch.setattr(EffectEnvironment, "observe_intermediate", obstruct)
+    result, installer = conduct(tmp_path)
+    assert result.status == "incomplete" and len(installer.calls) == 1
+    assert read_evidence(tmp_path / "proof").status == "incomplete"
+    relative = (
+        "intermediate/.performed.json.stopped.tmp"
+        if terminal == "before"
+        else "expectations/.reinstall.json.stopped.tmp"
+    )
+    (tmp_path / "proof" / relative).write_bytes(b"partial")
+    with pytest.raises(ValueError, match="staging"):
+        read_evidence(tmp_path / "proof")
+
+
+@pytest.mark.parametrize("kind", ["file_symlink", "directory_symlink", "fifo", "unknown_directory"])
+def test_intermediate_inventory_rejects_unconfined_or_unsupported_entries(
+    altered_proof: Path, tmp_path: Path, kind: str
+) -> None:
+    import os
+
+    candidate = altered_proof / "intermediate/unrecognized"
+    if kind == "file_symlink":
+        candidate.symlink_to(altered_proof / "case.json")
+    elif kind == "directory_symlink":
+        candidate.symlink_to(tmp_path.parent, target_is_directory=True)
+    elif kind == "fifo":
+        os.mkfifo(candidate)
+    else:
+        candidate.mkdir()
+    with pytest.raises(ValueError):
+        read_evidence(altered_proof)
+
+
+def test_ready_preparation_rejects_leftover_temporary(altered_proof: Path) -> None:
+    (altered_proof / "expectations/.reinstall.json.leftover.tmp").write_bytes(b"partial")
+    with pytest.raises(ValueError, match="staging"):
+        read_evidence(altered_proof)

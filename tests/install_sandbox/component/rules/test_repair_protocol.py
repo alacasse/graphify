@@ -7,6 +7,7 @@ from typing import cast
 import pytest
 
 from tests.install_sandbox.component.container.test_repair_scenario import KEY, inputs
+from tools.install_sandbox.contracts.evidence_layout import StagedEvidence
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -323,6 +324,11 @@ def test_ready_or_terminal_verification_replays_at_atomic_publication(
     else:
         assert isinstance(session.next_action(), Stop)
     assert inspect(ctx, session.checkpoint, inventory).diagnostic == diagnostic
+    terminal_staging = StagedEvidence(
+        "literal-terminal-staging", "json_temporary", frozenset({"expectations/reinstall.json"})
+    )
+    with pytest.raises(ValueError, match="staging"):
+        inspect(ctx, session.checkpoint, inventory, (terminal_staging,))
 
 
 def test_wrong_result_types_and_contradictory_observations_rejected_without_changes():
@@ -361,6 +367,17 @@ def test_changed_before_stops_effects_and_rejects_later_evidence():
     confirm(session)
     assert isinstance(session.next_action(), Stop)
     assert inspect(ctx, session.checkpoint, inventory).diagnostic == "incomplete"
+    with pytest.raises(ValueError, match="staging"):
+        inspect(
+            ctx,
+            session.checkpoint,
+            inventory,
+            (
+                StagedEvidence(
+                    "literal-staging", "json_temporary", frozenset({"intermediate/performed.json"})
+                ),
+            ),
+        )
     inventory["intermediate/performed.json"] = object()
     with pytest.raises(ValueError, match="published prefix"):
         inspect(ctx, session.checkpoint, inventory)
@@ -378,11 +395,25 @@ def test_replay_rejects_tampered_retention_and_future_or_missing_evidence():
     fresh = begin(ctx)
     confirm(fresh)
     with pytest.raises(ValueError, match="staging"):
-        inspect(ctx, fresh.checkpoint, {}, ("intermediate/after/0.bin",))
+        inspect(
+            ctx,
+            fresh.checkpoint,
+            {},
+            (StagedEvidence("arbitrary", "snapshot_blob", frozenset({"intermediate/after.json"})),),
+        )
     with pytest.raises(ValueError, match="ordered prefix"):
         inspect(ctx, fresh.checkpoint, {"intermediate/performed.json": object()})
     assert (
-        inspect(ctx, fresh.checkpoint, {}, ("intermediate/.operation.json.token.tmp",)).diagnostic
+        inspect(
+            ctx,
+            fresh.checkpoint,
+            {},
+            (
+                StagedEvidence(
+                    "arbitrary", "json_temporary", frozenset({"intermediate/operation.json"})
+                ),
+            ),
+        ).diagnostic
         == "incomplete"
     )
 
@@ -455,3 +486,34 @@ def test_same_digest_wrong_logical_type_is_rejected_during_replay() -> None:
     inventory[REFERENCES[0]] = operation.to_data()
     with pytest.raises(ValueError, match="Wrong result type"):
         inspect(ctx, session.checkpoint, inventory)
+
+
+@pytest.mark.parametrize("successor", range(8))
+def test_staging_rejected_after_complete_unpublished_successor(successor: int) -> None:
+    ctx = context()
+    session = begin(ctx)
+    inventory = advance(session, ctx, successor)
+    published = session.checkpoint
+    completion = completion_for(session.next_action(), ctx)
+    accept(session, completion)
+    inventory[REFERENCES[successor]] = completion.value
+    with pytest.raises(ValueError, match="staging"):
+        inspect(
+            ctx,
+            published,
+            inventory,
+            (StagedEvidence("literal", "json_temporary", frozenset({REFERENCES[successor]})),),
+        )
+
+
+def test_json_action_rejects_snapshot_staging_even_with_matching_owner() -> None:
+    ctx = context()
+    session = begin(ctx)
+    confirm(session)
+    with pytest.raises(ValueError, match="staging"):
+        inspect(
+            ctx,
+            session.checkpoint,
+            {},
+            (StagedEvidence("literal", "snapshot_blob", frozenset({REFERENCES[0]})),),
+        )

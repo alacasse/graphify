@@ -5,6 +5,7 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from tools.install_sandbox.contracts.evidence_layout import blob_reference
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
@@ -75,9 +76,8 @@ def check_snapshot(
         parse_obstacle(obstacle)
     entries: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
-    prefix = relative.removesuffix(".json")
     for value in json_list(data["entries"]):
-        entry = snapshot_entry(value, output, prefix)
+        entry = snapshot_entry(value, output, relative)
         key = (text(entry["root"]), text(entry["path"]))
         if key in seen:
             raise ValueError("Duplicate snapshot entry")
@@ -107,7 +107,7 @@ def check_complete_snapshot(
             raise ValueError("Complete verification contradicts unsupported entry")
 
 
-def snapshot_entry(value: object, output: Path, prefix: str) -> dict[str, object]:
+def snapshot_entry(value: object, output: Path, reference: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Invalid snapshot entry")
     entry = cast(dict[str, object], value)
@@ -123,20 +123,20 @@ def snapshot_entry(value: object, output: Path, prefix: str) -> dict[str, object
     root, path, kind = text(entry["root"]), text(entry["path"]), text(entry["kind"])
     if path != ".":
         relative_path(path)
-    if root not in ({"subject"} if prefix == "expected" else {"project", "home"}):
+    if root not in ({"subject"} if reference == "expected.json" else {"project", "home"}):
         raise ValueError("Invalid snapshot root")
     if kind not in {"file", "directory", "unknown", "other"}:
         raise ValueError("Invalid snapshot entry kind")
     if "listing_complete" in entry:
         boolean(entry["listing_complete"])
-    check_content_binding(entry, output, prefix)
+    check_content_binding(entry, output, reference)
     return entry
 
 
-def check_content_binding(entry: dict[str, object], output: Path, prefix: str) -> None:
-    root, path = entry["root"], entry["path"]
+def check_content_binding(entry: dict[str, object], output: Path, reference: str) -> None:
+    root, path = text(entry["root"]), text(entry["path"])
     if entry.get("content_file") is not None:
-        binding = f"{prefix}/{path}" if root == "subject" else f"{prefix}/{root}/{path}"
+        binding = blob_reference(reference, root, path)
         if entry["content_file"] != binding:
             raise ValueError("Snapshot content must belong to its own observation")
         safe_evidence_path(output, binding).read_bytes()

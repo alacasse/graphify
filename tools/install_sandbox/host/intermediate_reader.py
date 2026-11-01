@@ -1,9 +1,15 @@
 """Load confined retained artifacts and delegate preparation semantics to the protocol."""
 
-import re
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
+from tools.install_sandbox.contracts.evidence_layout import (
+    ArtifactLocation,
+    FilesystemEntry,
+    StagedEvidence,
+    classify_staging,
+)
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import InstallTestResult
 from tools.install_sandbox.host.evidence_reader import (
@@ -29,11 +35,46 @@ def replay_intermediate(
 
 def _inventory(
     output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
-) -> tuple[dict[str, object], tuple[str, ...]]:
+) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
+    entries = _physical_entries(output)
     inventory, referenced = _load_artifacts(output, snapshot)
-    staged = _intermediate_files(output, referenced)
-    staged.extend(_expectation_files(output))
-    return inventory, tuple(staged)
+    known_files = {
+        entry.relative
+        for entry in entries
+        if entry.kind == "file"
+        and entry.relative in {"expectations/initial.json", "expectations/install.json"}
+    }
+    staged = classify_staging(
+        entries,
+        tuple(ArtifactLocation(item.reference, item.transport) for item in ARTIFACTS),
+        referenced,
+        known_files,
+    )
+    return inventory, staged
+
+
+def _physical_entries(output: Path) -> tuple[FilesystemEntry, ...]:
+    entries: list[FilesystemEntry] = []
+
+    def visit(relative: str) -> None:
+        path = safe_evidence_path(output, relative)
+        mode = path.lstat().st_mode
+        if stat.S_ISREG(mode):
+            entries.append(FilesystemEntry(relative, "file"))
+        elif stat.S_ISDIR(mode):
+            entries.append(FilesystemEntry(relative, "directory"))
+            for child in sorted(path.iterdir()):
+                visit(child.relative_to(output).as_posix())
+        else:
+            raise ValueError("Preparation evidence must be a regular file or directory")
+
+    for relative in ("intermediate", "expectations"):
+        path = safe_evidence_path(output, relative)
+        if path.exists():
+            if not path.is_dir():
+                raise ValueError("Preparation evidence requires a directory")
+            visit(relative)
+    return tuple(entries)
 
 
 def _load_artifacts(
@@ -57,80 +98,3 @@ def _load_artifacts(
         else:
             inventory[reference] = descriptor.decode(read_json_evidence(output, reference))
     return inventory, referenced
-
-
-def _snapshot_directory(relative: str) -> bool:
-    return relative in {"intermediate/before", "intermediate/after"} or any(
-        relative == f"intermediate/{phase}/{root}"
-        or relative.startswith(f"intermediate/{phase}/{root}/")
-        for phase in ("before", "after")
-        for root in ("home", "project")
-    )
-
-
-def _intermediate_files(output: Path, referenced: set[str]) -> list[str]:
-    intermediate = safe_evidence_path(output, "intermediate")
-    if not intermediate.exists():
-        return []
-    if not intermediate.is_dir():
-        raise ValueError("Preparation evidence requires a directory")
-    staged: list[str] = [] if any(intermediate.iterdir()) else ["intermediate/"]
-    known = {descriptor.reference for descriptor in ARTIFACTS}
-    for path in intermediate.rglob("*"):
-        relative = path.relative_to(output).as_posix()
-        safe_evidence_path(output, relative)
-        if path.is_dir():
-            if not _snapshot_directory(relative):
-                raise ValueError("Unknown preparation evidence directory")
-            if not any(reference.startswith(relative + "/") for reference in referenced):
-                staged.append(relative + "/")
-        elif relative not in known and relative not in referenced:
-            staged.append(_staged_file(path, relative))
-    return staged
-
-
-def _staged_file(path: Path, relative: str) -> str:
-    if not path.is_file():
-        raise ValueError("Preparation evidence must be regular")
-    if not _temporary(relative) and not any(
-        relative.startswith(f"intermediate/{phase}/{root}/")
-        for phase in ("before", "after")
-        for root in ("home", "project")
-    ):
-        raise ValueError("Unknown preparation evidence")
-    return relative
-
-
-def _expectation_files(output: Path) -> list[str]:
-    directory = safe_evidence_path(output, "expectations")
-    if not directory.exists():
-        return []
-    if not directory.is_dir():
-        raise ValueError("Expectations require a directory")
-    known = {descriptor.reference for descriptor in ARTIFACTS}
-    known.update({"expectations/initial.json", "expectations/install.json"})
-    staged: list[str] = []
-    for path in directory.iterdir():
-        relative = path.relative_to(output).as_posix()
-        safe_evidence_path(output, relative)
-        if not path.is_file():
-            raise ValueError("Expectation artifact must be regular")
-        if relative in known:
-            continue
-        if not _temporary(relative):
-            raise ValueError("Unknown expectation evidence")
-        staged.append(relative)
-    return staged
-
-
-def _temporary(relative: str) -> bool:
-    path = Path(relative)
-    return any(
-        path.parent == Path(descriptor.reference).parent
-        and re.fullmatch(
-            re.escape("." + Path(descriptor.reference).name + ".") + r"[A-Za-z0-9_-]+\.tmp",
-            path.name,
-        )
-        is not None
-        for descriptor in ARTIFACTS
-    )

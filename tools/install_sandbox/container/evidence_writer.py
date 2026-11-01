@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 import tempfile
@@ -13,13 +12,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.install_sandbox.container.installer import InstallerCommandResult
+from tools.install_sandbox.contracts.evidence_layout import (
+    SnapshotPublication,
+    plan_json,
+    plan_snapshot,
+)
 from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
     CommandEvidence,
     EvidenceWriteError,
     InstallTestResult,
-    SnapshotEntry,
     VerificationResult,
 )
 from tools.install_sandbox.contracts.timings import (
@@ -65,29 +68,28 @@ class TestResultWriter:
         path = self.output_directory / relative
         if not path.resolve().is_relative_to(self.output_directory.resolve()):
             raise EvidenceWriteError("Artifact escaped the evidence directory")
+        snapshot_plan = (
+            plan_snapshot(relative, artifact.snapshot)
+            if isinstance(artifact, SnapshotArtifact)
+            else None
+        )
         if isinstance(artifact, JsonArtifact):
             self._write_json(relative, artifact.document)
-        else:
-            self._snapshot(artifact.snapshot, relative.removesuffix(".json"))
+        elif snapshot_plan is not None:
+            self._snapshot(snapshot_plan)
         if path.is_symlink() or not path.is_file():
             raise EvidenceWriteError("Artifact has not been retained")
-        if isinstance(artifact, SnapshotArtifact):
-            self._check_snapshot_receipt(path, artifact.snapshot, relative.removesuffix(".json"))
+        if snapshot_plan is not None:
+            self._check_snapshot_receipt(path, snapshot_plan)
         elif artifact_digest(json.loads(path.read_bytes())) != artifact_digest(artifact):
             raise EvidenceWriteError("Published artifact differs from retained facts")
         return ArtifactReceipt(relative, artifact_digest(artifact))
 
-    def _check_snapshot_receipt(self, path: Path, payload: FilesystemSnapshot, prefix: str) -> None:
-        expected = self._manifest(payload, prefix)
-        for entry in expected["entries"]:
-            content = entry.get("content_file")
-            if (
-                content is not None
-                and (self.output_directory / content).read_bytes()
-                != (payload.contents[(entry["root"], entry["path"])])
-            ):
+    def _check_snapshot_receipt(self, path: Path, plan: SnapshotPublication) -> None:
+        for reference, content in plan.blobs:
+            if (self.output_directory / reference).read_bytes() != content:
                 raise EvidenceWriteError("Published snapshot differs from retained facts")
-        if json.loads(path.read_bytes()) != {**expected, "obstacles": payload.obstacles}:
+        if json.loads(path.read_bytes()) != plan.manifest.document:
             raise EvidenceWriteError("Published manifest differs from retained facts")
 
     def write_checkpoint(
@@ -157,32 +159,12 @@ class TestResultWriter:
                     f"Cannot create expected evidence directory: {error}"
                 ) from error
         prefix = "expected" if name == "expected" else f"steps/{step_index}/{name}"
-        self._snapshot(snapshot, prefix)
+        self._snapshot(plan_snapshot(f"{prefix}.json", snapshot))
 
-    @staticmethod
-    def _manifest(snapshot: FilesystemSnapshot, prefix: str) -> dict[str, list[SnapshotEntry]]:
-        entries: list[SnapshotEntry] = []
-        for entry in snapshot.entries:
-            retained = entry.copy()
-            retained.pop("content_file", None)
-            retained.pop("sha256", None)
-            key = (entry["root"], entry["path"])
-            if key in snapshot.contents:
-                relative = (
-                    f"{prefix}/{key[1]}" if prefix == "expected" else f"{prefix}/{key[0]}/{key[1]}"
-                )
-                retained["content_file"] = relative
-                retained["sha256"] = hashlib.sha256(snapshot.contents[key]).hexdigest()
-            entries.append(retained)
-        return {"entries": entries}
-
-    def _snapshot(self, snapshot: FilesystemSnapshot, prefix: str) -> None:
-        manifest = self._manifest(snapshot, prefix)
-        for entry in manifest["entries"]:
-            relative = entry.get("content_file")
-            if relative is not None:
-                self._write_bytes(relative, snapshot.contents[(entry["root"], entry["path"])])
-        self._write_json(f"{prefix}.json", {**manifest, "obstacles": snapshot.obstacles})
+    def _snapshot(self, plan: SnapshotPublication) -> None:
+        for reference, content in plan.blobs:
+            self._write_bytes(reference, content)
+        self._write_json(plan.manifest.reference, plan.manifest.document)
 
     def write_metadata(self, relative: str, value: object) -> None:
         self._write_json(relative, value)
@@ -194,7 +176,8 @@ class TestResultWriter:
         self._write_json(f"steps/{step_index}/verification.json", asdict(result))
 
     def _write_json(self, relative: str, value: object) -> None:
-        destination = self.output_directory / relative
+        plan = plan_json(relative, value)
+        destination = self.output_directory / plan.reference
         temporary: Path | None = None
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -202,12 +185,12 @@ class TestResultWriter:
                 mode="w",
                 encoding="utf-8",
                 dir=destination.parent,
-                prefix=f".{destination.name}.",
-                suffix=".tmp",
+                prefix=plan.temporary_prefix,
+                suffix=plan.temporary_suffix,
                 delete=False,
             ) as stream:
                 temporary = Path(stream.name)
-                json.dump(value, stream, indent=2)
+                json.dump(plan.document, stream, indent=2)
                 stream.write("\n")
             temporary.replace(destination)
         except OSError as error:

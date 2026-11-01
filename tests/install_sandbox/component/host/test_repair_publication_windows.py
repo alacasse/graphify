@@ -115,6 +115,11 @@ def run_stopped(
                 if runtime_error:
                     raise OSError("Controlled blob publication error")
                 raise ProcessStopped()
+        if relative == target and when == "partial":
+            original_bytes(writer, relative, b"Partial retained bytes", append=append)
+            if runtime_error:
+                raise OSError("Controlled partial blob write")
+            raise ProcessStopped()
         original_bytes(writer, relative, value, append=append)
         if relative == target and when == "after":
             if runtime_error:
@@ -208,3 +213,50 @@ def test_snapshot_publication_preserves_logical_input(tmp_path: Path) -> None:
     manifest = json.loads((tmp_path / "intermediate/before.json").read_text())
     assert manifest["entries"][0]["content_file"] == "intermediate/before/project/GUIDE.md"
     assert snapshot.entries[0].get("content_file") is None
+
+
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("phase", ["before", "after"])
+@pytest.mark.parametrize("runtime_error", [False, True])
+def test_partial_blob_without_manifest_has_no_proof_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    phase: str,
+    runtime_error: bool,
+) -> None:
+    target = f"intermediate/{phase}/project/GUIDE.md"
+    calls, mutations, writes = run_stopped(
+        tmp_path, monkeypatch, scenario, target, "partial", runtime_error=runtime_error
+    )
+    proof = tmp_path / "proof"
+    assert (proof / target).read_bytes() == b"Partial retained bytes"
+    assert not (proof / f"intermediate/{phase}.json").exists()
+    checkpoint = json.loads((proof / "result.json").read_text())["intermediate_preparation"]
+    assert checkpoint == {
+        "stage": "repair_plan_retained" if phase == "before" else "mutation_recorded",
+        "generation": 4 if phase == "before" else 6,
+        "reason": None,
+    }
+    assert (calls, mutations, writes) == (1, int(phase == "after"), 1)
+    assert read_evidence(proof).status == "incomplete"
+
+
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_multiple_blobs_with_partial_content_and_manifest_temporary_are_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, phase: str
+) -> None:
+    target = f"intermediate/{phase}/project/GUIDE.md"
+    calls, mutations, writes = run_stopped(tmp_path, monkeypatch, scenario, target, "partial")
+    proof = tmp_path / "proof"
+    # Independent physical examples: no layout helper supplies this replay oracle.
+    complete = proof / f"intermediate/{phase}/project/personal.txt"
+    complete.write_bytes(b"Complete independent personal file.\n")
+    temporary = proof / f"intermediate/.{phase}.json.interrupted.tmp"
+    temporary.write_bytes(b'{"entries": [')
+    assert (proof / target).read_bytes() == b"Partial retained bytes"
+    assert complete.read_bytes() == b"Complete independent personal file.\n"
+    assert not (proof / f"intermediate/{phase}.json").exists()
+    assert (calls, mutations, writes) == (1, int(phase == "after"), 1)
+    assert read_evidence(proof).status == "incomplete"

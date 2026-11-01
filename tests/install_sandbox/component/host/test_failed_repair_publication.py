@@ -163,3 +163,14 @@ def test_failed_preparation_rejects_contradictory_retained_facts(
     path.write_text(json.dumps(data))
     with pytest.raises(MalformedEvidence):
         read_evidence(proof)
+
+
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("window", ["after-verdict", "after-checkpoint", "uninterrupted"])
+def test_terminal_verification_rejects_next_artifact_temporary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, window: str
+) -> None:
+    proof = failed_archive(tmp_path, monkeypatch, scenario, window)
+    (proof / "expectations/.reinstall.json.stopped.tmp").write_bytes(b"partial")
+    with pytest.raises(MalformedEvidence, match="staging"):
+        read_evidence(proof)

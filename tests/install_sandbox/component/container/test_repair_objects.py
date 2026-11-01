@@ -26,9 +26,10 @@ from tools.install_sandbox.rules.repair_protocol import (
 )
 
 
+@pytest.mark.parametrize("case", ["missing-section", "altered-section"])
 @pytest.mark.parametrize("phase", ["before", "after"])
 def test_failure_after_snapshot_blobs_before_publication_is_replayable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, case: str
 ):
     original = Writer.retain
 
@@ -39,7 +40,7 @@ def test_failure_after_snapshot_blobs_before_publication_is_replayable(
         return receipt
 
     monkeypatch.setattr(Writer, "retain", interrupt)
-    outcome = run_fixture(tmp_path, {"case": "missing-section"})
+    outcome = run_fixture(tmp_path, {"case": case})
     assert outcome["run_status"] == outcome["replay_status"] == "incomplete"
     assert outcome["calls"] == 1
     assert (Path(outcome["proof"]) / "intermediate" / f"{phase}.json").exists()
@@ -177,9 +178,7 @@ class CapturedExecution(TypedDict, total=False):
     retry: Callable[[], object]
 
 
-def capture_execution(
-    monkeypatch: pytest.MonkeyPatch, captured: CapturedExecution
-) -> None:
+def capture_execution(monkeypatch: pytest.MonkeyPatch, captured: CapturedExecution) -> None:
     from tools.install_sandbox.container import intermediate_execution
 
     begin = intermediate_execution.begin
@@ -192,8 +191,11 @@ def capture_execution(
     )
 
     def capture_advance(
-        session: RepairSession, inputs: RepairInputs, environment: EffectEnvironment,
-        writer: Writer, result: InstallTestResult,
+        session: RepairSession,
+        inputs: RepairInputs,
+        environment: EffectEnvironment,
+        writer: Writer,
+        result: InstallTestResult,
     ) -> object:
         captured["retry"] = lambda: advance(session, inputs, environment, writer, result)
         return advance(session, inputs, environment, writer, result)
@@ -252,18 +254,19 @@ def interrupt_execution(
     return captured
 
 
+@pytest.mark.parametrize("case", ["missing-section", "altered-section"])
 @pytest.mark.parametrize("window", ["initial", "mutation-retention", "confirmation"])
 @pytest.mark.parametrize("disappearance", [False, True])
 def test_escaping_failure_aborts_session_and_halts_writer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, window: str, disappearance: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, window: str, disappearance: bool, case: str
 ) -> None:
     failure = ProcessDisappeared if disappearance else OSError
     captured = interrupt_execution(monkeypatch, window, failure)
     if disappearance:
         with pytest.raises(ProcessDisappeared):
-            run_fixture(tmp_path, {"case": "missing-section"})
+            run_fixture(tmp_path, {"case": case})
     else:
-        outcome = run_fixture(tmp_path, {"case": "missing-section"})
+        outcome = run_fixture(tmp_path, {"case": case})
         assert outcome["run_status"] == outcome["replay_status"] == "incomplete"
         assert outcome["calls"] == 1
     assert "writer" in captured and "session" in captured and "retry" in captured

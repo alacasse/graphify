@@ -108,8 +108,8 @@ def test_unexpected_stop_is_not_success(
     assert ("interrupted" if interrupted else "Controlled unexpected stop") in diagnostic
     result = read_evidence(tmp_path / "results")
     assert result.status == "incomplete"
-    assert result.steps[0]["progress"] == "incomplete"
-    assert result.steps[1]["progress"] == "not_started"
+    assert result.steps[0].phase != "terminal"
+    assert result.steps[1].phase == "idle"
     assert (tmp_path / "results/preparation.log").is_file()
 
 

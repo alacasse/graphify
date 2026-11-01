@@ -92,6 +92,6 @@ def conduct_intermediate(
     if isinstance(outcome, Ready):
         return outcome.expectations, outcome.baseline
     result.status = outcome.diagnostic
-    result.steps[1]["skip_reason"] = outcome.reason
-    writer.write_result(result)
+    with writer.measure("finalize"):
+        writer.write_result(result)
     return None

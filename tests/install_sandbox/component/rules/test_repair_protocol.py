@@ -15,9 +15,9 @@ from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
     IntermediateEvidence,
-    StepEvidence,
     VerificationResult,
 )
+from tools.install_sandbox.rules import step_lifecycle as lifecycle
 from tools.install_sandbox.rules.repair_actions import (
     ARTIFACTS,
     ApplyMarkdownMutation,
@@ -40,13 +40,13 @@ from tools.install_sandbox.rules.repair_protocol import (
 
 def context() -> RepairInputs:
     case, sources, installed, first, verdict = inputs()
-    step = cast(
-        StepEvidence,
-        {
-            "progress": "finished",
-            "operation": "install",
-            "skip_reason": None,
-            "command": {
+    step = lifecycle.start("install")
+    for event in (
+        lifecycle.PreparationObserved("steps/0/before.json"),
+        lifecycle.Prepared(),
+        lifecycle.ExpectationsRetained("expectations/install.json"),
+        lifecycle.CommandReturned(
+            {
                 "args": ["install"],
                 "cwd": "/sandbox/project",
                 "state": "completed",
@@ -54,11 +54,15 @@ def context() -> RepairInputs:
                 "reason": None,
                 "stdout_file": None,
                 "stderr_file": None,
-            },
-            "verification": verdict,
-            "observations": {"before": "steps/0/before.json", "after": "steps/0/after.json"},
-        },
-    )
+            }
+        ),
+        lifecycle.CommandRetained("steps/0/stdout.txt", "steps/0/stderr.txt"),
+        lifecycle.ObservationRetained("steps/0/after.json"),
+        lifecycle.VerificationComputed(verdict),
+        lifecycle.VerificationRetained("steps/0/verification.json"),
+        lifecycle.Terminate(),
+    ):
+        step = lifecycle.advance(step, event)
     return RepairInputs(case.to_json().encode(), sources, installed, first, step)
 
 

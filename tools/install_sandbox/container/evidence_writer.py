@@ -155,6 +155,7 @@ class TestResultWriter:
             try:
                 (self.output_directory / "expected").mkdir(exist_ok=True)
             except OSError as error:
+                self.halted = True
                 raise EvidenceWriteError(
                     f"Cannot create expected evidence directory: {error}"
                 ) from error
@@ -176,6 +177,9 @@ class TestResultWriter:
         self._write_json(f"steps/{step_index}/verification.json", asdict(result))
 
     def _write_json(self, relative: str, value: object) -> None:
+        authoritative = relative != "timings.json.tmp"
+        if self.halted and authoritative:
+            raise EvidenceWriteError("Evidence writer has halted")
         plan = plan_json(relative, value)
         destination = self.output_directory / plan.reference
         temporary: Path | None = None
@@ -194,6 +198,8 @@ class TestResultWriter:
                 stream.write("\n")
             temporary.replace(destination)
         except OSError as error:
+            if authoritative:
+                self.halted = True
             raise EvidenceWriteError(f"Cannot publish evidence {relative}: {error}") from error
         finally:
             if temporary is not None:
@@ -201,12 +207,15 @@ class TestResultWriter:
                     temporary.unlink(missing_ok=True)
 
     def _write_bytes(self, relative: str, content: bytes, *, append: bool = False) -> None:
+        if self.halted:
+            raise EvidenceWriteError("Evidence writer has halted")
         destination = self.output_directory / relative
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with destination.open("ab" if append else "wb") as stream:
                 stream.write(content)
         except OSError as error:
+            self.halted = True
             raise EvidenceWriteError(f"Cannot write evidence {relative}: {error}") from error
 
     def append_log(self, relative: str, message: str | bytes) -> None:
@@ -231,4 +240,6 @@ class TestResultWriter:
         }
 
     def write_result(self, result: InstallTestResult) -> None:
-        self._write_json("result.json", asdict(result))
+        document = asdict(result)
+        document["steps"] = [step.to_data() for step in result.steps]
+        self._write_json("result.json", document)

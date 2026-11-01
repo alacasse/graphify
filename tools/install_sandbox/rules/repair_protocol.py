@@ -17,10 +17,11 @@ from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
     IntermediateEvidence,
-    StepEvidence,
+    StepState,
     VerificationResult,
 )
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.step_lifecycle import status
 from tools.install_sandbox.rules.expectation_builder import preservation_baseline
 from tools.install_sandbox.rules.repair_actions import (
     ARTIFACTS,
@@ -54,7 +55,7 @@ class RepairInputs:
     sources: FilesystemSnapshot
     installed: ExpectationSet
     first_after: FilesystemSnapshot
-    first_step: StepEvidence
+    first_step: StepState
 
 
 @dataclass(frozen=True)
@@ -104,17 +105,9 @@ class RepairSession:
             "reason": None,
         }
         first = self._inputs.first_step
-        command = first["command"]
-        verdict = first["verification"]
+        verdict = first.verification
         self._blocked: str | None = None
-        if (
-            first["progress"] != "finished"
-            or command is None
-            or command["state"] != "completed"
-            or command["exit_code"] != 0
-            or verdict is None
-            or not _conforming(verdict)
-        ):
+        if status(first) != "passed" or verdict is None:
             self._blocked = "First installation not completed and conforming"
             self._plan = None
             return

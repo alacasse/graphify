@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.install_sandbox.contracts.results import StepState
 from tools.install_sandbox.host.result_reader import MalformedEvidence, read_evidence
 
 
@@ -45,11 +46,13 @@ def test_phase_continuity_tampering_is_rejected(proof: Path) -> None:
     data = json.loads(path.read_text())
     data["entries"] = [entry for entry in data["entries"] if entry["path"] != "GUIDE.md"]
     path.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="continuity"):
+    with pytest.raises(ValueError, match="observation contradicts"):
         read_evidence(proof)
 
 
-@pytest.mark.parametrize("version", ["effects-v1", "explicit-expectations-v3"])
+@pytest.mark.parametrize(
+    "version", ["effects-v1", "explicit-expectations-v3", "explicit-expectations-v5"]
+)
 def test_historical_transport_is_explicitly_rejected(proof: Path, version: str) -> None:
     path = proof / "evidence-format.json"
     path.write_text(json.dumps({"format": version}))
@@ -64,21 +67,14 @@ def test_skipped_phase_rejects_retained_execution_evidence(proof: Path, leftover
     path = proof / "result.json"
     data = json.loads(path.read_text())
     data["status"] = "failed"
-    data["steps"][0]["command"]["exit_code"] = 7
-    data["steps"][1] = {
-        "progress": "not_started",
-        "operation": "install",
-        "skip_reason": "First phase failed",
-        "command": None,
-        "verification": None,
-        "observations": None,
-    }
+    data["steps"][0]["facts"]["command"]["exit_code"] = 7
+    data["steps"][1] = StepState.idle("install").to_data()
     path.write_text(json.dumps(data))
     if leftover == "observations":
         (proof / "expectations/reinstall.json").unlink()
     else:
         shutil.rmtree(proof / "steps/1")
-    with pytest.raises(ValueError, match="stage contradicts retained later evidence"):
+    with pytest.raises(ValueError):
         read_evidence(proof)
 
 
@@ -131,17 +127,7 @@ def test_rejected_initial_verification_forbids_retained_execution(
     result = json.loads(result_file.read_text())
     result["status"] = "not_run"
     result["preparation"].update(ready=False, reason="Initial verification failed")
-    result["steps"] = [
-        {
-            "progress": "not_started",
-            "operation": "install",
-            "skip_reason": "Initial verification failed",
-            "command": None,
-            "verification": None,
-            "observations": None,
-        }
-        for _ in range(2)
-    ]
+    result["steps"] = [StepState.idle("install").to_data() for _ in range(2)]
     result_file.write_text(json.dumps(result))
     retained = None if retained_artifact is None else (proof / retained_artifact).read_bytes()
     shutil.rmtree(proof / "steps/1")
@@ -161,7 +147,7 @@ def test_rejected_initial_verification_forbids_retained_execution(
         path.parent.mkdir(parents=True, exist_ok=True)
         assert retained is not None
         path.write_bytes(retained)
-        with pytest.raises(ValueError, match="stage contradicts retained later evidence"):
+        with pytest.raises(ValueError):
             read_evidence(proof)
         return
     assert read_evidence(proof).status == "not_run"

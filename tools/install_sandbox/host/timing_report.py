@@ -116,11 +116,13 @@ def _test_diagnostics(test: InstallTestResult | None) -> list[str]:
         else []
     )
     for index, step in enumerate(test.steps):
-        command = step["command"]
-        reason = step["skip_reason"] or (command["reason"] if command else None)
+        command = step.command
+        reason = (step.stop.reason if step.stop else None) or (
+            command["reason"] if command else None
+        )
         if reason:
             lines.append(f"  Step {index + 1}: {reason}")
-        verification = step["verification"]
+        verification = step.verification
         if verification is not None:
             lines.extend(
                 f"  Step {index + 1}: {m.type}: {m.root}/{m.path}" for m in verification.mismatches

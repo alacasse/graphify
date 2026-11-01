@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from tools.install_sandbox.contracts.timings import Timing, measure
 from tools.install_sandbox.host.build_context import validate_evidence_location
+from tools.install_sandbox.host.campaign_definition import (
+    CampaignDefinition,
+    load_campaign_definition,
+)
 from tools.install_sandbox.host.coordinator import CampaignResult, InstallTestCoordinator
 from tools.install_sandbox.host.docker_runtime import SignalCapture
 from tools.install_sandbox.host.output_archive import archive_evidence, check_interrupt
@@ -63,8 +68,24 @@ class CampaignOutput:
             str(spec_file),
             str(subject_context_file),
         )
-        session = _Session(self.root, report, self.now, prepare_only=prepare_only)
+        construction = Timing("construction")
         with SignalCapture() as interrupts:
+            try:
+                with measure(construction):
+                    definition = load_campaign_definition(
+                        spec_file=spec_file,
+                        subject_context_file=subject_context_file,
+                        subject_checkout=subject_checkout,
+                        prepare_only=prepare_only,
+                    )
+            except (Exception, KeyboardInterrupt) as error:
+                report.exit_code = 130 if isinstance(error, KeyboardInterrupt) else 2
+                if interrupts.signal_number is not None:
+                    report.exit_code = 128 + interrupts.signal_number
+                report.phase = "incomplete"
+                report.diagnostics.append(f"{type(error).__name__}: {error}")
+                return CampaignCommandResult(report.exit_code, None, report)
+            session = _Session(self.root, report, self.now, definition, construction)
             return session.run(output_directory, str(runtime_executable), interrupts)
 
 
@@ -74,11 +95,11 @@ class _Session:
         root: Path,
         report: OutputReport,
         now: Callable[[], datetime],
-        *,
-        prepare_only: bool = False,
+        definition: CampaignDefinition,
+        construction: Timing,
     ) -> None:
         self.root, self.report, self.now = root, report, now
-        self.prepare_only = prepare_only
+        self.definition, self.construction = definition, construction
         self.directory: Path | None = None
         self.lock: FileLock | None = None
 
@@ -115,7 +136,7 @@ class _Session:
     def _allocate(self, requested: Path | None) -> None:
         self.root = safe_path(self.root)
         destination = safe_path(requested) if requested is not None else None
-        subject = Path(self.report.subject).expanduser().resolve()
+        subject = self.definition.subject_checkout
         self.report.subject = str(subject)
         validate_evidence_location(subject, destination or self.root / "in-progress" / "pending")
         if destination is not None and not destination.is_relative_to(self.root):
@@ -159,15 +180,13 @@ class _Session:
     def _execute(self, runtime: str, interrupts: SignalCapture) -> None:
         assert self.directory is not None
         result = InstallTestCoordinator().run_campaign(
-            spec_file=Path(self.report.spec),
-            subject_context_file=Path(self.report.subject_context),
-            subject_checkout=Path(self.report.subject),
+            definition=self.definition,
+            construction_timing=self.construction,
             output_directory=self.directory / "evidence",
             runtime_executable=runtime,
             interrupts=interrupts,
             observer=self,
             progress=self._progress,
-            prepare_only=self.prepare_only,
         )
         self.report.observe(result)
         self.report.exit_code = 0 if result.successful else 1

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -20,14 +21,19 @@ def arrange_output(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def refused(root: Path, now: datetime = START, output: Path | None = None) -> CampaignCommandResult:
-    (root / "subject").mkdir(exist_ok=True)
-    return CampaignOutput(managed_root=root / "out", now=lambda: now).run(
-        spec_file=root / "missing-effects.yaml",
-        subject_context_file=root / "context.json",
-        subject_checkout=root / "subject",
-        output_directory=output,
-        runtime_executable=RUNTIME,
-    )
+    if not (root / "effects.yaml").exists():
+        arrange(root)
+    with patch(
+        "tools.install_sandbox.host.coordinator.InstallTestCoordinator.run_campaign",
+        side_effect=OSError("Controlled post-allocation failure"),
+    ):
+        return CampaignOutput(managed_root=root / "out", now=lambda: now).run(
+            spec_file=root / "effects.yaml",
+            subject_context_file=root / "context.json",
+            subject_checkout=root / "subject",
+            output_directory=output,
+            runtime_executable=RUNTIME,
+        )
 
 
 def valid(root: Path, monkeypatch: pytest.MonkeyPatch) -> CampaignCommandResult:

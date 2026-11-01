@@ -12,6 +12,7 @@ import pytest
 from tests.install_sandbox.component.host.native_support import arrange
 from tools.install_sandbox.__main__ import main
 from tools.install_sandbox.host import output_lifecycle
+from tools.install_sandbox.host.campaign_definition import load_campaign_definition
 from tools.install_sandbox.host.coordinator import InstallTestCoordinator
 from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 from tools.install_sandbox.host.preparation_reader import read_preparation
@@ -144,9 +145,9 @@ def test_bound_sources_feed_normal_engine_only_through_controlled_transport(
     subject, spec, context = package(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_DOCKER_CASE_PROGRAM", str(Path(__file__).with_name("binding_case.py")))
     result = InstallTestCoordinator().run_campaign(
-        spec_file=spec,
-        subject_context_file=context,
-        subject_checkout=subject,
+        definition=load_campaign_definition(
+            spec_file=spec, subject_context_file=context, subject_checkout=subject
+        ),
         output_directory=tmp_path / "proof",
         runtime_executable=RUNTIME,
     )

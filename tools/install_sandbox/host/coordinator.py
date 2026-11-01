@@ -8,24 +8,21 @@ from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.contracts.effect_case import (
-    EffectCaseBuild,
     EffectInstallCase,
     SubjectContext,
-    build_effect_cases,
-    unique_object,
 )
 from tools.install_sandbox.contracts.effects import EffectSpec
 from tools.install_sandbox.contracts.preparation import PreparationResult
 from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
 from tools.install_sandbox.contracts.timings import Timing, elapsed, measure
 from tools.install_sandbox.host.build_context import validate_evidence_location
+from tools.install_sandbox.host.campaign_definition import CampaignDefinition
 from tools.install_sandbox.host.docker_runtime import (
     ContainerHarness,
     ContainerRunResult,
     SignalCapture,
     WriterObserver,
 )
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 from tools.install_sandbox.host.subject_checkout import captured_subject
 from tools.install_sandbox.host.timing_reader import CaseTimingResult, read_timings
@@ -173,9 +170,7 @@ class InstallTestCoordinator:
     def run_campaign(
         self,
         *,
-        spec_file: Path,
-        subject_context_file: Path,
-        subject_checkout: Path,
+        definition: CampaignDefinition,
         output_directory: Path,
         runtime_executable: str | Path = "docker",
         build_timeout_seconds: float = 300,
@@ -185,28 +180,24 @@ class InstallTestCoordinator:
         interrupts: SignalCapture | None = None,
         observer: WriterObserver | None = None,
         progress: Callable[[CampaignResult], None] | None = None,
-        prepare_only: bool = False,
+        construction_timing: Timing | None = None,
     ) -> CampaignResult:
         """Prepare once, conduct ordered isolated cases, and always finalize owned resources."""
         started = time.monotonic_ns()
-        inputs = Timing("inputs")
-        with measure(inputs):
-            harness = ContainerHarness(
-                runtime_executable=runtime_executable,
-                build_timeout_seconds=build_timeout_seconds,
-                verify_timeout_seconds=verify_timeout_seconds,
-                run_timeout_seconds=run_timeout_seconds,
-                graceful_termination_seconds=graceful_termination_seconds,
-                interrupts=interrupts,
-                observer=observer,
-            )
-            subject, output, effects, context, built = self._prepare_campaign(
-                spec_file,
-                subject_context_file,
-                subject_checkout,
-                output_directory,
-                prepare_only,
-            )
+        destination = output_directory.expanduser().absolute()
+        output = destination.resolve()
+        _check_campaign_paths(definition.subject_checkout, destination, output)
+        harness = ContainerHarness(
+            runtime_executable=runtime_executable,
+            build_timeout_seconds=build_timeout_seconds,
+            verify_timeout_seconds=verify_timeout_seconds,
+            run_timeout_seconds=run_timeout_seconds,
+            graceful_termination_seconds=graceful_termination_seconds,
+            interrupts=interrupts,
+            observer=observer,
+        )
+        built = definition.built
+        materialization = Timing("materialization")
         result = CampaignResult(
             output,
             [CampaignCase(c.name, output / "cases" / c.name) for c in built.cases]
@@ -214,18 +205,13 @@ class InstallTestCoordinator:
                 CampaignCase(name, output / "cases" / name, not_run_reason=reason, state="not_run")
                 for name, reason in built.unavailable.items()
             ],
-            timings=[inputs],
-            prepare_only=prepare_only,
+            timings=([construction_timing] if construction_timing is not None else [])
+            + [materialization],
+            prepare_only=definition.prepare_only,
         )
         with harness:
             try:
-                _save_progress(result, progress)
-                self._prepare_image(harness, subject, effects, context, result)
-                assert result.preparation is not None
-                result.timings.extend(result.preparation.timings)
-                _save_progress(result, progress)
-                if not prepare_only:
-                    self._conduct_cases(harness, list(built.cases), result, progress)
+                self._execute_campaign(harness, definition, result, materialization, progress)
             except (Exception, KeyboardInterrupt) as error:
                 result.interrupted = isinstance(error, KeyboardInterrupt)
                 result.error = f"Campaign stopped: {type(error).__name__}: {error}"
@@ -240,6 +226,26 @@ class InstallTestCoordinator:
                 except EvidenceWriteError as error:
                     result.error = f"{result.error or 'Campaign evidence incomplete'}; {error}"
         return result
+
+    def _execute_campaign(
+        self,
+        harness: ContainerHarness,
+        definition: CampaignDefinition,
+        result: CampaignResult,
+        materialization: Timing,
+        progress: Callable[[CampaignResult], None] | None,
+    ) -> None:
+        with measure(materialization):
+            self._materialize(definition, result.output_directory)
+        _save_progress(result, progress)
+        self._prepare_image(
+            harness, definition.subject_checkout, definition.effects, definition.context, result
+        )
+        assert result.preparation is not None
+        result.timings.extend(result.preparation.timings)
+        _save_progress(result, progress)
+        if not definition.prepare_only:
+            self._conduct_cases(harness, list(definition.built.cases), result, progress)
 
     @staticmethod
     def _prepare_image(
@@ -263,38 +269,17 @@ class InstallTestCoordinator:
                 )
                 result.preparation_result = harness.preparation_result
 
-    def _prepare_campaign(
-        self,
-        spec: Path,
-        context: Path,
-        subject: Path,
-        output: Path,
-        prepare_only: bool = False,
-    ) -> tuple[Path, Path, EffectSpec, SubjectContext, EffectCaseBuild]:
-        subject = subject.expanduser().resolve(strict=True)
-        destination = output.expanduser()
-        output = destination.resolve()
-        _check_campaign_paths(subject, destination, output)
-        effects = EffectSpecReader().read(spec)
-        subject_context = SubjectContext.from_data(
-            json.loads(context.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
-        )
-        if prepare_only and subject_context.package_root is None:
-            raise ValueError("Preparation-only requires a package root and exact subject revision")
-        built = (
-            EffectCaseBuild((), {})
-            if prepare_only
-            else build_effect_cases(effects, subject_context, subject_context.identity)
-        )
-        cases = built.cases
+    @staticmethod
+    def _materialize(definition: CampaignDefinition, output: Path) -> None:
         output.mkdir(parents=True, exist_ok=True)
         (output / "inputs").mkdir()
-        if cases:
+        if definition.built.cases:
             (output / "cases").mkdir()
-        for case in cases:
+        for case, transport in zip(definition.built.cases, definition.transports, strict=True):
             (output / "cases" / case.name).mkdir()
-            case.write(output / "inputs" / f"{case.name}.json")
-        return subject, output, effects, subject_context, built
+            (output / "inputs" / f"{case.name}.json").write_text(
+                transport, encoding="utf-8", newline="\n"
+            )
 
     def _conduct_cases(
         self,
@@ -369,7 +354,7 @@ def _check_campaign_paths(subject: Path, destination: Path, output: Path) -> Non
     if not subject.is_dir():
         raise ValueError("subject_checkout must be a directory")
     validate_evidence_location(subject, output)
-    if destination.is_symlink() or "," in str(output):
+    if any(p.is_symlink() for p in (destination, *destination.parents)) or "," in str(output):
         raise ValueError("Campaign evidence must not be a symlink or contain commas")
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError("Campaign evidence directory must be fresh or empty")

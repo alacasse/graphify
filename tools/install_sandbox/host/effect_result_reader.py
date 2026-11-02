@@ -9,6 +9,7 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
+    RepairProgress,
     StepState,
     VerificationResult,
 )
@@ -70,7 +71,7 @@ def _expectations(output: Path, expected: ExpectationSet) -> None:
 
 def check_effect_result(
     result: InstallTestResult, case: EffectInstallCase, output: Path
-) -> str | None:
+) -> RepairProgress | None:
     _check_steps_directory(result, output)
     retained = EffectInstallCase.from_json(
         safe_evidence_path(output, "case.json").read_text(encoding="utf-8")
@@ -82,13 +83,13 @@ def check_effect_result(
     initial = replay_initial(result.preparation, case, output, _snapshot)
     if initial is None:
         _absent(output, ("expectations/reinstall.json",))
-        for index, step in enumerate(result.steps):
+        for index in range(len(result.steps)):
             loaded, staged = inventory(output, index, _snapshot)
             # Installation expectations belong to initial preparation, never an idle step.
             own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
-            if step.phase != "idle" or own or staged:
+            if own or staged:
                 raise ValueError(
-                    "Incomplete initial preparation requires idle steps without execution evidence"
+                    "Incomplete initial preparation cannot own installation execution evidence"
                 )
         return _unstarted_repair(result, output)
     return _steps(
@@ -110,7 +111,7 @@ def _check_steps_directory(result: InstallTestResult, output: Path) -> None:
                 raise ValueError("Unknown step evidence directory")
 
 
-def _unstarted_repair(result: InstallTestResult, output: Path) -> str | None:
+def _unstarted_repair(result: InstallTestResult, output: Path) -> RepairProgress | None:
     if result.intermediate_preparation is None:
         return None
     inputs = RepairInputs(
@@ -120,7 +121,7 @@ def _unstarted_repair(result: InstallTestResult, output: Path) -> str | None:
         FilesystemSnapshot(),
         result.steps[0],
     )
-    return replay_intermediate(result, output, inputs, _snapshot).diagnostic
+    return replay_intermediate(result, output, inputs, _snapshot).progress
 
 
 def _steps(
@@ -131,14 +132,14 @@ def _steps(
     expected: ExpectationSet,
     previous: FilesystemSnapshot,
     sources: FilesystemSnapshot,
-) -> str | None:
+) -> RepairProgress | None:
     first_command: tuple[list[str], str] | None = None
     previous_verdict: VerificationResult | None = None
-    diagnostic: str | None = None
+    progress: RepairProgress | None = None
     installed = expected
     for index, step in enumerate(result.steps):
         if index:
-            expected, previous, diagnostic = _transition(
+            expected, previous, progress = _transition(
                 result, case, output, sources, installed, expected, previous, previous_verdict
             )
         after, verdict = _inspect_step(
@@ -149,7 +150,7 @@ def _steps(
         if after is not None:
             previous = after
         previous_verdict = verdict
-    return diagnostic
+    return progress
 
 
 def _transition(
@@ -161,7 +162,7 @@ def _transition(
     expected: ExpectationSet,
     previous: FilesystemSnapshot,
     verdict: VerificationResult | None,
-) -> tuple[ExpectationSet, FilesystemSnapshot, str | None]:
+) -> tuple[ExpectationSet, FilesystemSnapshot, RepairProgress | None]:
     if case.intermediate_preparation is not None:
         inspection = replay_intermediate(
             result,
@@ -176,10 +177,8 @@ def _transition(
             _snapshot,
         )
         if inspection.ready is None:
-            if result.steps[1].phase != "idle":
-                raise ValueError("Repair requires published conforming preparation")
-            return expected, previous, inspection.diagnostic
-        return inspection.ready.expectations, inspection.ready.baseline, inspection.diagnostic
+            return expected, previous, inspection.progress
+        return inspection.ready.expectations, inspection.ready.baseline, inspection.progress
     if result.steps[1].phase != "idle" and verdict is not None:
         expected = build_reinstall_expectations(expected, previous, verdict)
     return expected, previous, None

@@ -11,7 +11,7 @@ from tools.install_sandbox.contracts.evidence_layout import (
     classify_staging,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.contracts.results import InstallTestResult
+from tools.install_sandbox.contracts.results import InstallTestResult, RepairCheckpoint
 from tools.install_sandbox.host.evidence_reader import (
     check_snapshot,
     read_json_evidence,
@@ -31,7 +31,7 @@ def replay_intermediate(
     published = result.intermediate_preparation
     assert published is not None
     inventory, staged = _inventory(output, snapshot)
-    return inspect(inputs, published, inventory, staged)
+    return inspect(inputs, RepairCheckpoint.from_data(published), inventory, staged)
 
 
 def _inventory(

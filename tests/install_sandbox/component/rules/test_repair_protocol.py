@@ -14,7 +14,7 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
-    IntermediateEvidence,
+    RepairCheckpoint,
     VerificationResult,
 )
 from tools.install_sandbox.rules import step_lifecycle as lifecycle
@@ -219,9 +219,11 @@ def test_inputs_completion_artifacts_and_pending_are_detached():
     ctx.sources.contents.clear()
     pending = session.pending
     assert pending is not None
-    pending.checkpoint["stage"] = "ready"
+    with pytest.raises(AttributeError):
+        checkpoint = pending.progress.checkpoint
+        checkpoint.stage = "ready"  # pyright: ignore[reportAttributeAccessIssue]
     assert session.pending is not None
-    assert session.pending.checkpoint["stage"] == "started"
+    assert session.pending.progress.checkpoint.stage == "started"
     confirm(session)
     accept(session, retained(session).completion)
     confirm(session)
@@ -248,7 +250,7 @@ def test_prepare_changed_before_is_pure_and_abort_is_idempotent():
     changed = copy.deepcopy(ctx.first_after)
     changed.contents[KEY] += b"external edit"
     completion = request.complete(changed)
-    before = session.checkpoint
+    before = session.progress.checkpoint
     artifact = session.prepare(completion)
     assert isinstance(artifact, SnapshotArtifact)
     artifact.snapshot.contents.clear()
@@ -256,11 +258,11 @@ def test_prepare_changed_before_is_pure_and_abort_is_idempotent():
     saved_value = completion.value
     assert isinstance(saved_value, FilesystemSnapshot)
     assert artifact.snapshot.contents and saved_value.contents
-    assert session.checkpoint == before and session.pending is None
+    assert session.progress.checkpoint == before and session.pending is None
     assert session.next_action() is request
     accept(session, completion)
     assert session.pending is not None
-    assert session.pending.checkpoint["reason"]
+    assert session.pending.progress.checkpoint.reason
     saved = session.pending
     assert saved is not None
     session.abort()
@@ -277,7 +279,7 @@ def test_prepare_changed_before_is_pure_and_abort_is_idempotent():
     ):
         with pytest.raises(ValueError, match="aborted"):
             operation()
-    assert session.pending == saved and session.checkpoint == before
+    assert session.pending == saved and session.progress.checkpoint == before
 
 
 @pytest.mark.parametrize("successor", range(8))
@@ -285,17 +287,19 @@ def test_one_unpublished_successor_is_valid_without_authorizing_dependents(succe
     ctx = context()
     session = begin(ctx)
     inventory = advance(session, ctx, successor)
-    published = session.checkpoint
+    published = session.progress.checkpoint
     completion = completion_for(session.next_action(), ctx)
     accept(session, completion)
     inventory[REFERENCES[successor]] = completion.value
     result = inspect(ctx, published, inventory)
-    assert result.diagnostic == "incomplete" and result.ready is None
+    assert result.progress == session.progress
+    assert result.progress.checkpoint == published
+    assert result.progress.outcome == "incomplete" and result.ready is None
 
 
 @pytest.mark.parametrize(
     "corrupt,unavailable,diagnostic",
-    [(False, False, "passed"), (True, False, "failed"), (False, True, "incomplete")],
+    [(False, False, "ready"), (True, False, "failed"), (False, True, "incomplete")],
 )
 def test_ready_or_terminal_verification_replays_at_atomic_publication(
     corrupt: bool, unavailable: bool, diagnostic: str
@@ -303,7 +307,7 @@ def test_ready_or_terminal_verification_replays_at_atomic_publication(
     ctx = context()
     session = begin(ctx)
     inventory = advance(session, ctx, 6, corrupt=corrupt, unavailable=unavailable)
-    published = session.checkpoint
+    published = session.progress.checkpoint
     request = retained(session)
     completion = request.completion
     exposed = completion.value
@@ -311,15 +315,15 @@ def test_ready_or_terminal_verification_replays_at_atomic_publication(
     exposed.mismatches.clear()
     artifact = accept(session, completion)
     inventory[artifact.reference] = completion.value
-    assert inspect(ctx, published, inventory).diagnostic == "incomplete"
+    assert inspect(ctx, published, inventory).progress.outcome == "incomplete"
     # Publication is authoritative even before the live session confirms it.
     pending = session.pending
     assert pending is not None
-    assert inspect(ctx, pending.checkpoint, inventory).diagnostic == (
-        diagnostic if diagnostic != "passed" else "incomplete"
+    assert inspect(ctx, pending.progress.checkpoint, inventory).progress.outcome == (
+        diagnostic if diagnostic != "ready" else "incomplete"
     )
     confirm(session)
-    if diagnostic == "passed":
+    if diagnostic == "ready":
         completion = retained(session).completion
         artifact = accept(session, completion)
         inventory[artifact.reference] = completion.value
@@ -327,12 +331,12 @@ def test_ready_or_terminal_verification_replays_at_atomic_publication(
         assert isinstance(session.next_action(), Ready)
     else:
         assert isinstance(session.next_action(), Stop)
-    assert inspect(ctx, session.checkpoint, inventory).diagnostic == diagnostic
+    assert inspect(ctx, session.progress.checkpoint, inventory).progress.outcome == diagnostic
     terminal_staging = StagedEvidence(
         "literal-terminal-staging", "json_temporary", frozenset({"expectations/reinstall.json"})
     )
     with pytest.raises(ValueError, match="staging"):
-        inspect(ctx, session.checkpoint, inventory, (terminal_staging,))
+        inspect(ctx, session.progress.checkpoint, inventory, (terminal_staging,))
 
 
 def test_wrong_result_types_and_contradictory_observations_rejected_without_changes():
@@ -344,10 +348,10 @@ def test_wrong_result_types_and_contradictory_observations_rejected_without_chan
         request.complete(cast(FilesystemSnapshot, object()))
     broken = copy.deepcopy(ctx.first_after)
     broken.contents.pop(KEY)
-    checkpoint = session.checkpoint
+    checkpoint = session.progress.checkpoint
     with pytest.raises(ValueError, match="explicit matching obstacle"):
         session.prepare(request.complete(broken))
-    assert session.checkpoint == checkpoint and session.pending is None
+    assert session.progress.checkpoint == checkpoint and session.pending is None
     accept(session, request.complete(ctx.first_after))
     confirm(session)
     mutation = applied(session)
@@ -370,11 +374,11 @@ def test_changed_before_stops_effects_and_rejects_later_evidence():
     inventory[artifact.reference] = completion.value
     confirm(session)
     assert isinstance(session.next_action(), Stop)
-    assert inspect(ctx, session.checkpoint, inventory).diagnostic == "incomplete"
+    assert inspect(ctx, session.progress.checkpoint, inventory).progress.outcome == "incomplete"
     with pytest.raises(ValueError, match="staging"):
         inspect(
             ctx,
-            session.checkpoint,
+            session.progress.checkpoint,
             inventory,
             (
                 StagedEvidence(
@@ -384,7 +388,7 @@ def test_changed_before_stops_effects_and_rejects_later_evidence():
         )
     inventory["intermediate/performed.json"] = object()
     with pytest.raises(ValueError, match="published prefix"):
-        inspect(ctx, session.checkpoint, inventory)
+        inspect(ctx, session.progress.checkpoint, inventory)
 
 
 def test_replay_rejects_tampered_retention_and_future_or_missing_evidence():
@@ -395,29 +399,29 @@ def test_replay_rejects_tampered_retention_and_future_or_missing_evidence():
     assert isinstance(expectations, ExpectationSet) and expectations.roots is not None
     expectations.roots["home"] = "/wrong"
     with pytest.raises(ValueError, match="contradicts"):
-        inspect(ctx, session.checkpoint, inventory)
+        inspect(ctx, session.progress.checkpoint, inventory)
     fresh = begin(ctx)
     confirm(fresh)
     with pytest.raises(ValueError, match="staging"):
         inspect(
             ctx,
-            fresh.checkpoint,
+            fresh.progress.checkpoint,
             {},
             (StagedEvidence("arbitrary", "snapshot_blob", frozenset({"intermediate/after.json"})),),
         )
     with pytest.raises(ValueError, match="ordered prefix"):
-        inspect(ctx, fresh.checkpoint, {"intermediate/performed.json": object()})
+        inspect(ctx, fresh.progress.checkpoint, {"intermediate/performed.json": object()})
     assert (
         inspect(
             ctx,
-            fresh.checkpoint,
+            fresh.progress.checkpoint,
             {},
             (
                 StagedEvidence(
                     "arbitrary", "json_temporary", frozenset({"intermediate/operation.json"})
                 ),
             ),
-        ).diagnostic
+        ).progress.outcome
         == "incomplete"
     )
 
@@ -447,7 +451,7 @@ def test_catalogue_codecs_roundtrip_logical_facts():
 )
 def test_malformed_checkpoint_is_invalid(checkpoint: object) -> None:
     with pytest.raises(ValueError):
-        inspect(context(), cast(IntermediateEvidence, checkpoint), {})
+        inspect(context(), RepairCheckpoint.from_data(checkpoint), {})
 
 
 def test_foreign_performed_operation_cannot_be_retained() -> None:
@@ -459,10 +463,10 @@ def test_foreign_performed_operation_cannot_be_retained() -> None:
     request = applied(session)
     other = replace(request.operation, replacement=b"different mutation")
     completion = request.complete(PerformedMutation(other, "0" * 64))
-    checkpoint = session.checkpoint
+    checkpoint = session.progress.checkpoint
     with pytest.raises(ValueError, match="contradicts"):
         session.prepare(completion)
-    assert session.checkpoint == checkpoint and session.pending is None
+    assert session.progress.checkpoint == checkpoint and session.pending is None
     assert session.next_action() is request
 
 
@@ -489,7 +493,7 @@ def test_same_digest_wrong_logical_type_is_rejected_during_replay() -> None:
     # A decoded dictionary could hash identically but is not a decoded operation.
     inventory[REFERENCES[0]] = operation.to_data()
     with pytest.raises(ValueError, match="Wrong result type"):
-        inspect(ctx, session.checkpoint, inventory)
+        inspect(ctx, session.progress.checkpoint, inventory)
 
 
 @pytest.mark.parametrize("successor", range(8))
@@ -497,7 +501,7 @@ def test_staging_rejected_after_complete_unpublished_successor(successor: int) -
     ctx = context()
     session = begin(ctx)
     inventory = advance(session, ctx, successor)
-    published = session.checkpoint
+    published = session.progress.checkpoint
     completion = completion_for(session.next_action(), ctx)
     accept(session, completion)
     inventory[REFERENCES[successor]] = completion.value
@@ -517,7 +521,42 @@ def test_json_action_rejects_snapshot_staging_even_with_matching_owner() -> None
     with pytest.raises(ValueError, match="staging"):
         inspect(
             ctx,
-            session.checkpoint,
+            session.progress.checkpoint,
             {},
             (StagedEvidence("literal", "snapshot_blob", frozenset({REFERENCES[0]})),),
         )
+
+
+def test_confirmed_progress_does_not_advance_until_receipt_matches_local_checkpoint() -> None:
+    session = begin(context())
+    pending = session.pending
+    assert pending is not None
+    assert session.progress.checkpoint == RepairCheckpoint("not_started", 0)
+    assert pending.progress.checkpoint == RepairCheckpoint("started", 1)
+    assert not hasattr(pending, "status")
+    for receipt in (
+        CheckpointReceipt(pending.session_id, pending.generation + 1, pending.sha256),
+        CheckpointReceipt(pending.session_id, pending.generation, "altered"),
+    ):
+        with pytest.raises(ValueError, match="acknowledgement"):
+            session.confirm_checkpoint(receipt)
+        assert session.progress.checkpoint.stage == "not_started"
+    confirm(session)
+    assert session.progress == pending.progress
+    checkpoint = pending.progress.checkpoint
+    assert RepairCheckpoint.from_data(checkpoint.to_data()) == checkpoint
+
+
+def test_unpublished_failed_successor_keeps_published_reason_and_outcome() -> None:
+    ctx = context()
+    session = begin(ctx)
+    inventory = advance(session, ctx, 6, corrupt=True)
+    published = session.progress
+    completion = retained(session).completion
+    artifact = accept(session, completion)
+    inventory[artifact.reference] = completion.value
+    assert session.pending is not None
+    assert session.pending.progress.outcome == "failed"
+    replay = inspect(ctx, published.checkpoint, inventory)
+    assert replay.progress == published
+    assert replay.progress.checkpoint.reason is None

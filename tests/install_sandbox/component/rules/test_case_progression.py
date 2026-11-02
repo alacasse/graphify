@@ -1,0 +1,220 @@
+"""Independent case decision tables built from valid local lifecycle states."""
+
+from dataclasses import FrozenInstanceError, replace
+from typing import Literal
+
+import pytest
+
+from tools.install_sandbox.contracts.initial_preparation import (
+    OPERATIONS,
+    REFERENCES,
+    InitialPreparationState,
+)
+from tools.install_sandbox.contracts.results import (
+    RepairCheckpoint,
+    RepairProgress,
+    StepState,
+    VerificationResult,
+)
+from tools.install_sandbox.rules import initial_preparation as initial
+from tools.install_sandbox.rules import step_lifecycle as step
+from tools.install_sandbox.rules.case_progression import (
+    CaseDecision,
+    CaseFacts,
+    CaseShape,
+    evaluate,
+)
+
+
+def prepared(
+    count: int = 6, *, blocked: bool = False, stopped: bool = False
+) -> InitialPreparationState:
+    lifecycle = initial.InitialPreparationLifecycle()
+    state = lifecycle.publication_candidate()
+    lifecycle.acknowledge(state)
+    for operation in OPERATIONS[:count]:
+        lifecycle.acquire(
+            operation,
+            **({"verification_passed": not blocked} if operation == "verification" else {}),
+        )
+        lifecycle.retain(operation, REFERENCES[initial.ARTIFACT_BY_OPERATION[operation]])
+        state = lifecycle.publication_candidate()
+        lifecycle.acknowledge(state)
+    if stopped:
+        lifecycle.stop(OPERATIONS[count], "io", "Unavailable storage")
+        lifecycle.retain_failure(REFERENCES["failure"])
+        state = lifecycle.publication_candidate()
+        lifecycle.acknowledge(state)
+    return state
+
+
+def installation(count: int = 9, *, code: int = 0, stopped: bool = False) -> StepState:
+    state = step.start("install")
+    events = (
+        step.PreparationObserved("before"),
+        step.Prepared(),
+        step.ExpectationsRetained("expectations"),
+        step.CommandReturned(
+            {
+                "args": ["install"],
+                "cwd": "/project",
+                "state": "completed",
+                "exit_code": code,
+                "reason": None,
+                "stdout_file": None,
+                "stderr_file": None,
+            }
+        ),
+        step.CommandRetained("stdout", "stderr"),
+        step.ObservationRetained("after"),
+        step.VerificationComputed(VerificationResult()),
+        step.VerificationRetained("verification"),
+        step.Terminate(),
+    )
+    for event in events[:count]:
+        state = step.advance(state, event)
+    return step.advance(state, step.StopStep("Storage unavailable")) if stopped else state
+
+
+def repair(
+    stage: str = "started", outcome: Literal["incomplete", "ready", "failed"] = "incomplete"
+) -> RepairProgress:
+    # These are published protocol facts, not a recomputation of the case decision.
+    generations = {"not_started": 0, "started": 1, "verification_retained": 8, "ready": 9}
+    return RepairProgress(RepairCheckpoint(stage, generations[stage], None), outcome)
+
+
+IDLE = StepState.idle("install")
+PASSED = installation()
+READY = prepared()
+
+
+@pytest.mark.parametrize("count", range(6))
+def test_initial_publication_prefixes_authorize_only_preparation(count: int) -> None:
+    assert evaluate(
+        CaseShape(("install", "install"), False), CaseFacts(prepared(count), (IDLE, IDLE))
+    ) == CaseDecision("incomplete", "initial_preparation")
+
+
+@pytest.mark.parametrize("state", [prepared(5, blocked=True), prepared(0, stopped=True)])
+def test_initial_terminal_results_end_the_invocation(state: InitialPreparationState) -> None:
+    assert evaluate(
+        CaseShape(("install", "install"), False), CaseFacts(state, (IDLE, IDLE))
+    ) == CaseDecision("not_run", None)
+
+
+@pytest.mark.parametrize(
+    "first,second,expected",
+    [
+        (IDLE, IDLE, CaseDecision("incomplete", "installation")),
+        (installation(3), IDLE, CaseDecision("incomplete", "installation")),
+        (installation(3, stopped=True), IDLE, CaseDecision("incomplete", None)),
+        (installation(code=1), IDLE, CaseDecision("failed", None)),
+        (PASSED, IDLE, CaseDecision("incomplete", "reinstallation")),
+        (PASSED, installation(5), CaseDecision("incomplete", "reinstallation")),
+        (PASSED, installation(5, stopped=True), CaseDecision("incomplete", None)),
+        (PASSED, installation(code=1), CaseDecision("failed", None)),
+        (PASSED, PASSED, CaseDecision("passed", None)),
+    ],
+)
+def test_reinstall_table(first: StepState, second: StepState, expected: CaseDecision) -> None:
+    assert (
+        evaluate(CaseShape(("install", "install"), False), CaseFacts(READY, (first, second)))
+        == expected
+    )
+
+
+@pytest.mark.parametrize("count", range(9))
+def test_first_step_publication_prefixes(count: int) -> None:
+    assert evaluate(
+        CaseShape(("install", "install"), False), CaseFacts(READY, (installation(count), IDLE))
+    ) == CaseDecision("incomplete", "installation")
+
+
+def test_records_are_frozen() -> None:
+    decision = evaluate(
+        CaseShape(("install", "install"), False), CaseFacts(READY, (PASSED, PASSED))
+    )
+    with pytest.raises(FrozenInstanceError):
+        decision.status = "failed"  # pyright: ignore[reportAttributeAccessIssue]
+
+
+@pytest.mark.parametrize(
+    "shape,facts",
+    [
+        (CaseShape(("install", "other"), False), CaseFacts(READY, (PASSED, IDLE))),
+        (
+            CaseShape(("install", "install"), False),
+            CaseFacts(prepared(), (replace(IDLE, phase="terminal"), IDLE)),
+        ),
+        (CaseShape(("install", "install"), False), CaseFacts(prepared(0), (installation(0), IDLE))),
+        (
+            CaseShape(("install", "install"), False),
+            CaseFacts(prepared(5, blocked=True), (IDLE, installation(0))),
+        ),
+        (
+            CaseShape(("install", "install"), False),
+            CaseFacts(READY, (installation(code=1), installation(0))),
+        ),
+        (
+            CaseShape(("install", "install"), False),
+            CaseFacts(READY, (installation(0, stopped=True), installation(0))),
+        ),
+        (CaseShape(("install", "install"), True), CaseFacts(READY, (PASSED, installation(0)))),
+    ],
+)
+def test_invalid_local_facts_and_dependencies_are_never_hidden(
+    shape: CaseShape, facts: CaseFacts
+) -> None:
+    with pytest.raises(ValueError):
+        evaluate(shape, facts)
+
+
+@pytest.mark.parametrize(
+    "progress,second,expected",
+    [
+        (None, IDLE, CaseDecision("incomplete", "repair")),
+        (repair("not_started"), IDLE, CaseDecision("incomplete", "repair")),
+        (repair(), IDLE, CaseDecision("incomplete", "repair")),
+        (repair("verification_retained", "failed"), IDLE, CaseDecision("failed", None)),
+        (repair("ready", "ready"), IDLE, CaseDecision("incomplete", "reinstallation")),
+        (repair("ready", "ready"), PASSED, CaseDecision("passed", None)),
+    ],
+)
+def test_repair_table(
+    progress: RepairProgress | None, second: StepState, expected: CaseDecision
+) -> None:
+    assert (
+        evaluate(
+            CaseShape(("install", "install"), True), CaseFacts(READY, (PASSED, second), progress)
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "shape,facts",
+    [
+        (CaseShape(("install", "install"), False), CaseFacts(READY, (PASSED, IDLE), repair())),
+        (CaseShape(("install", "install"), True), CaseFacts(READY, (IDLE, IDLE), repair())),
+        (
+            CaseShape(("install", "install"), True),
+            CaseFacts(READY, (installation(code=1), IDLE), repair()),
+        ),
+        (
+            CaseShape(("install", "install"), True),
+            CaseFacts(prepared(5, blocked=True), (IDLE, IDLE), repair()),
+        ),
+        (
+            CaseShape(("install", "install"), True),
+            CaseFacts(READY, (PASSED, installation(0)), repair()),
+        ),
+        (
+            CaseShape(("install", "install"), True),
+            CaseFacts(READY, (PASSED, installation(0)), repair("verification_retained", "failed")),
+        ),
+    ],
+)
+def test_repair_dependencies(shape: CaseShape, facts: CaseFacts) -> None:
+    with pytest.raises(ValueError):
+        evaluate(shape, facts)

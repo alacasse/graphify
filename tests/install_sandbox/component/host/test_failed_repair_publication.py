@@ -59,7 +59,7 @@ def inject_failure_and_stop(patches: pytest.MonkeyPatch, window: str) -> None:
         if (
             window == "after-confirm"
             and pending
-            and pending.checkpoint["stage"] == "verification_retained"
+            and pending.progress.checkpoint.stage == "verification_retained"
         ):
             raise ProcessStopped()
 

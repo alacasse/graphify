@@ -104,15 +104,21 @@ def assert_retained_result(subject: ControlledRun, phase: str, *, step: int = 0)
         assert replayed.steps[1].phase == "idle"
 
 
+@pytest.mark.parametrize("case_name", ["reinstall", "missing-section", "altered-section"])
 @pytest.mark.parametrize("step", [0, 1], ids=["install", "reinstall"])
 @pytest.mark.parametrize(
     "phase", ["preparation", "observation", "terminal"], ids=["start", "command", "terminal"]
 )
 @pytest.mark.parametrize("after", [False, True], ids=["before-write", "after-write"])
 def test_interruption_preserves_last_publication_and_blocks_dependent_step(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, after: bool, step: int
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    after: bool,
+    step: int,
+    case_name: str,
 ) -> None:
-    subject = ControlledRun(tmp_path)
+    subject = ControlledRun(tmp_path, case_name)
     original = Writer.write_result
     attempts: list[str] = []
     in_memory: list[InstallTestResult] = []

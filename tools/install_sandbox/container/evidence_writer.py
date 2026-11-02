@@ -7,7 +7,7 @@ import sys
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,7 +19,6 @@ from tools.install_sandbox.contracts.evidence_layout import (
 )
 from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
-    CheckpointReceipt,
     CommandEvidence,
     EvidenceWriteError,
     InstallTestResult,
@@ -36,10 +35,6 @@ from tools.install_sandbox.rules.repair_actions import (
     JsonArtifact,
     SnapshotArtifact,
     artifact_digest,
-)
-from tools.install_sandbox.rules.repair_protocol import (
-    PendingCheckpoint,
-    checkpoint_digest,
 )
 
 if TYPE_CHECKING:
@@ -91,24 +86,6 @@ class TestResultWriter:
                 raise EvidenceWriteError("Published snapshot differs from retained facts")
         if json.loads(path.read_bytes()) != plan.manifest.document:
             raise EvidenceWriteError("Published manifest differs from retained facts")
-
-    def write_checkpoint(
-        self, result: InstallTestResult, pending: PendingCheckpoint
-    ) -> CheckpointReceipt:
-        if self.halted:
-            raise EvidenceWriteError("Evidence writer has halted")
-        candidate = replace(
-            result, intermediate_preparation=dict(pending.checkpoint), status=pending.status
-        )
-        self.write_result(candidate)
-        result.intermediate_preparation = candidate.intermediate_preparation
-        result.status = candidate.status
-        published = json.loads((self.output_directory / "result.json").read_bytes())
-        return CheckpointReceipt(
-            pending.session_id,
-            pending.generation,
-            checkpoint_digest(published["intermediate_preparation"], published["status"]),
-        )
 
     def initialize_timings(self, case_name: str, step_count: int) -> None:
         self.timings = case_timings(case_name, step_count)
@@ -243,7 +220,11 @@ class TestResultWriter:
         }
 
     def write_result(self, result: InstallTestResult) -> None:
-        document = asdict(result)
-        document["preparation"] = result.preparation.to_data()
-        document["steps"] = [step.to_data() for step in result.steps]
-        self._write_json("result.json", document)
+        self._write_json("result.json", result_document(result))
+
+
+def result_document(result: InstallTestResult) -> dict[str, object]:
+    document = asdict(result)
+    document["preparation"] = result.preparation.to_data()
+    document["steps"] = [step.to_data() for step in result.steps]
+    return document

@@ -8,6 +8,7 @@ from tools.install_sandbox.contracts.initial_preparation import InitialPreparati
 from tools.install_sandbox.contracts.results import (
     InstallTestResult,
     IntermediateEvidence,
+    RepairCheckpoint,
     StepState,
 )
 from tools.install_sandbox.contracts.spec import fields, text
@@ -27,8 +28,8 @@ from tools.install_sandbox.host.evidence_reader import (
 from tools.install_sandbox.host.evidence_reader import (
     safe_evidence_path,
 )
-from tools.install_sandbox.rules.initial_preparation import status as initial_status
-from tools.install_sandbox.rules.step_lifecycle import status, validate
+from tools.install_sandbox.rules.case_progression import CaseFacts, CaseShape, evaluate
+from tools.install_sandbox.rules.step_lifecycle import validate
 
 
 def _evidence(value: object, output: Path) -> str | None:
@@ -49,37 +50,8 @@ def _step(value: object, output: Path) -> StepState:
     return step
 
 
-def _intermediate(value: object, output: Path) -> IntermediateEvidence | None:
-    if value is None:
-        return None
-    data = fields(value, "stage generation reason")
-    generation = data["generation"]
-    if type(generation) is not int or generation < 0:
-        raise ValueError("Expected nonnegative checkpoint generation")
-    return {
-        "stage": text(data["stage"]),
-        "generation": generation,
-        "reason": _optional_text(data["reason"]),
-    }
-
-
-def _check_consistency(result: InstallTestResult, repair_diagnostic: str | None) -> None:
-    if result.preparation.checkpoint != "ready":
-        expected = initial_status(result.preparation)
-        if any(step.phase != "idle" for step in result.steps) or result.status != expected:
-            raise ValueError("Initial preparation contradicts case progression")
-        return
-    aggregate = "passed"
-    for index, step in enumerate(result.steps):
-        if index == 1 and repair_diagnostic is not None and aggregate == "passed":
-            aggregate = repair_diagnostic
-        if aggregate != "passed":
-            if step.phase != "idle":
-                raise ValueError("Dependent step requires published passed predecessor")
-            continue
-        aggregate = "incomplete" if step.phase == "idle" else status(step)
-    if result.status != aggregate:
-        raise ValueError("Case status contradicts command or verification facts")
+def _intermediate(value: object) -> IntermediateEvidence | None:
+    return None if value is None else RepairCheckpoint.from_data(value).to_data()
 
 
 def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTestResult:
@@ -109,13 +81,16 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
             for key, value in fields(data["evidence"], "journal").items()
         },
     )
-    result.intermediate_preparation = _intermediate(
-        data["intermediate_preparation"], output_directory
-    )
+    result.intermediate_preparation = _intermediate(data["intermediate_preparation"])
     if (result.intermediate_preparation is None) != (case.intermediate_preparation is None):
         raise ValueError("Intermediate evidence contradicts case definition")
-    repair_diagnostic = check_effect_result(result, case, output_directory)
-    _check_consistency(result, repair_diagnostic)
+    repair = check_effect_result(result, case, output_directory)
+    decision = evaluate(
+        CaseShape.from_case(case),
+        CaseFacts(result.preparation, (steps[0], steps[1]), repair),
+    )
+    if result.status != decision.status:
+        raise ValueError("Case status contradicts published local progression")
     return result
 
 

@@ -193,14 +193,6 @@ class InitialPreparationInventory:
     staged: tuple[frozenset[str], ...] = ()
 
 
-@dataclass(frozen=True)
-class InitialPreparationInspection:
-    status: Literal["incomplete", "not_run"]
-    checkpoint: str
-    stop: InitialPreparationStop | None
-    reason: str | None = None
-
-
 def _published_rank(state: InitialPreparationState) -> int:
     if state.checkpoint == "stopped":
         assert state.previous_checkpoint is not None
@@ -281,20 +273,13 @@ def _inspect_diagnostic(
 
 def inspect(
     state: InitialPreparationState, inventory: InitialPreparationInventory
-) -> InitialPreparationInspection:
+) -> None:
     """Check independently validated physical evidence without promoting publication."""
     validate(state)
     rank = _published_rank(state)
     _inspect_ownership(state, inventory, rank)
     _inspect_prerequisites(state, inventory)
     _inspect_diagnostic(state, inventory, rank)
-    diagnostic = inventory.stopped_state
-    return InitialPreparationInspection(
-        status(state),
-        state.checkpoint,
-        diagnostic.stop if diagnostic else state.stop,
-        "Initial state is nonconformant or incomplete" if state.checkpoint == "blocked" else None,
-    )
 
 
 def status(state: InitialPreparationState) -> Literal["incomplete", "not_run"]:

@@ -120,7 +120,7 @@ def test_beginning_allows_command_write_prefix_but_no_future_observation():
             before=True, expectations=True, environment=True, stdout=True, stderr=True
         ),
     ):
-        assert life.inspect(state, facts).status == "incomplete"
+        life.inspect(state, facts)
     for facts in (
         life.RetainedFacts(stdout=True),
         life.RetainedFacts(after=True),
@@ -142,14 +142,15 @@ def test_command_publication_allows_after_and_verdict_without_promotion():
         after=True,
         verification=VerificationResult(),
     )
-    assert life.inspect(state, facts).status == "incomplete"
-    assert (
-        life.inspect(
-            state, replace(facts, after=False, verification=None, staged=(frozenset({"after"}),))
-        ).status
-        == "incomplete"
+    life.inspect(state, facts)
+    assert state == through(5)
+    assert life.status(state) == "incomplete"
+    with pytest.raises(ValueError):
+        life.advance(state, life.Terminate())
+    life.inspect(
+        state, replace(facts, after=False, verification=None, staged=(frozenset({"after"}),))
     )
-    assert life.inspect(through(9), facts).status == "passed"
+    life.inspect(through(9), facts)
     with pytest.raises(ValueError):
         life.inspect(through(9), replace(facts, staged=(frozenset({"after"}),)))
 
@@ -162,8 +163,8 @@ def test_unusable_before_is_inspectable_and_prevents_command():
     facts = life.RetainedFacts(
         before=True, before_usable=False, stop=stopped.stop, stopped_state=stopped
     )
-    assert life.inspect(life.start("reinstall"), facts).status == "incomplete"
-    assert life.inspect(stopped, facts).status == "incomplete"
+    life.inspect(life.start("reinstall"), facts)
+    life.inspect(stopped, facts)
     with pytest.raises(ValueError):
         life.inspect(stopped, replace(facts, environment=True))
 
@@ -181,7 +182,7 @@ def test_stop_ahead_requires_coherent_acquired_facts_and_bounds_staging():
         stopped_state=stopped,
         staged=(frozenset({"after"}),),
     )
-    assert life.inspect(state, facts).status == "incomplete"
+    life.inspect(state, facts)
     with pytest.raises(ValueError):
         life.inspect(through(0), facts)
     with pytest.raises(ValueError):
@@ -195,18 +196,18 @@ def test_external_expectations_allow_command_prefix_without_claiming_local_acqui
     facts = life.RetainedFacts(
         before=True, external_expectations=True, environment=True, stdout=True
     )
-    assert life.inspect(state, facts).status == "incomplete"
+    life.inspect(state, facts)
     stopped = life.advance(life.start("install"), life.StopStep("preparation failed"))
     facts = replace(
         facts, environment=False, stdout=False, stop=stopped.stop, stopped_state=stopped
     )
-    assert life.inspect(life.start("install"), facts).status == "incomplete"
-    assert life.inspect(stopped, facts).status == "incomplete"
+    life.inspect(life.start("install"), facts)
+    life.inspect(stopped, facts)
 
 
 def test_ambiguous_structural_directory_needs_one_eligible_owner() -> None:
     facts = life.RetainedFacts(staged=(frozenset({"before", "after", "environment"}),))
-    assert life.inspect(life.start("install"), facts).status == "incomplete"
+    life.inspect(life.start("install"), facts)
     with pytest.raises(ValueError):
         life.inspect(
             life.start("install"), replace(facts, staged=(frozenset({"after", "environment"}),))

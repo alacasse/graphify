@@ -267,14 +267,7 @@ class RetainedFacts:
     staged: tuple[frozenset[Artifact], ...] = ()
 
 
-@dataclass(frozen=True)
-class StepInspection:
-    status: Status
-    published_phase: str
-    stop: StepStop | None
-
-
-def inspect(published_state: StepState, retained_facts: RetainedFacts) -> StepInspection:
+def inspect(published_state: StepState, retained_facts: RetainedFacts) -> None:
     """Check all physical facts without promoting the last published statement."""
     validate(published_state)
     state, present = published_state, retained_facts
@@ -406,4 +399,3 @@ def inspect(published_state: StepState, retained_facts: RetainedFacts) -> StepIn
         command_evidence or present.after or present.verification is not None
     ):
         raise ValueError("Unusable preparation cannot have command evidence")
-    return StepInspection(status(state), state.phase, stop)

@@ -82,7 +82,6 @@ class Stop:
 @dataclass(frozen=True)
 class Inspection:
     progress: RepairProgress
-    present: str
     ready: Ready | None
 
 
@@ -331,7 +330,7 @@ def inspect(
             raise ValueError("Unstarted preparation has retained evidence")
         if published != session.progress.checkpoint:
             raise ValueError("Checkpoint diagnostic contradicts retained facts")
-        return Inspection(session.progress, stage, None)
+        return Inspection(session.progress, None)
     if total < count or total > count + 1:
         raise ValueError("Inventory differs from published prefix by more than one artifact")
     _replay_published_prefix(session, inventory, count)
@@ -345,7 +344,7 @@ def inspect(
         descriptor = ARTIFACTS[count]
         completion = _replay_completion(action, descriptor, inventory[descriptor.reference])
         session.prepare(completion)
-    return Inspection(progress, STAGES[total + 1], ready)
+    return Inspection(progress, ready)
 
 
 def _replay_published_prefix(

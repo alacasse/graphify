@@ -142,9 +142,8 @@ def test_failure_ahead_requires_coherent_acquired_facts(archive: Path, future_ph
 
 def test_error_diagnostic_ahead_of_begin_is_readable(archive: Path) -> None:
     retain_begin(archive)
-    (archive / "expectations/install.json").unlink()
     stopped = declaration("stopped")
-    stopped["retained"]["before"] = "steps/0/before.json"
+    stopped["retained"]["before"] = "initial/before.json"
     stopped["stop"] = {"phase": "preparation", "reason": "controlled failure"}
     (archive / "steps/0/failure.json").write_text(json.dumps(stopped))
     assert read_evidence(archive).status == "incomplete"
@@ -191,5 +190,60 @@ def test_malformed_command_state_is_rejected_as_evidence(archive: Path, state: o
     result = json.loads((archive / "result.json").read_text())
     result["steps"][0]["facts"]["command"]["state"] = state
     (archive / "result.json").write_text(json.dumps(result))
+    with pytest.raises(MalformedEvidence):
+        read_evidence(archive)
+
+
+@pytest.mark.parametrize("phase", ["idle", "preparation", "terminal"])
+@pytest.mark.parametrize(
+    "reference", ["before.json", ".before.json.partial.tmp", "before/project/extra"]
+)
+def test_step_zero_rejects_obsolete_owned_before(archive: Path, phase: str, reference: str) -> None:
+    if phase != "terminal":
+        result = retain_begin(archive)
+        result["steps"][0] = declaration(phase)
+        (archive / "result.json").write_text(json.dumps(result))
+    path = archive / "steps/0" / reference
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"entries": [], "obstacles": []}')
+    with pytest.raises(MalformedEvidence):
+        read_evidence(archive)
+
+
+@pytest.mark.parametrize("reference", ["expected.json", "initial/before.json"])
+@pytest.mark.parametrize("tamper", ["remove_digest", "alter_bytes", "remove_blob"])
+def test_initial_retained_blobs_require_verified_digest(
+    archive: Path, reference: str, tamper: str
+) -> None:
+    manifest_file = archive / reference
+    manifest = json.loads(manifest_file.read_text())
+    entry = next(entry for entry in manifest["entries"] if entry.get("content_file"))
+    blob = archive / entry["content_file"]
+    if tamper == "remove_digest":
+        entry.pop("sha256")
+        manifest_file.write_text(json.dumps(manifest))
+    elif tamper == "alter_bytes":
+        blob.write_bytes(b"altered retained bytes")
+    else:
+        blob.unlink()
+    with pytest.raises(MalformedEvidence):
+        read_evidence(archive)
+
+
+def test_unready_initial_rejects_foreign_reinstall_final(archive: Path) -> None:
+    from tools.install_sandbox.contracts.initial_preparation import InitialPreparationState
+
+    result = json.loads((archive / "result.json").read_text())
+    result["preparation"] = InitialPreparationState().to_data()
+    result["steps"] = [declaration("idle"), declaration("idle")]
+    result["status"] = "incomplete"
+    for child in archive.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        elif child.name not in {"case.json", "evidence-format.json", "result.json"}:
+            child.unlink()
+    (archive / "result.json").write_text(json.dumps(result))
+    (archive / "expectations").mkdir()
+    (archive / "expectations/reinstall.json").write_text("{}")
     with pytest.raises(MalformedEvidence):
         read_evidence(archive)

@@ -1,8 +1,8 @@
 """Execute native reinstall phases against expectations retained before commands."""
 
 import time
-from pathlib import Path
 from dataclasses import replace
+from pathlib import Path
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
@@ -10,6 +10,7 @@ from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
+from tools.install_sandbox.contracts.initial_preparation import REFERENCES, InitialPreparationState
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
 from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
@@ -17,6 +18,14 @@ from tools.install_sandbox.contracts.results import (
     StepState,
 )
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.expectation_builder import (
+    bind_roots,
+    build_initial_expectations,
+    build_install_expectations,
+    build_reinstall_expectations,
+)
+from tools.install_sandbox.rules.initial_preparation import InitialPreparationLifecycle
+from tools.install_sandbox.rules.initial_preparation import status as initial_status
 from tools.install_sandbox.rules.step_lifecycle import (
     CommandRetained,
     CommandReturned,
@@ -31,12 +40,6 @@ from tools.install_sandbox.rules.step_lifecycle import (
     advance,
     start,
     status,
-)
-from tools.install_sandbox.rules.expectation_builder import (
-    bind_roots,
-    build_initial_expectations,
-    build_install_expectations,
-    build_reinstall_expectations,
 )
 
 
@@ -55,20 +58,25 @@ def _new_result(case: EffectInstallCase) -> InstallTestResult:
     steps = [StepState.idle(operation) for operation in case.operations]
     return InstallTestResult(
         {"name": case.name, "target": case.target, "scope": case.scope},
-        {
-            "ready": False,
-            "reason": None,
-            "log": "preparation.log",
-            "source": "campaign",
-            "stage": "started",
-        },
+        InitialPreparationState(),
         steps,
-        "not_run",
-        {"journal": "journal.log", "expected_contents": None},
+        "incomplete",
+        {"journal": "journal.log"},
         None
         if case.intermediate_preparation is None
         else {"stage": "not_started", "generation": 0, "reason": None},
     )
+
+
+def _publish_initial(
+    result: InstallTestResult, lifecycle: InitialPreparationLifecycle, writer: TestResultWriter
+) -> None:
+    checkpoint = lifecycle.publication_candidate()
+    candidate = replace(result, preparation=checkpoint, status=initial_status(checkpoint))
+    writer.write_result(candidate)
+    lifecycle.acknowledge(checkpoint)
+    result.preparation = checkpoint
+    result.status = candidate.status
 
 
 def _publish_step(
@@ -113,14 +121,15 @@ class InstallTestRunner:
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
         case.write(output / "case.json")
-        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v6"})
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v7"})
         writer.initialize_timings(case.name, len(case.operations))
         result = _new_result(case)
-        writer.write_result(result)
-        writer.append_log("journal.log", "Validated native case; starting preparation\n")
-        writer.append_log("preparation.log", "Package availability inherited from campaign\n")
+        lifecycle = InitialPreparationLifecycle()
         try:
-            self._run(case, subject, prepared_executable, work, writer, result)
+            _publish_initial(result, lifecycle, writer)
+            writer.append_log("journal.log", "Validated native case; starting preparation\n")
+            writer.append_log("preparation.log", "Package availability inherited from campaign\n")
+            self._run(case, subject, prepared_executable, work, writer, result, lifecycle)
         except BaseException:
             writer.halted = True
             raise
@@ -137,48 +146,41 @@ class InstallTestRunner:
         work: Path,
         writer: TestResultWriter,
         result: InstallTestResult,
+        lifecycle: InitialPreparationLifecycle,
     ) -> None:
-        failure_stage = "environment"
-        try:
-            with writer.measure("initial"):
-                environment = EffectEnvironment(case, work / "environment")
-                environment.prepare()
-                (work / "command-tmp").mkdir()
-                roots = {"home": str(environment.home), "project": str(environment.project)}
-                writer.write_metadata("roots.json", roots)
-                failure_stage = "sources"
-                sources = environment.preserve_expected(subject, writer)
-                result.evidence["expected_contents"] = "expected/"
-                result.preparation["stage"] = "sources_retained"
-                failure_stage = "initial_expectations"
-                initial = bind_roots(build_initial_expectations(case, sources), roots)
-                writer.write_metadata("expectations/initial.json", initial.to_data())
-                failure_stage = "initial_observation"
-                before = environment.observe(writer, "before")
-                failure_stage = "initial_verification"
-                verdict = self.verifier.verify(initial, before)
-                writer.write_initial_verification(verdict)
-                result.preparation["stage"] = "initial_verified"
-                if not verdict.complete or verdict.mismatches:
-                    self._not_run(result, writer, "Initial verification failed")
-                    return
-                failure_stage = "install_expectations"
-                expectations = build_install_expectations(case, sources, before, roots)
-            result.preparation["ready"] = True
-        except EvidenceWriteError:
-            raise
-        except (OSError, ValueError) as error:
-            writer.write_metadata(
-                "construction-failure.json",
-                {
-                    "stage": failure_stage,
-                    "kind": "validation" if isinstance(error, ValueError) else "io",
-                    "reason": str(error),
-                },
-            )
-            self._not_run(result, writer, f"Initial preparation failed: {error}")
+        operations = _InitialOperations(case, subject, work, writer, lifecycle, self.verifier)
+        with writer.measure("initial"):
+            while (operation := lifecycle.next_operation()) is not None:
+                try:
+                    operations.execute(operation)
+                except EvidenceWriteError:
+                    raise
+                except (OSError, ValueError) as error:
+                    lifecycle.stop(
+                        operation,
+                        "validation" if isinstance(error, ValueError) else "io",
+                        str(error) or type(error).__name__,
+                    )
+                    writer.write_metadata(
+                        REFERENCES["failure"], lifecycle.failure_candidate().to_data()
+                    )
+                    lifecycle.retain_failure(REFERENCES["failure"])
+                # Failed publication cannot become an operational diagnostic or a retry.
+                _publish_initial(result, lifecycle, writer)
+        if result.preparation.checkpoint != "ready":
             return
-        self._steps(case, executable, environment, sources, expectations, before, writer, result)
+        assert operations.environment is not None and operations.sources is not None
+        assert operations.expectations is not None and operations.before is not None
+        self._steps(
+            case,
+            executable,
+            operations.environment,
+            operations.sources,
+            operations.expectations,
+            operations.before,
+            writer,
+            result,
+        )
 
     def _steps(
         self,
@@ -239,9 +241,9 @@ class InstallTestRunner:
                             "Environment changed or was obstructed before the second installation"
                         )
             else:
-                state = advance(state, PreparationObserved("steps/0/before.json"))
+                state = advance(state, PreparationObserved(REFERENCES["before"]))
             state = advance(state, Prepared())
-            if not (index and case.intermediate_preparation is not None):
+            if index and case.intermediate_preparation is None:
                 writer.write_metadata(
                     f"expectations/{expectations.phase}.json", expectations.to_data()
                 )
@@ -298,9 +300,89 @@ class InstallTestRunner:
         _publish_step(result, state, writer, index)
         return (expectations, after) if status(state) == "passed" else None
 
-    @staticmethod
-    def _not_run(result: InstallTestResult, writer: TestResultWriter, reason: str) -> None:
-        result.preparation["reason"] = reason
-        writer.append_log("preparation.log", reason + "\n")
-        with writer.measure("finalize"):
-            writer.write_result(result)
+
+class _InitialOperations:
+    """Execute requested operations and keep their in-process outputs, without progression rules."""
+
+    def __init__(
+        self,
+        case: EffectInstallCase,
+        subject: Path,
+        work: Path,
+        writer: TestResultWriter,
+        lifecycle: InitialPreparationLifecycle,
+        verifier: EffectVerifier,
+    ) -> None:
+        self.case, self.subject, self.work = case, subject, work
+        self.writer, self.lifecycle, self.verifier = writer, lifecycle, verifier
+        self.environment: EffectEnvironment | None = None
+        self.roots: dict[str, str] = {}
+        self.sources: FilesystemSnapshot | None = None
+        self.before: FilesystemSnapshot | None = None
+        self.initial: ExpectationSet | None = None
+        self.expectations: ExpectationSet | None = None
+
+    def execute(self, operation: str) -> None:
+        actions = {
+            "environment": self.create_environment,
+            "sources": self.capture_sources,
+            "expectations": self.build_initial,
+            "observation": self.observe_initial,
+            "verification": self.verify_initial,
+            "install_expectations": self.build_install,
+        }
+        actions[operation]()
+
+    def create_environment(self) -> None:
+        self.environment = EffectEnvironment(self.case, self.work / "environment")
+        self.environment.prepare()
+        (self.work / "command-tmp").mkdir()
+        self.roots = {
+            "home": str(self.environment.home),
+            "project": str(self.environment.project),
+        }
+        self.lifecycle.acquire("environment")
+        self.writer.write_metadata(REFERENCES["environment"], self.roots)
+        self.lifecycle.retain("environment", REFERENCES["environment"])
+
+    def capture_sources(self) -> None:
+        assert self.environment is not None
+        self.sources = self.environment.capture_sources(self.subject)
+        self.lifecycle.acquire("sources")
+        self.writer.write_snapshot(self.sources, "expected")
+        self.lifecycle.retain("sources", REFERENCES["sources"])
+
+    def build_initial(self) -> None:
+        assert self.sources is not None
+        self.initial = bind_roots(build_initial_expectations(self.case, self.sources), self.roots)
+        self.lifecycle.acquire("expectations")
+        self.writer.write_metadata(REFERENCES["expectations"], self.initial.to_data())
+        self.lifecycle.retain("expectations", REFERENCES["expectations"])
+
+    def observe_initial(self) -> None:
+        assert self.environment is not None
+        self.before = self.environment.capture_initial()
+        self.lifecycle.acquire("observation")
+        self.writer.write_initial_observation(self.before)
+        self.lifecycle.retain("observation", REFERENCES["before"])
+
+    def verify_initial(self) -> None:
+        assert self.initial is not None and self.before is not None
+        verdict = self.verifier.verify(self.initial, self.before)
+        self.lifecycle.acquire(
+            "verification",
+            verification_passed=bool(
+                verdict.complete and not verdict.mismatches and not verdict.obstacles
+            ),
+        )
+        self.writer.write_initial_verification(verdict)
+        self.lifecycle.retain("verification", REFERENCES["verification"])
+
+    def build_install(self) -> None:
+        assert self.sources is not None and self.before is not None
+        self.expectations = build_install_expectations(
+            self.case, self.sources, self.before, self.roots
+        )
+        self.lifecycle.acquire("install_expectations")
+        self.writer.write_metadata(REFERENCES["install_expectations"], self.expectations.to_data())
+        self.lifecycle.retain("install_expectations", REFERENCES["install_expectations"])

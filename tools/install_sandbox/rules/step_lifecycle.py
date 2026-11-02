@@ -255,6 +255,7 @@ class RetainedFacts:
     expectations: bool = False
     external_expectations: bool = False
     before: bool = False
+    external_before: bool = False
     before_usable: bool = True
     environment: bool = False
     stdout: bool = False
@@ -308,8 +309,8 @@ def inspect(published_state: StepState, retained_facts: RetainedFacts) -> StepIn
         raise ValueError("Unpublished diagnostic requires its acquired facts")
     declared, fact = state.retained, state.facts
     required = (
-        (declared.before is not None, present.before),
-        (declared.expectations is not None, present.expectations),
+        (declared.before is not None, present.before or present.external_before),
+        (declared.expectations is not None, present.expectations or present.external_expectations),
         (declared.command, present.environment and present.stdout and present.stderr),
         (declared.after is not None, present.after),
         (declared.verification is not None, present.verification is not None),
@@ -325,7 +326,7 @@ def inspect(published_state: StepState, retained_facts: RetainedFacts) -> StepIn
     command_evidence = present.environment or present.stdout or present.stderr
     if command_evidence and (
         not (present.expectations or present.external_expectations)
-        or not present.before
+        or not (present.before or present.external_before)
         or not present.before_usable
     ):
         raise ValueError("Command evidence requires usable preparation and expectations")
@@ -389,7 +390,7 @@ def inspect(published_state: StepState, retained_facts: RetainedFacts) -> StepIn
     staging_allowed = allowed.copy()
     if (
         not (present.expectations or present.external_expectations)
-        or not present.before
+        or not (present.before or present.external_before)
         or not present.before_usable
     ):
         staging_allowed -= {"environment", "stdout", "stderr"}

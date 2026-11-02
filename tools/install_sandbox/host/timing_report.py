@@ -111,11 +111,13 @@ def render_campaign(result: CampaignResult) -> str:
 def _test_diagnostics(test: InstallTestResult | None) -> list[str]:
     if test is None:
         return []
-    lines = (
-        [f"  Preparation reason: {test.preparation['reason']}"]
-        if test.preparation["reason"]
-        else []
+    initial = test.preparation
+    reason = (
+        initial.stop.reason
+        if initial.stop
+        else ("Initial verification failed" if initial.checkpoint == "blocked" else None)
     )
+    lines = [f"  Preparation reason: {reason}"] if reason else []
     for index, step in enumerate(test.steps):
         command = step.command
         reason = (step.stop.reason if step.stop else None) or (

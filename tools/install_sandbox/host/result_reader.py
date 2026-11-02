@@ -4,17 +4,14 @@ import json
 from pathlib import Path
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.initial_preparation import InitialPreparationState
 from tools.install_sandbox.contracts.results import (
     InstallTestResult,
     IntermediateEvidence,
-    PreparationEvidence,
     StepState,
 )
 from tools.install_sandbox.contracts.spec import fields, text
 from tools.install_sandbox.host.effect_result_reader import check_effect_result
-from tools.install_sandbox.host.evidence_reader import (
-    boolean as _boolean,
-)
 from tools.install_sandbox.host.evidence_reader import (
     json_list as _list,
 )
@@ -30,7 +27,7 @@ from tools.install_sandbox.host.evidence_reader import (
 from tools.install_sandbox.host.evidence_reader import (
     safe_evidence_path,
 )
-
+from tools.install_sandbox.rules.initial_preparation import status as initial_status
 from tools.install_sandbox.rules.step_lifecycle import status, validate
 
 
@@ -66,43 +63,11 @@ def _intermediate(value: object, output: Path) -> IntermediateEvidence | None:
     }
 
 
-def _preparation(value: object, output: Path) -> PreparationEvidence:
-    data = fields(value, "ready reason log source stage")
-    if data["source"] != "campaign":
-        raise ValueError("Package preparation must be inherited from campaign")
-    log, stage = text(data["log"]), text(data["stage"])
-    safe_evidence_path(output, log)
-    if stage not in ("started", "sources_retained", "initial_verified"):
-        raise ValueError("Invalid preparation stage")
-    return {
-        "source": "campaign",
-        "ready": _boolean(data["ready"]),
-        "reason": _optional_text(data["reason"]),
-        "log": log,
-        "stage": stage,
-    }
-
-
-def _check_preparation_stage(result: InstallTestResult) -> None:
-    stage = result.preparation.get("stage")
-    expected = None if stage == "started" else "expected/"
-    if result.evidence["expected_contents"] != expected:
-        raise ValueError("Preparation stage contradicts retained source reference")
-    if result.preparation["ready"] and (
-        stage != "initial_verified" or result.preparation["reason"] is not None
-    ):
-        raise ValueError("Ready preparation requires completed initial verification without reason")
-
-
 def _check_consistency(result: InstallTestResult, repair_diagnostic: str | None) -> None:
-    _check_preparation_stage(result)
-    if result.status == "passed" and any(value is None for value in result.evidence.values()):
-        raise ValueError("passed requires all evidence references")
-    if not result.preparation["ready"]:
-        if any(step.phase != "idle" for step in result.steps):
-            raise ValueError("Unavailable preparation requires unattempted steps")
-        if result.status != "not_run" or result.preparation["reason"] is None:
-            raise ValueError("Unavailable preparation requires not_run and a reason")
+    if result.preparation.checkpoint != "ready":
+        expected = initial_status(result.preparation)
+        if any(step.phase != "idle" for step in result.steps) or result.status != expected:
+            raise ValueError("Initial preparation contradicts case progression")
         return
     aggregate = "passed"
     for index, step in enumerate(result.steps):
@@ -136,12 +101,12 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
         raise ValueError("Result steps do not match the requested operations")
     result = InstallTestResult(
         expected,
-        _preparation(data["preparation"], output_directory),
+        InitialPreparationState.from_data(data["preparation"]),
         steps,
         status,
         {
             key: _evidence(value, output_directory)
-            for key, value in fields(data["evidence"], "journal expected_contents").items()
+            for key, value in fields(data["evidence"], "journal").items()
         },
     )
     result.intermediate_preparation = _intermediate(
@@ -157,7 +122,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
 def _read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
-        "format": "explicit-expectations-v6"
+        "format": "explicit-expectations-v7"
     }:
         raise ValueError("Unsupported evidence format; use its identified historical reader")
     case = EffectInstallCase.from_json(

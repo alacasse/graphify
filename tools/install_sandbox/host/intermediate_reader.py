@@ -17,6 +17,7 @@ from tools.install_sandbox.host.evidence_reader import (
     read_json_evidence,
     safe_evidence_path,
 )
+from tools.install_sandbox.host.initial_preparation_reader import ARTIFACTS as INITIAL_ARTIFACTS
 from tools.install_sandbox.rules.repair_actions import ARTIFACTS
 from tools.install_sandbox.rules.repair_protocol import Inspection, RepairInputs, inspect
 
@@ -46,11 +47,13 @@ def _inventory(
     }
     staged = classify_staging(
         entries,
-        tuple(ArtifactLocation(item.reference, item.transport) for item in ARTIFACTS),
+        tuple(ArtifactLocation(item.reference, item.transport) for item in ARTIFACTS)
+        + tuple(INITIAL_ARTIFACTS.values()),
         referenced,
         known_files,
     )
-    return inventory, staged
+    initial = {item.reference for item in INITIAL_ARTIFACTS.values()}
+    return inventory, tuple(item for item in staged if not item.owners & initial)
 
 
 def _physical_entries(output: Path) -> tuple[FilesystemEntry, ...]:

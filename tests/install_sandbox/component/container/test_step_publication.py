@@ -6,17 +6,16 @@ from typing import Any
 
 import pytest
 
+from tests.install_sandbox.component.container.native_case_support import NativeCase
+from tests.install_sandbox.component.host.native_support import LiteralInstaller
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.effect_case import build_effect_cases
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
 from tools.install_sandbox.host.result_reader import read_evidence
-
-from tests.install_sandbox.component.container.native_case_support import NativeCase
-from tests.install_sandbox.component.host.native_support import LiteralInstaller
 
 
 class InterruptedPublication(BaseException):
@@ -63,82 +62,10 @@ class ControlledRun:
         return json.loads((self.output / "result.json").read_text())
 
 
-def assert_retained_result(subject: ControlledRun, phase: str, *, step: int = 0) -> None:
-    saved = subject.saved()
-    assert saved["steps"][step]["phase"] == phase
-    replayed = read_evidence(subject.output)
-    assert replayed.steps[step].phase == phase
-    assert replayed.status == saved["status"]
-    if step == 0:
-        assert replayed.steps[1].phase == "idle"
-
-
-@pytest.mark.parametrize("step", [0, 1], ids=["install", "reinstall"])
-@pytest.mark.parametrize("publication", [2, 3, 4], ids=["start", "command", "terminal"])
-@pytest.mark.parametrize("after", [False, True], ids=["before-write", "after-write"])
-def test_interruption_preserves_last_publication_and_blocks_dependent_step(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publication: int, after: bool, step: int
-) -> None:
-    subject = ControlledRun(tmp_path)
-    original = Writer.write_result
-    boundary = publication + 3 * step
-    attempts: list[bytes] = []
-    in_memory: list[InstallTestResult] = []
-
-    def publish(writer: Writer, result: InstallTestResult) -> None:
-        if not attempts:
-            in_memory.append(result)
-        attempts.append(result.steps[step].phase.encode())
-        if len(attempts) == boundary and not after:
-            raise InterruptedPublication()
-        original(writer, result)
-        if len(attempts) == boundary:
-            raise InterruptedPublication()
-
-    monkeypatch.setattr(Writer, "write_result", publish)
-    with pytest.raises(InterruptedPublication):
-        subject.run()
-    assert len(attempts) == boundary
-    assert len(subject.calls) == step + (0 if publication == 2 else 1)
-    phases = ["idle", "preparation", "observation", "terminal"]
-    assert in_memory[0].steps[step].phase == phases[publication - 2]
-    phase = phases[publication - 2 + after]
-    if step == 0 and publication == 2 and not after:
-        # Initial preparation has no intermediate publication contract.
-        assert subject.saved()["status"] == "not_run"
-        assert subject.saved()["steps"][0]["phase"] == "idle"
-    else:
-        assert_retained_result(subject, phase, step=step)
-        assert (subject.saved()["status"] == "passed") == (step == 1 and publication == 4 and after)
-    if publication < 4:
-        assert not (subject.output / f"steps/{step}/after.json").exists()
-    if publication == 4 and not after:
-        assert (subject.output / f"steps/{step}/verification.json").is_file()
-
-
-@pytest.mark.parametrize("step", [0, 1], ids=["install", "reinstall"])
-@pytest.mark.parametrize(
-    "target",
-    [
-        "steps/0/environment.json",
-        "steps/0/stdout.txt",
-        "steps/0/stderr.txt",
-        "steps/0/after/project/GUIDE.md",
-        "steps/0/after.json",
-        "steps/0/verification.json",
-    ],
-)
-@pytest.mark.parametrize("partial", [False, True], ids=["no-bytes", "partial-bytes"])
-def test_authoritative_write_failure_stops_without_retry_or_final_rewrite(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, partial: bool, step: int
-) -> None:
-    subject = ControlledRun(tmp_path)
-    target = target.replace("steps/0/", f"steps/{step}/")
+def inject_write_error(monkeypatch: pytest.MonkeyPatch, target: str, partial: bool) -> list[str]:
     original_bytes = Writer._write_bytes  # pyright: ignore[reportPrivateUsage]
     original_json = Writer._write_json  # pyright: ignore[reportPrivateUsage]
-    original_result = Writer.write_result
     writes: list[str] = []
-    publications: list[str] = []
 
     def fail(writer: Writer, relative: str) -> None:
         if partial:
@@ -162,12 +89,88 @@ def test_authoritative_write_failure_stops_without_retry_or_final_rewrite(
             fail(writer, relative)
         original_json(writer, relative, data)
 
-    def publish(writer: Writer, result: InstallTestResult) -> None:
-        publications.append(result.steps[step].phase)
-        original_result(writer, result)
-
     monkeypatch.setattr(Writer, "_write_bytes", write_bytes)
     monkeypatch.setattr(Writer, "_write_json", write_json)
+    return writes
+
+
+def assert_retained_result(subject: ControlledRun, phase: str, *, step: int = 0) -> None:
+    saved = subject.saved()
+    assert saved["steps"][step]["phase"] == phase
+    replayed = read_evidence(subject.output)
+    assert replayed.steps[step].phase == phase
+    assert replayed.status == saved["status"]
+    if step == 0:
+        assert replayed.steps[1].phase == "idle"
+
+
+@pytest.mark.parametrize("step", [0, 1], ids=["install", "reinstall"])
+@pytest.mark.parametrize(
+    "phase", ["preparation", "observation", "terminal"], ids=["start", "command", "terminal"]
+)
+@pytest.mark.parametrize("after", [False, True], ids=["before-write", "after-write"])
+def test_interruption_preserves_last_publication_and_blocks_dependent_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str, after: bool, step: int
+) -> None:
+    subject = ControlledRun(tmp_path)
+    original = Writer.write_result
+    attempts: list[str] = []
+    in_memory: list[InstallTestResult] = []
+
+    def publish(writer: Writer, result: InstallTestResult) -> None:
+        if result.steps[step].phase == phase:
+            in_memory.append(result)
+            attempts.append(phase)
+            if not after:
+                raise InterruptedPublication()
+            original(writer, result)
+            raise InterruptedPublication()
+        original(writer, result)
+
+    monkeypatch.setattr(Writer, "write_result", publish)
+    with pytest.raises(InterruptedPublication):
+        subject.run()
+    assert attempts == [phase]
+    assert len(subject.calls) == step + (phase != "preparation")
+    phases = ["idle", "preparation", "observation", "terminal"]
+    index = phases.index(phase)
+    assert in_memory[0].steps[step].phase == phase
+    retained_phase = phase if after else phases[index - 1]
+    assert_retained_result(subject, retained_phase, step=step)
+    assert (subject.saved()["status"] == "passed") == (step == 1 and phase == "terminal" and after)
+    if phase != "terminal":
+        assert not (subject.output / f"steps/{step}/after.json").exists()
+    if phase == "terminal" and not after:
+        assert (subject.output / f"steps/{step}/verification.json").is_file()
+
+
+@pytest.mark.parametrize("step", [0, 1], ids=["install", "reinstall"])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "steps/0/environment.json",
+        "steps/0/stdout.txt",
+        "steps/0/stderr.txt",
+        "steps/0/after/project/GUIDE.md",
+        "steps/0/after.json",
+        "steps/0/verification.json",
+    ],
+)
+@pytest.mark.parametrize("partial", [False, True], ids=["no-bytes", "partial-bytes"])
+def test_authoritative_write_failure_stops_without_retry_or_final_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, partial: bool, step: int
+) -> None:
+    subject = ControlledRun(tmp_path)
+    target = target.replace("steps/0/", f"steps/{step}/")
+    original_result = Writer.write_result
+    publications: list[str] = []
+    writes = inject_write_error(monkeypatch, target, partial)
+
+    def publish(writer: Writer, result: InstallTestResult) -> None:
+        if result.steps[step].phase != "idle":
+            publications.append(result.steps[step].phase)
+        original_result(writer, result)
+
     monkeypatch.setattr(Writer, "write_result", publish)
     with pytest.raises(EvidenceWriteError, match="Controlled authoritative"):
         subject.run()
@@ -175,10 +178,7 @@ def test_authoritative_write_failure_stops_without_retry_or_final_rewrite(
     assert writes.count(target) == 1
     assert all(path == "timings.json.tmp" for path in writes[writes.index(target) + 1 :])
     command_retained = "/after" in target or target.endswith("verification.json")
-    before = ["idle"] * (1 + 3 * step)
-    assert publications == before + (
-        ["preparation", "observation"] if command_retained else ["preparation"]
-    )
+    assert publications == (["preparation", "observation"] if command_retained else ["preparation"])
     assert_retained_result(subject, "observation" if command_retained else "preparation", step=step)
     assert not (subject.output / f"steps/{step}/failure.json").exists()
     if step == 0:
@@ -337,15 +337,16 @@ def test_terminal_publication_keeps_finalization_timing_without_extra_result_wri
 ) -> None:
     subject = ControlledRun(tmp_path)
     original = Writer.write_result
-    publications: list[str] = []
+    publications: list[tuple[str, str]] = []
 
     def publish(writer: Writer, result: InstallTestResult) -> None:
-        publications.append(result.status)
+        publications.append((result.preparation.checkpoint, result.steps[1].phase))
         original(writer, result)
 
     monkeypatch.setattr(Writer, "write_result", publish)
     assert subject.run().status == "passed"
-    assert len(publications) == 7  # Initial preparation, then three per step.
+    assert publications[-1] == ("ready", "terminal")
+    assert publications.count(("ready", "terminal")) == 1
     timings = json.loads((subject.output / "timings.json").read_text())
     finalization = next(phase for phase in timings["phases"] if phase["phase"] == "finalize")
     assert finalization["state"] == "measured"

@@ -11,7 +11,7 @@ Install and uninstall used to identify graphify's hooks with
 
 These tests pin the entry-scoped contract: only entries graphify installed go,
 a group is dropped only when nothing is left in it, other tools' commands
-survive, and uninstall keeps a rolling backup.
+survive, and uninstall creates a missing backup without replacing an existing one.
 """
 from __future__ import annotations
 
@@ -59,7 +59,9 @@ def _has_graphify(entry: object) -> bool:
 
 
 @pytest.mark.parametrize("name", sorted(_INSTALLERS))
-def test_uninstall_keeps_user_commands_and_unrelated_groups(tmp_path, name):
+@pytest.mark.parametrize("saved_backup", [None, b"", b"Original personal settings\r\n"],
+                         ids=["absent-backup", "empty-backup", "existing-backup"])
+def test_uninstall_keeps_user_commands_and_unrelated_groups(tmp_path, name, saved_backup):
     install, uninstall, rel, section = _INSTALLERS[name]
     project = tmp_path / "proj"
     project.mkdir()
@@ -85,6 +87,12 @@ def test_uninstall_keeps_user_commands_and_unrelated_groups(tmp_path, name):
         }
     )
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    before = settings_path.read_bytes()
+    backup = settings_path.with_name(settings_path.name + ".graphify-bak")
+    if saved_backup is not None:
+        backup.write_bytes(saved_backup)
+    else:
+        assert not backup.exists()
 
     uninstall(project)
 
@@ -94,8 +102,9 @@ def test_uninstall_keeps_user_commands_and_unrelated_groups(tmp_path, name):
     assert "hook-guard" not in after and "hook-check" not in after, (
         f"{name}: graphify's own hook commands were not removed"
     )
-    backup = settings_path.with_name(settings_path.name + ".graphify-bak")
-    assert backup.exists(), f"{name}: uninstall wrote no backup"
+    assert backup.read_bytes() == (before if saved_backup is None else saved_backup), (
+        f"{name}: uninstall must create a missing backup and preserve an existing one"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(_INSTALLERS))

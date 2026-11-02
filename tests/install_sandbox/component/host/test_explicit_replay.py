@@ -51,7 +51,13 @@ def test_phase_continuity_tampering_is_rejected(proof: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "version", ["effects-v1", "explicit-expectations-v3", "explicit-expectations-v5"]
+    "version",
+    [
+        "effects-v1",
+        "explicit-expectations-v3",
+        "explicit-expectations-v5",
+        "explicit-expectations-v6",
+    ],
 )
 def test_historical_transport_is_explicitly_rejected(proof: Path, version: str) -> None:
     path = proof / "evidence-format.json"
@@ -78,17 +84,9 @@ def test_skipped_phase_rejects_retained_execution_evidence(proof: Path, leftover
         read_evidence(proof)
 
 
-def test_ready_result_rejects_retained_construction_failure(proof: Path) -> None:
-    (proof / "construction-failure.json").write_text(
-        json.dumps(
-            {
-                "stage": "initial_expectations",
-                "kind": "io",
-                "reason": "unavailable",
-            }
-        )
-    )
-    with pytest.raises(ValueError, match="Ready preparation contradicts"):
+def test_ready_result_rejects_retained_initial_failure(proof: Path) -> None:
+    (proof / "initial/failure.json").write_text("{}")
+    with pytest.raises(ValueError):
         read_evidence(proof)
 
 
@@ -108,7 +106,7 @@ def test_rejected_initial_verification_forbids_retained_execution(
 ) -> None:
     import shutil
 
-    (proof / "steps/0/before/project/GUIDE.md").write_text("Altered initial guide.\n")
+    (proof / "initial/before/project/GUIDE.md").write_text("Altered initial guide.\n")
     verdict = {
         "complete": True,
         "obstacles": [],
@@ -126,7 +124,11 @@ def test_rejected_initial_verification_forbids_retained_execution(
     result_file = proof / "result.json"
     result = json.loads(result_file.read_text())
     result["status"] = "not_run"
-    result["preparation"].update(ready=False, reason="Initial verification failed")
+    result["preparation"]["checkpoint"] = "blocked"
+    result["preparation"]["facts"]["completed"].pop()
+    result["preparation"]["facts"]["verification_passed"] = False
+    result["preparation"]["retained"]["install_expectations"] = None
+    _retain_changed_guide_digest(proof)
     result["steps"] = [StepState.idle("install").to_data() for _ in range(2)]
     result_file.write_text(json.dumps(result))
     retained = None if retained_artifact is None else (proof / retained_artifact).read_bytes()
@@ -142,6 +144,7 @@ def test_rejected_initial_verification_forbids_retained_execution(
     ):
         (proof / relative).unlink()
     shutil.rmtree(proof / "steps/0/after")
+    (proof / "steps/0").rmdir()
     if retained_artifact is not None:
         path = proof / retained_artifact
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,3 +154,15 @@ def test_rejected_initial_verification_forbids_retained_execution(
             read_evidence(proof)
         return
     assert read_evidence(proof).status == "not_run"
+
+
+def _retain_changed_guide_digest(proof: Path) -> None:
+    # Keep the manifest digest consistent: this is a real nonconforming observation.
+    import hashlib
+
+    before_file = proof / "initial/before.json"
+    before = json.loads(before_file.read_text())
+    for entry in before["entries"]:
+        if entry["root"] == "project" and entry["path"] == "GUIDE.md":
+            entry["sha256"] = hashlib.sha256(b"Altered initial guide.\n").hexdigest()
+    before_file.write_text(json.dumps(before))

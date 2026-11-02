@@ -184,7 +184,7 @@ def test_restricted_embedded_payload_runs_from_foreign_cwd(tmp_path: Path) -> No
     assert all(value >= 0 for value in timing["seconds"].values())
     saved = json.loads((tmp_path / "results/result.json").read_bytes())
     assert saved["status"] == "not_run"
-    assert saved["preparation"]["reason"]
+    assert saved["preparation"]["checkpoint"] == "stopped"
     assert not (tmp_path / "work/software/venv").exists()
 
 

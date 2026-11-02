@@ -32,7 +32,9 @@ def inventory(
         ("failure.json", "json"),
     )
     descriptors = tuple(
-        ArtifactLocation(f"{prefix}/{name}", transport) for name, transport in transports
+        ArtifactLocation(f"{prefix}/{name}", transport)
+        for name, transport in transports
+        if index != 0 or name != "before.json"
     ) + tuple(
         ArtifactLocation(f"expectations/{phase}.json", "json")
         for phase in ("initial", "install", "intermediate", "reinstall")
@@ -74,9 +76,17 @@ def inventory(
         if safe_evidence_path(output, reference).exists():
             loaded[reference] = safe_evidence_path(output, reference).read_bytes()
     staged = classify_staging(tuple(entries), descriptors, referenced, known)
+    return loaded, tuple(item for item in staged if _step_owns(item, index))
+
+
+def _step_owns(item: StagedEvidence, index: int) -> bool:
+    if item.form == "directory" and item.owners & {
+        "expectations/initial.json",
+        "expectations/install.json",
+    }:
+        return False
     expectation = f"expectations/{'install' if index == 0 else 'reinstall'}.json"
-    return loaded, tuple(
-        item
-        for item in staged
-        if any(owner.startswith(prefix + "/") or owner == expectation for owner in item.owners)
+    return any(
+        owner.startswith(f"steps/{index}/") or (index != 0 and owner == expectation)
+        for owner in item.owners
     )

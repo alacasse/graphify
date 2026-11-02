@@ -63,6 +63,7 @@ def test_cli_real_engine_and_autonomous_reread(
         reread = read_evidence(restored / "evidence/cases" / name)
         assert reread.status == "passed"
         decoded = asdict(reread)
+        decoded["preparation"] = reread.preparation.to_data()
         decoded["steps"] = [step.to_data() for step in reread.steps]
         assert decoded == saved[name]
 

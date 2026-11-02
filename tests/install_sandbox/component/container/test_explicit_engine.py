@@ -283,43 +283,23 @@ def test_partial_execution_stages_remain_autonomously_readable(
 
 def inject_initial_persistence_failure(monkeypatch: pytest.MonkeyPatch, failed_file: str) -> None:
     from tools.install_sandbox.container.evidence_writer import TestResultWriter
-    from tools.install_sandbox.contracts.results import EvidenceWriteError, VerificationResult
+    from tools.install_sandbox.contracts.results import EvidenceWriteError
 
-    original = TestResultWriter.write_metadata
-    original_snapshot = TestResultWriter.write_snapshot
-    original_verification = TestResultWriter.write_initial_verification
+    original = TestResultWriter._write_json  # pyright: ignore[reportPrivateUsage]
 
-    def metadata(self: TestResultWriter, relative: str, data: object) -> None:
-        if failed_file == relative:
-            raise EvidenceWriteError("Controlled initial expectations persistence failure")
-        original(self, relative, data)
+    def write(writer: TestResultWriter, relative: str, value: object) -> None:
+        if relative == failed_file:
+            raise EvidenceWriteError("Controlled initial persistence failure")
+        original(writer, relative, value)
 
-    def snapshot(
-        self: TestResultWriter,
-        observed: runner.FilesystemSnapshot,
-        name: str,
-        *,
-        step_index: int = 0,
-    ) -> None:
-        if failed_file == "steps/0/before.json" and name == "before":
-            raise EvidenceWriteError("Controlled initial observation persistence failure")
-        original_snapshot(self, observed, name, step_index=step_index)
-
-    def verdict(self: TestResultWriter, data: VerificationResult) -> None:
-        if failed_file == "initial-verification.json":
-            raise EvidenceWriteError("Controlled initial verification persistence failure")
-        original_verification(self, data)
-
-    monkeypatch.setattr(TestResultWriter, "write_metadata", metadata)
-    monkeypatch.setattr(TestResultWriter, "write_snapshot", snapshot)
-    monkeypatch.setattr(TestResultWriter, "write_initial_verification", verdict)
+    monkeypatch.setattr(TestResultWriter, "_write_json", write)
 
 
 @pytest.mark.parametrize(
     "failed_file",
     [
         "expectations/initial.json",
-        "steps/0/before.json",
+        "initial/before.json",
         "initial-verification.json",
     ],
 )
@@ -352,6 +332,10 @@ def test_initial_persistence_failure_stops_without_republishing(
             output_directory=output,
         )
     published = json.loads((output / "result.json").read_text())
-    assert published["preparation"]["stage"] == "started"
-    assert not (output / "construction-failure.json").exists()
+    assert published["preparation"]["checkpoint"] == {
+        "expectations/initial.json": "sources_retained",
+        "initial/before.json": "expectations_retained",
+        "initial-verification.json": "observed",
+    }[failed_file]
+    assert not (output / "initial/failure.json").exists()
     assert not (output / "steps/0/environment.json").exists()

@@ -173,6 +173,9 @@ class TestResultWriter:
     def write_initial_verification(self, result: VerificationResult) -> None:
         self._write_json("initial-verification.json", asdict(result))
 
+    def write_initial_observation(self, snapshot: FilesystemSnapshot) -> None:
+        self._snapshot(plan_snapshot("initial/before.json", snapshot))
+
     def write_verification(self, result: VerificationResult, *, step_index: int = 0) -> None:
         self._write_json(f"steps/{step_index}/verification.json", asdict(result))
 
@@ -241,5 +244,6 @@ class TestResultWriter:
 
     def write_result(self, result: InstallTestResult) -> None:
         document = asdict(result)
+        document["preparation"] = result.preparation.to_data()
         document["steps"] = [step.to_data() for step in result.steps]
         self._write_json("result.json", document)

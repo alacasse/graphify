@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Literal, NotRequired, TypedDict, cast
 
+from tools.install_sandbox.contracts.initial_preparation import InitialPreparationState
 from tools.install_sandbox.contracts.spec import fields, text
 
 
@@ -78,14 +79,6 @@ def parse_obstacle(value: object) -> ObservationObstacle:
         "path": text(data["path"]),
         "reason": text(data["reason"]),
     }
-
-
-class PreparationEvidence(TypedDict):
-    source: Literal["campaign"]
-    ready: bool
-    reason: str | None
-    log: str
-    stage: Literal["started", "sources_retained", "initial_verified"]
 
 
 class CommandEvidence(TypedDict):
@@ -331,7 +324,7 @@ class CheckpointReceipt:
 @dataclass
 class InstallTestResult:
     case: dict[str, str]
-    preparation: PreparationEvidence
+    preparation: InitialPreparationState
     steps: list[StepState]
     status: Literal["passed", "failed", "not_run", "incomplete"]
     evidence: dict[str, str | None]

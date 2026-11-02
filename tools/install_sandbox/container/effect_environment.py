@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from tools.install_sandbox.container.environment import ObservedEnvironment
-from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import MarkdownSectionEffect, SkillEffect
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -39,12 +38,14 @@ class EffectEnvironment(ObservedEnvironment):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(initial["content"].encode("utf-8"))
 
-    def preserve_expected(self, subject: Path, writer: TestResultWriter) -> FilesystemSnapshot:
+    def capture_sources(self, subject: Path) -> FilesystemSnapshot:
         snapshot = FilesystemSnapshot()
         for path in source_paths(self.case):
             self._capture(snapshot, "subject", subject, path)
-        writer.write_snapshot(snapshot, "expected")
         return snapshot
+
+    def capture_initial(self) -> FilesystemSnapshot:
+        return self.observe_intermediate("initial")
 
     def observe_intermediate(self, phase: str) -> FilesystemSnapshot:
         snapshot = FilesystemSnapshot()

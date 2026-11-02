@@ -12,7 +12,6 @@ from tools.install_sandbox.contracts.results import (
     StepState,
     VerificationResult,
 )
-from tools.install_sandbox.contracts.spec import fields, text
 from tools.install_sandbox.host.evidence_reader import (
     check_environment,
     check_snapshot,
@@ -20,13 +19,11 @@ from tools.install_sandbox.host.evidence_reader import (
     retained_snapshot,
     safe_evidence_path,
 )
+from tools.install_sandbox.host.initial_preparation_reader import replay_initial
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
 from tools.install_sandbox.host.step_artifacts import inventory
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
-    bind_roots,
-    build_initial_expectations,
-    build_install_expectations,
     build_reinstall_expectations,
 )
 from tools.install_sandbox.rules.repair_protocol import RepairInputs
@@ -71,25 +68,35 @@ def _expectations(output: Path, expected: ExpectationSet) -> None:
         raise ValueError(f"Stored {expected.phase} expectations contradict retained inputs")
 
 
-def _roots(output: Path) -> dict[str, str]:
-    data = fields(read_json_evidence(output, "roots.json"), "home project")
-    roots = {key: text(value) for key, value in data.items()}
-    project, home = (PurePosixPath(roots[key]) for key in ("project", "home"))
-    if (
-        not project.is_absolute()
-        or project.name != "project"
-        or home != project.parent / "home"
-        or ".." in project.parts
-        or str(project) != roots["project"]
-        or str(home) != roots["home"]
-    ):
-        raise ValueError("Evidence requires canonical isolated roots")
-    return roots
-
-
 def check_effect_result(
     result: InstallTestResult, case: EffectInstallCase, output: Path
 ) -> str | None:
+    _check_steps_directory(result, output)
+    retained = EffectInstallCase.from_json(
+        safe_evidence_path(output, "case.json").read_text(encoding="utf-8")
+    )
+    if case.intermediate_preparation is None:
+        _absent(output, ("intermediate", "expectations/intermediate.json"))
+    if retained != case:
+        raise ValueError("Retained case contradicts requested case")
+    initial = replay_initial(result.preparation, case, output, _snapshot)
+    if initial is None:
+        _absent(output, ("expectations/reinstall.json",))
+        for index, step in enumerate(result.steps):
+            loaded, staged = inventory(output, index, _snapshot)
+            # Installation expectations belong to initial preparation, never an idle step.
+            own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
+            if step.phase != "idle" or own or staged:
+                raise ValueError(
+                    "Incomplete initial preparation requires idle steps without execution evidence"
+                )
+        return _unstarted_repair(result, output)
+    return _steps(
+        result, case, output, initial.roots, initial.expectations, initial.before, initial.sources
+    )
+
+
+def _check_steps_directory(result: InstallTestResult, output: Path) -> None:
     steps_directory = safe_evidence_path(output, "steps")
     if steps_directory.exists():
         if not steps_directory.is_dir():
@@ -101,25 +108,6 @@ def check_effect_result(
                 or not child.is_dir()
             ):
                 raise ValueError("Unknown step evidence directory")
-    retained = EffectInstallCase.from_json(
-        safe_evidence_path(output, "case.json").read_text(encoding="utf-8")
-    )
-    if case.intermediate_preparation is None:
-        _absent(output, ("intermediate", "expectations/intermediate.json"))
-    if retained != case:
-        raise ValueError("Retained case contradicts requested case")
-    for relative in ("journal.log", result.preparation["log"]):
-        safe_evidence_path(output, relative).read_bytes()
-    failure = output / "construction-failure.json"
-    if failure.exists() or failure.is_symlink():
-        if result.preparation["ready"]:
-            raise ValueError("Ready preparation contradicts retained construction failure")
-        _failed_initial(result, case, output)
-        return _unstarted_repair(result, output)
-    roots = _roots(output)
-    sources = _snapshot(output, "expected.json")
-    initial = bind_roots(build_initial_expectations(case, sources), roots)
-    return _initial_and_steps(result, case, output, roots, sources, initial)
 
 
 def _unstarted_repair(result: InstallTestResult, output: Path) -> str | None:
@@ -133,127 +121,6 @@ def _unstarted_repair(result: InstallTestResult, output: Path) -> str | None:
         result.steps[0],
     )
     return replay_intermediate(result, output, inputs, _snapshot).diagnostic
-
-
-def _initial_and_steps(
-    result: InstallTestResult,
-    case: EffectInstallCase,
-    output: Path,
-    roots: dict[str, str],
-    sources: FilesystemSnapshot,
-    initial: ExpectationSet,
-) -> str | None:
-    _expectations(output, initial)
-    before = _snapshot(output, "steps/0/before.json")
-    computed = EffectVerifier().verify(initial, before)
-    saved = VerificationResult.from_data(read_json_evidence(output, "initial-verification.json"))
-    if result.preparation.get("stage") != "initial_verified" or computed != saved:
-        raise ValueError("Initial stage or verification contradicts observations")
-    if not result.preparation["ready"]:
-        if computed.complete and not computed.mismatches:
-            raise ValueError("Failed preparation contradicts conforming initial observations")
-        _no_initial_execution(output)
-        return _unstarted_repair(result, output)
-    if not computed.complete or computed.mismatches:
-        raise ValueError("Installation requires successful initial verification")
-    installed = build_install_expectations(case, sources, before, roots)
-    return _steps(result, case, output, roots, installed, before, sources)
-
-
-def _failed_initial(result: InstallTestResult, case: EffectInstallCase, output: Path) -> None:
-    data = fields(read_json_evidence(output, "construction-failure.json"), "stage kind reason")
-    stage, kind = text(data["stage"]), text(data["kind"])
-    text(data["reason"])
-    phases = {
-        "environment": "started",
-        "sources": "started",
-        "initial_expectations": "sources_retained",
-        "initial_observation": "sources_retained",
-        "initial_verification": "sources_retained",
-        "install_expectations": "initial_verified",
-    }
-    if kind not in {"io", "validation"} or phases.get(stage) != result.preparation["stage"]:
-        raise ValueError("Construction failure contradicts initial preparation substage")
-    _no_initial_execution(output)
-    if stage in {"environment", "sources"}:
-        _absent(
-            output,
-            ("expectations/initial.json", "steps/0/before.json", "initial-verification.json"),
-        )
-        return
-    _failed_initial_expectations(case, output, stage, kind)
-
-
-def _no_initial_execution(output: Path) -> None:
-    _no_phase_evidence(output, 1)
-    _absent(
-        output,
-        (
-            "expectations/install.json",
-            "steps/0/after.json",
-            "steps/0/after",
-            "steps/0/environment.json",
-            "steps/0/verification.json",
-            "steps/0/failure.json",
-            "steps/0/stdout.txt",
-            "steps/0/stderr.txt",
-        ),
-    )
-
-
-def _failed_initial_expectations(
-    case: EffectInstallCase, output: Path, stage: str, kind: str
-) -> None:
-    roots, sources = _roots(output), _snapshot(output, "expected.json")
-    try:
-        initial = bind_roots(build_initial_expectations(case, sources), roots)
-    except ValueError:
-        if stage != "initial_expectations" or kind != "validation":
-            raise
-        _absent(
-            output,
-            ("expectations/initial.json", "steps/0/before.json", "initial-verification.json"),
-        )
-        return
-    if stage == "initial_expectations":
-        if kind != "io":
-            raise ValueError("Failed construction contradicts successfully rebuilt expectations")
-        _absent(output, ("steps/0/before.json", "initial-verification.json"))
-        return
-    _expectations(output, initial)
-    if stage == "initial_observation":
-        if kind != "io":
-            raise ValueError("Initial observation failure requires an I/O diagnostic")
-        _absent(output, ("initial-verification.json",))
-        return
-    _failed_initial_verification(case, output, stage, kind, sources, roots, initial)
-
-
-def _failed_initial_verification(
-    case: EffectInstallCase,
-    output: Path,
-    stage: str,
-    kind: str,
-    sources: FilesystemSnapshot,
-    roots: dict[str, str],
-    initial: ExpectationSet,
-) -> None:
-    before = _snapshot(output, "steps/0/before.json")
-    computed = EffectVerifier().verify(initial, before)
-    if stage == "initial_verification":
-        if kind != "io":
-            raise ValueError("Initial verification persistence failure requires an I/O diagnostic")
-        return
-    saved = VerificationResult.from_data(read_json_evidence(output, "initial-verification.json"))
-    if computed != saved or not computed.complete or computed.mismatches:
-        raise ValueError("Install expectations require conforming initial verification")
-    try:
-        build_install_expectations(case, sources, before, roots)
-    except ValueError:
-        if kind != "validation":
-            raise
-        return
-    raise ValueError("Failed construction contradicts successfully rebuilt install expectations")
 
 
 def _steps(
@@ -325,11 +192,6 @@ def _absent(output: Path, relatives: tuple[str, ...]) -> None:
         raise ValueError("Execution stage contradicts retained later evidence")
 
 
-def _no_phase_evidence(output: Path, index: int) -> None:
-    phase = "install" if index == 0 else "reinstall"
-    _absent(output, (f"steps/{index}", f"expectations/{phase}.json"))
-
-
 def _inspect_step(
     step: StepState,
     case: EffectInstallCase,
@@ -364,14 +226,17 @@ def _inspect_step(
     before_usable = isinstance(before, FilesystemSnapshot) and _same_observation(previous, before)
     if isinstance(before, FilesystemSnapshot) and before.obstacles:
         before_usable = False
-    if index == 0 and not before_usable:
-        raise ValueError("Initial step continuity contradicts previous observation")
+    if index == 0:
+        before, before_usable = previous, not previous.obstacles
     for name, reference in claim.observations.items():
         if reference is None:
             continue
-        if reference != f"{prefix}/{name}.json":
+        expected_reference = (
+            "initial/before.json" if index == 0 and name == "before" else f"{prefix}/{name}.json"
+        )
+        if reference != expected_reference:
             raise ValueError("Evidence references must belong to their own step")
-        if reference not in loaded:
+        if reference not in loaded and not (index == 0 and name == "before"):
             raise ValueError("Missing referenced observation")
     command = claim.command
     if command is not None:
@@ -399,12 +264,11 @@ def _inspect_step(
         check_environment(binding, output, index)
     saved = loaded.get(f"{prefix}/verification.json")
     verdict = None if saved is None else VerificationResult.from_data(saved)
-    if verdict is not None:
-        if (
-            not isinstance(after, FilesystemSnapshot)
-            or EffectVerifier().verify(expected, after) != verdict
-        ):
-            raise ValueError("Verification contradicts retained explicit expectations")
+    if verdict is not None and (
+        not isinstance(after, FilesystemSnapshot)
+        or EffectVerifier().verify(expected, after) != verdict
+    ):
+        raise ValueError("Verification contradicts retained explicit expectations")
     if claim.verification is not None and (
         not isinstance(after, FilesystemSnapshot)
         or EffectVerifier().verify(expected, after) != claim.verification
@@ -420,9 +284,10 @@ def _inspect_step(
         expectation_reference: "expectations",
     }
     facts = RetainedFacts(
-        expectations=has_expectations and not repair_owns_expectations,
-        external_expectations=has_expectations and repair_owns_expectations,
-        before=isinstance(before, FilesystemSnapshot) and not (index == 0 and step.phase == "idle"),
+        expectations=has_expectations and not repair_owns_expectations and index != 0,
+        external_expectations=has_expectations and (repair_owns_expectations or index == 0),
+        external_before=index == 0,
+        before=isinstance(before, FilesystemSnapshot) and index != 0,
         before_usable=before_usable,
         environment=f"{prefix}/environment.json" in loaded,
         stdout=f"{prefix}/stdout.txt" in loaded,
@@ -434,7 +299,10 @@ def _inspect_step(
         staged=tuple(
             frozenset(cast(Artifact, kinds[owner]) for owner in entry.owners if owner in kinds)
             for entry in staged
-            if not (repair_owns_expectations and entry.owners == frozenset({expectation_reference}))
+            if not (
+                (repair_owns_expectations or index == 0)
+                and entry.owners == frozenset({expectation_reference})
+            )
         ),
     )
     if (

@@ -6,7 +6,7 @@ from typing import TypedDict, cast
 
 import pytest
 
-from experiment_adapter import replay, run_fixture
+from tests.install_sandbox.component.container.repair_support import replay, run_fixture
 from tools.install_sandbox.container.case_publication import CasePublisher
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
@@ -215,7 +215,9 @@ def capture_execution(monkeypatch: pytest.MonkeyPatch, captured: CapturedExecuti
 
     monkeypatch.setattr(intermediate_execution, "_advance", capture_advance)
     monkeypatch.setattr(intermediate_execution, "begin", begin_session)
-    monkeypatch.setattr("experiment_adapter.apply_markdown_mutation", mutate)
+    monkeypatch.setattr(
+        "tests.install_sandbox.component.container.repair_support.apply_markdown_mutation", mutate
+    )
 
 
 def interrupt_execution(

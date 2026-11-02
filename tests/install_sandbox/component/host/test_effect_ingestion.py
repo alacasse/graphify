@@ -50,6 +50,20 @@ def test_generic_effect_fixture_has_exact_structured_representation() -> None:
     )
 
 
+def test_active_amp_spec_has_project_skill_and_markdown_without_hooks() -> None:
+    active = Path(__file__).resolve().parents[4] / "tools/install_sandbox/specs/amp.yaml"
+    assert EffectSpecReader().read(active) == EffectSpec(
+        (
+            SkillEffect(
+                "skill-amp.md",
+                "skills/amp/references",
+                Destination("project", ".agents/skills/graphify"),
+            ),
+            MarkdownSectionEffect("always_on/agents-md.md", Destination("project", "AGENTS.md")),
+        )
+    )
+
+
 def test_active_codebuddy_spec_has_current_retained_target_facts() -> None:
     active = Path(__file__).resolve().parents[4] / "tools/install_sandbox/specs/codebuddy.yaml"
     spec = EffectSpecReader().read(active)

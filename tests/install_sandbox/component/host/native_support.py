@@ -5,7 +5,7 @@ import json
 import shutil
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -22,7 +22,15 @@ def write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def arrange(root: Path, *, markdown_only: bool = False) -> tuple[Path, Path, Path]:
+def arrange(
+    root: Path,
+    *,
+    markdown_only: bool = False,
+    skill: bool = True,
+    markdown: bool = True,
+    hooks: bool = True,
+    skill_root: Literal["home", "project"] = "home",
+) -> tuple[Path, Path, Path]:
     subject = root / "subject"
     for name, content in {
         "package.md": "# Synthetic package\n",
@@ -41,19 +49,35 @@ def arrange(root: Path, *, markdown_only: bool = False) -> tuple[Path, Path, Pat
     context_file.write_text(json.dumps(asdict(context)))
     spec_file = root / "effects.yaml"
     payload = FIXTURE.read_text()
-    if markdown_only:
-        raw = cast(dict[str, Any], yaml.safe_load(payload))
-        raw["effects"] = [
-            effect for effect in raw["effects"] if effect["kind"] == "markdown-section"
-        ]
-        payload = yaml.safe_dump(raw)
+    raw = cast(dict[str, Any], yaml.safe_load(payload))
+    enabled = {
+        "skill": skill and not markdown_only,
+        "markdown-section": markdown,
+        "json-hooks": hooks and not markdown_only,
+    }
+    raw["effects"] = [effect for effect in raw["effects"] if enabled[effect["kind"]]]
+    for effect in raw["effects"]:
+        if effect["kind"] == "skill":
+            effect["destination"]["root"] = skill_root
+    payload = yaml.safe_dump(raw)
     spec_file.write_text(payload)
     return subject, spec_file, context_file
 
 
 class LiteralInstaller:
-    def __init__(self, markdown_only: bool = False) -> None:
-        self.markdown_only = markdown_only
+    def __init__(
+        self,
+        markdown_only: bool = False,
+        *,
+        skill: bool = True,
+        markdown: bool = True,
+        hooks: bool = True,
+        skill_root: Literal["home", "project"] = "home",
+    ) -> None:
+        self.skill = skill and not markdown_only
+        self.markdown = markdown
+        self.hooks = hooks and not markdown_only
+        self.skill_root = skill_root
         self.calls: list[list[str]] = []
 
     def execute(
@@ -61,9 +85,17 @@ class LiteralInstaller:
     ) -> InstallerCommandResult:
         assert timeout == 60
         self.calls.append(args)
-        if not self.markdown_only:
-            self._skill(Path(environment["HOME"]))
+        home = Path(environment["HOME"])
+        if self.skill:
+            self._skill(home if self.skill_root == "home" else project, home)
+        if self.hooks:
             self._hooks(project)
+        if self.markdown:
+            self._markdown(project)
+        return InstallerCommandResult(args, str(project), "completed", 0, None)
+
+    @staticmethod
+    def _markdown(project: Path) -> None:
         path = project / "GUIDE.md"
         content = path.read_text()
         if "Replace this placeholder." in content:
@@ -83,11 +115,10 @@ class LiteralInstaller:
         elif "## graphify" not in content:
             separator = "" if "## Personal before" in content else "\n"
             path.write_text(content + separator + "## graphify\nConsult the synthetic map.\n")
-        return InstallerCommandResult(args, str(project), "completed", 0, None)
 
     @staticmethod
-    def _skill(home: Path) -> None:
-        skill = home / ".synthetic/skills/package"
+    def _skill(root: Path, home: Path) -> None:
+        skill = root / ".synthetic/skills/package"
         write(skill / "SKILL.md", "# Synthetic package\n")
         write(skill / "references/nested/reference.md", "Independent nested reference.\n")
         write(skill / ".graphify_version", "8.7.6")
@@ -119,9 +150,20 @@ def completed() -> ContainerRunResult:
 class ControlledTransport:
     """Test injection at the existing container harness seam; execute the real engine."""
 
-    def __init__(self, root: Path, *, markdown_only: bool = False) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        markdown_only: bool = False,
+        skill: bool = True,
+        markdown: bool = True,
+        hooks: bool = True,
+        skill_root: Literal["home", "project"] = "home",
+    ) -> None:
         self.root = root
-        self.installer = LiteralInstaller(markdown_only)
+        self.installer = LiteralInstaller(
+            markdown_only, skill=skill, markdown=markdown, hooks=hooks, skill_root=skill_root
+        )
         self.interrupted = False
         self.subject = root / "prepared"
         self.executable = root / "simulated-executable"

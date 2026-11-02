@@ -27,12 +27,17 @@ CHECKPOINTS = (
 )
 
 
+@pytest.mark.parametrize("case_name", ["reinstall", "missing-section", "altered-section"])
 @pytest.mark.parametrize("checkpoint", CHECKPOINTS)
 @pytest.mark.parametrize("after", [False, True], ids=["before-replace", "after-replace"])
 def test_initial_publication_interruptions_keep_actual_published_checkpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkpoint: str, after: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    checkpoint: str,
+    after: bool,
+    case_name: str,
 ) -> None:
-    subject = ControlledRun(tmp_path)
+    subject = ControlledRun(tmp_path, case_name)
     original = Writer.write_result
     attempts: list[InstallTestResult] = []
 

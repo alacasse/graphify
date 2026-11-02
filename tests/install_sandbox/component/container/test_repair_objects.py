@@ -7,6 +7,7 @@ from typing import TypedDict, cast
 import pytest
 
 from experiment_adapter import replay, run_fixture
+from tools.install_sandbox.container.case_publication import CasePublisher
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
@@ -15,12 +16,10 @@ from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
     EvidenceWriteError,
-    InstallTestResult,
     SnapshotEntry,
 )
 from tools.install_sandbox.rules.repair_actions import JsonArtifact, SnapshotArtifact
 from tools.install_sandbox.rules.repair_protocol import (
-    PendingCheckpoint,
     RepairInputs,
     RepairSession,
 )
@@ -185,7 +184,7 @@ def capture_execution(monkeypatch: pytest.MonkeyPatch, captured: CapturedExecuti
     apply = intermediate_execution.apply_markdown_mutation
     advance = cast(
         Callable[
-            [RepairSession, RepairInputs, EffectEnvironment, Writer, InstallTestResult], object
+            [RepairSession, RepairInputs, EffectEnvironment, Writer, CasePublisher], object
         ],
         vars(intermediate_execution)["_advance"],
     )
@@ -195,10 +194,10 @@ def capture_execution(monkeypatch: pytest.MonkeyPatch, captured: CapturedExecuti
         inputs: RepairInputs,
         environment: EffectEnvironment,
         writer: Writer,
-        result: InstallTestResult,
+        publisher: CasePublisher,
     ) -> object:
-        captured["retry"] = lambda: advance(session, inputs, environment, writer, result)
-        return advance(session, inputs, environment, writer, result)
+        captured["retry"] = lambda: advance(session, inputs, environment, writer, publisher)
+        return advance(session, inputs, environment, writer, publisher)
 
     def begin_session(inputs: RepairInputs) -> RepairSession:
         session = begin(inputs)
@@ -224,7 +223,7 @@ def interrupt_execution(
 ) -> CapturedExecution:
     captured: CapturedExecution = {"mutations": 0}
     original_retain = Writer.retain
-    original_checkpoint = Writer.write_checkpoint
+    original_publication = CasePublisher.publish_repair
     original_confirm = RepairSession.confirm_checkpoint
     capture_execution(monkeypatch, captured)
 
@@ -235,13 +234,11 @@ def interrupt_execution(
             raise failure("Controlled retention interruption")
         return original_retain(writer, artifact)
 
-    def checkpoint(
-        writer: Writer, result: InstallTestResult, pending: PendingCheckpoint
-    ) -> CheckpointReceipt:
-        captured["writer"] = writer
-        if window == "initial" and not writer.halted:
+    def publication(publisher: CasePublisher, session: RepairSession) -> None:
+        captured["writer"] = publisher.writer
+        if window == "initial" and not publisher.writer.halted:
             raise failure("Controlled initial publication interruption")
-        return original_checkpoint(writer, result, pending)
+        return original_publication(publisher, session)
 
     def confirm(session: RepairSession, receipt: CheckpointReceipt) -> None:
         if window == "confirmation" and session is captured.get("session"):
@@ -249,7 +246,7 @@ def interrupt_execution(
         return original_confirm(session, receipt)
 
     monkeypatch.setattr(Writer, "retain", retain)
-    monkeypatch.setattr(Writer, "write_checkpoint", checkpoint)
+    monkeypatch.setattr(CasePublisher, "publish_repair", publication)
     monkeypatch.setattr(RepairSession, "confirm_checkpoint", confirm)
     return captured
 

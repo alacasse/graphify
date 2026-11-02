@@ -309,6 +309,29 @@ class IntermediateEvidence(TypedDict):
 
 
 @dataclass(frozen=True)
+class RepairCheckpoint:
+    stage: str
+    generation: int
+    reason: str | None = None
+
+    def to_data(self) -> IntermediateEvidence:
+        return {"stage": self.stage, "generation": self.generation, "reason": self.reason}
+
+    @classmethod
+    def from_data(cls, value: object) -> "RepairCheckpoint":
+        data = fields(value, "stage generation reason")
+        if type(data["generation"]) is not int or data["generation"] < 0:
+            raise ValueError("Checkpoint generation must be a nonnegative integer")
+        return cls(text(data["stage"]), data["generation"], _optional_text(data["reason"]))
+
+
+@dataclass(frozen=True)
+class RepairProgress:
+    checkpoint: RepairCheckpoint
+    outcome: Literal["incomplete", "ready", "failed"]
+
+
+@dataclass(frozen=True)
 class ArtifactReceipt:
     reference: str
     sha256: str

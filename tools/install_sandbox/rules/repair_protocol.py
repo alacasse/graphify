@@ -9,19 +9,19 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
-from tools.install_sandbox.contracts.evidence_layout import StagedEvidence
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.evidence_layout import StagedEvidence
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
 from tools.install_sandbox.contracts.results import (
     ArtifactReceipt,
     CheckpointReceipt,
-    IntermediateEvidence,
+    RepairCheckpoint,
+    RepairProgress,
     StepState,
     VerificationResult,
 )
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
-from tools.install_sandbox.rules.step_lifecycle import status
 from tools.install_sandbox.rules.expectation_builder import preservation_baseline
 from tools.install_sandbox.rules.repair_actions import (
     ARTIFACTS,
@@ -36,13 +36,14 @@ from tools.install_sandbox.rules.repair_actions import (
     artifact_digest,
 )
 from tools.install_sandbox.rules.repair_scenario import MarkdownRepairScenario, PreparationBlocked
+from tools.install_sandbox.rules.step_lifecycle import status
 
 STAGES = ("not_started", "started", *(item.checkpoint for item in ARTIFACTS))
 
 
-def checkpoint_digest(checkpoint: IntermediateEvidence, status: str) -> str:
-    """Bind acknowledgement to the checkpoint and its atomically published case status."""
-    return artifact_digest({"checkpoint": checkpoint, "status": status})
+def checkpoint_digest(checkpoint: RepairCheckpoint) -> str:
+    """Bind acknowledgement to immutable local checkpoint content."""
+    return artifact_digest(checkpoint.to_data())
 
 
 def _conforming(verdict: VerificationResult) -> bool:
@@ -60,8 +61,7 @@ class RepairInputs:
 
 @dataclass(frozen=True)
 class PendingCheckpoint:
-    checkpoint: IntermediateEvidence
-    status: Literal["failed", "incomplete"]
+    progress: RepairProgress
     session_id: str
     generation: int
     sha256: str
@@ -81,9 +81,8 @@ class Stop:
 
 @dataclass(frozen=True)
 class Inspection:
-    published: str
+    progress: RepairProgress
     present: str
-    diagnostic: Literal["passed", "failed", "incomplete"]
     ready: Ready | None
 
 
@@ -99,11 +98,7 @@ class RepairSession:
         self._payloads: dict[str, object] = {}
         self._reason: str | None = None
         self._pending: PendingCheckpoint | None = None
-        self._checkpoint: IntermediateEvidence = {
-            "stage": "not_started",
-            "generation": 0,
-            "reason": None,
-        }
+        self._progress = RepairProgress(RepairCheckpoint("not_started", 0), "incomplete")
         first = self._inputs.first_step
         verdict = first.verification
         self._blocked: str | None = None
@@ -135,21 +130,20 @@ class RepairSession:
         return copy.deepcopy(self._pending)
 
     @property
-    def checkpoint(self) -> IntermediateEvidence:
-        return copy.deepcopy(self._checkpoint)
+    def progress(self) -> RepairProgress:
+        return self._progress
 
     def _make_pending(self, stage: str, generation: int) -> PendingCheckpoint:
-        checkpoint: IntermediateEvidence = {
-            "stage": stage,
-            "generation": generation,
-            "reason": self._reason,
-        }
-        outcome = self._stop()
-        status = outcome.diagnostic if outcome is not None else "incomplete"
-        self._pending = PendingCheckpoint(
-            checkpoint, status, self.session_id, generation, checkpoint_digest(checkpoint, status)
+        checkpoint = RepairCheckpoint(stage, generation, self._reason)
+        stop = self._stop()
+        outcome = stop.diagnostic if stop is not None else (
+            "ready" if self._index == len(ARTIFACTS) - 1 else "incomplete"
         )
-        return copy.deepcopy(self._pending)
+        progress = RepairProgress(checkpoint, outcome)
+        self._pending = PendingCheckpoint(
+            progress, self.session_id, generation, checkpoint_digest(checkpoint)
+        )
+        return self._pending
 
     def abort(self) -> None:
         """Permanently halt physical execution without changing recorded facts."""
@@ -168,7 +162,7 @@ class RepairSession:
             or receipt.sha256 != pending.sha256
         ):
             raise ValueError("Checkpoint acknowledgement does not match pending publication")
-        self._checkpoint = copy.deepcopy(pending.checkpoint)
+        self._progress = pending.progress
         self._pending = None
 
     def next_action(self) -> Request | Ready | Stop:
@@ -270,7 +264,7 @@ class RepairSession:
         self._reason = reason or self._reason
         self._index += 1
         self._active = None
-        return self._make_pending(descriptor.checkpoint, self._checkpoint["generation"] + 1)
+        return self._make_pending(descriptor.checkpoint, self._progress.checkpoint.generation + 1)
 
     def _validate(self, kind: str, payload: object, expected: object) -> str | None:
         reason = None
@@ -323,29 +317,47 @@ def begin(inputs: RepairInputs) -> RepairSession:
 
 def inspect(
     context: RepairInputs,
-    published: IntermediateEvidence,
+    published: RepairCheckpoint,
     inventory: Mapping[str, object],
     staged: tuple[StagedEvidence, ...] = (),
 ) -> Inspection:
-    """Validate every present artifact, including exactly one unpublished successor."""
+    """Replay the published prefix, then validate one successor without promoting it."""
     session = begin(context)
     stage, count, total = _inventory_prefix(published, inventory)
-    if session.blocked_reason is not None:
-        if stage != "not_started" or total or staged:
-            raise ValueError("Blocked preparation has incompatible evidence")
-        return Inspection(stage, "not_started", "incomplete", None)
+    if session.blocked_reason is not None and stage != "not_started":
+        raise ValueError("Blocked preparation has incompatible evidence")
     if stage == "not_started":
         if total or staged:
             raise ValueError("Unstarted preparation has retained evidence")
-        return Inspection(stage, stage, "incomplete", None)
+        if published != session.progress.checkpoint:
+            raise ValueError("Checkpoint diagnostic contradicts retained facts")
+        return Inspection(session.progress, stage, None)
     if total < count or total > count + 1:
         raise ValueError("Inventory differs from published prefix by more than one artifact")
+    _replay_published_prefix(session, inventory, count)
+    progress = session.progress
+    if published != progress.checkpoint:
+        raise ValueError("Checkpoint diagnostic contradicts retained facts")
+    action = session.next_action()
+    ready = action if isinstance(action, Ready) else None
+    _validate_staging(staged, total, count, action)
+    if total > count:
+        descriptor = ARTIFACTS[count]
+        completion = _replay_completion(action, descriptor, inventory[descriptor.reference])
+        session.prepare(completion)
+    return Inspection(progress, STAGES[total + 1], ready)
+
+
+def _replay_published_prefix(
+    session: RepairSession, inventory: Mapping[str, object], count: int
+) -> None:
+    """Acknowledge only the artifacts covered by the published checkpoint."""
     initial = session.pending
     assert initial is not None
     session.confirm_checkpoint(
         CheckpointReceipt(initial.session_id, initial.generation, initial.sha256)
     )
-    for descriptor in ARTIFACTS[:total]:
+    for descriptor in ARTIFACTS[:count]:
         payload = inventory[descriptor.reference]
         completion = _replay_completion(session.next_action(), descriptor, payload)
         pending = session.record(
@@ -354,8 +366,6 @@ def inspect(
         session.confirm_checkpoint(
             CheckpointReceipt(pending.session_id, pending.generation, pending.sha256)
         )
-    _validate_staging(staged, total, count, session.next_action())
-    return _inspection_result(session, published, stage, total, count)
 
 
 def _replay_completion(
@@ -379,44 +389,20 @@ def _replay_completion(
     raise ValueError("Artifact does not follow the published prefix")
 
 
-def _inspection_result(
-    session: RepairSession,
-    published: IntermediateEvidence,
-    stage: str,
-    total: int,
-    count: int,
-) -> Inspection:
-    reason = session.checkpoint["reason"] if total == count else None
-    if published["reason"] != reason:
-        raise ValueError("Checkpoint diagnostic contradicts retained facts")
-    action = session.next_action()
-    ready = action if isinstance(action, Ready) and total == count else None
-    diagnostic: Literal["passed", "failed", "incomplete"] = "incomplete"
-    if ready is not None:
-        diagnostic = "passed"
-    elif isinstance(action, Stop) and total == count:
-        diagnostic = action.diagnostic
-    return Inspection(stage, STAGES[total + 1], diagnostic, ready)
-
-
 def _inventory_prefix(
-    published: IntermediateEvidence,
+    published: RepairCheckpoint,
     inventory: Mapping[str, object],
 ) -> tuple[str, int, int]:
     if set(inventory) - {item.reference for item in ARTIFACTS}:
         raise ValueError("Unknown preparation evidence")
-    if set(published) != {"stage", "generation", "reason"}:
-        raise ValueError("Malformed preparation checkpoint")
-    if type(published["generation"]) is not int or (
-        published["reason"] is not None and type(published["reason"]) is not str
-    ):
-        raise ValueError("Malformed preparation checkpoint values")
-    stage = published["stage"]
+    # Decode again to reject invalid directly constructed values.
+    RepairCheckpoint.from_data(published.to_data())
+    stage = published.stage
     if stage not in STAGES:
         raise ValueError("Unknown preparation checkpoint stage")
     count = STAGES.index(stage) - 1
     expected_generation = STAGES.index(stage)
-    if published["generation"] != expected_generation:
+    if published.generation != expected_generation:
         raise ValueError("Checkpoint generation contradicts its stage")
     present = [item.reference in inventory for item in ARTIFACTS]
     if present != sorted(present, reverse=True):

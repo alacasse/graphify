@@ -1,16 +1,16 @@
 """Execute native reinstall phases against expectations retained before commands."""
 
 import time
-from dataclasses import replace
 from pathlib import Path
 
+from tools.install_sandbox.container.case_publication import CasePublisher
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.initial_preparation import REFERENCES, InitialPreparationState
+from tools.install_sandbox.contracts.initial_preparation import REFERENCES
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
 from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
@@ -25,7 +25,6 @@ from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
 )
 from tools.install_sandbox.rules.initial_preparation import InitialPreparationLifecycle
-from tools.install_sandbox.rules.initial_preparation import status as initial_status
 from tools.install_sandbox.rules.step_lifecycle import (
     CommandRetained,
     CommandReturned,
@@ -54,51 +53,6 @@ def _check_directories(subject: Path, case_file: Path, work: Path, output: Path)
             raise ValueError(f"Directory must be fresh or empty: {path}")
 
 
-def _new_result(case: EffectInstallCase) -> InstallTestResult:
-    steps = [StepState.idle(operation) for operation in case.operations]
-    return InstallTestResult(
-        {"name": case.name, "target": case.target, "scope": case.scope},
-        InitialPreparationState(),
-        steps,
-        "incomplete",
-        {"journal": "journal.log"},
-        None
-        if case.intermediate_preparation is None
-        else {"stage": "not_started", "generation": 0, "reason": None},
-    )
-
-
-def _publish_initial(
-    result: InstallTestResult, lifecycle: InitialPreparationLifecycle, writer: TestResultWriter
-) -> None:
-    checkpoint = lifecycle.publication_candidate()
-    candidate = replace(result, preparation=checkpoint, status=initial_status(checkpoint))
-    writer.write_result(candidate)
-    lifecycle.acknowledge(checkpoint)
-    result.preparation = checkpoint
-    result.status = candidate.status
-
-
-def _publish_step(
-    result: InstallTestResult, state: StepState, writer: TestResultWriter, index: int
-) -> None:
-    """Adopt a declaration only after its atomic result publication succeeds."""
-    steps = list(result.steps)
-    steps[index] = state
-    outcome = status(state)
-    case_status = "incomplete" if outcome == "passed" and index < len(steps) - 1 else outcome
-    candidate = replace(result, steps=steps, status=case_status)
-    if state.phase == "stopped" or (
-        state.phase == "terminal" and (outcome != "passed" or index == len(steps) - 1)
-    ):
-        with writer.measure("finalize"):
-            writer.write_result(candidate)
-    else:
-        writer.write_result(candidate)
-    result.steps = candidate.steps
-    result.status = candidate.status
-
-
 class InstallTestRunner:
     def __init__(self, driver: InstallerDriver | None = None):
         self.driver = driver if driver is not None else InstallerDriver()
@@ -123,20 +77,20 @@ class InstallTestRunner:
         case.write(output / "case.json")
         writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v7"})
         writer.initialize_timings(case.name, len(case.operations))
-        result = _new_result(case)
+        publisher = CasePublisher(case, writer)
         lifecycle = InitialPreparationLifecycle()
         try:
-            _publish_initial(result, lifecycle, writer)
+            publisher.publish_initial(lifecycle)
             writer.append_log("journal.log", "Validated native case; starting preparation\n")
             writer.append_log("preparation.log", "Package availability inherited from campaign\n")
-            self._run(case, subject, prepared_executable, work, writer, result, lifecycle)
+            self._run(case, subject, prepared_executable, work, writer, publisher, lifecycle)
         except BaseException:
             writer.halted = True
             raise
         finally:
             # Timings never authorize progression or overwrite the last result.
             writer.finish_timings(started)
-        return result
+        return publisher.result
 
     def _run(
         self,
@@ -145,7 +99,7 @@ class InstallTestRunner:
         executable: Path,
         work: Path,
         writer: TestResultWriter,
-        result: InstallTestResult,
+        publisher: CasePublisher,
         lifecycle: InitialPreparationLifecycle,
     ) -> None:
         operations = _InitialOperations(case, subject, work, writer, lifecycle, self.verifier)
@@ -166,8 +120,8 @@ class InstallTestRunner:
                     )
                     lifecycle.retain_failure(REFERENCES["failure"])
                 # Failed publication cannot become an operational diagnostic or a retry.
-                _publish_initial(result, lifecycle, writer)
-        if result.preparation.checkpoint != "ready":
+                publisher.publish_initial(lifecycle)
+        if publisher.decision.segment != "installation":
             return
         assert operations.environment is not None and operations.sources is not None
         assert operations.expectations is not None and operations.before is not None
@@ -179,7 +133,7 @@ class InstallTestRunner:
             operations.expectations,
             operations.before,
             writer,
-            result,
+            publisher,
         )
 
     def _steps(
@@ -191,22 +145,25 @@ class InstallTestRunner:
         expectations: ExpectationSet,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
-        result: InstallTestResult,
+        publisher: CasePublisher,
     ) -> None:
-        for index, operation in enumerate(case.operations):
-            if index and status(result.steps[index - 1]) != "passed":
-                return
-            if index and case.intermediate_preparation is not None:
+        while True:
+            segment = publisher.decision.segment
+            if segment == "repair":
                 transition = conduct_intermediate(
-                    case, sources, expectations, before, environment, writer, result
+                    case, sources, expectations, before, environment, writer, publisher
                 )
                 if transition is None:
                     return
                 expectations, before = transition
-            state = start(operation)
-            _publish_step(result, state, writer, index)
+                continue
+            if segment not in {"installation", "reinstallation"}:
+                return
+            index = 0 if segment == "installation" else 1
+            state = start(case.operations[index])
+            publisher.publish_step(index, state)
             completed = self._step(
-                case, executable, environment, expectations, before, writer, result, index, state
+                case, executable, environment, expectations, before, writer, publisher, index, state
             )
             if completed is None:
                 return
@@ -220,14 +177,14 @@ class InstallTestRunner:
         expectations: ExpectationSet,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
-        result: InstallTestResult,
+        publisher: CasePublisher,
         index: int,
         state: StepState,
     ) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
         try:
             if index:
                 with writer.measure("step_preparation", index):
-                    previous = result.steps[0].verification
+                    previous = publisher.facts.steps[0].verification
                     assert previous is not None
                     if case.intermediate_preparation is None:
                         expectations = build_reinstall_expectations(expectations, before, previous)
@@ -279,7 +236,7 @@ class InstallTestRunner:
             state = advance(
                 state, CommandRetained(retained["stdout_file"], retained["stderr_file"])
             )
-            _publish_step(result, state, writer, index)
+            publisher.publish_step(index, state)
             with writer.measure("checks", index):
                 after = environment.observe(writer, "after", step_index=index)
                 state = advance(state, ObservationRetained(f"steps/{index}/after.json"))
@@ -295,9 +252,9 @@ class InstallTestRunner:
         except (OSError, ValueError) as error:
             state = advance(state, StopStep(str(error)))
             writer.write_metadata(f"steps/{index}/failure.json", state.to_data())
-            _publish_step(result, state, writer, index)
+            publisher.publish_step(index, state)
             return None
-        _publish_step(result, state, writer, index)
+        publisher.publish_step(index, state)
         return (expectations, after) if status(state) == "passed" else None
 
 

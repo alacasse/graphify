@@ -293,7 +293,8 @@ def test_one_unpublished_successor_is_valid_without_authorizing_dependents(succe
     inventory[REFERENCES[successor]] = completion.value
     result = inspect(ctx, published, inventory)
     assert result.progress == session.progress
-    assert result.progress.checkpoint == published
+    with pytest.raises(ValueError, match="Pending"):
+        session.next_action()
     assert result.progress.outcome == "incomplete" and result.ready is None
 
 
@@ -559,4 +560,5 @@ def test_unpublished_failed_successor_keeps_published_reason_and_outcome() -> No
     assert session.pending.progress.outcome == "failed"
     replay = inspect(ctx, published.checkpoint, inventory)
     assert replay.progress == published
-    assert replay.progress.checkpoint.reason is None
+    with pytest.raises(ValueError, match="Pending"):
+        session.next_action()

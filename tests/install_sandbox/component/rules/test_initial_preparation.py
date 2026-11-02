@@ -15,6 +15,7 @@ from tools.install_sandbox.rules.initial_preparation import (
     InitialPreparationInventory,
     InitialPreparationLifecycle,
     inspect,
+    status,
 )
 
 
@@ -49,10 +50,8 @@ def test_every_group_requires_initial_publication_acquisition_retention_and_ackn
         state = complete(lifecycle, operation)
         assert InitialPreparationState.from_data(state.to_data()) == state
     assert lifecycle.next_operation() is None
-    assert (
-        inspect(state, InitialPreparationInventory(frozenset(INITIAL_ARTIFACTS[:6]), True)).status
-        == "incomplete"
-    )
+    inspect(state, InitialPreparationInventory(frozenset(INITIAL_ARTIFACTS[:6]), True))
+    assert status(state) == "incomplete"
 
 
 @pytest.mark.parametrize("count", range(7))
@@ -63,8 +62,12 @@ def test_only_the_next_operation_may_have_unpublished_artifacts(count: int) -> N
         state = complete(lifecycle, operation)
     present = frozenset(INITIAL_ARTIFACTS[: min(count + 1, 6)])
     inventory = InitialPreparationInventory(present, True if "verification" in present else None)
-    assert inspect(state, inventory).checkpoint == state.checkpoint
+    inspect(state, inventory)
+    assert lifecycle.published == state
+    assert lifecycle.next_operation() == (OPERATIONS[count] if count < 6 else None)
     if count < 5:
+        with pytest.raises(ValueError, match="not authorized"):
+            lifecycle.acquire(OPERATIONS[count + 1])
         excessive = present | {INITIAL_ARTIFACTS[count + 1]}
         with pytest.raises(ValueError):
             inspect(state, replace(inventory, present=excessive))
@@ -87,9 +90,11 @@ def test_diagnostic_retained_before_publication_preserves_old_checkpoint():
         lifecycle.publication_candidate()
     lifecycle.retain_failure(REFERENCES["failure"])
     inventory = InitialPreparationInventory(frozenset({"failure"}), stopped_state=diagnostic)
-    assert inspect(state, inventory).status == "incomplete"
+    inspect(state, inventory)
+    assert status(state) == "incomplete"
     stopped = publish(lifecycle)
-    assert inspect(stopped, inventory).status == "not_run"
+    inspect(stopped, inventory)
+    assert status(stopped) == "not_run"
     assert stopped.facts.completed == ("environment",)
 
 
@@ -102,7 +107,8 @@ def test_failed_initial_verification_blocks_installation_and_is_independently_ch
     assert state.checkpoint == "blocked"
     assert lifecycle.next_operation() is None
     inventory = InitialPreparationInventory(frozenset(INITIAL_ARTIFACTS[:5]), False)
-    assert inspect(state, inventory).status == "not_run"
+    inspect(state, inventory)
+    assert status(state) == "not_run"
     with pytest.raises(ValueError):
         inspect(state, replace(inventory, verification_passed=True))
     with pytest.raises(ValueError):
@@ -150,15 +156,16 @@ def test_old_operation_staging_cannot_reappear_after_its_checkpoint():
         inspect(state, inventory)
 
 
-def test_unpublished_observation_verdict_is_inspection_information_only():
+def test_unpublished_observation_verdict_does_not_authorize_install_expectations():
     lifecycle = InitialPreparationLifecycle()
     state = publish(lifecycle)
     for operation in OPERATIONS[:4]:
         state = complete(lifecycle, operation)
-    outcome = inspect(state, InitialPreparationInventory(frozenset(INITIAL_ARTIFACTS[:4]), True))
-    assert outcome.status == "incomplete"
-    assert outcome.checkpoint == "observed"
+    inspect(state, InitialPreparationInventory(frozenset(INITIAL_ARTIFACTS[:4]), True))
+    assert lifecycle.published == state
     assert lifecycle.next_operation() == "verification"
+    with pytest.raises(ValueError, match="not authorized"):
+        lifecycle.acquire("install_expectations")
 
 
 def test_install_expectations_stop_cannot_claim_a_failed_verified_predecessor() -> None:

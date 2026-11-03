@@ -7,12 +7,13 @@ from typing import ClassVar
 
 from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileAppend,
+    BoundFileCreation,
     BoundFileRemoval,
     BoundMarkdownMutation,
     BoundMutation,
 )
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.effects import MarkdownSectionEffect, SkillEffect
+from tools.install_sandbox.contracts.effects import Destination, MarkdownSectionEffect, SkillEffect
 from tools.install_sandbox.contracts.expectations import (
     Expectation,
     ExpectationSet,
@@ -22,6 +23,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredSkillPreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
+    PreserveSkillBackupPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
@@ -383,6 +385,68 @@ class AlteredSkillScenario:
             return PreparationBlocked(str(exc))
 
 
+@dataclass(frozen=True)
+class PreserveSkillBackupScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
+            preparation = self.case.intermediate_preparation
+            if not isinstance(preparation, PreserveSkillBackupPreparation):
+                raise ValueError("Case has no preserved skill backup preparation")
+            skill = selected_skill(self.case)
+            effect = next(
+                effect
+                for effect in self.case.effects.effects
+                if isinstance(effect, SkillEffect) and effect.destination == preparation.destination
+            )
+            source = retained_bytes(self.sources, "subject", effect.source)
+            if retained_bytes(first_after, skill.root, skill.path) != source:
+                raise ValueError("First skill differs from retained source")
+            destination = Destination(skill.root, skill.path + self.case.subject.rules.skill_backup)
+            content = source + preparation.suffix
+            backup = Expectation(
+                "file",
+                destination.root,
+                destination.path,
+                "intermediate",
+                "case:source+suffix",
+                content,
+            )
+            operation = BoundFileCreation(
+                hashlib.sha256(case_bytes).hexdigest(),
+                observation_ref,
+                destination,
+                content,
+            )
+            operation.verify_binding(case_bytes, first_after)
+            return PreparationPlan(
+                operation,
+                replace(
+                    _transition(installed, first_after, (backup,), "intermediate"),
+                    allowed_removals=(),
+                ),
+                replace(
+                    _transition(
+                        installed, first_after, (replace(backup, phase="reinstall"),), "reinstall"
+                    ),
+                    allowed_changes=(),
+                    allowed_removals=(),
+                ),
+            )
+        except (ValueError, UnicodeError, StopIteration) as exc:
+            return PreparationBlocked(str(exc))
+
+
 def repair_scenario_from_case(
     case: EffectInstallCase, sources: FilesystemSnapshot
 ) -> (
@@ -390,16 +454,28 @@ def repair_scenario_from_case(
     | MissingReferenceScenario
     | AlteredReferenceScenario
     | AlteredSkillScenario
+    | PreserveSkillBackupScenario
 ):
     preparation = case.intermediate_preparation
     if preparation is None:
         raise ValueError("Case has no intermediate preparation")
-    if isinstance(preparation, MissingReferencePreparation):
-        return MissingReferenceScenario(case, sources)
-    if isinstance(preparation, AlteredReferencePreparation):
-        return AlteredReferenceScenario(case, sources)
-    if isinstance(preparation, AlteredSkillPreparation):
-        return AlteredSkillScenario(case, sources)
+    scenarios: dict[
+        type[object],
+        type[MissingReferenceScenario]
+        | type[AlteredReferenceScenario]
+        | type[AlteredSkillScenario]
+        | type[PreserveSkillBackupScenario],
+    ] = {
+        MissingReferencePreparation: MissingReferenceScenario,
+        AlteredReferencePreparation: AlteredReferenceScenario,
+        AlteredSkillPreparation: AlteredSkillScenario,
+        PreserveSkillBackupPreparation: PreserveSkillBackupScenario,
+    }
+    scenario = scenarios.get(type(preparation))
+    if scenario is not None:
+        return scenario(case, sources)
+    if not isinstance(preparation, IntermediatePreparation):
+        raise ValueError("Unsupported repair scenario")
     if preparation.kind == "missing-markdown-section":
         return MissingSectionScenario(case, sources)
     if preparation.kind == "altered-markdown-body":

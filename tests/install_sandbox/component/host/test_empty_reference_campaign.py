@@ -78,7 +78,13 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
         assert test.preparation.stop is not None
         assert test.preparation.stop.category == "validation"
         assert all(step.facts.command is None for step in test.steps)
-    assert len(transport.installer.calls) == 8
-    assert set(cases) == {"reinstall", "missing-section", "altered-section", "altered-skill"}
+    assert len(transport.installer.calls) == 10
+    assert set(cases) == {
+        "reinstall",
+        "missing-section",
+        "altered-section",
+        "altered-skill",
+        "preserve-skill-backup",
+    }
     for case in cases.values():
         assert case.result is not None and case.result.passed

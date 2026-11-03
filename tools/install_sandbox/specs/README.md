@@ -55,7 +55,8 @@ The coordinator constructs the cases before allocating campaign output.
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
 A skill additionally makes `missing-reference`, `altered-reference` and
-`altered-skill` available, in that order, independently of the Markdown count.
+`altered-skill` and `preserve-skill-backup` available, in that order, independently
+of the Markdown count.
 Without a skill, those cases
 are not applicable. Each constructed case has two dependent installation steps.
 Effects select the behavior;
@@ -84,8 +85,18 @@ the witness. Preparation may change only that file. Reinstallation must restore
 its exact source bytes and create `SKILL.md.bak` containing the full altered
 bytes, while preserving references, version, lock, personal files, other effects
 and the initial JSON backup. The repair baseline is the verified preparation.
-Other cases continue to require the skill backup to be absent. Preservation of
-a preexisting skill backup is a separate behavior not covered by this scenario.
+`preserve-skill-backup` covers a conforming skill with a preexisting backup.
+After a fully conforming first installation with no backup, preparation creates
+only `SKILL.md.bak`, containing the exact retained source bytes followed once by
+`b"\nSandbox previous backup witness.\n"`. Empty, binary and already suffixed
+sources retain their exact bytes. Creation binds the case digest, validated
+observation and positively observed absence, recalculates the destination, and
+uses exclusive creation without following symlinks. Existing files and incomplete
+writes block dependent execution. Reinstallation preserves the explicit backup
+expectation and uses the verified preparation baseline with no allowed changes
+or removals. Skill, references, metadata, personal content and other effects must
+also remain exact. An altered skill with a preexisting backup is a distinct case.
+Other cases continue to require the skill backup to be absent.
 
 For `missing-reference`, the engine binds removal to the case, observed
 file bytes and exact destination selected from retained sources. Only that file
@@ -161,9 +172,9 @@ validates phase continuity and recalculates verdicts. Partial failures retain th
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
 
-The current formats are case `explicit-expectations-v8`, expectations
-`explicit-expectations-v4`, prepared operation `prepared-mutation-v2`, performed
-result `performed-mutation-v2`, and case evidence `explicit-expectations-v10`.
+The current formats are case `explicit-expectations-v9`, expectations
+`explicit-expectations-v4`, prepared operation `prepared-mutation-v3`, performed
+result `performed-mutation-v3`, and case evidence `explicit-expectations-v11`.
 Mutation records discriminate Markdown modification, file removal and file append.
 Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
 independently reconstructs the target selection, operation and expectations,

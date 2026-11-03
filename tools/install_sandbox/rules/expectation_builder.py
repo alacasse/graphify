@@ -18,6 +18,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredSkillPreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
+    PreserveSkillBackupPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
@@ -361,8 +362,8 @@ def selected_reference(case: EffectInstallCase, sources: FilesystemSnapshot) -> 
 def selected_skill(case: EffectInstallCase) -> Destination:
     """Resolve the skill document from the preparation and declared skill effect."""
     preparation = case.intermediate_preparation
-    if not isinstance(preparation, AlteredSkillPreparation):
-        raise ValueError("Case has no altered skill preparation")
+    if not isinstance(preparation, (AlteredSkillPreparation, PreserveSkillBackupPreparation)):
+        raise ValueError("Case has no skill preparation")
     preparation.to_data()
     effect = next(
         (

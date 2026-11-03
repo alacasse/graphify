@@ -271,7 +271,12 @@ class InstallTestCoordinator:
             prepare_only=definition.prepare_only,
         )
         # Keep skill repairs after Markdown cases and their construction decisions.
-        repair_order = {"missing-reference": 1, "altered-reference": 2, "altered-skill": 3}
+        repair_order = {
+            "missing-reference": 1,
+            "altered-reference": 2,
+            "altered-skill": 3,
+            "preserve-skill-backup": 4,
+        }
         result.cases.sort(key=lambda entry: repair_order.get(entry.name, 0))
         with harness:
             try:

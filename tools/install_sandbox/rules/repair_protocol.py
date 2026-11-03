@@ -10,6 +10,7 @@ from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileAppend,
+    BoundFileCreation,
     BoundFileRemoval,
     BoundMarkdownMutation,
     PerformedMutation,
@@ -191,7 +192,8 @@ class RepairSession:
             elif kind == "performed":
                 operation = self._payloads["operation"]
                 assert isinstance(
-                    operation, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend)
+                    operation,
+                    (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation),
                 )
                 self._active = ApplyMutation(operation)
             else:
@@ -295,7 +297,10 @@ class RepairSession:
     def _validate_mutation(self, kind: str, payload: object) -> None:
         assert self._plan is not None
         if kind == "operation":
-            if not isinstance(payload, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend)):
+            if not isinstance(
+                payload,
+                (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation),
+            ):
                 raise ValueError("Expected bound mutation")
             if payload != self._plan.operation:
                 raise ValueError("Operation destination differs from case")
@@ -317,7 +322,9 @@ class RepairSession:
         performed = self._payloads["performed"]
         operation = self._payloads["operation"]
         assert isinstance(performed, PerformedMutation)
-        assert isinstance(operation, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend))
+        assert isinstance(
+            operation, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation)
+        )
         performed.verify(operation, payload)
         return None
 

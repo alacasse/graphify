@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -230,7 +231,7 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
         build_reinstall_case(spec, context())
 
 
-def test_six_cases_have_strict_independent_preparations() -> None:
+def test_seven_cases_have_strict_independent_preparations() -> None:
     cases = build_effect_cases(structured_spec(), context()).cases
     assert [case.name for case in cases] == [
         "reinstall",
@@ -239,11 +240,12 @@ def test_six_cases_have_strict_independent_preparations() -> None:
         "missing-reference",
         "altered-reference",
         "altered-skill",
+        "preserve-skill-backup",
     ]
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(next(case for case in cases if case.name == "altered-section").to_json())
-    assert raw["format"] == "explicit-expectations-v8"
+    assert raw["format"] == "explicit-expectations-v9"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
@@ -262,6 +264,7 @@ def test_six_cases_have_strict_independent_preparations() -> None:
         "explicit-expectations-v5",
         "explicit-expectations-v6",
         "explicit-expectations-v7",
+        "explicit-expectations-v8",
     ],
 )
 def test_old_case_formats_are_rejected(version: str) -> None:
@@ -310,7 +313,12 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
         for name in ("missing-section", "altered-section")
     ] + [
         (name, "not_applicable", "No skill effect declared")
-        for name in ("missing-reference", "altered-reference", "altered-skill")
+        for name in (
+            "missing-reference",
+            "altered-reference",
+            "altered-skill",
+            "preserve-skill-backup",
+        )
     ]
 
 
@@ -328,3 +336,41 @@ def test_altered_case_rejects_malformed_preparation(change: str) -> None:
         preparation["extra"] = "unsupported"
     with pytest.raises(ValueError):
         EffectInstallCase.from_json(json.dumps(raw))
+
+
+@pytest.mark.parametrize("root", ["home", "project"])
+@pytest.mark.parametrize("markdown_count", [0, 1, 2])
+def test_backup_preservation_case_follows_skill_across_effect_combinations(
+    root: Literal["home", "project"], markdown_count: int
+) -> None:
+    skill = SkillEffect("package.md", "refs", Destination(root, "package"))
+    markdown = tuple(
+        MarkdownSectionEffect(f"source-{index}.md", Destination("project", f"GUIDE-{index}.md"))
+        for index in range(markdown_count)
+    )
+    spec = EffectSpec((skill, *markdown))
+    built = build_effect_cases(spec, context())
+    assert [case.name for case in built.cases][-2:] == ["altered-skill", "preserve-skill-backup"]
+    case = built.cases[-1]
+    assert case.effects == spec
+    assert case.operations == ["install", "install"]
+    preparation = json.loads(case.to_json())["intermediate_preparation"]
+    assert preparation["kind"] == "preserve-skill-backup"
+    assert preparation["destination"] == {"root": root, "path": "package"}
+    assert EffectInstallCase.from_json(case.to_json()) == case
+    if markdown_count == 2:
+        assert [(item.name, item.classification) for item in built.decisions] == [
+            ("missing-section", "unconstructible"),
+            ("altered-section", "unconstructible"),
+        ]
+
+
+def test_backup_preservation_retains_multiskill_construction_limit() -> None:
+    spec = EffectSpec(
+        (
+            SkillEffect("first.md", "first-refs", Destination("home", "first")),
+            SkillEffect("second.md", "second-refs", Destination("project", "second")),
+        )
+    )
+    with pytest.raises(ValueError, match="Multiple skill effects"):
+        build_effect_cases(spec, context())

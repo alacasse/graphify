@@ -97,7 +97,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
 def _read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
-        "format": "explicit-expectations-v10"
+        "format": "explicit-expectations-v11"
     }:
         raise ValueError("Unsupported evidence format; use its identified historical reader")
     case = EffectInstallCase.from_json(

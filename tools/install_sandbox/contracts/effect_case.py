@@ -18,6 +18,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredSkillPreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
+    PreserveSkillBackupPreparation,
     preparation_from_data,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
@@ -237,12 +238,13 @@ class EffectInstallCase:
         | MissingReferencePreparation
         | AlteredReferencePreparation
         | AlteredSkillPreparation
+        | PreserveSkillBackupPreparation
         | None
     ) = None
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v8"
+        data["format"] = "explicit-expectations-v9"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -263,7 +265,7 @@ class EffectInstallCase:
             "format name target scope effects subject initial_files operations "
             "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v8":
+        if data["format"] != "explicit-expectations-v9":
             raise ValueError("Unsupported effects case format or operation")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
@@ -352,6 +354,11 @@ def build_effect_cases(
                 name="altered-skill",
                 intermediate_preparation=AlteredSkillPreparation(skills[0].destination),
             ),
+            replace(
+                reinstall,
+                name="preserve-skill-backup",
+                intermediate_preparation=PreserveSkillBackupPreparation(skills[0].destination),
+            ),
         )
         if skills
         else ()
@@ -363,6 +370,9 @@ def build_effect_cases(
             CaseNonConstruction("missing-reference", "not_applicable", "No skill effect declared"),
             CaseNonConstruction("altered-reference", "not_applicable", "No skill effect declared"),
             CaseNonConstruction("altered-skill", "not_applicable", "No skill effect declared"),
+            CaseNonConstruction(
+                "preserve-skill-backup", "not_applicable", "No skill effect declared"
+            ),
         )
     )
     if len(markdown) != 1:

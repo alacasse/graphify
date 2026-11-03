@@ -47,7 +47,7 @@ def test_archive_is_readable_after_move_and_extraction(
     timings = {item["phase"]: item for item in payload["timings"]}
     assert timings["construction"]["state"] == "measured"
     assert timings["materialization"]["state"] == "measured"
-    assert len(payload["output_lifecycle"]["writers"]) == 7
+    assert len(payload["output_lifecycle"]["writers"]) == 8
     assert all(w["state"] == "stopped" for w in payload["output_lifecycle"]["writers"])
 
 
@@ -111,7 +111,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 7
+        == 8
     )
 
 

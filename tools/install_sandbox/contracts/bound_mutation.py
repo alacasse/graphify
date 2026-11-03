@@ -4,6 +4,7 @@ import base64
 import hashlib
 import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import cast
 
 from tools.install_sandbox.contracts.effects import Destination
@@ -53,7 +54,7 @@ class BoundMarkdownMutation:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v2",
+            "format": "prepared-mutation-v3",
             "kind": "markdown",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
@@ -71,7 +72,7 @@ class BoundMarkdownMutation:
             "format kind case_sha256 observation_ref destination document_sha256 "
             "start end replacement",
         )
-        if data["format"] != "prepared-mutation-v2" or data["kind"] != "markdown":
+        if data["format"] != "prepared-mutation-v3" or data["kind"] != "markdown":
             raise ValueError("Unsupported prepared operation")
         if type(data["start"]) is not int or type(data["end"]) is not int:
             raise ValueError("Expected integer byte bounds")
@@ -136,7 +137,7 @@ class BoundFileRemoval:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v2",
+            "format": "prepared-mutation-v3",
             "kind": "file-removal",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
@@ -147,7 +148,7 @@ class BoundFileRemoval:
     @classmethod
     def from_data(cls, value: object) -> "BoundFileRemoval":
         data = fields(value, "format kind case_sha256 observation_ref destination document_sha256")
-        if data["format"] != "prepared-mutation-v2" or data["kind"] != "file-removal":
+        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-removal":
             raise ValueError("Unsupported prepared operation")
         return cls(
             text(data["case_sha256"]),
@@ -184,7 +185,7 @@ class BoundFileAppend:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v2",
+            "format": "prepared-mutation-v3",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
             "destination": {"root": self.destination.root, "path": self.destination.path},
@@ -198,7 +199,7 @@ class BoundFileAppend:
         data = fields(
             value, "format kind case_sha256 observation_ref destination document_sha256 suffix"
         )
-        if data["format"] != "prepared-mutation-v2" or data["kind"] != "file-append":
+        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-append":
             raise ValueError("Unsupported prepared operation")
         return cls(
             text(data["case_sha256"]),
@@ -209,13 +210,73 @@ class BoundFileAppend:
         )
 
 
-BoundMutation = BoundMarkdownMutation | BoundFileRemoval | BoundFileAppend
+@dataclass(frozen=True)
+class BoundFileCreation:
+    case_sha256: str
+    observation_ref: str
+    destination: Destination
+    content: bytes
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"[0-9a-f]{64}", self.case_sha256) is None:
+            raise ValueError("Expected exact SHA-256 digest")
+        if self.observation_ref != "steps/0/after.json":
+            raise ValueError("Creation requires validated first observation")
+        if type(self.content) is not bytes:
+            raise ValueError("Creation requires content bytes")
+
+    def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
+        if self.case_sha256 != hashlib.sha256(case_bytes).hexdigest():
+            raise ValueError("Operation case digest differs from retained case")
+        root, path = self.destination.root, self.destination.path
+        ancestors = {str(parent) for parent in PurePosixPath(path).parents}
+        if (
+            not first_after.absent(root, path)
+            or (root, path) in first_after.contents
+            or any(
+                item["root"] == root and item["path"] in ancestors and item["kind"] != "directory"
+                for item in first_after.entries
+            )
+            or any(
+                item["root"] == root and item["path"] in ancestors | {path}
+                for item in first_after.obstacles
+            )
+        ):
+            raise ValueError("Creation requires positively observed absent destination")
+        return self.content
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "format": "prepared-mutation-v3",
+            "kind": "file-creation",
+            "case_sha256": self.case_sha256,
+            "observation_ref": self.observation_ref,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+            "content": base64.b64encode(self.content).decode("ascii"),
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "BoundFileCreation":
+        data = fields(value, "format kind case_sha256 observation_ref destination content")
+        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-creation":
+            raise ValueError("Unsupported prepared operation")
+        return cls(
+            text(data["case_sha256"]),
+            text(data["observation_ref"]),
+            Destination.from_data(data["destination"]),
+            _replacement(data["content"]),
+        )
+
+
+BoundMutation = BoundMarkdownMutation | BoundFileRemoval | BoundFileAppend | BoundFileCreation
 
 
 def mutation_from_data(value: object) -> BoundMutation:
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
+    if incoming.get("kind") == "file-creation":
+        return BoundFileCreation.from_data(incoming)
     if incoming.get("kind") == "file-append":
         return BoundFileAppend.from_data(incoming)
     if incoming.get("kind") == "file-removal":
@@ -231,11 +292,19 @@ class PerformedMutation:
     document_sha256: str | None
 
     def __post_init__(self) -> None:
-        if type(self.operation) not in (BoundFileRemoval, BoundMarkdownMutation, BoundFileAppend):
+        if type(self.operation) not in (
+            BoundFileRemoval,
+            BoundMarkdownMutation,
+            BoundFileAppend,
+            BoundFileCreation,
+        ):
             raise ValueError("Unsupported performed mutation")
         if type(self.operation) is BoundFileRemoval:
             if self.document_sha256 is not None:
                 raise ValueError("Removed file cannot have resulting bytes")
+        elif type(self.operation) is BoundFileCreation and self.document_sha256 is None:
+            # A complete failed creation is evaluated by the expectation verifier.
+            pass
         elif (
             not isinstance(self.document_sha256, str)
             or re.fullmatch(r"[0-9a-f]{64}", self.document_sha256) is None
@@ -244,7 +313,7 @@ class PerformedMutation:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "performed-mutation-v2",
+            "format": "performed-mutation-v3",
             "kind": self.operation.to_data()["kind"],
             "operation": self.operation.to_data(),
             "document_sha256": self.document_sha256,
@@ -255,7 +324,7 @@ class PerformedMutation:
         data = fields(value, "format kind operation document_sha256")
         operation = mutation_from_data(data["operation"])
         kind = operation.to_data()["kind"]
-        if data["format"] != "performed-mutation-v2" or data["kind"] != kind:
+        if data["format"] != "performed-mutation-v3" or data["kind"] != kind:
             raise ValueError("Unsupported performed operation")
         digest = data["document_sha256"]
         return cls(operation, None if digest is None else text(digest))
@@ -270,6 +339,20 @@ class PerformedMutation:
             # A physical claim must not turn an observed failed removal into a replay error.
             return
         document = observed.contents.get(key)
+        if type(operation) is BoundFileCreation and self.document_sha256 is None:
+            entry = observed.entry(*key)
+            ancestors = {str(parent) for parent in PurePosixPath(destination.path).parents}
+            obstructed = any(
+                item["root"] == destination.root and item["path"] in ancestors | {destination.path}
+                for item in observed.obstacles
+            )
+            if document is not None or not (
+                observed.absent(*key)
+                or (entry is not None and entry["kind"] != "file")
+                or obstructed
+            ):
+                raise ValueError("Observation contradicts absent performed creation bytes")
+            return
         if document is None:
             entry = observed.entry(*key)
             obstructed = any(

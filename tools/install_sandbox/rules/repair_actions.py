@@ -11,6 +11,7 @@ from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileAppend,
+    BoundFileCreation,
     BoundFileRemoval,
     BoundMarkdownMutation,
     BoundMutation,
@@ -70,6 +71,7 @@ def _data(value: object) -> object:
         (
             BoundMarkdownMutation,
             BoundFileAppend,
+            BoundFileCreation,
             BoundFileRemoval,
             PerformedMutation,
             ExpectationSet,
@@ -120,7 +122,7 @@ ARTIFACTS = (
         "intermediate/operation.json",
         "operation_retained",
         "json",
-        (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend),
+        (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation),
         mutation_from_data,
     ),
     ArtifactDescriptor(

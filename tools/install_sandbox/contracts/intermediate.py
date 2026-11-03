@@ -157,6 +157,36 @@ class AlteredSkillPreparation:
         return result
 
 
+PRESERVE_SKILL_BACKUP_SUFFIX = b"\nSandbox previous backup witness.\n"
+
+
+@dataclass(frozen=True)
+class PreserveSkillBackupPreparation:
+    destination: Destination
+    suffix: bytes = PRESERVE_SKILL_BACKUP_SUFFIX
+    kind: str = "preserve-skill-backup"
+
+    def to_data(self) -> dict[str, object]:
+        if self.kind != "preserve-skill-backup" or self.suffix != PRESERVE_SKILL_BACKUP_SUFFIX:
+            raise ValueError("Unsupported preserve skill backup preparation")
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+            "suffix": base64.b64encode(self.suffix).decode("ascii"),
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "PreserveSkillBackupPreparation":
+        data = fields(value, "kind destination suffix")
+        result = cls(
+            Destination.from_data(data["destination"]),
+            _decoded(data["suffix"]),
+            text(data["kind"]),
+        )
+        result.to_data()
+        return result
+
+
 def preparation_from_data(
     value: object,
 ) -> (
@@ -164,10 +194,13 @@ def preparation_from_data(
     | MissingReferencePreparation
     | AlteredReferencePreparation
     | AlteredSkillPreparation
+    | PreserveSkillBackupPreparation
 ):
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
+    if incoming.get("kind") == "preserve-skill-backup":
+        return PreserveSkillBackupPreparation.from_data(incoming)
     if incoming.get("kind") == "missing-reference":
         return MissingReferencePreparation.from_data(incoming)
     if incoming.get("kind") == "altered-reference":

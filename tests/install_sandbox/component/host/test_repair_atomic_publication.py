@@ -157,7 +157,9 @@ def _run_interrupted(
     return root / "proof"
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
+@pytest.mark.parametrize(
+    "scenario", ["missing-section", "altered-section", "altered-reference", "altered-skill"]
+)
 @pytest.mark.parametrize(
     "window",
     [

@@ -149,6 +149,7 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
         "reinstall",
         "missing-reference",
         "altered-reference",
+        "altered-skill",
     ]
     assert [(item.name, item.classification, item.reason) for item in empty.decisions] == [
         (name, "not_applicable", "No Markdown effect declared")

@@ -15,6 +15,7 @@ from tools.install_sandbox.contracts.effects import (
 from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
 from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
+    AlteredSkillPreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
 )
@@ -355,3 +356,22 @@ def selected_reference(case: EffectInstallCase, sources: FilesystemSnapshot) -> 
         effect.destination.root,
         effect.destination.path + "/references/" + paths[0][len(effect.references) + 1 :],
     )
+
+
+def selected_skill(case: EffectInstallCase) -> Destination:
+    """Resolve the skill document from the preparation and declared skill effect."""
+    preparation = case.intermediate_preparation
+    if not isinstance(preparation, AlteredSkillPreparation):
+        raise ValueError("Case has no altered skill preparation")
+    preparation.to_data()
+    effect = next(
+        (
+            effect
+            for effect in case.effects.effects
+            if isinstance(effect, SkillEffect) and effect.destination == preparation.destination
+        ),
+        None,
+    )
+    if effect is None:
+        raise ValueError("Skill preparation requires matching skill effect")
+    return Destination(effect.destination.root, effect.destination.path + "/SKILL.md")

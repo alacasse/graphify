@@ -19,6 +19,7 @@ from tools.install_sandbox.contracts.expectations import (
 )
 from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
+    AlteredSkillPreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
 )
@@ -30,6 +31,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     preservation_baseline,
     retained_bytes,
     selected_reference,
+    selected_skill,
 )
 
 
@@ -68,13 +70,17 @@ def _validate_first_install(
 def _transition(
     installed: ExpectationSet,
     first_after: FilesystemSnapshot,
-    replacement: Expectation,
+    replacements: tuple[Expectation, ...],
     phase: str,
 ) -> ExpectationSet:
+    by_destination = {(item.root, item.path): item for item in replacements}
+    if len(by_destination) != len(replacements):
+        raise ValueError("Duplicate transition replacement")
+    existing = {(item.root, item.path) for item in installed.expectations}
+    if not by_destination.keys() <= existing:
+        raise ValueError("Transition replacement requires an explicit prior constraint")
     constraints = tuple(
-        replacement
-        if (item.root, item.path) == (replacement.root, replacement.path)
-        else replace(item, phase=phase)
+        by_destination.get((item.root, item.path), replace(item, phase=phase))
         for item in installed.expectations
     )
     return replace(
@@ -82,7 +88,7 @@ def _transition(
         phase=phase,
         expectations=constraints,
         baseline=preservation_baseline(first_after, phase),
-        allowed_changes=((replacement.root, replacement.path),),
+        allowed_changes=tuple(by_destination),
     )
 
 
@@ -178,8 +184,8 @@ class MarkdownRepairScenario(ABC):
         )
         return PreparationPlan(
             operation,
-            _transition(installed, first_after, removed, "intermediate"),
-            _transition(installed, first_after, repaired, "reinstall"),
+            _transition(installed, first_after, (removed,), "intermediate"),
+            _transition(installed, first_after, (repaired,), "reinstall"),
         )
 
 
@@ -244,7 +250,7 @@ class MissingReferenceScenario:
             key = destination.root, destination.path
             absent = Expectation("absent", *key, "intermediate", "case:missing-reference")
             intermediate = replace(
-                _transition(installed, first_after, absent, "intermediate"),
+                _transition(installed, first_after, (absent,), "intermediate"),
                 allowed_changes=(),
                 allowed_removals=(key,),
             )
@@ -312,8 +318,66 @@ class AlteredReferenceScenario:
             operation.verify_binding(case_bytes, first_after)
             return PreparationPlan(
                 operation,
-                _transition(installed, first_after, altered, "intermediate"),
-                _transition(installed, first_after, restored, "reinstall"),
+                _transition(installed, first_after, (altered,), "intermediate"),
+                _transition(installed, first_after, (restored,), "reinstall"),
+            )
+        except (ValueError, UnicodeError, StopIteration) as exc:
+            return PreparationBlocked(str(exc))
+
+
+@dataclass(frozen=True)
+class AlteredSkillScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
+            preparation = self.case.intermediate_preparation
+            if not isinstance(preparation, AlteredSkillPreparation):
+                raise ValueError("Case has no altered skill preparation")
+            destination = selected_skill(self.case)
+            key = destination.root, destination.path
+            effect = next(
+                effect
+                for effect in self.case.effects.effects
+                if isinstance(effect, SkillEffect) and effect.destination == preparation.destination
+            )
+            source = retained_bytes(self.sources, "subject", effect.source)
+            if retained_bytes(first_after, *key) != source:
+                raise ValueError("First skill differs from retained source")
+            changed = source + preparation.suffix
+            altered = Expectation("file", *key, "intermediate", "case:source+suffix", changed)
+            restored = Expectation(
+                "file", *key, "reinstall", "source:subject:" + effect.source, source
+            )
+            backup = Expectation(
+                "file",
+                destination.root,
+                destination.path + self.case.subject.rules.skill_backup,
+                "reinstall",
+                "case:source+suffix",
+                changed,
+            )
+            operation = BoundFileAppend(
+                hashlib.sha256(case_bytes).hexdigest(),
+                observation_ref,
+                destination,
+                hashlib.sha256(source).hexdigest(),
+                preparation.suffix,
+            )
+            operation.verify_binding(case_bytes, first_after)
+            return PreparationPlan(
+                operation,
+                _transition(installed, first_after, (altered,), "intermediate"),
+                _transition(installed, first_after, (restored, backup), "reinstall"),
             )
         except (ValueError, UnicodeError, StopIteration) as exc:
             return PreparationBlocked(str(exc))
@@ -321,7 +385,12 @@ class AlteredReferenceScenario:
 
 def repair_scenario_from_case(
     case: EffectInstallCase, sources: FilesystemSnapshot
-) -> MarkdownRepairScenario | MissingReferenceScenario | AlteredReferenceScenario:
+) -> (
+    MarkdownRepairScenario
+    | MissingReferenceScenario
+    | AlteredReferenceScenario
+    | AlteredSkillScenario
+):
     preparation = case.intermediate_preparation
     if preparation is None:
         raise ValueError("Case has no intermediate preparation")
@@ -329,6 +398,8 @@ def repair_scenario_from_case(
         return MissingReferenceScenario(case, sources)
     if isinstance(preparation, AlteredReferencePreparation):
         return AlteredReferenceScenario(case, sources)
+    if isinstance(preparation, AlteredSkillPreparation):
+        return AlteredSkillScenario(case, sources)
     if preparation.kind == "missing-markdown-section":
         return MissingSectionScenario(case, sources)
     if preparation.kind == "altered-markdown-body":

@@ -127,9 +127,44 @@ class AlteredReferencePreparation:
         return result
 
 
+SKILL_REPAIR_SUFFIX = b"\nSandbox skill repair witness.\n"
+
+
+@dataclass(frozen=True)
+class AlteredSkillPreparation:
+    destination: Destination
+    suffix: bytes = SKILL_REPAIR_SUFFIX
+    kind: str = "altered-skill"
+
+    def to_data(self) -> dict[str, object]:
+        if self.kind != "altered-skill" or self.suffix != SKILL_REPAIR_SUFFIX:
+            raise ValueError("Unsupported altered skill preparation")
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+            "suffix": base64.b64encode(self.suffix).decode("ascii"),
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "AlteredSkillPreparation":
+        data = fields(value, "kind destination suffix")
+        result = cls(
+            Destination.from_data(data["destination"]),
+            _decoded(data["suffix"]),
+            text(data["kind"]),
+        )
+        result.to_data()
+        return result
+
+
 def preparation_from_data(
     value: object,
-) -> IntermediatePreparation | MissingReferencePreparation | AlteredReferencePreparation:
+) -> (
+    IntermediatePreparation
+    | MissingReferencePreparation
+    | AlteredReferencePreparation
+    | AlteredSkillPreparation
+):
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
@@ -137,4 +172,6 @@ def preparation_from_data(
         return MissingReferencePreparation.from_data(incoming)
     if incoming.get("kind") == "altered-reference":
         return AlteredReferencePreparation.from_data(incoming)
+    if incoming.get("kind") == "altered-skill":
+        return AlteredSkillPreparation.from_data(incoming)
     return IntermediatePreparation.from_data(incoming)

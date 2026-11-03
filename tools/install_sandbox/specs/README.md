@@ -54,8 +54,9 @@ The coordinator constructs the cases before allocating campaign output.
 `reinstall` is always constructed. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
-A skill additionally makes `missing-reference` and `altered-reference` available,
-in that order, independently of the Markdown count. Without a skill, those cases
+A skill additionally makes `missing-reference`, `altered-reference` and
+`altered-skill` available, in that order, independently of the Markdown count.
+Without a skill, those cases
 are not applicable. Each constructed case has two dependent installation steps.
 Effects select the behavior;
 filenames, subject identities and invocation words do not.
@@ -76,6 +77,16 @@ exact source bytes without adding a reference backup. Neither case creates a
 personal witness inside `references/`; preservation of extra user files there
 would be a distinct behavior.
 
+`altered-skill` appends exactly `b"\nSandbox skill repair witness.\n"` once to
+`SKILL.md` after a fully conforming first installation without a skill backup.
+It supports empty and binary sources, including a source that already contains
+the witness. Preparation may change only that file. Reinstallation must restore
+its exact source bytes and create `SKILL.md.bak` containing the full altered
+bytes, while preserving references, version, lock, personal files, other effects
+and the initial JSON backup. The repair baseline is the verified preparation.
+Other cases continue to require the skill backup to be absent. Preservation of
+a preexisting skill backup is a separate behavior not covered by this scenario.
+
 For `missing-reference`, the engine binds removal to the case, observed
 file bytes and exact destination selected from retained sources. Only that file
 may disappear during preparation; its directory and every other entry in HOME
@@ -88,10 +99,9 @@ The Docker harness isolates execution, prepares the package once, enforces
 timeouts and cleans resources. It captures the subject's declared Git revision,
 installs its package and binds source files and `METADATA` to the executable.
 Local Component tests substitute a controlled transport at the harness boundary;
-there is no public local-execution backend. Historical real CodeBuddy campaigns
-qualified the three earlier cases with the corrected product. The added
-reference repair cases have Component validation only; they have not been qualified
-with a real installer or Docker campaign.
+there is no public local-execution backend. Real qualification belongs to the exact sandbox and product revisions recorded
+with each campaign. Component simulations and retained literal proofs do not
+qualify the product; use the campaign evidence to establish which cases ran.
 
 For the Amp project campaign, use a separate subject context with:
 
@@ -151,12 +161,13 @@ validates phase continuity and recalculates verdicts. Partial failures retain th
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
 
-The current formats are case `explicit-expectations-v7`, expectations
+The current formats are case `explicit-expectations-v8`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v2`, performed
-result `performed-mutation-v2`, and case evidence `explicit-expectations-v9`.
+result `performed-mutation-v2`, and case evidence `explicit-expectations-v10`.
 Mutation records discriminate Markdown modification, file removal and file append.
 Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
-independently reconstructs the reference selection, operation and expectations.
+independently reconstructs the target selection, operation and expectations,
+including both repaired skill bytes and altered backup bytes from retained sources.
 
 ## Independent test data
 

@@ -114,7 +114,9 @@ def failed_archive(root: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, w
     return proof
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
+@pytest.mark.parametrize(
+    "scenario", ["missing-section", "altered-section", "altered-reference", "altered-skill"]
+)
 @pytest.mark.parametrize(
     ("window", "expected"),
     [
@@ -135,7 +137,9 @@ def test_failed_preparation_replays_at_its_atomic_publication(
     assert saved["status"] == expected
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
+@pytest.mark.parametrize(
+    "scenario", ["missing-section", "altered-section", "altered-reference", "altered-skill"]
+)
 @pytest.mark.parametrize("window", ["after-verdict", "after-checkpoint"])
 @pytest.mark.parametrize("tamper", ["verdict", "checkpoint", "status", "expectations"])
 def test_failed_preparation_rejects_contradictory_retained_facts(
@@ -165,7 +169,9 @@ def test_failed_preparation_rejects_contradictory_retained_facts(
         read_evidence(proof)
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
+@pytest.mark.parametrize(
+    "scenario", ["missing-section", "altered-section", "altered-reference", "altered-skill"]
+)
 @pytest.mark.parametrize("window", ["after-verdict", "after-checkpoint", "uninterrupted"])
 def test_terminal_verification_rejects_next_artifact_temporary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, window: str

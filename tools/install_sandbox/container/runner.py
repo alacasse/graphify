@@ -75,7 +75,7 @@ class InstallTestRunner:
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
         case.write(output / "case.json")
-        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v9"})
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v10"})
         writer.initialize_timings(case.name, len(case.operations))
         publisher = CasePublisher(case, writer)
         lifecycle = InitialPreparationLifecycle()

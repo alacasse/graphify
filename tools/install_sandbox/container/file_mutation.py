@@ -14,10 +14,11 @@ from tools.install_sandbox.contracts.bound_mutation import (
 )
 from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
+    AlteredSkillPreparation,
     IntermediatePreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.rules.expectation_builder import selected_reference
+from tools.install_sandbox.rules.expectation_builder import selected_reference, selected_skill
 
 
 def _path(operation: BoundMutation, environment: EffectEnvironment) -> Path:
@@ -32,7 +33,11 @@ def _validate_destination(
     operation: BoundMutation, environment: EffectEnvironment, sources: FilesystemSnapshot
 ) -> None:
     preparation = environment.case.intermediate_preparation
-    if isinstance(operation, (BoundFileRemoval, BoundFileAppend)):
+    if isinstance(preparation, AlteredSkillPreparation):
+        if not isinstance(operation, BoundFileAppend):
+            raise ValueError("Skill preparation requires an append operation")
+        destination = selected_skill(environment.case)
+    elif isinstance(operation, (BoundFileRemoval, BoundFileAppend)):
         destination = selected_reference(environment.case, sources)
     else:
         if not isinstance(preparation, IntermediatePreparation):
@@ -41,7 +46,7 @@ def _validate_destination(
     if destination != operation.destination:
         raise ValueError("Operation destination differs from case and retained sources")
     if isinstance(operation, BoundFileAppend) and (
-        not isinstance(preparation, AlteredReferencePreparation)
+        not isinstance(preparation, (AlteredReferencePreparation, AlteredSkillPreparation))
         or operation.suffix != preparation.suffix
     ):
         raise ValueError("Operation suffix differs from case preparation")

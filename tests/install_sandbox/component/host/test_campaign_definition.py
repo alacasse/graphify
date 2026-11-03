@@ -106,7 +106,7 @@ def test_definition_retains_case_transports_after_inputs_disappear(
         definition=definition, output_directory=proof
     )
     assert result.passed
-    assert len(transport.installer.calls) == (10 if markdown else 6)
+    assert len(transport.installer.calls) == (12 if markdown else 8)
     assert [
         (case.name, case.construction, case.construction_reason)
         for case in result.cases

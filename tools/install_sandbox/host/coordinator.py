@@ -270,9 +270,9 @@ class InstallTestCoordinator:
             + [materialization],
             prepare_only=definition.prepare_only,
         )
-        # Keep reference repairs after Markdown cases and their construction decisions.
-        reference_order = {"missing-reference": 1, "altered-reference": 2}
-        result.cases.sort(key=lambda entry: reference_order.get(entry.name, 0))
+        # Keep skill repairs after Markdown cases and their construction decisions.
+        repair_order = {"missing-reference": 1, "altered-reference": 2, "altered-skill": 3}
+        result.cases.sort(key=lambda entry: repair_order.get(entry.name, 0))
         with harness:
             try:
                 self._execute_campaign(harness, definition, result, materialization, progress)

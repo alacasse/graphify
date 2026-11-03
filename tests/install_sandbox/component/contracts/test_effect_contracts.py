@@ -230,7 +230,7 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
         build_reinstall_case(spec, context())
 
 
-def test_five_cases_have_strict_independent_preparations() -> None:
+def test_six_cases_have_strict_independent_preparations() -> None:
     cases = build_effect_cases(structured_spec(), context()).cases
     assert [case.name for case in cases] == [
         "reinstall",
@@ -238,11 +238,12 @@ def test_five_cases_have_strict_independent_preparations() -> None:
         "altered-section",
         "missing-reference",
         "altered-reference",
+        "altered-skill",
     ]
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(next(case for case in cases if case.name == "altered-section").to_json())
-    assert raw["format"] == "explicit-expectations-v7"
+    assert raw["format"] == "explicit-expectations-v8"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
@@ -259,6 +260,8 @@ def test_five_cases_have_strict_independent_preparations() -> None:
         "explicit-expectations-v3",
         "explicit-expectations-v4",
         "explicit-expectations-v5",
+        "explicit-expectations-v6",
+        "explicit-expectations-v7",
     ],
 )
 def test_old_case_formats_are_rejected(version: str) -> None:
@@ -307,7 +310,7 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
         for name in ("missing-section", "altered-section")
     ] + [
         (name, "not_applicable", "No skill effect declared")
-        for name in ("missing-reference", "altered-reference")
+        for name in ("missing-reference", "altered-reference", "altered-skill")
     ]
 
 

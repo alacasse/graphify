@@ -57,7 +57,7 @@ def test_cli_real_engine_and_autonomous_reread(
             str(output),
         ]
     ) == (0 if passed else 1)
-    assert len(transport.installer.calls) == (6 if markdown_only else 10 if passed else 5)
+    assert len(transport.installer.calls) == (6 if markdown_only else 12 if passed else 6)
     assert not (output / "evidence").exists()
     report = json.loads((output / "campaign.json").read_text())
     assert [case["name"] for case in report["cases"]] == [
@@ -66,6 +66,7 @@ def test_cli_real_engine_and_autonomous_reread(
         "altered-section",
         "missing-reference",
         "altered-reference",
+        "altered-skill",
     ]
     saved = {
         case["name"]: case["result"]["test"]
@@ -140,7 +141,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=3 if wrong_skill else 6,
+        calls=4 if wrong_skill else 8,
     )
 
 
@@ -229,24 +230,30 @@ def _assert_partial_campaign(
     assert report["passed"] is passed
     first = next(case for case in report["cases"] if case["name"] == "reinstall")
     repairs = [case for case in report["cases"] if case["construction"] != "constructed"]
-    expected_status = "failed" if construction == "not_applicable" and calls == 3 else "passed"
+    expected_status = "failed" if construction == "not_applicable" and calls == 4 else "passed"
     assert first["result"]["test"]["status"] == expected_status
     if expected_status == "failed":
         _assert_wrong_root_stops_after_first_command(first["result"]["test"])
     assert [case["name"] for case in repairs] == (
         ["missing-section", "altered-section"]
         if construction == "not_applicable"
-        else ["missing-section", "altered-section", "missing-reference", "altered-reference"]
+        else [
+            "missing-section",
+            "altered-section",
+            "missing-reference",
+            "altered-reference",
+            "altered-skill",
+        ]
     )
     for case in repairs:
         assert case["construction"] == (
             "not_applicable"
-            if case["name"] in {"missing-reference", "altered-reference"}
+            if case["name"] in {"missing-reference", "altered-reference", "altered-skill"}
             else construction
         )
         assert case["construction_reason"] == (
             "No skill effect declared"
-            if case["name"] in {"missing-reference", "altered-reference"}
+            if case["name"] in {"missing-reference", "altered-reference", "altered-skill"}
             else reason
         )
         assert all(case[field] is None for field in ("state", "result", "output_directory"))

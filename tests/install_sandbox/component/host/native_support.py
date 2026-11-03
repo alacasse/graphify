@@ -119,7 +119,12 @@ class LiteralInstaller:
     @staticmethod
     def _skill(root: Path, home: Path) -> None:
         skill = root / ".synthetic/skills/package"
-        write(skill / "SKILL.md", "# Synthetic package\n")
+        document = skill / "SKILL.md"
+        canonical = b"# Synthetic package\n"
+        if document.exists() and document.read_bytes() != canonical:
+            document.with_name("SKILL.md.bak").write_bytes(document.read_bytes())
+        document.parent.mkdir(parents=True, exist_ok=True)
+        document.write_bytes(canonical)
         write(skill / "references/nested/reference.md", "Independent nested reference.\n")
         write(skill / ".graphify_version", "8.7.6")
         digest = hashlib.sha256(str(skill.resolve()).encode()).hexdigest()[:16]

@@ -14,6 +14,7 @@ from tools.install_sandbox.contracts.effects import (
 )
 from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
 from tools.install_sandbox.contracts.intermediate import (
+    AlteredReferencePreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
 )
@@ -131,7 +132,9 @@ def build_initial_expectations(
 ) -> ExpectationSet:
     """Validate source construction and describe the prepared, uninstalled state."""
     _source_constraints(case, sources)
-    if isinstance(case.intermediate_preparation, MissingReferencePreparation):
+    if isinstance(
+        case.intermediate_preparation, (MissingReferencePreparation, AlteredReferencePreparation)
+    ):
         selected_reference(case, sources)
     constraints = [
         Expectation(
@@ -325,7 +328,7 @@ def build_reinstall_expectations(
 def selected_reference(case: EffectInstallCase, sources: FilesystemSnapshot) -> Destination:
     """Select from the complete retained source inventory, never installed output."""
     preparation = case.intermediate_preparation
-    if not isinstance(preparation, MissingReferencePreparation):
+    if not isinstance(preparation, (MissingReferencePreparation, AlteredReferencePreparation)):
         raise ValueError("Case has no reference preparation")
     preparation.to_data()
     _source_constraints(case, sources)
@@ -347,7 +350,7 @@ def selected_reference(case: EffectInstallCase, sources: FilesystemSnapshot) -> 
         and entry["path"].startswith(effect.references + "/")
     )
     if not paths:
-        raise ValueError("Missing-reference requires a nonempty source reference bundle")
+        raise ValueError("Reference repair requires a nonempty source reference bundle")
     return Destination(
         effect.destination.root,
         effect.destination.path + "/references/" + paths[0][len(effect.references) + 1 :],

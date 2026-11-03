@@ -14,6 +14,7 @@ from tools.install_sandbox.contracts.effects import (
     physical_destinations,
 )
 from tools.install_sandbox.contracts.intermediate import (
+    AlteredReferencePreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
     preparation_from_data,
@@ -230,11 +231,13 @@ class EffectInstallCase:
     subject: SubjectContext
     initial_files: list[InitialFile]
     operations: list[str]
-    intermediate_preparation: IntermediatePreparation | MissingReferencePreparation | None = None
+    intermediate_preparation: (
+        IntermediatePreparation | MissingReferencePreparation | AlteredReferencePreparation | None
+    ) = None
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v6"
+        data["format"] = "explicit-expectations-v7"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -255,7 +258,7 @@ class EffectInstallCase:
             "format name target scope effects subject initial_files operations "
             "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v6":
+        if data["format"] != "explicit-expectations-v7":
             raise ValueError("Unsupported effects case format or operation")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
@@ -334,6 +337,11 @@ def build_effect_cases(
                 name="missing-reference",
                 intermediate_preparation=MissingReferencePreparation(skills[0].destination),
             ),
+            replace(
+                reinstall,
+                name="altered-reference",
+                intermediate_preparation=AlteredReferencePreparation(skills[0].destination),
+            ),
         )
         if skills
         else ()
@@ -343,6 +351,7 @@ def build_effect_cases(
         if skills
         else (
             CaseNonConstruction("missing-reference", "not_applicable", "No skill effect declared"),
+            CaseNonConstruction("altered-reference", "not_applicable", "No skill effect declared"),
         )
     )
     if len(markdown) != 1:

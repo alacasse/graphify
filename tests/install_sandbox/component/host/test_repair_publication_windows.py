@@ -14,7 +14,7 @@ from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
 from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
+from tools.install_sandbox.contracts.bound_mutation import BoundMutation
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import SnapshotEntry
@@ -75,7 +75,7 @@ def run_stopped(
     original_mutate = transition.apply_mutation
 
     def mutate(
-        operation: BoundMarkdownMutation,
+        operation: BoundMutation,
         environment: EffectEnvironment,
         case_bytes: bytes,
         first_after: FilesystemSnapshot,
@@ -153,7 +153,7 @@ def run_stopped(
     return len(installer.calls), mutations, writes
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
 @pytest.mark.parametrize("when", ["before", "after"])
 @pytest.mark.parametrize("target", ARTIFACTS + STAGES + BLOBS)
 def test_process_loss_at_each_publication_blocks_dependent_effects(
@@ -170,7 +170,7 @@ def test_process_loss_at_each_publication_blocks_dependent_effects(
     assert writes == 1
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
 @pytest.mark.parametrize("when", ["before", "after"])
 @pytest.mark.parametrize("target", ARTIFACTS + STAGES + BLOBS)
 def test_publication_error_stops_without_retry_or_dependent_effects(
@@ -216,7 +216,7 @@ def test_snapshot_publication_preserves_logical_input(tmp_path: Path) -> None:
     assert snapshot.entries[0].get("content_file") is None
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
 @pytest.mark.parametrize("phase", ["before", "after"])
 @pytest.mark.parametrize("runtime_error", [False, True])
 def test_partial_blob_without_manifest_has_no_proof_value(
@@ -243,7 +243,7 @@ def test_partial_blob_without_manifest_has_no_proof_value(
     assert read_evidence(proof).status == "incomplete"
 
 
-@pytest.mark.parametrize("scenario", ["missing-section", "altered-section"])
+@pytest.mark.parametrize("scenario", ["missing-section", "altered-section", "altered-reference"])
 @pytest.mark.parametrize("phase", ["before", "after"])
 def test_multiple_blobs_with_partial_content_and_manifest_temporary_are_staging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, phase: str
@@ -258,6 +258,25 @@ def test_multiple_blobs_with_partial_content_and_manifest_temporary_are_staging(
     temporary.write_bytes(b'{"entries": [')
     assert (proof / target).read_bytes() == b"Partial retained bytes"
     assert complete.read_bytes() == b"Complete independent personal file.\n"
+    assert not (proof / f"intermediate/{phase}.json").exists()
+    assert (calls, mutations, writes) == (1, int(phase == "after"), 1)
+    assert read_evidence(proof).status == "incomplete"
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+@pytest.mark.parametrize("runtime_error", [False, True])
+def test_partial_selected_reference_blob_blocks_reinstall(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    runtime_error: bool,
+) -> None:
+    target = f"intermediate/{phase}/home/.synthetic/skills/package/references/nested/reference.md"
+    calls, mutations, writes = run_stopped(
+        tmp_path, monkeypatch, "altered-reference", target, "partial", runtime_error=runtime_error
+    )
+    proof = tmp_path / "proof"
+    assert (proof / target).read_bytes() == b"Partial retained bytes"
     assert not (proof / f"intermediate/{phase}.json").exists()
     assert (calls, mutations, writes) == (1, int(phase == "after"), 1)
     assert read_evidence(proof).status == "incomplete"

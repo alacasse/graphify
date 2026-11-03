@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileAppend,
     BoundFileRemoval,
     BoundMarkdownMutation,
     PerformedMutation,
@@ -39,7 +40,10 @@ from tools.install_sandbox.rules.repair_actions import (
     SnapshotArtifact,
     artifact_digest,
 )
-from tools.install_sandbox.rules.repair_scenario import MarkdownRepairScenario, PreparationBlocked
+from tools.install_sandbox.rules.repair_scenario import (
+    PreparationBlocked,
+    repair_scenario_from_case,
+)
 from tools.install_sandbox.rules.step_lifecycle import status
 
 STAGES = ("not_started", "started", *(item.checkpoint for item in ARTIFACTS))
@@ -110,7 +114,7 @@ class RepairSession:
             self._plan = None
             return
         case = EffectInstallCase.from_json(inputs.case_bytes.decode("utf-8"))
-        plan = MarkdownRepairScenario.from_case(case, self._inputs.sources).bind(
+        plan = repair_scenario_from_case(case, self._inputs.sources).bind(
             self._inputs.first_after,
             "steps/0/after.json",
             verdict,
@@ -186,7 +190,9 @@ class RepairSession:
                 self._active = ObserveSnapshot(kind)
             elif kind == "performed":
                 operation = self._payloads["operation"]
-                assert isinstance(operation, (BoundMarkdownMutation, BoundFileRemoval))
+                assert isinstance(
+                    operation, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend)
+                )
                 self._active = ApplyMutation(operation)
             else:
                 self._active = RetainEvidence(self._retained_value(kind))
@@ -289,7 +295,7 @@ class RepairSession:
     def _validate_mutation(self, kind: str, payload: object) -> None:
         assert self._plan is not None
         if kind == "operation":
-            if not isinstance(payload, (BoundMarkdownMutation, BoundFileRemoval)):
+            if not isinstance(payload, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend)):
                 raise ValueError("Expected bound mutation")
             if payload != self._plan.operation:
                 raise ValueError("Operation destination differs from case")
@@ -311,7 +317,7 @@ class RepairSession:
         performed = self._payloads["performed"]
         operation = self._payloads["operation"]
         assert isinstance(performed, PerformedMutation)
-        assert isinstance(operation, (BoundMarkdownMutation, BoundFileRemoval))
+        assert isinstance(operation, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend))
         performed.verify(operation, payload)
         return None
 

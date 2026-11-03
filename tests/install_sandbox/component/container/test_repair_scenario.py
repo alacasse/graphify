@@ -22,9 +22,9 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import build_install_expectations
 from tools.install_sandbox.rules.repair_scenario import (
-    MarkdownRepairScenario,
     PreparationBlocked,
     PreparationPlan,
+    repair_scenario_from_case,
 )
 
 ROOTS = {"home": "/sandbox/home", "project": "/sandbox/project"}
@@ -64,7 +64,7 @@ def inputs(index: int = 1, source: bytes = SOURCE):
 
 def plan():
     case, sources, installed, first, validation = inputs()
-    result = MarkdownRepairScenario.from_case(case, sources).bind(
+    result = repair_scenario_from_case(case, sources).bind(
         first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(result, PreparationPlan)
@@ -131,7 +131,7 @@ def test_removal_oracle_is_independent_of_range_and_preserves_other_files() -> N
 def test_preparation_rechecks_observation_and_exact_case_bytes() -> None:
     case, sources, installed, first, validation = inputs()
     first.contents[KEY] = BEFORE + b"changed" + AFTER
-    blocked = MarkdownRepairScenario.from_case(case, sources).bind(
+    blocked = repair_scenario_from_case(case, sources).bind(
         first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(blocked, PreparationBlocked)
@@ -145,7 +145,11 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
         EffectSpec((SkillEffect("skill.md", "references", Destination("home", "skills")),)),
         case.subject,
     )
-    assert [built.name for built in empty.cases] == ["reinstall", "missing-reference"]
+    assert [built.name for built in empty.cases] == [
+        "reinstall",
+        "missing-reference",
+        "altered-reference",
+    ]
     assert [(item.name, item.classification, item.reason) for item in empty.decisions] == [
         (name, "not_applicable", "No Markdown effect declared")
         for name in ("missing-section", "altered-section")
@@ -155,7 +159,7 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
 def test_operation_hashes_exact_archived_case_bytes() -> None:
     case, sources, installed, first, validation = inputs()
     archived = b"\n" + case.to_json().encode()
-    prepared = MarkdownRepairScenario.from_case(case, sources).bind(
+    prepared = repair_scenario_from_case(case, sources).bind(
         first, "steps/0/after.json", validation, installed, archived
     )
     assert isinstance(prepared, PreparationPlan)
@@ -165,7 +169,7 @@ def test_operation_hashes_exact_archived_case_bytes() -> None:
 
 def test_altered_body_bounds_and_independent_oracle() -> None:
     case, sources, installed, first, validation = inputs(2)
-    prepared = MarkdownRepairScenario.from_case(case, sources).bind(
+    prepared = repair_scenario_from_case(case, sources).bind(
         first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(prepared, PreparationPlan)
@@ -188,7 +192,7 @@ def test_altered_body_bounds_and_independent_oracle() -> None:
 )
 def test_altered_preparation_requires_a_real_body_change(source: bytes) -> None:
     case, sources, installed, first, validation = inputs(2, source)
-    result = MarkdownRepairScenario.from_case(case, sources).bind(
+    result = repair_scenario_from_case(case, sources).bind(
         first, "steps/0/after.json", validation, installed, case.to_json().encode()
     )
     assert isinstance(result, PreparationBlocked)

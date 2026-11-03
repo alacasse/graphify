@@ -230,18 +230,19 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
         build_reinstall_case(spec, context())
 
 
-def test_four_cases_have_strict_independent_preparations() -> None:
+def test_five_cases_have_strict_independent_preparations() -> None:
     cases = build_effect_cases(structured_spec(), context()).cases
     assert [case.name for case in cases] == [
         "reinstall",
         "missing-section",
         "altered-section",
         "missing-reference",
+        "altered-reference",
     ]
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(next(case for case in cases if case.name == "altered-section").to_json())
-    assert raw["format"] == "explicit-expectations-v6"
+    assert raw["format"] == "explicit-expectations-v7"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
@@ -304,7 +305,10 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
     assert [(item.name, item.classification, item.reason) for item in built.decisions] == [
         (name, "unconstructible", "The case builder currently supports only one Markdown effect")
         for name in ("missing-section", "altered-section")
-    ] + [("missing-reference", "not_applicable", "No skill effect declared")]
+    ] + [
+        (name, "not_applicable", "No skill effect declared")
+        for name in ("missing-reference", "altered-reference")
+    ]
 
 
 @pytest.mark.parametrize("change", ["kind", "missing-body", "invalid-body", "extra"])

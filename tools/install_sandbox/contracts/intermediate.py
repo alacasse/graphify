@@ -90,10 +90,51 @@ class MissingReferencePreparation:
         return result
 
 
-def preparation_from_data(value: object) -> IntermediatePreparation | MissingReferencePreparation:
+REFERENCE_REPAIR_SUFFIX = b"\nSandbox repair witness.\n"
+
+
+@dataclass(frozen=True)
+class AlteredReferencePreparation:
+    destination: Destination
+    selection: str = "first-regular-file-lexical"
+    suffix: bytes = REFERENCE_REPAIR_SUFFIX
+    kind: str = "altered-reference"
+
+    def to_data(self) -> dict[str, object]:
+        if (
+            self.selection != "first-regular-file-lexical"
+            or self.kind != "altered-reference"
+            or self.suffix != REFERENCE_REPAIR_SUFFIX
+        ):
+            raise ValueError("Unsupported altered reference preparation")
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+            "selection": self.selection,
+            "suffix": base64.b64encode(self.suffix).decode("ascii"),
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "AlteredReferencePreparation":
+        data = fields(value, "kind destination selection suffix")
+        result = cls(
+            Destination.from_data(data["destination"]),
+            text(data["selection"]),
+            _decoded(data["suffix"]),
+            text(data["kind"]),
+        )
+        result.to_data()
+        return result
+
+
+def preparation_from_data(
+    value: object,
+) -> IntermediatePreparation | MissingReferencePreparation | AlteredReferencePreparation:
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
     if incoming.get("kind") == "missing-reference":
         return MissingReferencePreparation.from_data(incoming)
+    if incoming.get("kind") == "altered-reference":
+        return AlteredReferencePreparation.from_data(incoming)
     return IntermediatePreparation.from_data(incoming)

@@ -6,17 +6,19 @@ from dataclasses import dataclass, replace
 from typing import ClassVar
 
 from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileAppend,
     BoundFileRemoval,
     BoundMarkdownMutation,
     BoundMutation,
 )
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.effects import MarkdownSectionEffect
+from tools.install_sandbox.contracts.effects import MarkdownSectionEffect, SkillEffect
 from tools.install_sandbox.contracts.expectations import (
     Expectation,
     ExpectationSet,
 )
 from tools.install_sandbox.contracts.intermediate import (
+    AlteredReferencePreparation,
     IntermediatePreparation,
     MissingReferencePreparation,
 )
@@ -45,6 +47,22 @@ class PreparationPlan:
 
 def _conforming(validation: VerificationResult) -> bool:
     return validation.complete and not validation.mismatches and not validation.obstacles
+
+
+def _validate_first_install(
+    case: EffectInstallCase,
+    case_bytes: bytes,
+    installed: ExpectationSet,
+    first_after: FilesystemSnapshot,
+    validation: VerificationResult,
+) -> None:
+    if EffectInstallCase.from_json(case_bytes.decode("utf-8")) != case:
+        raise ValueError("Archived case differs from unchanged case definition")
+    if installed.phase != "install" or installed.roots is None:
+        raise ValueError("Preparation requires bound first-install expectations")
+    actual = EffectVerifier().verify(installed, first_after)
+    if not _conforming(validation) or not _conforming(actual) or validation != actual:
+        raise ValueError("Preparation requires a conforming verdict for this observation")
 
 
 def _transition(
@@ -164,23 +182,6 @@ class MarkdownRepairScenario(ABC):
             _transition(installed, first_after, repaired, "reinstall"),
         )
 
-    @classmethod
-    def from_case(
-        cls, case: EffectInstallCase, sources: FilesystemSnapshot
-    ) -> "MarkdownRepairScenario | MissingReferenceScenario":
-        preparation = case.intermediate_preparation
-        if preparation is None:
-            raise ValueError("Case has no intermediate preparation")
-        if isinstance(preparation, MissingReferencePreparation):
-            return MissingReferenceScenario(case, sources)
-        if preparation.kind == "missing-markdown-section":
-            return MissingSectionScenario(case, sources)
-        if preparation.kind == "altered-markdown-body":
-            if not isinstance(preparation.body, bytes):
-                raise ValueError("Altered scenario requires body bytes")
-            return AlteredBodyScenario(case, sources, preparation.body)
-        raise ValueError("Unsupported Markdown scenario")
-
 
 @dataclass(frozen=True)
 class MissingSectionScenario(MarkdownRepairScenario):
@@ -237,13 +238,7 @@ class MissingReferenceScenario:
         case_bytes: bytes,
     ) -> PreparationPlan | PreparationBlocked:
         try:
-            if EffectInstallCase.from_json(case_bytes.decode("utf-8")) != self.case:
-                raise ValueError("Archived case differs from unchanged case definition")
-            if installed.phase != "install" or installed.roots is None:
-                raise ValueError("Preparation requires bound first-install expectations")
-            actual = EffectVerifier().verify(installed, first_after)
-            if not _conforming(validation) or not _conforming(actual) or validation != actual:
-                raise ValueError("Preparation requires a conforming verdict for this observation")
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
             destination = selected_reference(self.case, self.sources)
             content = retained_bytes(first_after, destination.root, destination.path)
             key = destination.root, destination.path
@@ -268,3 +263,76 @@ class MissingReferenceScenario:
             return PreparationPlan(operation, intermediate, restored)
         except (ValueError, UnicodeError) as exc:
             return PreparationBlocked(str(exc))
+
+
+@dataclass(frozen=True)
+class AlteredReferenceScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
+            preparation = self.case.intermediate_preparation
+            if not isinstance(preparation, AlteredReferencePreparation):
+                raise ValueError("Case has no altered reference preparation")
+            preparation.to_data()
+            destination = selected_reference(self.case, self.sources)
+            key = destination.root, destination.path
+            effect = next(
+                effect
+                for effect in self.case.effects.effects
+                if isinstance(effect, SkillEffect) and effect.destination == preparation.destination
+            )
+            relative = destination.path.removeprefix(effect.destination.path + "/references/")
+            source_path = effect.references + "/" + relative
+            source = retained_bytes(self.sources, "subject", source_path)
+            if retained_bytes(first_after, *key) != source:
+                raise ValueError("First reference differs from retained source")
+            altered = Expectation(
+                "file", *key, "intermediate", "case:source+suffix", source + preparation.suffix
+            )
+            restored = Expectation(
+                "file", *key, "reinstall", "source:subject:" + source_path, source
+            )
+            operation = BoundFileAppend(
+                hashlib.sha256(case_bytes).hexdigest(),
+                observation_ref,
+                destination,
+                hashlib.sha256(source).hexdigest(),
+                preparation.suffix,
+            )
+            operation.verify_binding(case_bytes, first_after)
+            return PreparationPlan(
+                operation,
+                _transition(installed, first_after, altered, "intermediate"),
+                _transition(installed, first_after, restored, "reinstall"),
+            )
+        except (ValueError, UnicodeError, StopIteration) as exc:
+            return PreparationBlocked(str(exc))
+
+
+def repair_scenario_from_case(
+    case: EffectInstallCase, sources: FilesystemSnapshot
+) -> MarkdownRepairScenario | MissingReferenceScenario | AlteredReferenceScenario:
+    preparation = case.intermediate_preparation
+    if preparation is None:
+        raise ValueError("Case has no intermediate preparation")
+    if isinstance(preparation, MissingReferencePreparation):
+        return MissingReferenceScenario(case, sources)
+    if isinstance(preparation, AlteredReferencePreparation):
+        return AlteredReferenceScenario(case, sources)
+    if preparation.kind == "missing-markdown-section":
+        return MissingSectionScenario(case, sources)
+    if preparation.kind == "altered-markdown-body":
+        if not isinstance(preparation.body, bytes):
+            raise ValueError("Altered scenario requires body bytes")
+        return AlteredBodyScenario(case, sources, preparation.body)
+    raise ValueError("Unsupported repair scenario")

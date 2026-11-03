@@ -7,11 +7,15 @@ from pathlib import Path
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileAppend,
     BoundFileRemoval,
     BoundMutation,
     PerformedMutation,
 )
-from tools.install_sandbox.contracts.intermediate import IntermediatePreparation
+from tools.install_sandbox.contracts.intermediate import (
+    AlteredReferencePreparation,
+    IntermediatePreparation,
+)
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.rules.expectation_builder import selected_reference
 
@@ -24,15 +28,11 @@ def _path(operation: BoundMutation, environment: EffectEnvironment) -> Path:
     return path
 
 
-def apply_mutation(
-    operation: BoundMutation,
-    environment: EffectEnvironment,
-    case_bytes: bytes,
-    first_after: FilesystemSnapshot,
-    sources: FilesystemSnapshot,
+def _validate_destination(
+    operation: BoundMutation, environment: EffectEnvironment, sources: FilesystemSnapshot
 ) -> None:
     preparation = environment.case.intermediate_preparation
-    if isinstance(operation, BoundFileRemoval):
+    if isinstance(operation, (BoundFileRemoval, BoundFileAppend)):
         destination = selected_reference(environment.case, sources)
     else:
         if not isinstance(preparation, IntermediatePreparation):
@@ -40,6 +40,21 @@ def apply_mutation(
         destination = preparation.destination
     if destination != operation.destination:
         raise ValueError("Operation destination differs from case and retained sources")
+    if isinstance(operation, BoundFileAppend) and (
+        not isinstance(preparation, AlteredReferencePreparation)
+        or operation.suffix != preparation.suffix
+    ):
+        raise ValueError("Operation suffix differs from case preparation")
+
+
+def apply_mutation(
+    operation: BoundMutation,
+    environment: EffectEnvironment,
+    case_bytes: bytes,
+    first_after: FilesystemSnapshot,
+    sources: FilesystemSnapshot,
+) -> None:
+    _validate_destination(operation, environment, sources)
     retained = operation.verify_binding(case_bytes, first_after)
     path = _path(operation, environment)
     if not path.is_file():
@@ -51,6 +66,9 @@ def apply_mutation(
             raise ValueError("File changed since validated observation")
         if isinstance(operation, BoundFileRemoval):
             path.unlink()
+        elif isinstance(operation, BoundFileAppend):
+            stream.seek(0, os.SEEK_END)
+            stream.write(operation.suffix)
         else:
             stream.seek(0)
             stream.write(

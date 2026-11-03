@@ -57,6 +57,7 @@ def test_phase_continuity_tampering_is_rejected(proof: Path) -> None:
         "explicit-expectations-v3",
         "explicit-expectations-v5",
         "explicit-expectations-v6",
+        "explicit-expectations-v8",
     ],
 )
 def test_historical_transport_is_explicitly_rejected(proof: Path, version: str) -> None:

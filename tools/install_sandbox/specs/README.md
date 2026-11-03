@@ -54,9 +54,10 @@ The coordinator constructs the cases before allocating campaign output.
 `reinstall` is always constructed. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
-A skill additionally makes `missing-reference` available, independently of the
-Markdown count. Without a skill, that case is not applicable. Each constructed
-case has two dependent installation steps. Effects select the behavior;
+A skill additionally makes `missing-reference` and `altered-reference` available,
+in that order, independently of the Markdown count. Without a skill, those cases
+are not applicable. Each constructed case has two dependent installation steps.
+Effects select the behavior;
 filenames, subject identities and invocation words do not.
 
 `missing-reference` removes one representative reference: the first regular file
@@ -66,7 +67,16 @@ installer call. An empty or incomplete bundle stops initial preparation with a
 validation diagnostic: the case is `not_run` and the campaign is `incomplete`.
 Multiple skills remain unsupported by the common engine.
 
-After a conforming installation, the engine binds removal to the case, observed
+`altered-reference` uses the same source inventory and lexical selection. After
+a conforming first installation it appends exactly `b"\nSandbox repair witness.\n"`
+to the selected installed file. Empty and binary source files are supported,
+including files already containing that witness. Preparation must preserve every
+other entry and permit no removals. The second installation must restore the
+exact source bytes without adding a reference backup. Neither case creates a
+personal witness inside `references/`; preservation of extra user files there
+would be a distinct behavior.
+
+For `missing-reference`, the engine binds removal to the case, observed
 file bytes and exact destination selected from retained sources. Only that file
 may disappear during preparation; its directory and every other entry in HOME
 and PROJECT must remain unchanged. Reinstallation requires exact source bytes
@@ -80,7 +90,7 @@ installs its package and binds source files and `METADATA` to the executable.
 Local Component tests substitute a controlled transport at the harness boundary;
 there is no public local-execution backend. Historical real CodeBuddy campaigns
 qualified the three earlier cases with the corrected product. The added
-reference-removal case has Component validation only; it has not been qualified
+reference repair cases have Component validation only; they have not been qualified
 with a real installer or Docker campaign.
 
 For the Amp project campaign, use a separate subject context with:
@@ -141,11 +151,11 @@ validates phase continuity and recalculates verdicts. Partial failures retain th
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
 
-The current formats are case `explicit-expectations-v6`, expectations
-`explicit-expectations-v4`, prepared operation `prepared-mutation-v1`, performed
-result `performed-mutation-v1`, and case evidence `explicit-expectations-v8`.
-Mutation records discriminate Markdown modification from file removal. Campaign
-format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
+The current formats are case `explicit-expectations-v7`, expectations
+`explicit-expectations-v4`, prepared operation `prepared-mutation-v2`, performed
+result `performed-mutation-v2`, and case evidence `explicit-expectations-v9`.
+Mutation records discriminate Markdown modification, file removal and file append.
+Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
 independently reconstructs the reference selection, operation and expectations.
 
 ## Independent test data

@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileAppend,
     BoundFileRemoval,
     BoundMarkdownMutation,
     BoundMutation,
@@ -68,6 +69,7 @@ def _data(value: object) -> object:
         value,
         (
             BoundMarkdownMutation,
+            BoundFileAppend,
             BoundFileRemoval,
             PerformedMutation,
             ExpectationSet,
@@ -118,7 +120,7 @@ ARTIFACTS = (
         "intermediate/operation.json",
         "operation_retained",
         "json",
-        (BoundMarkdownMutation, BoundFileRemoval),
+        (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend),
         mutation_from_data,
     ),
     ArtifactDescriptor(

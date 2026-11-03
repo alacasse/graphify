@@ -80,10 +80,11 @@ def test_invalid_definition_never_allocates_or_runs_retention(
     run.assert_not_called()
 
 
+@pytest.mark.parametrize("markdown", [True, False])
 def test_definition_retains_case_transports_after_inputs_disappear(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, markdown: bool
 ) -> None:
-    subject, spec, context = arrange(tmp_path)
+    subject, spec, context = arrange(tmp_path, markdown=markdown)
     before = set(tmp_path.rglob("*"))
     with monkeypatch.context() as loading:
         loading.setattr(
@@ -94,17 +95,23 @@ def test_definition_retains_case_transports_after_inputs_disappear(
         )
     assert set(tmp_path.rglob("*")) == before
     spec.unlink()
-    context.write_text("invalid modified context")
+    context.unlink()
     monkeypatch.setattr(
         campaign_definition, "build_effect_cases", Mock(side_effect=AssertionError("rebuilt cases"))
     )
-    transport = ControlledTransport(tmp_path)
+    transport = ControlledTransport(tmp_path, markdown=markdown)
     monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     proof = tmp_path / "proof"
     result = coordinator.InstallTestCoordinator().run_campaign(
         definition=definition, output_directory=proof
     )
     assert result.passed
+    assert len(transport.installer.calls) == (6 if markdown else 2)
+    assert [
+        (case.name, case.construction, case.construction_reason)
+        for case in result.cases
+        if case.construction != "constructed"
+    ] == [(item.name, item.classification, item.reason) for item in definition.built.decisions]
     for case, serialized in zip(definition.built.cases, definition.transports, strict=True):
         assert (proof / "inputs" / f"{case.name}.json").read_text() == serialized
     phases = {timing.phase: timing for timing in result.timings}
@@ -126,6 +133,7 @@ def test_prepare_only_validates_context_but_skips_case_construction(
         spec_file=spec, subject_context_file=context, subject_checkout=subject, prepare_only=True
     )
     assert definition.built.cases == () and definition.transports == ()
+    assert definition.built.decisions == ()
     assert set(tmp_path.rglob("*")) == before
     build.assert_not_called()
 

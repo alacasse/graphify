@@ -44,7 +44,7 @@ def load_campaign_definition(
     if prepare_only and context.package_root is None:
         raise ValueError("Preparation-only requires a package root and exact subject revision")
     built = (
-        EffectCaseBuild((), {})
+        EffectCaseBuild((), ())
         if prepare_only
         else build_effect_cases(effects, context, context.identity)
     )

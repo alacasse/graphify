@@ -86,6 +86,15 @@ def render_campaign(result: CampaignResult) -> str:
         lines.append(result.error)
     for entry in result.cases:
         lines.append(f"\nCase: {entry.name}")
+        if entry.construction != "constructed":
+            label = (
+                "not applicable"
+                if entry.construction == "not_applicable"
+                else "applicable but not constructible"
+            )
+            lines.append(f"  {label}: {entry.construction_reason}")
+            continue
+        lines.append(f"  Construction: constructed; execution: {entry.state}")
         if entry.result is None:
             lines.append(
                 f"  {entry.state}: {entry.not_run_reason or entry.error or 'awaiting result'}"

@@ -12,7 +12,6 @@ import pytest
 from tests.install_sandbox.component.host.native_support import ControlledTransport, arrange
 from tools.install_sandbox.__main__ import main
 from tools.install_sandbox.host import coordinator
-from tools.install_sandbox.host.campaign_definition import load_campaign_definition
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
@@ -109,30 +108,162 @@ def _assert_wrong_root_stops_after_first_command(result: dict[str, Any]) -> None
     assert second["facts"]["command"] is None
 
 
-def test_unavailable_case_reason_is_retained_in_campaign(
+@pytest.mark.parametrize(("hooks", "wrong_skill"), [(False, False), (True, False), (False, True)])
+def test_campaign_without_markdown_preserves_effects_and_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hooks: bool, wrong_skill: bool
+) -> None:
+    subject, spec, context = arrange(tmp_path, markdown=False, hooks=hooks, skill_root="project")
+    transport = ControlledTransport(
+        tmp_path,
+        markdown=False,
+        hooks=hooks,
+        skill_root="home" if wrong_skill else "project",
+    )
+    _assert_partial_campaign(
+        tmp_path,
+        monkeypatch,
+        subject,
+        spec,
+        context,
+        transport,
+        construction="not_applicable",
+        reason="No Markdown effect declared",
+        passed=not wrong_skill,
+        calls=1 if wrong_skill else 2,
+    )
+
+
+def test_multiple_markdown_campaign_runs_reinstall_and_reports_builder_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import copy
+
     import yaml
 
-    subject, spec, context = arrange(tmp_path)
+    subject, spec, context = arrange(tmp_path, markdown_only=True)
     data = yaml.safe_load(spec.read_text())
-    data["effects"] = [effect for effect in data["effects"] if effect["kind"] != "markdown-section"]
+    second = copy.deepcopy(data["effects"][0])
+    second["destination"]["path"] = "SECOND.md"
+    second["source"] = "second-instructions.md"
+    data["effects"].append(second)
     spec.write_text(yaml.safe_dump(data))
-    transport = ControlledTransport(tmp_path)
+    (subject / "second-instructions.md").write_text("## graphify\nSecond synthetic map.\n")
+    transport = ControlledTransport(tmp_path, markdown_only=True)
+    execute = transport.installer.execute
 
+    def install_two(
+        args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> Any:
+        result = execute(args, project, environment, timeout)
+        document = project / "SECOND.md"
+        content = document.read_text()
+        section = "## graphify\nSecond synthetic map.\n"
+        if "Replace this placeholder." in content:
+            document.write_text(
+                content.replace("## graphify\nReplace this placeholder.\n\n", section)
+            )
+        elif "## graphify" not in content:
+            document.write_text(content + "\n" + section)
+        return result
+
+    transport.installer.execute = install_two
+    _assert_partial_campaign(
+        tmp_path,
+        monkeypatch,
+        subject,
+        spec,
+        context,
+        transport,
+        construction="unconstructible",
+        reason="The case builder currently supports only one Markdown effect",
+        passed=False,
+        calls=2,
+    )
+
+
+def _assert_partial_campaign(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    subject: Path,
+    spec: Path,
+    context: Path,
+    transport: ControlledTransport,
+    *,
+    construction: str,
+    reason: str,
+    passed: bool,
+    calls: int,
+) -> None:
     def harness(**kwargs: object) -> ControlledTransport:
         return transport
 
     monkeypatch.setattr(coordinator, "ContainerHarness", harness)
-    result = coordinator.InstallTestCoordinator().run_campaign(
-        definition=load_campaign_definition(
-            spec_file=spec, subject_context_file=context, subject_checkout=subject
-        ),
-        output_directory=tmp_path / "proof",
+    output = root / "published"
+    assert main(
+        [
+            "--spec",
+            str(spec),
+            "--subject-context",
+            str(context),
+            "--repo",
+            str(subject),
+            "--output",
+            str(output),
+        ]
+    ) == (0 if passed else 1)
+    assert len(transport.installer.calls) == calls
+    report = json.loads((output / "campaign.json").read_text())
+    external_text = (output / "campaign.txt").read_text()
+    assert report["version"] == 3
+    assert report["passed"] is passed
+    first, *repairs = report["cases"]
+    expected_status = "failed" if calls == 1 else "passed"
+    assert first["result"]["test"]["status"] == expected_status
+    if calls == 1:
+        _assert_wrong_root_stops_after_first_command(first["result"]["test"])
+    assert [case["name"] for case in repairs] == ["missing-section", "altered-section"]
+    for case in repairs:
+        assert case["construction"] == construction
+        assert case["construction_reason"] == reason
+        assert all(case[field] is None for field in ("state", "result", "output_directory"))
+    shutil.rmtree(subject)
+    spec.unlink()
+    context.unlink()
+    assert not transport.executable.exists()
+    assert not (root / "environment").exists()
+    _assert_archived_partial_campaign(root, output, report, external_text, construction, reason)
+
+
+def _assert_archived_partial_campaign(
+    root: Path,
+    output: Path,
+    report: dict[str, Any],
+    external_text: str,
+    construction: str,
+    reason: str,
+) -> None:
+    first, *repairs = report["cases"]
+    restored = root / "restored"
+    with zipfile.ZipFile(output / "evidence.zip") as archive:
+        archive.extractall(restored)
+        names = archive.namelist()
+    archived = json.loads((restored / "evidence/campaign.json").read_text())
+    assert archived["version"] == 3
+    assert archived["cases"][1:] == repairs
+    archived_text = (restored / "evidence/campaign.txt").read_text()
+    label = (
+        "not applicable" if construction == "not_applicable" else "applicable but not constructible"
     )
-    unavailable = next(case for case in result.cases if case.name == "missing-section")
-    assert unavailable.state == "not_run"
-    assert unavailable.not_run_reason == "Requires exactly one Markdown section effect"
-    assert not result.passed
-    saved = json.loads((tmp_path / "proof/campaign.json").read_text())
-    assert saved["cases"][1]["not_run_reason"] == unavailable.not_run_reason
+    for text in (external_text, archived_text):
+        assert label in text and reason in text
+    assert not any(
+        name.startswith(f"evidence/cases/{case['name']}")
+        or name == f"evidence/inputs/{case['name']}.json"
+        for case in repairs
+        for name in names
+    )
+    reread = read_evidence(restored / "evidence/cases/reinstall")
+    decoded = asdict(reread)
+    decoded["preparation"] = reread.preparation.to_data()
+    decoded["steps"] = [step.to_data() for step in reread.steps]
+    assert decoded == first["result"]["test"]

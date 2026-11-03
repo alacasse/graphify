@@ -5,14 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from tools.install_sandbox.rules.effect_verifier import EffectVerifier
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.rules.expectation_builder import build_install_expectations
-from tools.install_sandbox.rules.repair_scenario import (
-    PreparationBlocked,
-    PreparationPlan,
-    MarkdownRepairScenario,
-)
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import (
     EffectInstallCase,
     EffectRules,
@@ -25,7 +18,14 @@ from tools.install_sandbox.contracts.effects import (
     MarkdownSectionEffect,
     SkillEffect,
 )
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.expectation_builder import build_install_expectations
+from tools.install_sandbox.rules.repair_scenario import (
+    MarkdownRepairScenario,
+    PreparationBlocked,
+    PreparationPlan,
+)
 
 ROOTS = {"home": "/sandbox/home", "project": "/sandbox/project"}
 BEFORE = b"## Personal before\nKeep before.\n\n"
@@ -145,10 +145,10 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
         case.subject,
     )
     assert [built.name for built in empty.cases] == ["reinstall"]
-    assert empty.unavailable == {
-        name: "Requires exactly one Markdown section effect"
+    assert [(item.name, item.classification, item.reason) for item in empty.decisions] == [
+        (name, "not_applicable", "No Markdown effect declared")
         for name in ("missing-section", "altered-section")
-    }
+    ]
 
 
 def test_operation_hashes_exact_archived_case_bytes() -> None:

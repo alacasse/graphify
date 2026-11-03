@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import (
     EffectInstallCase,
     EffectRules,
@@ -19,7 +20,6 @@ from tools.install_sandbox.contracts.effects import (
     MarkdownSectionEffect,
     SkillEffect,
 )
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
@@ -290,10 +290,10 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
     )
     built = build_effect_cases(spec, context())
     assert [case.name for case in built.cases] == ["reinstall"]
-    assert built.unavailable == {
-        "missing-section": "Requires exactly one Markdown section effect",
-        "altered-section": "Requires exactly one Markdown section effect",
-    }
+    assert [(item.name, item.classification, item.reason) for item in built.decisions] == [
+        (name, "unconstructible", "The case builder currently supports only one Markdown effect")
+        for name in ("missing-section", "altered-section")
+    ]
 
 
 @pytest.mark.parametrize("change", ["kind", "missing-body", "invalid-body", "extra"])

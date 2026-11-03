@@ -71,11 +71,67 @@ def _collect_result(
 @dataclass
 class CampaignCase:
     name: str
-    output_directory: Path
+    output_directory: Path | None
     result: CoordinatedResult | None = None
     not_run_reason: str | None = None
-    state: Literal["pending", "running", "finished", "not_run", "incomplete"] = "pending"
+    state: Literal["pending", "running", "finished", "not_run", "incomplete"] | None = "pending"
     error: str | None = None
+    construction: Literal["constructed", "not_applicable", "unconstructible"] = "constructed"
+    construction_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        if self.construction == "constructed":
+            if self.output_directory is None or self.state is None:
+                raise ValueError("Constructed case requires execution state and evidence path")
+            if self.construction_reason is not None:
+                raise ValueError("Constructed case cannot have a non-construction reason")
+            return
+        if self.construction not in {"not_applicable", "unconstructible"}:
+            raise ValueError("Invalid case construction classification")
+        if not self.construction_reason or not self.construction_reason.strip():
+            raise ValueError("Non-constructed case requires a reason")
+        if any(
+            value is not None
+            for value in (
+                self.state,
+                self.result,
+                self.output_directory,
+                self.not_run_reason,
+                self.error,
+            )
+        ):
+            raise ValueError("Non-constructed case cannot carry execution or evidence")
+
+
+def _case_entries(cases: list[CampaignCase]) -> dict[str, CampaignCase]:
+    entries: dict[str, CampaignCase] = {}
+    for entry in cases:
+        entry.validate()
+        if entry.name in entries:
+            raise ValueError("Duplicate campaign case name")
+        entries[entry.name] = entry
+    return entries
+
+
+def _cases_passed(cases: list[CampaignCase]) -> bool:
+    try:
+        entries = _case_entries(cases)
+    except ValueError:
+        return False
+    applicable = [entry for entry in entries.values() if entry.construction != "not_applicable"]
+    return bool(applicable) and all(
+        entry.construction == "constructed"
+        and entry.state == "finished"
+        and entry.error is None
+        and entry.not_run_reason is None
+        and entry.result is not None
+        and entry.result.output_directory == entry.output_directory
+        and entry.result.passed
+        for entry in applicable
+    )
 
 
 @dataclass
@@ -128,8 +184,7 @@ class CampaignResult:
             and self.preparation is not None
             and self.preparation.state == "completed"
             and self.preparation.cleanup_complete
-            and bool(self.cases)
-            and all(c.result is not None and c.result.passed for c in self.cases)
+            and _cases_passed(self.cases)
             and self.cleanup is not None
             and self.cleanup.state == "completed"
             and self.cleanup.cleanup_complete
@@ -137,7 +192,7 @@ class CampaignResult:
 
     def payload(self) -> dict[str, object]:
         return {
-            "version": 2,
+            "version": 3,
             "passed": self.passed,
             "status": self.status,
             **asdict(self, dict_factory=_campaign_fields),
@@ -202,8 +257,14 @@ class InstallTestCoordinator:
             output,
             [CampaignCase(c.name, output / "cases" / c.name) for c in built.cases]
             + [
-                CampaignCase(name, output / "cases" / name, not_run_reason=reason, state="not_run")
-                for name, reason in built.unavailable.items()
+                CampaignCase(
+                    decision.name,
+                    None,
+                    state=None,
+                    construction=decision.classification,
+                    construction_reason=decision.reason,
+                )
+                for decision in built.decisions
             ],
             timings=([construction_timing] if construction_timing is not None else [])
             + [materialization],
@@ -289,13 +350,16 @@ class InstallTestCoordinator:
         progress: Callable[[CampaignResult], None] | None,
     ) -> None:
         assert result.preparation is not None
+        entries = _associate_cases(cases, result.cases)
         if result.preparation.state != "completed" or not result.preparation.cleanup_complete:
             self._skip_remaining(
                 result, "Common preparation unavailable: " + result.preparation.detail
             )
             _save_progress(result, progress)
             return
-        for case, entry in zip(cases, result.cases[: len(cases)], strict=True):
+        for case in cases:
+            entry = entries[case.name]
+            assert entry.output_directory is not None
             if harness.interrupted:
                 self._skip_remaining(result, "Campaign interrupted")
                 break
@@ -344,10 +408,25 @@ class InstallTestCoordinator:
     @staticmethod
     def _skip_remaining(result: CampaignResult, reason: str) -> None:
         for entry in result.cases:
+            if entry.construction != "constructed":
+                continue
             if entry.state == "running":
                 entry.state, entry.error = "incomplete", reason
             elif entry.result is None and entry.state != "not_run":
                 entry.state, entry.not_run_reason = "not_run", reason
+
+
+def _associate_cases(
+    cases: list[EffectInstallCase], entries: list[CampaignCase]
+) -> dict[str, CampaignCase]:
+    indexed = _case_entries(entries)
+    names = [case.name for case in cases]
+    if len(names) != len(set(names)):
+        raise ValueError("Duplicate constructed case name")
+    constructed = {name for name, entry in indexed.items() if entry.construction == "constructed"}
+    if constructed != set(names):
+        raise ValueError("Constructed campaign entries do not match the supplied cases")
+    return indexed
 
 
 def _check_campaign_paths(subject: Path, destination: Path, output: Path) -> None:

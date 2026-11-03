@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 from tools.install_sandbox.contracts.effects import (
     EffectSpec,
@@ -293,9 +293,27 @@ def build_reinstall_case(
 
 
 @dataclass(frozen=True)
+class CaseNonConstruction:
+    name: str
+    classification: Literal["not_applicable", "unconstructible"]
+    reason: str
+
+    def __post_init__(self) -> None:
+        text(self.name)
+        text(self.reason)
+        if self.classification not in {"not_applicable", "unconstructible"}:
+            raise ValueError("Invalid case non-construction classification")
+
+
+@dataclass(frozen=True)
 class EffectCaseBuild:
     cases: tuple[EffectInstallCase, ...]
-    unavailable: dict[str, str]
+    decisions: tuple[CaseNonConstruction, ...]
+
+    def __post_init__(self) -> None:
+        names = [case.name for case in self.cases] + [item.name for item in self.decisions]
+        if len(names) != len(set(names)):
+            raise ValueError("Duplicate campaign case name")
 
 
 def build_effect_cases(
@@ -307,10 +325,16 @@ def build_effect_cases(
     if len(markdown) != 1:
         return EffectCaseBuild(
             (reinstall,),
-            {
-                name: "Requires exactly one Markdown section effect"
+            tuple(
+                CaseNonConstruction(
+                    name,
+                    "not_applicable" if not markdown else "unconstructible",
+                    "No Markdown effect declared"
+                    if not markdown
+                    else "The case builder currently supports only one Markdown effect",
+                )
                 for name in ("missing-section", "altered-section")
-            },
+            ),
         )
     effect = markdown[0]
     preparation = IntermediatePreparation(
@@ -343,4 +367,4 @@ def build_effect_cases(
             body=b"\nSandbox altered Markdown section.\n\n",
         ),
     )
-    return EffectCaseBuild((reinstall, missing, altered), {})
+    return EffectCaseBuild((reinstall, missing, altered), ())

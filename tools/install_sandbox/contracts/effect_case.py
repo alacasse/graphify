@@ -13,7 +13,11 @@ from tools.install_sandbox.contracts.effects import (
     SkillEffect,
     physical_destinations,
 )
-from tools.install_sandbox.contracts.intermediate import IntermediatePreparation
+from tools.install_sandbox.contracts.intermediate import (
+    IntermediatePreparation,
+    MissingReferencePreparation,
+    preparation_from_data,
+)
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 
 
@@ -226,11 +230,11 @@ class EffectInstallCase:
     subject: SubjectContext
     initial_files: list[InitialFile]
     operations: list[str]
-    intermediate_preparation: IntermediatePreparation | None = None
+    intermediate_preparation: IntermediatePreparation | MissingReferencePreparation | None = None
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v5"
+        data["format"] = "explicit-expectations-v6"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -251,7 +255,7 @@ class EffectInstallCase:
             "format name target scope effects subject initial_files operations "
             "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v5":
+        if data["format"] != "explicit-expectations-v6":
             raise ValueError("Unsupported effects case format or operation")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
@@ -263,7 +267,7 @@ class EffectInstallCase:
             raise ValueError("Unsupported effects case")
         case = matches[0]
         preparation = data["intermediate_preparation"]
-        parsed = None if preparation is None else IntermediatePreparation.from_data(preparation)
+        parsed = None if preparation is None else preparation_from_data(preparation)
         if (
             parsed != case.intermediate_preparation
             or data["scope"] != case.scope
@@ -322,9 +326,28 @@ def build_effect_cases(
     """Derive applicable native cases from effects and supported subject rules."""
     reinstall = build_reinstall_case(spec, subject, target)
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
+    skills = [e for e in spec.effects if isinstance(e, SkillEffect)]
+    reference_cases = (
+        (
+            replace(
+                reinstall,
+                name="missing-reference",
+                intermediate_preparation=MissingReferencePreparation(skills[0].destination),
+            ),
+        )
+        if skills
+        else ()
+    )
+    reference_decisions = (
+        ()
+        if skills
+        else (
+            CaseNonConstruction("missing-reference", "not_applicable", "No skill effect declared"),
+        )
+    )
     if len(markdown) != 1:
         return EffectCaseBuild(
-            (reinstall,),
+            (reinstall, *reference_cases),
             tuple(
                 CaseNonConstruction(
                     name,
@@ -334,7 +357,8 @@ def build_effect_cases(
                     else "The case builder currently supports only one Markdown effect",
                 )
                 for name in ("missing-section", "altered-section")
-            ),
+            )
+            + reference_decisions,
         )
     effect = markdown[0]
     preparation = IntermediatePreparation(
@@ -367,4 +391,4 @@ def build_effect_cases(
             body=b"\nSandbox altered Markdown section.\n\n",
         ),
     )
-    return EffectCaseBuild((reinstall, missing, altered), ())
+    return EffectCaseBuild((reinstall, missing, altered, *reference_cases), reference_decisions)

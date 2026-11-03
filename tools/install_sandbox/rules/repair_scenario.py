@@ -5,12 +5,20 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
+from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileRemoval,
+    BoundMarkdownMutation,
+    BoundMutation,
+)
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import MarkdownSectionEffect
 from tools.install_sandbox.contracts.expectations import (
     Expectation,
     ExpectationSet,
+)
+from tools.install_sandbox.contracts.intermediate import (
+    IntermediatePreparation,
+    MissingReferencePreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
@@ -19,6 +27,7 @@ from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     preservation_baseline,
     retained_bytes,
+    selected_reference,
 )
 
 
@@ -29,7 +38,7 @@ class PreparationBlocked:
 
 @dataclass(frozen=True)
 class PreparationPlan:
-    operation: BoundMarkdownMutation
+    operation: BoundMutation
     after_preparation_expectations: ExpectationSet
     second_install_expectations: ExpectationSet
 
@@ -104,8 +113,8 @@ class MarkdownRepairScenario(ABC):
     ) -> PreparationPlan:
         case, sources = self.case, self.sources
         preparation = case.intermediate_preparation
-        if preparation is None:
-            raise ValueError("Case has no intermediate preparation")
+        if not isinstance(preparation, IntermediatePreparation):
+            raise ValueError("Case has no Markdown preparation")
         destination = preparation.destination
         document = retained_bytes(first_after, destination.root, destination.path)
         parts = markdown_byte_parts(document, preparation.marker)
@@ -158,10 +167,12 @@ class MarkdownRepairScenario(ABC):
     @classmethod
     def from_case(
         cls, case: EffectInstallCase, sources: FilesystemSnapshot
-    ) -> "MarkdownRepairScenario":
+    ) -> "MarkdownRepairScenario | MissingReferenceScenario":
         preparation = case.intermediate_preparation
         if preparation is None:
             raise ValueError("Case has no intermediate preparation")
+        if isinstance(preparation, MissingReferencePreparation):
+            return MissingReferenceScenario(case, sources)
         if preparation.kind == "missing-markdown-section":
             return MissingSectionScenario(case, sources)
         if preparation.kind == "altered-markdown-body":
@@ -180,7 +191,7 @@ class MissingSectionScenario(MarkdownRepairScenario):
 
     def expected_preparation(self) -> bytes:
         preparation = self.case.intermediate_preparation
-        assert preparation is not None
+        assert isinstance(preparation, IntermediatePreparation)
         return preparation.before + preparation.after
 
 
@@ -191,7 +202,7 @@ class AlteredBodyScenario(MarkdownRepairScenario):
 
     def mutation(self, parts: tuple[bytes, bytes, bytes], document: bytes):
         preparation = self.case.intermediate_preparation
-        assert preparation is not None
+        assert isinstance(preparation, IntermediatePreparation)
         header = preparation.marker.encode("utf-8") + b"\n"
         if not parts[1].startswith(header):
             raise ValueError("Section has no applicable LF-terminated body")
@@ -202,7 +213,7 @@ class AlteredBodyScenario(MarkdownRepairScenario):
 
     def expected_preparation(self) -> bytes:
         preparation = self.case.intermediate_preparation
-        assert preparation is not None
+        assert isinstance(preparation, IntermediatePreparation)
         return (
             preparation.before
             + preparation.marker.encode("utf-8")
@@ -210,3 +221,50 @@ class AlteredBodyScenario(MarkdownRepairScenario):
             + self.altered_body
             + preparation.after
         )
+
+
+@dataclass(frozen=True)
+class MissingReferenceScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            if EffectInstallCase.from_json(case_bytes.decode("utf-8")) != self.case:
+                raise ValueError("Archived case differs from unchanged case definition")
+            if installed.phase != "install" or installed.roots is None:
+                raise ValueError("Preparation requires bound first-install expectations")
+            actual = EffectVerifier().verify(installed, first_after)
+            if not _conforming(validation) or not _conforming(actual) or validation != actual:
+                raise ValueError("Preparation requires a conforming verdict for this observation")
+            destination = selected_reference(self.case, self.sources)
+            content = retained_bytes(first_after, destination.root, destination.path)
+            key = destination.root, destination.path
+            absent = Expectation("absent", *key, "intermediate", "case:missing-reference")
+            intermediate = replace(
+                _transition(installed, first_after, absent, "intermediate"),
+                allowed_changes=(),
+                allowed_removals=(key,),
+            )
+            restored = replace(
+                installed.in_phase("reinstall"),
+                allowed_changes=(key,),
+                baseline=preservation_baseline(first_after, "reinstall"),
+            )
+            operation = BoundFileRemoval(
+                hashlib.sha256(case_bytes).hexdigest(),
+                observation_ref,
+                destination,
+                hashlib.sha256(content).hexdigest(),
+            )
+            operation.verify_binding(case_bytes, first_after)
+            return PreparationPlan(operation, intermediate, restored)
+        except (ValueError, UnicodeError) as exc:
+            return PreparationBlocked(str(exc))

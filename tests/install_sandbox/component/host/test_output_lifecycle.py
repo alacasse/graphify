@@ -38,14 +38,14 @@ def test_archive_is_readable_after_move_and_extraction(
     assert read_evidence(evidence / "cases/reinstall").status == "passed"
     assert read_evidence(evidence / "cases/missing-section").status == "passed"
     assert read_evidence(evidence / "cases/altered-section").status == "passed"
+    assert read_evidence(evidence / "cases/missing-reference").status == "passed"
     payload = json.loads((output / "campaign.json").read_text())
-    assert (
-        payload["passed"] and payload["cases"][0]["output_directory"] == "evidence/cases/reinstall"
-    )
+    reinstall = next(case for case in payload["cases"] if case["name"] == "reinstall")
+    assert payload["passed"] and reinstall["output_directory"] == "evidence/cases/reinstall"
     timings = {item["phase"]: item for item in payload["timings"]}
     assert timings["construction"]["state"] == "measured"
     assert timings["materialization"]["state"] == "measured"
-    assert len(payload["output_lifecycle"]["writers"]) == 4
+    assert len(payload["output_lifecycle"]["writers"]) == 5
     assert all(w["state"] == "stopped" for w in payload["output_lifecycle"]["writers"])
 
 
@@ -109,7 +109,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 4
+        == 5
     )
 
 
@@ -131,6 +131,5 @@ def test_failed_case_is_archived_after_confirmed_writer_cleanup(
     assert all(writer.state == "stopped" for writer in result.report.writers)
     with zipfile.ZipFile(result.output_directory / "evidence.zip") as archive:
         payload = json.loads(archive.read("evidence/campaign.json"))
-    assert (
-        payload["passed"] is False and payload["cases"][0]["result"]["test"]["status"] == "passed"
-    )
+    reinstall = next(case for case in payload["cases"] if case["name"] == "reinstall")
+    assert payload["passed"] is False and reinstall["result"]["test"]["status"] == "passed"

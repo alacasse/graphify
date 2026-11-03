@@ -72,17 +72,18 @@ def run_stopped(
     stopped_writers: list[Writer] = []
     original_write = cast(Callable[[Writer, str, object], None], vars(Writer)["_write_json"])
     original_bytes = cast(Callable[..., None], vars(Writer)["_write_bytes"])
-    original_mutate = transition.apply_markdown_mutation
+    original_mutate = transition.apply_mutation
 
     def mutate(
         operation: BoundMarkdownMutation,
         environment: EffectEnvironment,
         case_bytes: bytes,
         first_after: FilesystemSnapshot,
+        sources: FilesystemSnapshot,
     ) -> None:
         nonlocal mutations
         mutations += 1
-        original_mutate(operation, environment, case_bytes, first_after)
+        original_mutate(operation, environment, case_bytes, first_after, sources)
 
     def publish(writer: Writer, relative: str, value: object) -> None:
         nonlocal writes
@@ -127,7 +128,7 @@ def run_stopped(
             raise ProcessStopped()
 
     monkeypatch.setattr(Writer, "_write_bytes", publish_bytes)
-    monkeypatch.setattr(transition, "apply_markdown_mutation", mutate)
+    monkeypatch.setattr(transition, "apply_mutation", mutate)
     monkeypatch.setattr(Writer, "_write_json", publish)
     kwargs = dict(
         reference_sources=subject,

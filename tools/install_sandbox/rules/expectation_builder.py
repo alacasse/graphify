@@ -7,11 +7,16 @@ from pathlib import PurePosixPath
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import (
+    Destination,
     JsonHooksEffect,
     MarkdownSectionEffect,
     SkillEffect,
 )
 from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
+from tools.install_sandbox.contracts.intermediate import (
+    IntermediatePreparation,
+    MissingReferencePreparation,
+)
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
 
@@ -126,6 +131,8 @@ def build_initial_expectations(
 ) -> ExpectationSet:
     """Validate source construction and describe the prepared, uninstalled state."""
     _source_constraints(case, sources)
+    if isinstance(case.intermediate_preparation, MissingReferencePreparation):
+        selected_reference(case, sources)
     constraints = [
         Expectation(
             "file",
@@ -241,7 +248,10 @@ def build_install_expectations(
             constraints.extend(_skill_constraints(case, effect, sources))
         elif isinstance(effect, MarkdownSectionEffect):
             preparation = case.intermediate_preparation
-            if preparation is not None and preparation.destination == effect.destination:
+            if (
+                isinstance(preparation, IntermediatePreparation)
+                and preparation.destination == effect.destination
+            ):
                 constraints.append(
                     Expectation(
                         "file",
@@ -309,4 +319,36 @@ def build_reinstall_expectations(
         installed.in_phase("reinstall"),
         allowed_changes=(),
         baseline=preservation_baseline(first_after, "reinstall"),
+    )
+
+
+def selected_reference(case: EffectInstallCase, sources: FilesystemSnapshot) -> Destination:
+    """Select from the complete retained source inventory, never installed output."""
+    preparation = case.intermediate_preparation
+    if not isinstance(preparation, MissingReferencePreparation):
+        raise ValueError("Case has no reference preparation")
+    preparation.to_data()
+    _source_constraints(case, sources)
+    effect = next(
+        (
+            e
+            for e in case.effects.effects
+            if isinstance(e, SkillEffect) and e.destination == preparation.destination
+        ),
+        None,
+    )
+    if effect is None:
+        raise ValueError("Reference preparation requires matching skill effect")
+    paths = sorted(
+        entry["path"]
+        for entry in sources.entries
+        if entry["root"] == "subject"
+        and entry["kind"] == "file"
+        and entry["path"].startswith(effect.references + "/")
+    )
+    if not paths:
+        raise ValueError("Missing-reference requires a nonempty source reference bundle")
+    return Destination(
+        effect.destination.root,
+        effect.destination.path + "/references/" + paths[0][len(effect.references) + 1 :],
     )

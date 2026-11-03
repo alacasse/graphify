@@ -10,8 +10,8 @@ from tests.install_sandbox.component.host.native_support import LiteralInstaller
 from tools.install_sandbox.container import intermediate_execution
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
+from tools.install_sandbox.container.file_mutation import apply_mutation
 from tools.install_sandbox.container.installer import InstallerDriver
-from tools.install_sandbox.container.markdown_mutation import apply_markdown_mutation
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
@@ -51,7 +51,7 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
     case.write(case_file)
     installer = LiteralInstaller()
     fault = vector.get("fault")
-    original_apply = apply_markdown_mutation
+    original_apply = apply_mutation
     original_retain = TestResultWriter.retain
 
     def apply(
@@ -59,8 +59,9 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
         environment: EffectEnvironment,
         case_bytes: bytes,
         first_after: FilesystemSnapshot,
+        sources: FilesystemSnapshot,
     ) -> None:
-        original_apply(operation, environment, case_bytes, first_after)
+        original_apply(operation, environment, case_bytes, first_after, sources)
         if fault == "wrong-mutation":
             (environment.project / "GUIDE.md").write_text("Wrong mutation.\n")
 
@@ -75,7 +76,7 @@ def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
         return original_retain(writer, artifact)
 
     with (
-        patch.object(intermediate_execution, "apply_markdown_mutation", apply),
+        patch.object(intermediate_execution, "apply_mutation", apply),
         patch.object(TestResultWriter, "retain", retain),
     ):
         result = InstallTestRunner(InstallerDriver(installer.execute)).run_case(

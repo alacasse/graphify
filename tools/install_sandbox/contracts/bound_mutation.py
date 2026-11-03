@@ -4,6 +4,7 @@ import base64
 import hashlib
 import re
 from dataclasses import dataclass
+from typing import cast
 
 from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -52,7 +53,8 @@ class BoundMarkdownMutation:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-byte-range-v2",
+            "format": "prepared-mutation-v1",
+            "kind": "markdown",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
             "destination": {"root": self.destination.root, "path": self.destination.path},
@@ -66,9 +68,10 @@ class BoundMarkdownMutation:
     def from_data(cls, value: object) -> "BoundMarkdownMutation":
         data = fields(
             value,
-            "format case_sha256 observation_ref destination document_sha256 start end replacement",
+            "format kind case_sha256 observation_ref destination document_sha256 "
+            "start end replacement",
         )
-        if data["format"] != "prepared-byte-range-v2":
+        if data["format"] != "prepared-mutation-v1" or data["kind"] != "markdown":
             raise ValueError("Unsupported prepared operation")
         if type(data["start"]) is not int or type(data["end"]) is not int:
             raise ValueError("Expected integer byte bounds")
@@ -84,44 +87,121 @@ class BoundMarkdownMutation:
 
 
 @dataclass(frozen=True)
-class PerformedMutation:
-    """Retained actual mutation identity and physical result, separate from the oracle."""
-
-    operation: BoundMarkdownMutation
+class BoundFileRemoval:
+    case_sha256: str
+    observation_ref: str
+    destination: Destination
     document_sha256: str
 
     def __post_init__(self) -> None:
-        if re.fullmatch(r"[0-9a-f]{64}", self.document_sha256) is None:
+        for digest in (self.case_sha256, self.document_sha256):
+            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("Expected exact SHA-256 digest")
+        relative_path(self.observation_ref)
+
+    def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
+        if self.case_sha256 != hashlib.sha256(case_bytes).hexdigest():
+            raise ValueError("Operation case digest differs from retained case")
+        if self.observation_ref != "steps/0/after.json":
+            raise ValueError("Operation requires validated first observation")
+        entry = first_after.entry(self.destination.root, self.destination.path)
+        content = first_after.contents.get((self.destination.root, self.destination.path))
+        if entry is None or entry["kind"] != "file" or content is None:
+            raise ValueError("Operation requires retained regular file")
+        if hashlib.sha256(content).hexdigest() != self.document_sha256:
+            raise ValueError("Operation document binding invalid")
+        return content
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "format": "prepared-mutation-v1",
+            "kind": "file-removal",
+            "case_sha256": self.case_sha256,
+            "observation_ref": self.observation_ref,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+            "document_sha256": self.document_sha256,
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "BoundFileRemoval":
+        data = fields(value, "format kind case_sha256 observation_ref destination document_sha256")
+        if data["format"] != "prepared-mutation-v1" or data["kind"] != "file-removal":
+            raise ValueError("Unsupported prepared operation")
+        return cls(
+            text(data["case_sha256"]),
+            text(data["observation_ref"]),
+            Destination.from_data(data["destination"]),
+            text(data["document_sha256"]),
+        )
+
+
+BoundMutation = BoundMarkdownMutation | BoundFileRemoval
+
+
+def mutation_from_data(value: object) -> BoundMutation:
+    if not isinstance(value, dict):
+        raise ValueError("Expected discriminated operation object")
+    incoming = cast(dict[str, object], value)
+    if incoming.get("kind") == "file-removal":
+        return BoundFileRemoval.from_data(incoming)
+    return BoundMarkdownMutation.from_data(incoming)
+
+
+@dataclass(frozen=True)
+class PerformedMutation:
+    """Actual physical result, retained separately from the oracle."""
+
+    operation: BoundMutation
+    document_sha256: str | None
+
+    def __post_init__(self) -> None:
+        if type(self.operation) not in (BoundFileRemoval, BoundMarkdownMutation):
+            raise ValueError("Unsupported performed mutation")
+        if isinstance(self.operation, BoundFileRemoval):
+            if self.document_sha256 is not None:
+                raise ValueError("Removed file cannot have resulting bytes")
+        elif (
+            not isinstance(self.document_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", self.document_sha256) is None
+        ):
             raise ValueError("Expected actual document SHA-256 digest")
 
     def to_data(self) -> dict[str, object]:
-        return {"operation": self.operation.to_data(), "document_sha256": self.document_sha256}
+        return {
+            "format": "performed-mutation-v1",
+            "kind": "file-removal" if isinstance(self.operation, BoundFileRemoval) else "markdown",
+            "operation": self.operation.to_data(),
+            "document_sha256": self.document_sha256,
+        }
 
     @classmethod
     def from_data(cls, value: object) -> "PerformedMutation":
-        data = fields(value, "operation document_sha256")
-        return cls(
-            BoundMarkdownMutation.from_data(data["operation"]), text(data["document_sha256"])
-        )
+        data = fields(value, "format kind operation document_sha256")
+        operation = mutation_from_data(data["operation"])
+        kind = "file-removal" if isinstance(operation, BoundFileRemoval) else "markdown"
+        if data["format"] != "performed-mutation-v1" or data["kind"] != kind:
+            raise ValueError("Unsupported performed operation")
+        digest = data["document_sha256"]
+        return cls(operation, None if digest is None else text(digest))
 
-    def verify(self, operation: BoundMarkdownMutation, observed: "FilesystemSnapshot") -> None:
+    def verify(self, operation: BoundMutation, observed: FilesystemSnapshot) -> None:
         if operation != self.operation:
-            raise ValueError("Retained byte operation contradicts performed mutation")
-        key = operation.destination.root, operation.destination.path
+            raise ValueError("Retained operation contradicts performed mutation")
+        destination = operation.destination
+        key = destination.root, destination.path
+        if isinstance(operation, BoundFileRemoval):
+            # Completeness and absence are checked by the independent expectation verifier.
+            # A physical claim must not turn an observed failed removal into a replay error.
+            return
         document = observed.contents.get(key)
         if document is None:
-            self._require_read_obstacle(observed)
+            entry = observed.entry(*key)
+            obstructed = any(
+                (item["root"], item["path"], item["operation"]) == (*key, "read_file")
+                for item in observed.obstacles
+            )
+            if entry is None or entry["kind"] != "file" or not obstructed:
+                raise ValueError("Performed mutation requires bytes or explicit read obstacle")
             return
         if hashlib.sha256(document).hexdigest() != self.document_sha256:
             raise ValueError("Observation contradicts retained performed mutation")
-
-    def _require_read_obstacle(self, observed: "FilesystemSnapshot") -> None:
-        destination = self.operation.destination
-        entry = observed.entry(destination.root, destination.path)
-        obstructed = any(
-            (item["root"], item["path"], item["operation"])
-            == (destination.root, destination.path, "read_file")
-            for item in observed.obstacles
-        )
-        if entry is None or entry["kind"] != "file" or not obstructed:
-            raise ValueError("Performed mutation requires document bytes or explicit read obstacle")

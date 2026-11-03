@@ -265,6 +265,8 @@ def test_observed_bad_replacement_remains_an_explainable_failure(altered_proof: 
     import hashlib
 
     performed = {
+        "format": "performed-mutation-v1",
+        "kind": "markdown",
         "operation": json.loads((altered_proof / "intermediate/operation.json").read_text()),
         "document_sha256": hashlib.sha256(
             (altered_proof / "intermediate/after/project/GUIDE.md").read_bytes()

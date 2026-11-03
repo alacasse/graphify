@@ -129,6 +129,8 @@ class ExpectationSet:
     roots: dict[str, str] | None = None
     lock_destination: Destination | None = None
 
+    allowed_removals: tuple[tuple[str, str], ...] = ()
+
     def __post_init__(self) -> None:
         if self.phase not in _PHASES:
             raise ValueError("Invalid expectations phase")
@@ -142,14 +144,32 @@ class ExpectationSet:
                 Destination(root, path)
             elif root not in {"home", "project"}:
                 raise ValueError("Invalid allowed root")
+        self._validate_permissions()
         _validate_roots(self.roots)
+
+    def _validate_permissions(self) -> None:
+        if len(self.allowed_changes) != len(set(self.allowed_changes)):
+            raise ValueError("Duplicate allowed change")
+        if len(self.allowed_removals) != len(set(self.allowed_removals)):
+            raise ValueError("Duplicate allowed removal")
+        if self.allowed_removals and self.phase != "intermediate":
+            raise ValueError("Removals are only allowed during intermediate preparation")
+        for key in self.allowed_removals:
+            Destination(*key)
+            if key in self.allowed_changes:
+                raise ValueError("Removal permission differs from change permission")
+            if not any((e.root, e.path) == key and e.kind == "file" for e in self.baseline):
+                raise ValueError("Removal requires a baseline regular file")
+            if not any((e.root, e.path) == key and e.kind == "absent" for e in self.expectations):
+                raise ValueError("Removal requires an absence expectation")
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "explicit-expectations-v3",
+            "format": "explicit-expectations-v4",
             "phase": self.phase,
             "expectations": [item.to_data() for item in self.expectations],
             "allowed_changes": [list(item) for item in self.allowed_changes],
+            "allowed_removals": [list(item) for item in self.allowed_removals],
             "baseline": [item.to_data() for item in self.baseline],
             "roots": None if self.roots is None else dict(self.roots),
             "lock_destination": None
@@ -160,11 +180,13 @@ class ExpectationSet:
     @classmethod
     def from_data(cls, value: object) -> "ExpectationSet":
         data = fields(
-            value, "format phase expectations allowed_changes baseline roots lock_destination"
+            value,
+            "format phase expectations allowed_changes allowed_removals "
+            "baseline roots lock_destination",
         )
-        if data["format"] != "explicit-expectations-v3":
+        if data["format"] != "explicit-expectations-v4":
             raise ValueError("Unsupported expectations transport")
-        for key in ("expectations", "allowed_changes", "baseline"):
+        for key in ("expectations", "allowed_changes", "allowed_removals", "baseline"):
             if not isinstance(data[key], list):
                 raise ValueError("Expected expectation lists")
         allowed: list[tuple[str, str]] = []
@@ -189,6 +211,7 @@ class ExpectationSet:
             tuple(Expectation.from_data(e) for e in cast(list[object], data["baseline"])),
             bindings,
             None if lock is None else Destination.from_data(lock),
+            tuple(_pair(pair) for pair in cast(list[object], data["allowed_removals"])),
         )
 
     def in_phase(self, phase: str) -> "ExpectationSet":
@@ -198,3 +221,10 @@ class ExpectationSet:
             expectations=tuple(replace(e, phase=phase) for e in self.expectations),
             baseline=tuple(replace(e, phase=phase) for e in self.baseline),
         )
+
+
+def _pair(value: object) -> tuple[str, str]:
+    if not isinstance(value, list) or len(cast(list[object], value)) != 2:
+        raise ValueError("Expected allowed destination pair")
+    values = cast(list[object], value)
+    return text(values[0]), text(values[1])

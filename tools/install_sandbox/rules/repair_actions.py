@@ -9,7 +9,13 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Literal
 
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
+from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileRemoval,
+    BoundMarkdownMutation,
+    BoundMutation,
+    PerformedMutation,
+    mutation_from_data,
+)
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
@@ -58,7 +64,15 @@ def _data(value: object) -> object:
             "contents": [[*key, content.hex()] for key, content in sorted(value.contents.items())],
             "obstacles": copy.deepcopy(value.obstacles),
         }
-    if isinstance(value, (BoundMarkdownMutation, PerformedMutation, ExpectationSet)):
+    if isinstance(
+        value,
+        (
+            BoundMarkdownMutation,
+            BoundFileRemoval,
+            PerformedMutation,
+            ExpectationSet,
+        ),
+    ):
         return value.to_data()
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
@@ -77,7 +91,7 @@ class ArtifactDescriptor:
     reference: str
     checkpoint: str
     transport: Literal["json", "snapshot"]
-    _type: type[object]
+    _type: type[object] | tuple[type[object], ...]
     _decoder: Callable[[object], object]
 
     def decode(self, raw: object) -> object:
@@ -104,8 +118,8 @@ ARTIFACTS = (
         "intermediate/operation.json",
         "operation_retained",
         "json",
-        BoundMarkdownMutation,
-        BoundMarkdownMutation.from_data,
+        (BoundMarkdownMutation, BoundFileRemoval),
+        mutation_from_data,
     ),
     ArtifactDescriptor(
         "preparation_expectations",
@@ -212,21 +226,21 @@ class ObserveSnapshot:
 
 
 @dataclass(frozen=True, init=False, eq=False)
-class ApplyMarkdownMutation:
-    _operation: BoundMarkdownMutation
+class ApplyMutation:
+    _operation: BoundMutation
 
-    def __init__(self, operation: BoundMarkdownMutation) -> None:
+    def __init__(self, operation: BoundMutation) -> None:
         object.__setattr__(self, "_operation", copy.deepcopy(operation))
 
     @property
-    def operation(self) -> BoundMarkdownMutation:
+    def operation(self) -> BoundMutation:
         return copy.deepcopy(self._operation)
 
     def complete(self, performed: PerformedMutation) -> Completion:
         return Completion(self, _require_performed(performed), _key=_COMPLETION_KEY)
 
 
-Request = RetainEvidence | ObserveSnapshot | ApplyMarkdownMutation
+Request = RetainEvidence | ObserveSnapshot | ApplyMutation
 
 
 def _require_snapshot(value: object) -> FilesystemSnapshot:

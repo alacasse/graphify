@@ -270,6 +270,8 @@ class InstallTestCoordinator:
             + [materialization],
             prepare_only=definition.prepare_only,
         )
+        # Keep the reference case after the existing cases and their construction decisions.
+        result.cases.sort(key=lambda entry: entry.name == "missing-reference")
         with harness:
             try:
                 self._execute_campaign(harness, definition, result, materialization, progress)

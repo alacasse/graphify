@@ -147,6 +147,8 @@ def _preservation(
     after = {(e["root"], e["path"]): e for e in observed.entries}
     for key in sorted(before.keys() | after.keys()):
         prior, current = before.get(key), after.get(key)
+        if key in expected.allowed_removals and current is None and observed.absent(*key):
+            continue
         if key in expected.allowed_changes and (
             prior is None or (current is not None and prior.kind == current["kind"])
         ):

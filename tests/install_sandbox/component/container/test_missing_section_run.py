@@ -134,7 +134,9 @@ def test_failed_preparation_blocks_second_command(
             case_bytes: bytes,
         ) -> PreparationPlan:
             plan = original(self, first_after, observation_ref, validation, installed, case_bytes)
-            assert isinstance(plan, PreparationPlan)
+            assert isinstance(plan, PreparationPlan) and isinstance(
+                plan.operation, BoundMarkdownMutation
+            )
             return replace(plan, operation=replace(plan.operation, end=plan.operation.end + 1))
 
         monkeypatch.setattr(MarkdownRepairScenario, "bind", wrong_range)
@@ -145,6 +147,7 @@ def test_failed_preparation_blocks_second_command(
             environment: EffectEnvironment,
             case_bytes: bytes,
             first_after: FilesystemSnapshot,
+            sources: FilesystemSnapshot,
         ) -> None:
             # The durable intent must precede even a partially successful mutation.
             saved = json.loads((tmp_path / "proof/result.json").read_text())
@@ -152,7 +155,7 @@ def test_failed_preparation_blocks_second_command(
             (environment.project / "GUIDE.md").write_text(BEFORE)
             raise OSError("Controlled partial mutation")
 
-        monkeypatch.setattr(transition, "apply_markdown_mutation", partial)
+        monkeypatch.setattr(transition, "apply_mutation", partial)
     else:
         observe = EffectEnvironment.observe_intermediate
 

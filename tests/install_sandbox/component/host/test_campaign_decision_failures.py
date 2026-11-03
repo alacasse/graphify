@@ -72,8 +72,15 @@ def _assert_decisions(result: CampaignResult, markdown_count: int) -> None:
     text = (result.output_directory / "campaign.txt").read_text()
     label = "not applicable" if markdown_count == 0 else "applicable but not constructible"
     assert label in text and reason in text
-    assert [case.name for case in result.cases[1:]] == ["missing-section", "altered-section"]
-    for entry, report in zip(result.cases[1:], saved["cases"][1:], strict=True):
+    decisions = [entry for entry in result.cases if entry.construction != "constructed"]
+    reports = {entry["name"]: entry for entry in saved["cases"]}
+    assert [case.name for case in decisions] == ["missing-section", "altered-section"]
+    assert (
+        next(case for case in result.cases if case.name == "missing-reference").construction
+        == "constructed"
+    )
+    for entry in decisions:
+        report = reports[entry.name]
         assert entry.construction == report["construction"] == classification
         assert entry.construction_reason == report["construction_reason"] == reason
         assert entry.state is entry.result is entry.output_directory is None
@@ -119,7 +126,7 @@ def test_decisions_survive_coordinator_failure_paths(
     saved = json.loads((result.output_directory / "campaign.json").read_text())
     assert saved["status"] == "incomplete" and saved["passed"] is False
     assert result.interrupted is ("interruption" in fault)
-    assert len(transport.installer.calls) == (2 if fault == "cleanup" else 0)
+    assert len(transport.installer.calls) == (4 if fault == "cleanup" else 0)
     first = result.cases[0]
     if fault == "cleanup":
         assert first.state == "finished" and first.result is not None and first.result.passed
@@ -147,12 +154,14 @@ def test_two_markdown_definition_retains_decisions_after_inputs_disappear(
         definition=definition, output_directory=tmp_path / "proof"
     )
     assert not result.passed
-    assert len(transport.installer.calls) == 2
+    assert len(transport.installer.calls) == 4
     first = result.cases[0]
     assert first.result is not None and first.result.passed
-    assert [(entry.construction, entry.construction_reason) for entry in result.cases[1:]] == [
-        (decision.classification, decision.reason) for decision in definition.built.decisions
-    ]
+    assert [
+        (entry.construction, entry.construction_reason)
+        for entry in result.cases
+        if entry.construction != "constructed"
+    ] == [(decision.classification, decision.reason) for decision in definition.built.decisions]
     for case, serialized in zip(definition.built.cases, definition.transports, strict=True):
         assert (tmp_path / "proof/inputs" / f"{case.name}.json").read_text() == serialized
     _assert_decisions(result, 2)

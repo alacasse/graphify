@@ -181,7 +181,7 @@ def capture_execution(monkeypatch: pytest.MonkeyPatch, captured: CapturedExecuti
     from tools.install_sandbox.container import intermediate_execution
 
     begin = intermediate_execution.begin
-    apply = intermediate_execution.apply_markdown_mutation
+    apply = intermediate_execution.apply_mutation
     advance = cast(
         Callable[
             [RepairSession, RepairInputs, EffectEnvironment, Writer, CasePublisher], object
@@ -209,14 +209,15 @@ def capture_execution(monkeypatch: pytest.MonkeyPatch, captured: CapturedExecuti
         environment: EffectEnvironment,
         case_bytes: bytes,
         first_after: FilesystemSnapshot,
+        sources: FilesystemSnapshot,
     ) -> None:
-        apply(operation, environment, case_bytes, first_after)
+        apply(operation, environment, case_bytes, first_after, sources)
         captured["mutations"] = captured.get("mutations", 0) + 1
 
     monkeypatch.setattr(intermediate_execution, "_advance", capture_advance)
     monkeypatch.setattr(intermediate_execution, "begin", begin_session)
     monkeypatch.setattr(
-        "tests.install_sandbox.component.container.repair_support.apply_markdown_mutation", mutate
+        "tests.install_sandbox.component.container.repair_support.apply_mutation", mutate
     )
 
 

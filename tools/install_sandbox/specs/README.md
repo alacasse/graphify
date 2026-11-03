@@ -51,17 +51,37 @@ the subject checkout. `--output` selects a fresh result location; omitting it us
 the managed output directory and its retention policy.
 
 The coordinator constructs the cases before allocating campaign output.
-Exactly one Markdown section makes `reinstall`, `missing-section` and
-`altered-section` available, each with two dependent installation steps. Effects
-select the behavior; filenames, subject identities and invocation words do not.
-The skill is verified and preserved during the Markdown repair cases.
+`reinstall` is always constructed. Exactly one Markdown section also makes
+`missing-section` and `altered-section` available; zero sections makes those cases
+not applicable, while multiple sections remains an explicit construction limit.
+A skill additionally makes `missing-reference` available, independently of the
+Markdown count. Without a skill, that case is not applicable. Each constructed
+case has two dependent installation steps. Effects select the behavior;
+filenames, subject identities and invocation words do not.
+
+`missing-reference` removes one representative reference: the first regular file
+in lexical order of relative source paths, including subdirectories. A complete
+source inventory with at least one reference is required before its first
+installer call. An empty or incomplete bundle stops initial preparation with a
+validation diagnostic: the case is `not_run` and the campaign is `incomplete`.
+Multiple skills remain unsupported by the common engine.
+
+After a conforming installation, the engine binds removal to the case, observed
+file bytes and exact destination selected from retained sources. Only that file
+may disappear during preparation; its directory and every other entry in HOME
+and PROJECT must remain unchanged. Reinstallation requires exact source bytes
+and preserves all other references, the skill, version, lock, personal content,
+other effects and their initial backups. Markdown repair cases retain their
+existing preservation checks.
 
 The Docker harness isolates execution, prepares the package once, enforces
 timeouts and cleans resources. It captures the subject's declared Git revision,
 installs its package and binds source files and `METADATA` to the executable.
 Local Component tests substitute a controlled transport at the harness boundary;
-there is no public local-execution backend. Real CodeBuddy campaigns have also
-qualified all three cases with the corrected product.
+there is no public local-execution backend. Historical real CodeBuddy campaigns
+qualified the three earlier cases with the corrected product. The added
+reference-removal case has Component validation only; it has not been qualified
+with a real installer or Docker campaign.
 
 For the Amp project campaign, use a separate subject context with:
 
@@ -114,12 +134,19 @@ managed content still comes from the original retained sources.
 
 After extracting `evidence.zip`, call
 `tools.install_sandbox.host.result_reader.read_evidence(case_directory)` on the
-retained `evidence/cases/<case-name>` directory for each of the three cases. It needs no original YAML, subject
+retained `evidence/cases/<case-name>` directory for each constructed case. It needs no original YAML, subject
 context, subject checkout, executable or work directory. It reconstructs the
 expectations from retained inputs, checks their equality with stored expectations,
 validates phase continuity and recalculates verdicts. Partial failures retain the
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
+
+The current formats are case `explicit-expectations-v6`, expectations
+`explicit-expectations-v4`, prepared operation `prepared-mutation-v1`, performed
+result `performed-mutation-v1`, and case evidence `explicit-expectations-v8`.
+Mutation records discriminate Markdown modification from file removal. Campaign
+format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
+independently reconstructs the reference selection, operation and expectations.
 
 ## Independent test data
 

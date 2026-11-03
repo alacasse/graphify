@@ -57,15 +57,25 @@ def test_cli_real_engine_and_autonomous_reread(
             str(output),
         ]
     ) == (0 if passed else 1)
-    assert len(transport.installer.calls) == (6 if passed else 3)
+    assert len(transport.installer.calls) == (6 if markdown_only else 8 if passed else 4)
     assert not (output / "evidence").exists()
     report = json.loads((output / "campaign.json").read_text())
     assert [case["name"] for case in report["cases"]] == [
         "reinstall",
         "missing-section",
         "altered-section",
+        "missing-reference",
     ]
-    saved = {case["name"]: case["result"]["test"] for case in report["cases"]}
+    saved = {
+        case["name"]: case["result"]["test"]
+        for case in report["cases"]
+        if case["construction"] == "constructed"
+    }
+    if markdown_only:
+        assert (
+            report["cases"][-1]["construction"],
+            report["cases"][-1]["construction_reason"],
+        ) == ("not_applicable", "No skill effect declared")
     for result in saved.values():
         assert result["status"] == ("passed" if passed else "failed")
         if not passed:
@@ -78,7 +88,7 @@ def test_cli_real_engine_and_autonomous_reread(
     restored = tmp_path / "restored"
     with zipfile.ZipFile(output / "evidence.zip") as archive:
         archive.extractall(restored)
-    for name in ("reinstall", "missing-section", "altered-section"):
+    for name in saved:
         reread = read_evidence(restored / "evidence/cases" / name)
         assert reread.status == ("passed" if passed else "failed")
         decoded = asdict(reread)
@@ -129,7 +139,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=1 if wrong_skill else 2,
+        calls=2 if wrong_skill else 4,
     )
 
 
@@ -216,15 +226,24 @@ def _assert_partial_campaign(
     external_text = (output / "campaign.txt").read_text()
     assert report["version"] == 3
     assert report["passed"] is passed
-    first, *repairs = report["cases"]
-    expected_status = "failed" if calls == 1 else "passed"
+    first = next(case for case in report["cases"] if case["name"] == "reinstall")
+    repairs = [case for case in report["cases"] if case["construction"] != "constructed"]
+    expected_status = "failed" if construction == "not_applicable" and calls == 2 else "passed"
     assert first["result"]["test"]["status"] == expected_status
-    if calls == 1:
+    if expected_status == "failed":
         _assert_wrong_root_stops_after_first_command(first["result"]["test"])
-    assert [case["name"] for case in repairs] == ["missing-section", "altered-section"]
+    assert [case["name"] for case in repairs] == (
+        ["missing-section", "altered-section"]
+        if construction == "not_applicable"
+        else ["missing-section", "altered-section", "missing-reference"]
+    )
     for case in repairs:
-        assert case["construction"] == construction
-        assert case["construction_reason"] == reason
+        assert case["construction"] == (
+            "not_applicable" if case["name"] == "missing-reference" else construction
+        )
+        assert case["construction_reason"] == (
+            "No skill effect declared" if case["name"] == "missing-reference" else reason
+        )
         assert all(case[field] is None for field in ("state", "result", "output_directory"))
     shutil.rmtree(subject)
     spec.unlink()
@@ -242,14 +261,14 @@ def _assert_archived_partial_campaign(
     construction: str,
     reason: str,
 ) -> None:
-    first, *repairs = report["cases"]
+    repairs = [case for case in report["cases"] if case["construction"] != "constructed"]
     restored = root / "restored"
     with zipfile.ZipFile(output / "evidence.zip") as archive:
         archive.extractall(restored)
         names = archive.namelist()
     archived = json.loads((restored / "evidence/campaign.json").read_text())
     assert archived["version"] == 3
-    assert archived["cases"][1:] == repairs
+    assert [case for case in archived["cases"] if case["construction"] != "constructed"] == repairs
     archived_text = (restored / "evidence/campaign.txt").read_text()
     label = (
         "not applicable" if construction == "not_applicable" else "applicable but not constructible"
@@ -262,8 +281,11 @@ def _assert_archived_partial_campaign(
         for case in repairs
         for name in names
     )
-    reread = read_evidence(restored / "evidence/cases/reinstall")
-    decoded = asdict(reread)
-    decoded["preparation"] = reread.preparation.to_data()
-    decoded["steps"] = [step.to_data() for step in reread.steps]
-    assert decoded == first["result"]["test"]
+    for case in report["cases"]:
+        if case["construction"] != "constructed":
+            continue
+        reread = read_evidence(restored / "evidence/cases" / case["name"])
+        decoded = asdict(reread)
+        decoded["preparation"] = reread.preparation.to_data()
+        decoded["steps"] = [step.to_data() for step in reread.steps]
+        assert decoded == case["result"]["test"]

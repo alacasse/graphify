@@ -77,6 +77,7 @@ def test_case_bytes_round_trip_and_bound_operation() -> None:
     assert EffectInstallCase.from_json(archived.decode()) == case
     prepared, first = plan()
     operation = prepared.operation
+    assert isinstance(operation, BoundMarkdownMutation)
     assert operation.case_sha256 == hashlib.sha256(archived).hexdigest()
     assert operation.document_sha256 == hashlib.sha256(BEFORE + SOURCE + AFTER).hexdigest()
     assert (operation.start, operation.end) == (len(BEFORE), len(BEFORE + SOURCE))
@@ -144,7 +145,7 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
         EffectSpec((SkillEffect("skill.md", "references", Destination("home", "skills")),)),
         case.subject,
     )
-    assert [built.name for built in empty.cases] == ["reinstall"]
+    assert [built.name for built in empty.cases] == ["reinstall", "missing-reference"]
     assert [(item.name, item.classification, item.reason) for item in empty.decisions] == [
         (name, "not_applicable", "No Markdown effect declared")
         for name in ("missing-section", "altered-section")
@@ -169,6 +170,7 @@ def test_altered_body_bounds_and_independent_oracle() -> None:
     )
     assert isinstance(prepared, PreparationPlan)
     operation = prepared.operation
+    assert isinstance(operation, BoundMarkdownMutation)
     header = b"## graphify\n"
     body = b"\nSandbox altered Markdown section.\n\n"
     assert operation.start == len(BEFORE + header)

@@ -8,7 +8,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation, PerformedMutation
+from tools.install_sandbox.contracts.bound_mutation import (
+    BoundFileRemoval,
+    BoundMarkdownMutation,
+    PerformedMutation,
+)
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.evidence_layout import StagedEvidence
 from tools.install_sandbox.contracts.expectations import ExpectationSet
@@ -25,7 +29,7 @@ from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import preservation_baseline
 from tools.install_sandbox.rules.repair_actions import (
     ARTIFACTS,
-    ApplyMarkdownMutation,
+    ApplyMutation,
     ArtifactDescriptor,
     Completion,
     JsonArtifact,
@@ -135,8 +139,10 @@ class RepairSession:
     def _make_pending(self, stage: str, generation: int) -> PendingCheckpoint:
         checkpoint = RepairCheckpoint(stage, generation, self._reason)
         stop = self._stop()
-        outcome = stop.diagnostic if stop is not None else (
-            "ready" if self._index == len(ARTIFACTS) - 1 else "incomplete"
+        outcome = (
+            stop.diagnostic
+            if stop is not None
+            else ("ready" if self._index == len(ARTIFACTS) - 1 else "incomplete")
         )
         progress = RepairProgress(checkpoint, outcome)
         self._pending = PendingCheckpoint(
@@ -180,8 +186,8 @@ class RepairSession:
                 self._active = ObserveSnapshot(kind)
             elif kind == "performed":
                 operation = self._payloads["operation"]
-                assert isinstance(operation, BoundMarkdownMutation)
-                self._active = ApplyMarkdownMutation(operation)
+                assert isinstance(operation, (BoundMarkdownMutation, BoundFileRemoval))
+                self._active = ApplyMutation(operation)
             else:
                 self._active = RetainEvidence(self._retained_value(kind))
         return self._active
@@ -232,7 +238,7 @@ class RepairSession:
     def _prepared(self, completion: object) -> tuple[JsonArtifact | SnapshotArtifact, str | None]:
         request = self.next_action()
         if (
-            not isinstance(request, (RetainEvidence, ObserveSnapshot, ApplyMarkdownMutation))
+            not isinstance(request, (RetainEvidence, ObserveSnapshot, ApplyMutation))
             or not isinstance(completion, Completion)
             or not completion.belongs_to(request)
         ):
@@ -283,9 +289,9 @@ class RepairSession:
     def _validate_mutation(self, kind: str, payload: object) -> None:
         assert self._plan is not None
         if kind == "operation":
-            if not isinstance(payload, BoundMarkdownMutation):
+            if not isinstance(payload, (BoundMarkdownMutation, BoundFileRemoval)):
                 raise ValueError("Expected bound mutation")
-            if payload.destination != self._plan.operation.destination:
+            if payload != self._plan.operation:
                 raise ValueError("Operation destination differs from case")
             payload.verify_binding(self._inputs.case_bytes, self._inputs.first_after)
         elif (
@@ -305,7 +311,7 @@ class RepairSession:
         performed = self._payloads["performed"]
         operation = self._payloads["operation"]
         assert isinstance(performed, PerformedMutation)
-        assert isinstance(operation, BoundMarkdownMutation)
+        assert isinstance(operation, (BoundMarkdownMutation, BoundFileRemoval))
         performed.verify(operation, payload)
         return None
 
@@ -381,7 +387,7 @@ def _replay_completion(
         if not isinstance(payload, FilesystemSnapshot):
             raise ValueError("Expected preparation observation")
         return request.complete(payload)
-    if isinstance(request, ApplyMarkdownMutation):
+    if isinstance(request, ApplyMutation):
         if not isinstance(payload, PerformedMutation):
             raise ValueError("Expected performed mutation")
         return request.complete(payload)

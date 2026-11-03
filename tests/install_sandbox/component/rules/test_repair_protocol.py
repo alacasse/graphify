@@ -20,7 +20,7 @@ from tools.install_sandbox.contracts.results import (
 from tools.install_sandbox.rules import step_lifecycle as lifecycle
 from tools.install_sandbox.rules.repair_actions import (
     ARTIFACTS,
-    ApplyMarkdownMutation,
+    ApplyMutation,
     Completion,
     JsonArtifact,
     ObserveSnapshot,
@@ -99,14 +99,14 @@ def observed(session: RepairSession) -> ObserveSnapshot:
     return request
 
 
-def applied(session: RepairSession) -> ApplyMarkdownMutation:
+def applied(session: RepairSession) -> ApplyMutation:
     request = session.next_action()
-    assert isinstance(request, ApplyMarkdownMutation)
+    assert isinstance(request, ApplyMutation)
     return request
 
 
 def completion_for(
-    request: RetainEvidence | ObserveSnapshot | ApplyMarkdownMutation | Ready | Stop,
+    request: RetainEvidence | ObserveSnapshot | ApplyMutation | Ready | Stop,
     ctx: RepairInputs,
     *,
     corrupt: bool = False,
@@ -116,7 +116,7 @@ def completion_for(
         return request.completion
     if isinstance(request, ObserveSnapshot) and request.phase == "before":
         return request.complete(ctx.first_after)
-    if isinstance(request, ApplyMarkdownMutation):
+    if isinstance(request, ApplyMutation):
         operation = request.operation
     else:
         assert isinstance(request, ObserveSnapshot)
@@ -133,7 +133,7 @@ def completion_for(
     )
     if corrupt:
         after.contents[KEY] += b"personal edit"
-    if isinstance(request, ApplyMarkdownMutation):
+    if isinstance(request, ApplyMutation):
         return request.complete(
             PerformedMutation(operation, hashlib.sha256(after.contents[KEY]).hexdigest())
         )

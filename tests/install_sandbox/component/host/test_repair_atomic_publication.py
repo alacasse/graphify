@@ -110,13 +110,13 @@ def _run_interrupted(
     next(case for case in cases if case.name == scenario).write(root / "case.json")
     installer = LiteralInstaller()
     mutations: list[object] = []
-    mutate = cast(Callable[..., None], intermediate_execution.apply_markdown_mutation)
+    mutate = cast(Callable[..., None], intermediate_execution.apply_mutation)
 
     def count_mutation(*args: Any, **kwargs: Any) -> None:
         mutations.append(None)
         mutate(*args, **kwargs)
 
-    monkeypatch.setattr(intermediate_execution, "apply_markdown_mutation", count_mutation)
+    monkeypatch.setattr(intermediate_execution, "apply_mutation", count_mutation)
     attempts = _fail_publication(monkeypatch, window, target)
     outcome = InstallTestRunner(InstallerDriver(installer.execute)).run_case(
         reference_sources=subject,

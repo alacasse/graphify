@@ -3,8 +3,8 @@
 from tools.install_sandbox.container.case_publication import CasePublisher
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
-from tools.install_sandbox.container.markdown_mutation import (
-    apply_markdown_mutation,
+from tools.install_sandbox.container.file_mutation import (
+    apply_mutation,
     capture_performed_mutation,
 )
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
@@ -14,7 +14,7 @@ from tools.install_sandbox.contracts.results import (
     EvidenceWriteError,
 )
 from tools.install_sandbox.rules.repair_actions import (
-    ApplyMarkdownMutation,
+    ApplyMutation,
     Completion,
     ObserveSnapshot,
     RetainEvidence,
@@ -29,7 +29,7 @@ from tools.install_sandbox.rules.repair_protocol import (
 
 
 def _perform(
-    action: RetainEvidence | ObserveSnapshot | ApplyMarkdownMutation,
+    action: RetainEvidence | ObserveSnapshot | ApplyMutation,
     inputs: RepairInputs,
     environment: EffectEnvironment,
 ) -> Completion:
@@ -38,7 +38,7 @@ def _perform(
     if isinstance(action, ObserveSnapshot):
         return action.complete(environment.observe_intermediate(action.phase))
     operation = action.operation
-    apply_markdown_mutation(operation, environment, inputs.case_bytes, inputs.first_after)
+    apply_mutation(operation, environment, inputs.case_bytes, inputs.first_after, inputs.sources)
     return action.complete(capture_performed_mutation(operation, environment))
 
 

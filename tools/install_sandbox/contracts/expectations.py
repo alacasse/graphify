@@ -9,7 +9,17 @@ from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.spec import HookExpectation, fields, text
 
 _PHASES = {"initial", "install", "intermediate", "reinstall"}
-_KINDS = {"file", "directory", "absent", "markdown", "markdown-composed", "json-hooks"}
+_KINDS = {
+    "file",
+    "directory",
+    "absent",
+    "markdown",
+    "markdown-composed",
+    "json-hooks",
+    "json-hooks-seeded",
+    "json-hook-removed",
+    "json-hook-repair",
+}
 
 
 def _decode(value: object) -> bytes | None:
@@ -70,9 +80,14 @@ class Expectation:
             "markdown": {"content", "baseline", "marker"},
             "markdown-composed": {"content", "baseline", "marker"},
             "json-hooks": {"baseline", "hooks"},
+            "json-hooks-seeded": {"baseline", "hooks"},
+            "json-hook-removed": {"baseline", "hooks"},
+            "json-hook-repair": {"baseline", "hooks"},
         }
         if present != required[self.kind]:
             raise ValueError("Expectation fields do not match its kind")
+        if self.kind in {"json-hook-repair", "json-hook-removed"} and len(self.hooks) != 1:
+            raise ValueError("JSON hook repair requires exactly one declared target")
 
     def to_data(self) -> dict[str, object]:
         return {

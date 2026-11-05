@@ -116,7 +116,7 @@ def _bound_file_bytes(
 
 
 @dataclass(frozen=True)
-class BoundFileRemoval:
+class _BoundExistingFile:
     case_sha256: str
     observation_ref: str
     destination: Destination
@@ -135,6 +135,9 @@ class BoundFileRemoval:
             first_after,
         )
 
+
+@dataclass(frozen=True)
+class BoundFileRemoval(_BoundExistingFile):
     def to_data(self) -> dict[str, object]:
         return {
             "format": "prepared-mutation-v3",
@@ -159,29 +162,53 @@ class BoundFileRemoval:
 
 
 @dataclass(frozen=True)
-class BoundFileAppend:
-    case_sha256: str
-    observation_ref: str
-    destination: Destination
-    document_sha256: str
+class BoundFileReplacement(_BoundExistingFile):
+    content: bytes
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if type(self.content) is not bytes:
+            raise ValueError("Replacement requires content bytes")
+        if self.observation_ref != "steps/0/after.json":
+            raise ValueError("Replacement requires validated first observation")
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "format": "prepared-mutation-v3",
+            "kind": "file-replacement",
+            "case_sha256": self.case_sha256,
+            "observation_ref": self.observation_ref,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+            "document_sha256": self.document_sha256,
+            "content": base64.b64encode(self.content).decode("ascii"),
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "BoundFileReplacement":
+        data = fields(
+            value, "format kind case_sha256 observation_ref destination document_sha256 content"
+        )
+        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-replacement":
+            raise ValueError("Unsupported prepared operation")
+        return cls(
+            text(data["case_sha256"]),
+            text(data["observation_ref"]),
+            Destination.from_data(data["destination"]),
+            text(data["document_sha256"]),
+            _replacement(data["content"]),
+        )
+
+
+@dataclass(frozen=True)
+class BoundFileAppend(_BoundExistingFile):
     suffix: bytes
 
     def __post_init__(self) -> None:
-        _validate_file_binding(self.case_sha256, self.observation_ref, self.document_sha256)
+        super().__post_init__()
         if type(self.suffix) is not bytes or not self.suffix:
             raise ValueError("Append requires nonempty suffix bytes")
         if self.observation_ref != "steps/0/after.json":
             raise ValueError("Append requires validated first observation")
-
-    def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
-        return _bound_file_bytes(
-            self.case_sha256,
-            self.observation_ref,
-            self.destination,
-            self.document_sha256,
-            case_bytes,
-            first_after,
-        )
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -268,13 +295,21 @@ class BoundFileCreation:
         )
 
 
-BoundMutation = BoundMarkdownMutation | BoundFileRemoval | BoundFileAppend | BoundFileCreation
+BoundMutation = (
+    BoundMarkdownMutation
+    | BoundFileRemoval
+    | BoundFileAppend
+    | BoundFileCreation
+    | BoundFileReplacement
+)
 
 
 def mutation_from_data(value: object) -> BoundMutation:
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
+    if incoming.get("kind") == "file-replacement":
+        return BoundFileReplacement.from_data(incoming)
     if incoming.get("kind") == "file-creation":
         return BoundFileCreation.from_data(incoming)
     if incoming.get("kind") == "file-append":
@@ -293,10 +328,11 @@ class PerformedMutation:
 
     def __post_init__(self) -> None:
         if type(self.operation) not in (
-            BoundFileRemoval,
             BoundMarkdownMutation,
+            BoundFileRemoval,
             BoundFileAppend,
             BoundFileCreation,
+            BoundFileReplacement,
         ):
             raise ValueError("Unsupported performed mutation")
         if type(self.operation) is BoundFileRemoval:

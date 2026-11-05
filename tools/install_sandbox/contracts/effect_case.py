@@ -17,6 +17,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
+    MissingJsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
     preparation_from_data,
@@ -224,6 +225,43 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
     return files
 
 
+def missing_json_hook_group(effect: JsonHooksEffect) -> dict[str, object]:
+    """Independent cohabitation witness for the first declared hook."""
+    return {
+        "matcher": effect.hooks[0].matcher,
+        "sandbox_personal": "preserve",
+        "hooks": [
+            dict(effect.hooks[0].content),
+            {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17},
+        ],
+    }
+
+
+def _missing_json_hook_case(
+    reinstall: "EffectInstallCase", effect: JsonHooksEffect
+) -> "EffectInstallCase":
+    neighbor = {
+        "matcher": "SandboxPersonalNeighbor",
+        "sandbox_neighbor": True,
+        "hooks": [{"type": "command", "command": "python personal_neighbor.py", "timeout": 23}],
+    }
+    settings = {
+        "theme": "dark",
+        "metadata": {"owner": "personal"},
+        "hooks": {effect.hooks[0].event: [missing_json_hook_group(effect), neighbor]},
+    }
+    initial = [dict(item) for item in reinstall.initial_files]
+    for item in initial:
+        if (item["root"], item["path"]) == (effect.destination.root, effect.destination.path):
+            item["content"] = json.dumps(settings, indent=2) + "\n"
+    return replace(
+        reinstall,
+        name="missing-json-hook",
+        initial_files=initial,
+        intermediate_preparation=MissingJsonHookPreparation(effect.destination),
+    )
+
+
 @dataclass(frozen=True)
 class EffectInstallCase:
     name: str
@@ -236,6 +274,7 @@ class EffectInstallCase:
     intermediate_preparation: (
         IntermediatePreparation
         | MissingReferencePreparation
+        | MissingJsonHookPreparation
         | AlteredReferencePreparation
         | AlteredSkillPreparation
         | PreserveSkillBackupPreparation
@@ -337,6 +376,17 @@ def build_effect_cases(
     reinstall = build_reinstall_case(spec, subject, target)
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
     skills = [e for e in spec.effects if isinstance(e, SkillEffect)]
+    hooks = [e for e in spec.effects if isinstance(e, JsonHooksEffect)]
+    hook_cases = (_missing_json_hook_case(reinstall, hooks[0]),) if hooks else ()
+    hook_decisions = (
+        ()
+        if hooks
+        else (
+            CaseNonConstruction(
+                "missing-json-hook", "not_applicable", "No JSON hooks effect declared"
+            ),
+        )
+    )
     reference_cases = (
         (
             replace(
@@ -377,7 +427,7 @@ def build_effect_cases(
     )
     if len(markdown) != 1:
         return EffectCaseBuild(
-            (reinstall, *reference_cases),
+            (reinstall, *reference_cases, *hook_cases),
             tuple(
                 CaseNonConstruction(
                     name,
@@ -388,7 +438,8 @@ def build_effect_cases(
                 )
                 for name in ("missing-section", "altered-section")
             )
-            + reference_decisions,
+            + reference_decisions
+            + hook_decisions,
         )
     effect = markdown[0]
     preparation = IntermediatePreparation(
@@ -421,4 +472,7 @@ def build_effect_cases(
             body=b"\nSandbox altered Markdown section.\n\n",
         ),
     )
-    return EffectCaseBuild((reinstall, missing, altered, *reference_cases), reference_decisions)
+    return EffectCaseBuild(
+        (reinstall, missing, altered, *reference_cases, *hook_cases),
+        reference_decisions + hook_decisions,
+    )

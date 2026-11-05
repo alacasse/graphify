@@ -35,19 +35,25 @@ def test_archive_is_readable_after_move_and_extraction(
         archive.extractall(tmp_path / "extracted")
         assert not any(name.endswith("evidence.zip") for name in archive.namelist())
     evidence = tmp_path / "extracted/evidence"
-    assert read_evidence(evidence / "cases/reinstall").status == "passed"
-    assert read_evidence(evidence / "cases/missing-section").status == "passed"
-    assert read_evidence(evidence / "cases/altered-section").status == "passed"
-    assert read_evidence(evidence / "cases/missing-reference").status == "passed"
-    assert read_evidence(evidence / "cases/altered-reference").status == "passed"
-    assert read_evidence(evidence / "cases/altered-skill").status == "passed"
+    case_names = (
+        "reinstall",
+        "missing-section",
+        "altered-section",
+        "missing-reference",
+        "altered-reference",
+        "altered-skill",
+        "preserve-skill-backup",
+        "missing-json-hook",
+    )
+    for name in case_names:
+        assert read_evidence(evidence / "cases" / name).status == "passed"
     payload = json.loads((output / "campaign.json").read_text())
     reinstall = next(case for case in payload["cases"] if case["name"] == "reinstall")
     assert payload["passed"] and reinstall["output_directory"] == "evidence/cases/reinstall"
     timings = {item["phase"]: item for item in payload["timings"]}
     assert timings["construction"]["state"] == "measured"
     assert timings["materialization"]["state"] == "measured"
-    assert len(payload["output_lifecycle"]["writers"]) == 8
+    assert len(payload["output_lifecycle"]["writers"]) == 1 + len(case_names)
     assert all(w["state"] == "stopped" for w in payload["output_lifecycle"]["writers"])
 
 
@@ -111,7 +117,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 8
+        == 9  # One verification and eight constructed cases.
     )
 
 

@@ -16,12 +16,12 @@ from tools.install_sandbox.host.result_reader import read_evidence
 
 
 @pytest.mark.parametrize(
-    ("markdown_only", "hooks", "expected_root", "installed_root", "passed"),
+    ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, id="all-effects-home"),
-        pytest.param(True, False, "home", "home", True, id="markdown-only"),
-        pytest.param(False, False, "project", "project", True, id="skill-project-markdown"),
-        pytest.param(False, False, "project", "home", False, id="wrong-skill-root"),
+        pytest.param(False, True, "home", "home", True, 16, id="all-effects-home"),
+        pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
+        pytest.param(False, False, "project", "project", True, 14, id="skill-project-markdown"),
+        pytest.param(False, False, "project", "home", False, 7, id="wrong-skill-root"),
     ],
 )
 def test_cli_real_engine_and_autonomous_reread(
@@ -32,6 +32,7 @@ def test_cli_real_engine_and_autonomous_reread(
     expected_root: Literal["home", "project"],
     installed_root: Literal["home", "project"],
     passed: bool,
+    expected_calls: int,
 ) -> None:
     subject, spec, context = arrange(
         tmp_path, markdown_only=markdown_only, hooks=hooks, skill_root=expected_root
@@ -57,7 +58,7 @@ def test_cli_real_engine_and_autonomous_reread(
             str(output),
         ]
     ) == (0 if passed else 1)
-    assert len(transport.installer.calls) == (6 if markdown_only else 14 if passed else 7)
+    assert len(transport.installer.calls) == expected_calls
     assert not (output / "evidence").exists()
     report = json.loads((output / "campaign.json").read_text())
     assert [case["name"] for case in report["cases"]] == [
@@ -68,6 +69,7 @@ def test_cli_real_engine_and_autonomous_reread(
         "altered-reference",
         "altered-skill",
         "preserve-skill-backup",
+        "missing-json-hook",
     ]
     saved = {
         case["name"]: case["result"]["test"]
@@ -76,8 +78,8 @@ def test_cli_real_engine_and_autonomous_reread(
     }
     if markdown_only:
         assert (
-            report["cases"][-1]["construction"],
-            report["cases"][-1]["construction_reason"],
+            report["cases"][-2]["construction"],
+            report["cases"][-2]["construction_reason"],
         ) == ("not_applicable", "No skill effect declared")
     for result in saved.values():
         assert result["status"] == ("passed" if passed else "failed")
@@ -142,7 +144,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=5 if wrong_skill else 10,
+        calls=5 if wrong_skill else 12 if hooks else 10,
     )
 
 
@@ -246,8 +248,12 @@ def _assert_partial_campaign(
             "altered-skill",
             "preserve-skill-backup",
         ]
-    )
+    ) + (["missing-json-hook"] if not transport.installer.hooks else [])
     for case in repairs:
+        if case["name"] == "missing-json-hook":
+            assert case["construction"] == "not_applicable"
+            assert case["construction_reason"] == "No JSON hooks effect declared"
+            continue
         assert case["construction"] == (
             "not_applicable"
             if case["name"]

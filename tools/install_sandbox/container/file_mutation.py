@@ -2,7 +2,10 @@
 
 import hashlib
 import os
+import secrets
 import stat
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
@@ -10,14 +13,17 @@ from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileAppend,
     BoundFileCreation,
     BoundFileRemoval,
+    BoundFileReplacement,
+    BoundMarkdownMutation,
     BoundMutation,
     PerformedMutation,
 )
-from tools.install_sandbox.contracts.effects import Destination, SkillEffect
+from tools.install_sandbox.contracts.effects import Destination, JsonHooksEffect, SkillEffect
 from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
+    MissingJsonHookPreparation,
     PreserveSkillBackupPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -26,6 +32,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     selected_reference,
     selected_skill,
 )
+from tools.install_sandbox.rules.json_hook_repair import missing_hook_settings
 
 
 def _path(operation: BoundMutation, environment: EffectEnvironment) -> Path:
@@ -124,6 +131,21 @@ def _create_file(operation: BoundFileCreation, environment: EffectEnvironment) -
         os.close(parent)
 
 
+def _validate_hook_removal(
+    operation: BoundMutation, environment: EffectEnvironment, retained: bytes
+) -> None:
+    preparation = environment.case.intermediate_preparation
+    if not isinstance(operation, BoundFileReplacement) or not isinstance(
+        preparation, MissingJsonHookPreparation
+    ):
+        raise ValueError("Hook removal requires a replacement of the selected settings")
+    effect = next(e for e in environment.case.effects.effects if isinstance(e, JsonHooksEffect))
+    if operation.destination != effect.destination or preparation.destination != effect.destination:
+        raise ValueError("Hook removal destination differs from selected settings")
+    if operation.content != missing_hook_settings(effect, retained):
+        raise ValueError("Replacement differs from the selected hook removal")
+
+
 def apply_mutation(
     operation: BoundMutation,
     environment: EffectEnvironment,
@@ -131,12 +153,29 @@ def apply_mutation(
     first_after: FilesystemSnapshot,
     sources: FilesystemSnapshot,
 ) -> None:
-    _validate_destination(operation, environment, sources)
     retained = operation.verify_binding(case_bytes, first_after)
+    if isinstance(operation, BoundFileReplacement) or isinstance(
+        environment.case.intermediate_preparation, MissingJsonHookPreparation
+    ):
+        _validate_hook_removal(operation, environment, retained)
+    else:
+        _validate_destination(operation, environment, sources)
+    if isinstance(operation, BoundFileReplacement):
+        root = environment.project if operation.destination.root == "project" else environment.home
+        _replace_file(root / operation.destination.path, operation, retained)
+        return
     path = _path(operation, environment)
     if isinstance(operation, BoundFileCreation):
         _create_file(operation, environment)
         return
+    _mutate_existing(path, operation, retained)
+
+
+def _mutate_existing(
+    path: Path,
+    operation: BoundFileRemoval | BoundFileAppend | BoundMarkdownMutation,
+    retained: bytes,
+) -> None:
     if not path.is_file():
         raise ValueError("Operation requires original regular file")
     flags = os.O_RDONLY if isinstance(operation, BoundFileRemoval) else os.O_RDWR
@@ -157,9 +196,133 @@ def apply_mutation(
             stream.truncate()
 
 
+@contextmanager
+def _pinned_parent(path: Path) -> Generator[int]:
+    """Traverse from the filesystem root without following any directory links."""
+    path = path.absolute()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent = os.open(path.anchor, flags)
+    try:
+        for part in path.parts[1:-1]:
+            child = os.open(part, flags, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        yield parent
+    finally:
+        os.close(parent)
+
+
+def _regular_bytes(
+    parent: int, name: str, *, writable: bool = False
+) -> tuple[os.stat_result, bytes]:
+    # NONBLOCK makes a concurrent replacement with a FIFO fail without hanging.
+    flags = os.O_RDWR if writable else os.O_RDONLY
+    descriptor = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Operation requires original regular file")
+        return info, stream.read()
+
+
+def _replace_file(path: Path, operation: BoundFileReplacement, retained: bytes) -> None:
+    """Publish a new inode; never write through a possibly shared original inode."""
+    with _pinned_parent(path) as parent:
+        original, content = _regular_bytes(parent, path.name, writable=True)
+        if content != retained:
+            raise ValueError("File changed since validated observation")
+        private = ".graphify-replacement-" + secrets.token_hex(16)
+        os.mkdir(private, 0o700, dir_fd=parent)
+        private_info = os.stat(private, dir_fd=parent, follow_symlinks=False)
+        directory: int | None = None
+        staged_info: os.stat_result | None = None
+        try:
+            directory = os.open(
+                private, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
+            )
+            opened = os.fstat(directory)
+            if (opened.st_dev, opened.st_ino) != (private_info.st_dev, private_info.st_ino):
+                raise ValueError("Private staging directory changed")
+            descriptor = os.open(
+                "content",
+                os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory,
+            )
+            staged_info = os.fstat(descriptor)
+            prepared = _write_replacement(descriptor, operation.content, original.st_mode)
+            _validate_publication(parent, path.name, original, retained, directory, prepared)
+            # rename is atomic, but is not a compare-and-swap against an adversarial writer.
+            os.replace("content", path.name, src_dir_fd=directory, dst_dir_fd=parent)
+        finally:
+            if directory is not None:
+                try:
+                    if staged_info is not None:
+                        _unlink_owned(directory, "content", staged_info)
+                finally:
+                    os.close(directory)
+            _unlink_owned(parent, private, private_info, directory=True)
+
+
+def _validate_publication(
+    parent: int,
+    name: str,
+    original: os.stat_result,
+    retained: bytes,
+    directory: int,
+    prepared: os.stat_result,
+) -> None:
+    current, content = _regular_bytes(parent, name)
+    if (current.st_dev, current.st_ino) != (
+        original.st_dev,
+        original.st_ino,
+    ) or content != retained:
+        raise ValueError("File changed since validated observation")
+    staged = os.stat("content", dir_fd=directory, follow_symlinks=False)
+    if staged.st_nlink != 1:
+        raise ValueError("Prepared replacement is shared")
+    if (staged.st_dev, staged.st_ino) != (prepared.st_dev, prepared.st_ino):
+        raise ValueError("Prepared replacement changed before publication")
+
+
+def _write_replacement(descriptor: int, content: bytes, mode: int) -> os.stat_result:
+    with os.fdopen(descriptor, "w+b") as stream:
+        if os.fstat(stream.fileno()).st_nlink != 1:
+            raise ValueError("Prepared replacement is shared")
+        if stream.write(content) != len(content):
+            raise ValueError("Incomplete settings replacement")
+        stream.flush()
+        os.fchmod(stream.fileno(), stat.S_IMODE(mode))
+        stream.seek(0)
+        if stream.read() != content:
+            raise ValueError("Replacement differs from intended bytes")
+        return os.fstat(stream.fileno())
+
+
+def _unlink_owned(
+    parent: int, name: str, expected: os.stat_result, *, directory: bool = False
+) -> None:
+    """Best-effort cleanup, without deleting a detected substituted entry."""
+    try:
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) == (expected.st_dev, expected.st_ino):
+            if directory:
+                os.rmdir(name, dir_fd=parent)
+            else:
+                os.unlink(name, dir_fd=parent)
+    except FileNotFoundError:
+        pass
+
+
 def capture_performed_mutation(
     operation: BoundMutation, environment: EffectEnvironment
 ) -> PerformedMutation:
+    if isinstance(operation, BoundFileReplacement):
+        root = environment.project if operation.destination.root == "project" else environment.home
+        path = root / operation.destination.path
+        with _pinned_parent(path) as parent:
+            _, content = _regular_bytes(parent, path.name)
+        return PerformedMutation(operation, hashlib.sha256(content).hexdigest())
     path = _path(operation, environment)
     if isinstance(operation, BoundFileCreation) and not os.path.lexists(path):
         return PerformedMutation(operation, None)

@@ -140,9 +140,15 @@ class LiteralInstaller:
         groups = data["hooks"]["PreToolUse"]
         search = {"type": "command", "command": "graphify hook-guard search", "timeout": 10}
         read = {"type": "command", "command": "graphify hook-guard read", "timeout": 10}
-        if search not in groups[0]["hooks"]:
-            groups[0]["hooks"].append(search)
-            groups.append({"matcher": "Read|Glob", "hooks": [read]})
+        # Search and read may live in separate groups; repair each independently.
+        for matcher, hook in (("Bash|Grep", search), ("Read|Glob", read)):
+            matching = [group for group in groups if group.get("matcher") == matcher]
+            if any(hook in group["hooks"] for group in matching):
+                continue
+            if matching:
+                matching[0]["hooks"].append(hook)
+            else:
+                groups.append({"matcher": matcher, "hooks": [hook]})
         path.write_text(json.dumps(data) + "\n")
 
 

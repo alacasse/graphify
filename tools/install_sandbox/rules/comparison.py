@@ -1,11 +1,11 @@
 """Representation-level byte, Markdown and JSON comparison primitives."""
 
-import json
 from typing import cast
 
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationMismatch, VerificationResult
 from tools.install_sandbox.contracts.spec import HookExpectation
+from tools.install_sandbox.rules.lossless_json import decode_json, equal_json
 
 
 def mismatch(
@@ -145,30 +145,12 @@ def verify_markdown_section(
         )
 
 
-def _json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    data: dict[str, object] = {}
-    for key, value in pairs:
-        if key in data:
-            raise ValueError("Duplicate JSON key")
-        data[key] = value
-    return data
-
-
-def _reject_constant(value: str) -> object:
-    raise ValueError(f"Invalid JSON constant: {value}")
-
-
 def read_json(content: bytes) -> dict[str, object]:
-    value: object = json.loads(
-        content.decode("utf-8"), object_pairs_hook=_json_object, parse_constant=_reject_constant
-    )
-    if not isinstance(value, dict):
-        raise ValueError("Expected JSON object")
-    return cast(dict[str, object], value)
+    return decode_json(content)
 
 
 def json_equal(left: object, right: object) -> bool:
-    return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+    return equal_json(left, right)
 
 
 def _hook_entries(

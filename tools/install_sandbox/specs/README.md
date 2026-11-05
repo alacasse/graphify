@@ -54,13 +54,24 @@ The coordinator constructs the cases before allocating campaign output.
 `reinstall` is always constructed. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
-A skill additionally makes `missing-reference`, `altered-reference` and
-`altered-skill` and `preserve-skill-backup` available, in that order, independently
-of the Markdown count.
-Without a skill, those cases
-are not applicable. Each constructed case has two dependent installation steps.
-Effects select the behavior;
-filenames, subject identities and invocation words do not.
+A skill makes `missing-reference`, `altered-reference`, `altered-skill` and
+`preserve-skill-backup` available in that order, independently of the Markdown
+count. Without a skill, the campaign reports those cases as `not_applicable`.
+The last case, `missing-json-hook`, selects the first hook of the first
+`json-hooks` effect. A spec without that effect yields `not_applicable` for
+this case. Each constructed case has two dependent installation steps.
+
+`missing-json-hook` alone seeds the selected conforming hook beside the personal
+`python personal_graphify_audit.py` command (timeout 17), with an explicit group
+attribute and a neighboring personal group under the same event. Other declared
+hooks are absent initially and must be installed by the first command. The first
+installation must preserve the seeded group. Preparation removes only the selected
+hook, retaining its group, personal attributes and order, all other hooks and the
+initial JSON backup. Reinstallation restores exactly one conforming occurrence
+under the declared event and matcher in either an existing or a new group.
+All other JSON values and array ordering must match the prepared settings.
+The backup must still match the original settings byte for byte, and all
+other observed files must match their contents after the first installation.
 
 `missing-reference` removes one representative reference: the first regular file
 in lexical order of relative source paths, including subdirectories. A complete
@@ -175,7 +186,10 @@ its identified historical reader revision.
 The current formats are case `explicit-expectations-v9`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v3`, performed
 result `performed-mutation-v3`, and case evidence `explicit-expectations-v11`.
-Mutation records discriminate Markdown modification, file removal and file append.
+The `kind` field identifies the operation as `markdown`, `file-removal`,
+`file-append`, `file-creation`, or `file-replacement`. The
+`preserve-skill-backup` case uses `file-creation` to seed the backup.
+`missing-json-hook` uses `file-replacement` to remove one hook from the settings.
 Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
 independently reconstructs the target selection, operation and expectations,
 including both repaired skill bytes and altered backup bytes from retained sources.

@@ -90,6 +90,27 @@ class MissingReferencePreparation:
         return result
 
 
+@dataclass(frozen=True)
+class MissingJsonHookPreparation:
+    destination: Destination
+    kind: str = "missing-json-hook"
+
+    def to_data(self) -> dict[str, object]:
+        if self.kind != "missing-json-hook":
+            raise ValueError("Unsupported missing JSON hook preparation")
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "MissingJsonHookPreparation":
+        data = fields(value, "kind destination")
+        result = cls(Destination.from_data(data["destination"]), text(data["kind"]))
+        result.to_data()
+        return result
+
+
 REFERENCE_REPAIR_SUFFIX = b"\nSandbox repair witness.\n"
 
 
@@ -192,6 +213,7 @@ def preparation_from_data(
 ) -> (
     IntermediatePreparation
     | MissingReferencePreparation
+    | MissingJsonHookPreparation
     | AlteredReferencePreparation
     | AlteredSkillPreparation
     | PreserveSkillBackupPreparation
@@ -199,6 +221,8 @@ def preparation_from_data(
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
+    if incoming.get("kind") == "missing-json-hook":
+        return MissingJsonHookPreparation.from_data(incoming)
     if incoming.get("kind") == "preserve-skill-backup":
         return PreserveSkillBackupPreparation.from_data(incoming)
     if incoming.get("kind") == "missing-reference":

@@ -7,6 +7,12 @@ from tools.install_sandbox.contracts.expectations import (
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import ObservationObstacle, VerificationResult
 from tools.install_sandbox.rules import comparison as checks
+from tools.install_sandbox.rules.json_hook_repair import (
+    removed_target_preserved,
+    repaired_json_preserved,
+    target_group_preserved,
+    without_target,
+)
 
 
 def _obstacle(result: VerificationResult, root: str, path: str, reason: str) -> None:
@@ -54,14 +60,29 @@ def _json(item: Expectation, current: bytes, result: VerificationResult) -> None
     assert item.baseline is not None
     try:
         before, after = checks.read_json(item.baseline), checks.read_json(current)
+        counts: list[int] = []
         for hook in item.hooks:
             count = len(
                 checks.hook_positions(after, hook.event, hook.matcher, hook.content, exact=False)
             )
+            counts.append(count)
             if count != 1:
                 checks.mismatch(
                     result, "hook_count", item.root, item.path, "one conforming hook", str(count)
                 )
+        if (
+            item.kind == "json-hooks-seeded"
+            and counts[0] == 1
+            and not target_group_preserved(before, after, item.hooks[0])
+        ):
+            checks.mismatch(
+                result,
+                "target_group_changed",
+                item.root,
+                item.path,
+                "target retained in seeded personal group",
+                "target group changed",
+            )
         if not checks.json_equal(
             checks.personal_json(item.hooks, before), checks.personal_json(item.hooks, after)
         ):
@@ -118,10 +139,51 @@ def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> 
             path=item.path,
             marker=item.marker,
         )
-    elif item.kind == "json-hooks":
+    elif item.kind in {"json-hooks", "json-hooks-seeded"}:
         _json(item, current, result)
+    elif item.kind in {"json-hook-removed", "json-hook-repair"}:
+        _json_transition(item, current, result)
     else:
         raise ValueError("Unsupported expectation kind")
+
+
+def _json_transition(item: Expectation, current: bytes, result: VerificationResult) -> None:
+    assert item.baseline is not None and len(item.hooks) == 1
+    try:
+        before, after = checks.read_json(item.baseline), checks.read_json(current)
+        target = item.hooks[0]
+        if item.kind == "json-hook-removed":
+            valid = removed_target_preserved(before, after, target)
+        else:
+            count = len(
+                checks.hook_positions(
+                    after, target.event, target.matcher, target.content, exact=False
+                )
+            )
+            if count != 1:
+                checks.mismatch(
+                    result, "hook_count", item.root, item.path, "one conforming hook", str(count)
+                )
+                return
+            valid = repaired_json_preserved(without_target(before, target), after, target)
+        if not valid:
+            checks.mismatch(
+                result,
+                "user_content_lost",
+                item.root,
+                item.path,
+                "JSON structure preserved around target",
+                "JSON changed",
+            )
+    except (ValueError, UnicodeError):
+        checks.mismatch(
+            result,
+            "invalid_json",
+            item.root,
+            item.path,
+            "valid JSON with unique target",
+            "invalid JSON",
+        )
 
 
 class EffectVerifier:

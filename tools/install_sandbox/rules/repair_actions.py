@@ -7,13 +7,10 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, is_dataclass
+from types import UnionType
 from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import (
-    BoundFileAppend,
-    BoundFileCreation,
-    BoundFileRemoval,
-    BoundMarkdownMutation,
     BoundMutation,
     PerformedMutation,
     mutation_from_data,
@@ -66,17 +63,7 @@ def _data(value: object) -> object:
             "contents": [[*key, content.hex()] for key, content in sorted(value.contents.items())],
             "obstacles": copy.deepcopy(value.obstacles),
         }
-    if isinstance(
-        value,
-        (
-            BoundMarkdownMutation,
-            BoundFileAppend,
-            BoundFileCreation,
-            BoundFileRemoval,
-            PerformedMutation,
-            ExpectationSet,
-        ),
-    ):
+    if isinstance(value, BoundMutation | PerformedMutation | ExpectationSet):
         return value.to_data()
     if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
@@ -95,7 +82,7 @@ class ArtifactDescriptor:
     reference: str
     checkpoint: str
     transport: Literal["json", "snapshot"]
-    _type: type[object] | tuple[type[object], ...]
+    _type: type[object] | UnionType
     _decoder: Callable[[object], object]
 
     def decode(self, raw: object) -> object:
@@ -122,7 +109,7 @@ ARTIFACTS = (
         "intermediate/operation.json",
         "operation_retained",
         "json",
-        (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation),
+        BoundMutation,
         mutation_from_data,
     ),
     ArtifactDescriptor(

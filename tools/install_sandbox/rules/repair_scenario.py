@@ -9,11 +9,17 @@ from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileAppend,
     BoundFileCreation,
     BoundFileRemoval,
+    BoundFileReplacement,
     BoundMarkdownMutation,
     BoundMutation,
 )
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.effects import Destination, MarkdownSectionEffect, SkillEffect
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase, missing_json_hook_group
+from tools.install_sandbox.contracts.effects import (
+    Destination,
+    JsonHooksEffect,
+    MarkdownSectionEffect,
+    SkillEffect,
+)
 from tools.install_sandbox.contracts.expectations import (
     Expectation,
     ExpectationSet,
@@ -22,18 +28,23 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
+    MissingJsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
-from tools.install_sandbox.rules.comparison import markdown_byte_parts
+from tools.install_sandbox.rules.comparison import markdown_byte_parts, read_json
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     preservation_baseline,
     retained_bytes,
     selected_reference,
     selected_skill,
+)
+from tools.install_sandbox.rules.json_hook_repair import (
+    missing_hook_settings,
+    target_group_preserved,
 )
 
 
@@ -447,6 +458,71 @@ class PreserveSkillBackupScenario:
             return PreparationBlocked(str(exc))
 
 
+@dataclass(frozen=True)
+class MissingJsonHookScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
+            preparation = self.case.intermediate_preparation
+            if not isinstance(preparation, MissingJsonHookPreparation):
+                raise ValueError("Case has no missing JSON hook preparation")
+            effect = next(e for e in self.case.effects.effects if isinstance(e, JsonHooksEffect))
+            if preparation.destination != effect.destination:
+                raise ValueError("Preparation must target the first JSON effect")
+            destination = effect.destination
+            document = retained_bytes(first_after, destination.root, destination.path)
+            parsed = read_json(document)
+            seeded: dict[str, object] = {
+                "hooks": {effect.hooks[0].event: [missing_json_hook_group(effect)]}
+            }
+            if not target_group_preserved(seeded, parsed, effect.hooks[0]):
+                raise ValueError("Target hook must remain in its intact seeded personal group")
+            prepared = missing_hook_settings(effect, document)
+            removed = Expectation(
+                "json-hook-removed",
+                destination.root,
+                destination.path,
+                "intermediate",
+                "observation:remove-declared-hook",
+                baseline=document,
+                hooks=(effect.hooks[0],),
+            )
+            repaired = Expectation(
+                "json-hook-repair",
+                destination.root,
+                destination.path,
+                "reinstall",
+                "observation:prepared-json+declared-hook",
+                baseline=document,
+                hooks=(effect.hooks[0],),
+            )
+            operation = BoundFileReplacement(
+                hashlib.sha256(case_bytes).hexdigest(),
+                observation_ref,
+                destination,
+                hashlib.sha256(document).hexdigest(),
+                prepared,
+            )
+            operation.verify_binding(case_bytes, first_after)
+            return PreparationPlan(
+                operation,
+                _transition(installed, first_after, (removed,), "intermediate"),
+                _transition(installed, first_after, (repaired,), "reinstall"),
+            )
+        except (ValueError, UnicodeError, StopIteration) as exc:
+            return PreparationBlocked(str(exc))
+
+
 def repair_scenario_from_case(
     case: EffectInstallCase, sources: FilesystemSnapshot
 ) -> (
@@ -455,6 +531,7 @@ def repair_scenario_from_case(
     | AlteredReferenceScenario
     | AlteredSkillScenario
     | PreserveSkillBackupScenario
+    | MissingJsonHookScenario
 ):
     preparation = case.intermediate_preparation
     if preparation is None:
@@ -464,9 +541,11 @@ def repair_scenario_from_case(
         type[MissingReferenceScenario]
         | type[AlteredReferenceScenario]
         | type[AlteredSkillScenario]
-        | type[PreserveSkillBackupScenario],
+        | type[PreserveSkillBackupScenario]
+        | type[MissingJsonHookScenario],
     ] = {
         MissingReferencePreparation: MissingReferenceScenario,
+        MissingJsonHookPreparation: MissingJsonHookScenario,
         AlteredReferencePreparation: AlteredReferenceScenario,
         AlteredSkillPreparation: AlteredSkillScenario,
         PreserveSkillBackupPreparation: PreserveSkillBackupScenario,

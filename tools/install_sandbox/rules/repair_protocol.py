@@ -9,10 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from tools.install_sandbox.contracts.bound_mutation import (
-    BoundFileAppend,
-    BoundFileCreation,
-    BoundFileRemoval,
-    BoundMarkdownMutation,
+    BoundMutation,
     PerformedMutation,
 )
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
@@ -193,7 +190,7 @@ class RepairSession:
                 operation = self._payloads["operation"]
                 assert isinstance(
                     operation,
-                    (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation),
+                    BoundMutation,
                 )
                 self._active = ApplyMutation(operation)
             else:
@@ -299,7 +296,7 @@ class RepairSession:
         if kind == "operation":
             if not isinstance(
                 payload,
-                (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation),
+                BoundMutation,
             ):
                 raise ValueError("Expected bound mutation")
             if payload != self._plan.operation:
@@ -322,9 +319,7 @@ class RepairSession:
         performed = self._payloads["performed"]
         operation = self._payloads["operation"]
         assert isinstance(performed, PerformedMutation)
-        assert isinstance(
-            operation, (BoundMarkdownMutation, BoundFileRemoval, BoundFileAppend, BoundFileCreation)
-        )
+        assert isinstance(operation, BoundMutation)
         performed.verify(operation, payload)
         return None
 

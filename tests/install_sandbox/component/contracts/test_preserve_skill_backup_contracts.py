@@ -157,6 +157,7 @@ def test_multiple_markdown_effects_do_not_block_backup_case() -> None:
     assert [(item.name, item.classification) for item in build.decisions] == [
         ("missing-section", "unconstructible"),
         ("altered-section", "unconstructible"),
+        ("missing-json-hook", "not_applicable"),
     ]
 
 

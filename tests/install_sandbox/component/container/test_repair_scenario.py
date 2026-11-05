@@ -155,7 +155,7 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
     assert [(item.name, item.classification, item.reason) for item in empty.decisions] == [
         (name, "not_applicable", "No Markdown effect declared")
         for name in ("missing-section", "altered-section")
-    ]
+    ] + [("missing-json-hook", "not_applicable", "No JSON hooks effect declared")]
 
 
 def test_operation_hashes_exact_archived_case_bytes() -> None:

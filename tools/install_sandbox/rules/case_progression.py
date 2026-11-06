@@ -9,7 +9,9 @@ from tools.install_sandbox.contracts.results import RepairCheckpoint, RepairProg
 from tools.install_sandbox.rules import initial_preparation, step_lifecycle
 
 Status = Literal["not_run", "incomplete", "passed", "failed"]
-Segment = Literal["initial_preparation", "installation", "repair", "reinstallation"]
+Segment = Literal[
+    "initial_preparation", "installation", "repair", "reinstallation", "uninstallation"
+]
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ def evaluate(shape: CaseShape, facts: CaseFacts) -> CaseDecision:
             else "incomplete"
         )
         return CaseDecision(status, "repair" if status == "incomplete" else None)
+    segment: Segment = "uninstallation" if shape.operations[1] == "uninstall" else "reinstallation"
     if second.phase == "idle":
-        return CaseDecision("incomplete", "reinstallation")
-    return _step_decision(second, second_status, "reinstallation")
+        return CaseDecision("incomplete", segment)
+    return _step_decision(second, second_status, segment)

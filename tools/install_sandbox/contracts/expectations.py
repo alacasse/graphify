@@ -8,7 +8,7 @@ from typing import cast
 from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.spec import HookExpectation, fields, text
 
-_PHASES = {"initial", "install", "intermediate", "reinstall"}
+_PHASES = {"initial", "install", "intermediate", "reinstall", "uninstall"}
 _KINDS = {
     "file",
     "directory",
@@ -180,8 +180,8 @@ class ExpectationSet:
             raise ValueError("Duplicate allowed change")
         if len(self.allowed_removals) != len(set(self.allowed_removals)):
             raise ValueError("Duplicate allowed removal")
-        if self.allowed_removals and self.phase not in {"intermediate", "reinstall"}:
-            raise ValueError("Removals are only allowed during preparation or reinstall")
+        if self.allowed_removals and self.phase not in {"intermediate", "reinstall", "uninstall"}:
+            raise ValueError("Removals are only allowed during preparation, reinstall or uninstall")
         for key in self.allowed_removals:
             Destination(*key)
             if key in self.allowed_changes:

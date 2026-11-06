@@ -93,19 +93,18 @@ class InstallerDriver:
         self.execute = execute
         self.timeout = timeout
 
-    def install(
+    def run_operation(
         self,
         case: EffectInstallCase,
         executable: Path,
         project: Path,
         home: Path,
         temporary: Path,
-        resolution: Path | None = None,
+        *,
+        operation: str,
     ) -> InstallerCommandResult:
         case = EffectInstallCase.from_json(case.to_json())
-        args = [str(executable), *case.subject.invocation]
-        if resolution is not None:
-            raise ValueError("Native effects do not declare managed resolution")
+        args = [str(executable), *case.invocation_for(operation)]
         environment = command_environment(home, temporary)
         environment.update(isolated_configuration(home, temporary))
         result = self.execute(args, project, environment, self.timeout)

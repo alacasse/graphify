@@ -18,7 +18,7 @@ _LABELS = {
     "venv": "Create the Python environment",
     "pip": "Install the package and dependencies",
     "initial": "Prepare and check the initial state",
-    "command": "Run the installation command",
+    "command": "Run the product command",
     "checks": "Observe, verify and save evidence",
     "step_preparation": "Prepare and check the next step",
     "finalize": "Finalize the case result",
@@ -62,7 +62,7 @@ def render_campaign(result: CampaignResult) -> str:
         f"Interrupted: {result.interrupted}",
         "Operation: prepare-only (zero installation steps)"
         if result.prepare_only
-        else "Operation: reinstall (two installation steps)",
+        else "Operations: see individual cases",
         f"Evidence: {result.output_directory}",
         f"Preparation: {preparation.state if preparation else 'not completed'}",
         f"Preparation diagnostic: {preparation.detail if preparation else 'unavailable'}",
@@ -102,6 +102,8 @@ def render_campaign(result: CampaignResult) -> str:
             )
             lines.append(f"  {label}: {entry.construction_reason}")
             continue
+        operations = "install, uninstall" if entry.name == "uninstall" else "install, install"
+        lines.append(f"  Operations: {operations}")
         lines.append(f"  Construction: constructed; execution: {entry.state}")
         if entry.result is None:
             lines.append(

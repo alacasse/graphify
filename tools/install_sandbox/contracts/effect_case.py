@@ -73,6 +73,16 @@ class SubjectContext:
     rules: EffectRules
     package_root: str | None = None
     revision: str | None = None
+    uninstall_invocation: tuple[str, ...] | None = None
+    uninstall_user_skill_path: str | None = None
+
+    def to_data(self) -> dict[str, object]:
+        data = cast(dict[str, object], json.loads(json.dumps(asdict(self))))
+        if self.uninstall_invocation is None:
+            data.pop("uninstall_invocation")
+        if self.uninstall_user_skill_path is None:
+            data.pop("uninstall_user_skill_path")
+        return data
 
     @classmethod
     def from_data(cls, value: object) -> "SubjectContext":
@@ -90,7 +100,20 @@ class SubjectContext:
             EffectRules.from_data(data["rules"]),
             cast(str | None, data["package_root"]),
             cast(str | None, data["revision"]),
+            _optional_invocation(data["uninstall_invocation"]),
+            cast(str | None, data["uninstall_user_skill_path"]),
         )
+
+
+def _optional_invocation(value: object) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value:
+        raise ValueError("Expected explicit uninstall invocation arguments")
+    arguments = tuple(text(item) for item in cast(list[object], value))
+    if any("\x00" in argument for argument in arguments):
+        raise ValueError("Invalid uninstall invocation argument")
+    return arguments
 
 
 def _context_fields(value: object) -> dict[str, object]:
@@ -98,9 +121,20 @@ def _context_fields(value: object) -> dict[str, object]:
         raise ValueError("Expected a subject context object")
     incoming = cast(dict[str, object], value)
     data = fields(
-        {"package_root": None, "revision": None, **incoming},
-        "identity invocation version_source rules package_root revision",
+        {
+            "package_root": None,
+            "revision": None,
+            "uninstall_invocation": None,
+            "uninstall_user_skill_path": None,
+            **incoming,
+        },
+        "identity invocation version_source rules package_root revision uninstall_invocation "
+        "uninstall_user_skill_path",
     )
+    if (data["uninstall_invocation"] is None) != (data["uninstall_user_skill_path"] is None):
+        raise ValueError("Uninstall requires an explicit command and HOME skill path together")
+    if data["uninstall_user_skill_path"] is not None:
+        relative_path(data["uninstall_user_skill_path"])
     root, revision = data["package_root"], data["revision"]
     if root is not None:
         relative_path(root)
@@ -323,8 +357,20 @@ class EffectInstallCase:
         | None
     ) = None
 
+    @property
+    def second_phase(self) -> Literal["reinstall", "uninstall"]:
+        return "uninstall" if self.operations[1] == "uninstall" else "reinstall"
+
+    def invocation_for(self, operation: str) -> tuple[str, ...]:
+        if operation == "install":
+            return self.subject.invocation
+        if operation == "uninstall" and self.subject.uninstall_invocation is not None:
+            return self.subject.uninstall_invocation
+        raise ValueError(f"Unsupported subject operation: {operation}")
+
     def to_json(self) -> str:
         data = asdict(self)
+        data["subject"] = self.subject.to_data()
         data["format"] = "explicit-expectations-v9"
         data["intermediate_preparation"] = (
             None
@@ -452,6 +498,8 @@ def build_effect_cases(
             if hooks
             else CaseNonConstruction(kind, "not_applicable", "No JSON hooks effect declared")
         )
+    if reinstall.subject.uninstall_invocation is not None:
+        entries.append(_uninstall_case(reinstall))
     return EffectCaseBuild(tuple(entries))
 
 
@@ -497,4 +545,46 @@ def _markdown_cases(
             intermediate_preparation=replace(preparation, kind=kind, body=body),
         )
         for name, kind, body in variants
+    )
+
+
+def _uninstall_case(reinstall: EffectInstallCase) -> EffectInstallCase:
+    """Construct targeted project removal from explicit commands and skill data."""
+    spec, subject = reinstall.effects, reinstall.subject
+    invocation = subject.invocation
+    if (
+        len(invocation) != 4
+        or invocation[:2] != ("install", "--platform")
+        or re.fullmatch(r"[a-z][a-z0-9-]*", invocation[2]) is None
+        or invocation[3:] != ("--project",)
+        or subject.uninstall_invocation != ("uninstall", *invocation[1:])
+        or subject.uninstall_user_skill_path is None
+        or spec.scope != "project"
+        or len(spec.effects) != 1
+        or not isinstance(spec.effects[0], SkillEffect)
+        or spec.effects[0].destination.root != "project"
+    ):
+        raise ValueError("Unsupported uninstall composition or subject invocation")
+    path = spec.effects[0].destination.path
+    user_path = subject.uninstall_user_skill_path
+    witnesses: list[InitialFile] = [
+        {"root": root, "path": name, "content": content}
+        for root, name, content in (
+            ("home", user_path + "/SKILL.md", "# User skill witness\n"),
+            (
+                "home",
+                user_path + "/references/sandbox-user-witness.md",
+                "User reference witness.\n",
+            ),
+            ("home", user_path + "/.graphify_version", "user-witness-version\n"),
+            ("project", path + "/personal.txt", "Personal project skill content.\n"),
+            ("project", path + "/SKILL.md.bak", "Personal previous skill backup.\n"),
+            ("project", "graphify-out/personal.txt", "Personal graph output witness.\n"),
+        )
+    ]
+    return replace(
+        reinstall,
+        name="uninstall",
+        operations=["install", "uninstall"],
+        initial_files=[*reinstall.initial_files, *witnesses],
     )

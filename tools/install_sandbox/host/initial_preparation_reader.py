@@ -50,7 +50,7 @@ def replay_initial(
     output: Path,
     snapshot: Callable[[Path, str], FilesystemSnapshot],
 ) -> InitialInputs | None:
-    loaded, staged = _inventory(output, snapshot)
+    loaded, staged = _inventory(output, snapshot, case.second_phase)
     roots = _roots(loaded.get("environment"))
     sources, before = _observation(loaded.get("sources")), _observation(loaded.get("before"))
     initial, rejected = _initial_expectations(case, roots, sources)
@@ -234,13 +234,13 @@ def _require_blob_digests(output: Path, reference: str) -> None:
 
 
 def _inventory(
-    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
+    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot], second_phase: str
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     entries = _physical_entries(output)
     loaded, referenced = _load_artifacts(output, snapshot)
     foreign = tuple(
         ArtifactLocation(f"expectations/{phase}.json", "json")
-        for phase in ("intermediate", "reinstall")
+        for phase in ("intermediate", second_phase)
     )
     staged = classify_staging(
         tuple(entries), tuple(ARTIFACTS.values()) + foreign, referenced, set()

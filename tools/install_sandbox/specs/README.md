@@ -53,8 +53,8 @@ user scope identifies the operation, while the effect identifies its destination
 These specs declare no Markdown, hooks or Claude registration.
 
 Other YAML files retain historical target facts and are outside the current
-execution interface. Uninstall, other platforms and other effects remain outside
-these compositions.
+execution interface. Other platforms and effects remain outside these compositions.
+The optional Agents project uninstall case below covers one targeted removal path.
 
 ## Data and responsibilities
 
@@ -75,6 +75,17 @@ The subject context is a separate JSON object with these required fields:
 - `revision` and `package_root`: exact Git commit and package-relative source
   directory for a packaged subject; `package_root` is `graphify` for this product.
 - `invocation`: argument words following the prepared executable.
+- `uninstall_invocation` (optional): explicit argument words for the targeted
+  removal command, shaped as `["uninstall", "--platform", "NAME", "--project"]`,
+  paired with `["install", "--platform", "NAME", "--project"]` using the same
+  platform name. Construction requires exactly one PROJECT skill effect and no
+  other effects. Global commands, purge and mismatched platforms fail construction.
+- `uninstall_user_skill_path` (optional): explicit HOME-relative skill path for
+  the independent user-installation witness. Supply this together with
+  `uninstall_invocation`; omit both to preserve the historical catalogue and
+  transport. The PROJECT skill path always comes from the declared effect.
+  For the Agents project campaign, pair `agents.yaml` with platform `agents`
+  and HOME skill path `.agents/skills/graphify`.
 - `version_source`: relative source path containing distribution metadata with
   one `Version` header, required by a skill effect.
 - `rules`: explicit `hook_timeout`, `skill_lock`, `json_backup`, `skill_backup`
@@ -139,6 +150,16 @@ and Pi project or user runs 8 cases (16 installer calls): reinstall and the seve
 cases. Its two Markdown and three hook cases are `not_applicable`, with no
 installer commands or case evidence. These classifications describe the declared
 effects; a passed campaign qualifies only its represented paths.
+
+When that explicit uninstall command is supplied, `uninstall` is appended after
+all existing cases. It runs `install` followed by the targeted `uninstall`, without
+intermediate mutation. Its initial witnesses include an independent HOME Agents
+skill, reference and version, a personal file and `SKILL.md.bak` inside the PROJECT
+skill directory, and personal `graphify-out` content. Existing sentinels remain;
+no personal reference is inserted into the PROJECT reference bundle. This case
+covers removal of the installed PROJECT skill, packaged references and version
+while preserving the backup, personal content, HOME installation and persistent
+lock. The explicit command does not authorize global uninstall or purge.
 
 Each hook repair case seeds the selected conforming hook beside the personal
 `python personal_graphify_audit.py` command (timeout 17), with an explicit group

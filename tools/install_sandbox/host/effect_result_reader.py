@@ -26,6 +26,7 @@ from tools.install_sandbox.host.step_artifacts import inventory
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
+    build_uninstall_expectations,
 )
 from tools.install_sandbox.rules.repair_protocol import RepairInputs
 from tools.install_sandbox.rules.step_lifecycle import Artifact, RetainedFacts, inspect
@@ -82,9 +83,9 @@ def check_effect_result(
         raise ValueError("Retained case contradicts requested case")
     initial = replay_initial(result.preparation, case, output, _snapshot)
     if initial is None:
-        _absent(output, ("expectations/reinstall.json",))
+        _absent(output, (f"expectations/{case.second_phase}.json",))
         for index in range(len(result.steps)):
-            loaded, staged = inventory(output, index, _snapshot)
+            loaded, staged = inventory(output, index, _snapshot, case.second_phase)
             # Installation expectations belong to initial preparation, never an idle step.
             own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
             if own or staged:
@@ -133,7 +134,7 @@ def _steps(
     previous: FilesystemSnapshot,
     sources: FilesystemSnapshot,
 ) -> RepairProgress | None:
-    first_command: tuple[list[str], str] | None = None
+    first_executable: str | None = None
     previous_verdict: VerificationResult | None = None
     progress: RepairProgress | None = None
     installed = expected
@@ -143,10 +144,10 @@ def _steps(
                 result, case, output, sources, installed, expected, previous, previous_verdict
             )
         after, verdict = _inspect_step(
-            step, case, output, index, roots, first_command, previous, expected
+            step, case, output, index, roots, first_executable, previous, expected
         )
         if step.command is not None:
-            first_command = step.command["args"], step.command["cwd"]
+            first_executable = step.command["args"][0]
         if after is not None:
             previous = after
         previous_verdict = verdict
@@ -180,7 +181,12 @@ def _transition(
             return expected, previous, inspection.progress
         return inspection.ready.expectations, inspection.ready.baseline, inspection.progress
     if result.steps[1].phase != "idle" and verdict is not None:
-        expected = build_reinstall_expectations(expected, previous, verdict)
+        builder = (
+            build_uninstall_expectations
+            if case.second_phase == "uninstall"
+            else build_reinstall_expectations
+        )
+        expected = builder(expected, previous, verdict)
     return expected, previous, None
 
 
@@ -197,11 +203,11 @@ def _inspect_step(
     output: Path,
     index: int,
     roots: dict[str, str],
-    first_command: tuple[list[str], str] | None,
+    first_executable: str | None,
     previous: FilesystemSnapshot,
     expected: ExpectationSet,
 ) -> tuple[FilesystemSnapshot | None, VerificationResult | None]:
-    loaded, staged = inventory(output, index, _snapshot)
+    loaded, staged = inventory(output, index, _snapshot, case.second_phase)
     prefix = f"steps/{index}"
     failure = loaded.get(f"{prefix}/failure.json")
     stopped = None if failure is None else StepState.from_data(failure)
@@ -215,7 +221,7 @@ def _inspect_step(
             or (claim.stop is not None and claim.stop.phase == "preparation")
         )
     )
-    phase = "install" if index == 0 else "reinstall"
+    phase = "install" if index == 0 else case.second_phase
     expectation_reference = f"expectations/{phase}.json"
     has_expectations = safe_evidence_path(output, expectation_reference).exists()
     if has_expectations:
@@ -239,7 +245,9 @@ def _inspect_step(
             raise ValueError("Missing referenced observation")
     command = claim.command
     if command is not None:
-        _partial_command_binding(command, case, roots, first_command)
+        _partial_command_binding(
+            command, case.invocation_for(step.operation), roots, first_executable
+        )
         outputs: tuple[tuple[Literal["stdout_file", "stderr_file"], str], ...] = (
             ("stdout_file", "stdout.txt"),
             ("stderr_file", "stderr.txt"),
@@ -252,7 +260,7 @@ def _inspect_step(
                 raise ValueError("Command requires its own retained output")
     if f"{prefix}/environment.json" in loaded:
         binding = command or {
-            "args": ["retained", *case.subject.invocation],
+            "args": ["retained", *case.invocation_for(step.operation)],
             "cwd": roots["project"],
             "state": "not_started",
             "exit_code": None,
@@ -320,11 +328,11 @@ def _inspect_step(
 
 def _partial_command_binding(
     command: CommandEvidence,
-    case: EffectInstallCase,
+    invocation: tuple[str, ...],
     roots: dict[str, str],
-    first_command: tuple[list[str], str] | None,
+    first_executable: str | None,
 ) -> None:
-    if command["args"][1:] != list(case.subject.invocation) or command["cwd"] != roots["project"]:
+    if command["args"][1:] != list(invocation) or command["cwd"] != roots["project"]:
         raise ValueError("Partial command facts contradict invocation or retained roots")
-    if first_command is not None and (command["args"], command["cwd"]) != first_command:
-        raise ValueError("Partial reinstallation must repeat the same command")
+    if first_executable is not None and command["args"][0] != first_executable:
+        raise ValueError("Second operation must use the same prepared executable")

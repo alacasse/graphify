@@ -20,7 +20,7 @@ from tools.install_sandbox.host.evidence_reader import (
 
 
 def inventory(
-    output: Path, index: int, snapshot: Callable[[Path, str], FilesystemSnapshot]
+    output: Path, index: int, snapshot: Callable[[Path, str], FilesystemSnapshot], second_phase: str
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     """Load final artifacts even when the last publication does not reference them."""
     prefix = f"steps/{index}"
@@ -37,7 +37,7 @@ def inventory(
         if index != 0 or name != "before.json"
     ) + tuple(
         ArtifactLocation(f"expectations/{phase}.json", "json")
-        for phase in ("initial", "install", "intermediate", "reinstall")
+        for phase in ("initial", "install", "intermediate", second_phase)
     )
     entries: list[FilesystemEntry] = []
 
@@ -76,16 +76,16 @@ def inventory(
         if safe_evidence_path(output, reference).exists():
             loaded[reference] = safe_evidence_path(output, reference).read_bytes()
     staged = classify_staging(tuple(entries), descriptors, referenced, known)
-    return loaded, tuple(item for item in staged if _step_owns(item, index))
+    return loaded, tuple(item for item in staged if _step_owns(item, index, second_phase))
 
 
-def _step_owns(item: StagedEvidence, index: int) -> bool:
+def _step_owns(item: StagedEvidence, index: int, second_phase: str) -> bool:
     if item.form == "directory" and item.owners & {
         "expectations/initial.json",
         "expectations/install.json",
     }:
         return False
-    expectation = f"expectations/{'install' if index == 0 else 'reinstall'}.json"
+    expectation = f"expectations/{'install' if index == 0 else second_phase}.json"
     return any(
         owner.startswith(f"steps/{index}/") or (index != 0 and owner == expectation)
         for owner in item.owners

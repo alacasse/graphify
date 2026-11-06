@@ -1,4 +1,4 @@
-"""Execute native reinstall phases against expectations retained before commands."""
+"""Execute case operations against expectations retained before commands."""
 
 import time
 from pathlib import Path
@@ -23,6 +23,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     build_initial_expectations,
     build_install_expectations,
     build_reinstall_expectations,
+    build_uninstall_expectations,
 )
 from tools.install_sandbox.rules.initial_preparation import InitialPreparationLifecycle
 from tools.install_sandbox.rules.step_lifecycle import (
@@ -157,7 +158,7 @@ class InstallTestRunner:
                     return
                 expectations, before = transition
                 continue
-            if segment not in {"installation", "reinstallation"}:
+            if segment not in {"installation", "reinstallation", "uninstallation"}:
                 return
             index = 0 if segment == "installation" else 1
             state = start(case.operations[index])
@@ -187,7 +188,12 @@ class InstallTestRunner:
                     previous = publisher.facts.steps[0].verification
                     assert previous is not None
                     if case.intermediate_preparation is None:
-                        expectations = build_reinstall_expectations(expectations, before, previous)
+                        builder = (
+                            build_uninstall_expectations
+                            if case.second_phase == "uninstall"
+                            else build_reinstall_expectations
+                        )
+                        expectations = builder(expectations, before, previous)
                     observed = environment.observe(writer, "before", step_index=index)
                     usable = not observed.obstacles and same_observation(before, observed)
                     state = advance(
@@ -195,7 +201,7 @@ class InstallTestRunner:
                     )
                     if not usable:
                         raise ValueError(
-                            "Environment changed or was obstructed before the second installation"
+                            "Environment changed or was obstructed before the second operation"
                         )
             else:
                 state = advance(state, PreparationObserved(REFERENCES["before"]))
@@ -206,12 +212,13 @@ class InstallTestRunner:
                 )
             state = advance(state, ExpectationsRetained(f"expectations/{expectations.phase}.json"))
             with writer.measure("command", index) as timing:
-                command = self.driver.install(
+                command = self.driver.run_operation(
                     case,
                     executable,
                     environment.project,
                     environment.home,
                     environment.project.parent.parent / "command-tmp",
+                    operation=case.operations[index],
                 )
                 timing.duration_seconds = command.duration_seconds
                 if command.duration_seconds is None:

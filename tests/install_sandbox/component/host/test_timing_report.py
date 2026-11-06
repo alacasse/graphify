@@ -60,6 +60,6 @@ def test_partial_report_distinguishes_zero_skipped_and_unavailable() -> None:
     assert "Campaign total: unavailable" in report
     assert "Passed: False; total: unavailable" in report
     assert "Prepare and check the initial state: 0.000 s" in report
-    assert "Run the installation command: unavailable (started; end not recorded)" in report
+    assert "Run the product command: unavailable (started; end not recorded)" in report
     assert "Observe, verify and save evidence: not run" in report
     assert "Timing diagnostic: Interrupted before timing finalization" in report

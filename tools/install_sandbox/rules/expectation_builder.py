@@ -160,9 +160,18 @@ def build_initial_expectations(
         root, path = effect.destination.root, effect.destination.path
         if isinstance(effect, SkillEffect):
             lock = effect.destination
+            seeded_skill = any(
+                f["root"] == root and f["path"].startswith(path + "/") for f in case.initial_files
+            )
             constraints.extend(
                 (
-                    Expectation("absent", root, path, "initial", "effect:skill"),
+                    Expectation(
+                        "directory" if seeded_skill else "absent",
+                        root,
+                        path,
+                        "initial",
+                        "effect:skill",
+                    ),
                     Expectation(
                         "absent",
                         root,
@@ -172,6 +181,11 @@ def build_initial_expectations(
                     ),
                 )
             )
+            if seeded_skill:
+                constraints.extend(
+                    Expectation("absent", root, path + suffix, "initial", "effect:skill_payload")
+                    for suffix in ("/SKILL.md", "/.graphify_version", "/references")
+                )
         elif isinstance(effect, JsonHooksEffect):
             constraints.append(
                 Expectation(
@@ -182,6 +196,12 @@ def build_initial_expectations(
                     "rule:json_backup",
                 )
             )
+    seeded = {(f["root"], f["path"]) for f in case.initial_files}
+    constraints = [
+        item
+        for item in constraints
+        if item.kind != "absent" or (item.root, item.path) not in seeded
+    ]
     return ExpectationSet("initial", tuple(constraints), lock_destination=lock)
 
 
@@ -259,7 +279,18 @@ def build_install_expectations(
         root, path = effect.destination.root, effect.destination.path
         if isinstance(effect, SkillEffect):
             lock = effect.destination
-            constraints.extend(_skill_constraints(case, effect, sources))
+            for item in _skill_constraints(case, effect, sources):
+                if (
+                    item.provenance == "rule:skill_backup"
+                    and before.entry(item.root, item.path) is not None
+                ):
+                    item = replace(
+                        item,
+                        kind="file",
+                        content=retained_bytes(before, item.root, item.path),
+                        provenance="observation:prior:skill_backup",
+                    )
+                constraints.append(item)
         elif isinstance(effect, MarkdownSectionEffect):
             preparation = case.intermediate_preparation
             if (
@@ -354,6 +385,41 @@ def build_reinstall_expectations(
         allowed_changes=(),
         baseline=preservation_baseline(first_after, "reinstall"),
     )
+
+
+def build_uninstall_expectations(
+    installed: ExpectationSet, first_after: FilesystemSnapshot, validation: VerificationResult
+) -> ExpectationSet:
+    """Remove declared skill payload only after a conforming first installation."""
+    prior = build_reinstall_expectations(installed, first_after, validation)
+    destination = installed.lock_destination
+    if destination is None or destination.root != "project":
+        raise ValueError("Uninstall requires a declared project skill destination")
+    if any(item.kind not in {"file", "directory", "absent"} for item in installed.expectations):
+        raise ValueError("Uninstall currently supports skill effects only")
+    root, path = destination.root, destination.path
+    payload = {path + "/SKILL.md", path + "/.graphify_version"}
+    references = path + "/references"
+    removed = tuple(
+        (item.root, item.path)
+        for item in installed.expectations
+        if item.root == root
+        and item.kind in {"file", "directory"}
+        and (
+            item.path in payload
+            or item.path == references
+            or item.path.startswith(references + "/")
+        )
+    )
+    constraints = tuple(
+        replace(
+            item, kind="absent", phase="uninstall", content=None, provenance="rule:uninstall_skill"
+        )
+        if (item.root, item.path) in removed
+        else replace(item, phase="uninstall")
+        for item in installed.expectations
+    )
+    return replace(prior.in_phase("uninstall"), expectations=constraints, allowed_removals=removed)
 
 
 def selected_reference(case: EffectInstallCase, sources: FilesystemSnapshot) -> Destination:

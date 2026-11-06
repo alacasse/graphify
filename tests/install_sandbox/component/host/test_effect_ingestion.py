@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from tests.install_sandbox.component.contracts.test_effect_contracts import context
 from tests.install_sandbox.component.host.native_support import FIXTURE
 from tools.install_sandbox.contracts.effect_case import build_effect_cases
@@ -112,4 +114,42 @@ def test_active_project_specs_construct_supported_cases_without_running_installe
     assert all(case.scope == "project" for case in amp.cases)
     assert [(item.name, item.classification, item.reason) for item in amp.decisions] == [
         (kind, "not_applicable", "No JSON hooks effect declared") for kind in hooks
+    ]
+
+
+@pytest.mark.parametrize(
+    ("target", "source", "references", "destination"),
+    [
+        ("agents", "skill-agents.md", "skills/agents/references", ".agents/skills/graphify"),
+        ("copilot", "skill-copilot.md", "skills/copilot/references", ".copilot/skills/graphify"),
+        ("kimi", "skill.md", "skills/claude/references", ".kimi/skills/graphify"),
+        ("pi", "skill-pi.md", "skills/pi/references", ".pi/agent/skills/graphify"),
+    ],
+)
+def test_active_skill_only_project_spec_has_exact_representation(
+    target: str, source: str, references: str, destination: str
+) -> None:
+    active = Path(__file__).resolve().parents[4] / f"tools/install_sandbox/specs/{target}.yaml"
+    spec = EffectSpecReader().read(active)
+    assert spec == EffectSpec(
+        (SkillEffect(source, references, Destination("project", destination)),)
+    )
+    construction = build_effect_cases(spec, context())
+    assert [case.name for case in construction.cases] == [
+        "reinstall",
+        "missing-reference",
+        "altered-reference",
+        "altered-skill",
+        "preserve-skill-backup",
+        "stale-version",
+        "stale-reference",
+        "stale-references-tmp",
+    ]
+    assert all(case.scope == "project" for case in construction.cases)
+    assert [(item.name, item.classification, item.reason) for item in construction.decisions] == [
+        ("missing-section", "not_applicable", "No Markdown effect declared"),
+        ("altered-section", "not_applicable", "No Markdown effect declared"),
+        ("missing-json-hook", "not_applicable", "No JSON hooks effect declared"),
+        ("altered-json-hook", "not_applicable", "No JSON hooks effect declared"),
+        ("duplicate-json-hook", "not_applicable", "No JSON hooks effect declared"),
     ]

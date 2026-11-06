@@ -6,9 +6,34 @@ The active project-scope specifications are:
 | --- | --- | --- | --- |
 | `codebuddy.yaml` | HOME `.codebuddy/skills/graphify` | PROJECT `CODEBUDDY.md` | PROJECT `.codebuddy/settings.json` |
 | `amp.yaml` | PROJECT `.agents/skills/graphify` | PROJECT `AGENTS.md` | None |
+| `agents.yaml` | PROJECT `.agents/skills/graphify` | None | None |
+| `copilot.yaml` | PROJECT `.copilot/skills/graphify` | None | None |
+| `kimi.yaml` | PROJECT `.kimi/skills/graphify` | None | None |
+| `pi.yaml` | PROJECT `.pi/agent/skills/graphify` | None | None |
 
 Amp uses package sources `skill-amp.md`, `skills/amp/references` and
-`always_on/agents-md.md`, with the `## graphify` section marker. Other YAML files
+`always_on/agents-md.md`, with the `## graphify` section marker.
+
+The four skill-only project compositions use these package-relative sources:
+
+| Spec | Skill source | Reference source | Subject invocation after the executable |
+| --- | --- | --- | --- |
+| `agents.yaml` | `skill-agents.md` | `skills/agents/references` | `install --platform agents --project` |
+| `copilot.yaml` | `skill-copilot.md` | `skills/copilot/references` | `install --platform copilot --project` |
+| `kimi.yaml` | `skill.md` | `skills/claude/references` | `install --platform kimi --project` |
+| `pi.yaml` | `skill-pi.md` | `skills/pi/references` | `install --platform pi --project` |
+
+These mappings and commands are established at product revision
+`7b9e3e80d25137d12e198cd1f6b87865821af491`. Kimi shares the Claude reference
+bundle without declaring Claude registration. A reference named `hooks.md`
+does not declare a hook. `agents install` is a different composition, and
+`pi guard install` is not the Pi skill command. Each target needs a separate
+subject context and campaign. Historical user-scope facts and uninstall metadata
+remain available in the immutable
+[original YAML](https://github.com/alacasse/graphify/tree/e181166ae11bda165e23bbd83d6357fe4872db49/tools/install_sandbox/specs);
+conversion does not qualify or retire those capabilities.
+
+Other YAML files
 retain historical target facts and are outside the current execution interface.
 User scope, uninstall, other platforms and other effects are outside this scope.
 
@@ -90,7 +115,11 @@ The hook cases, `missing-json-hook`, `altered-json-hook` and
 `duplicate-json-hook`, select the first hook of the first `json-hooks` effect.
 A spec without that effect yields `not_applicable` for all three. Each case has two dependent
 installation steps. A successful CodeBuddy project campaign runs 13 cases (26 installer
-calls). Amp project runs 10 (20 installer calls).
+calls). Amp project runs 10 (20 installer calls). Each of Agents, Copilot, Kimi
+and Pi project runs 8 cases (16 installer calls): reinstall and the seven skill
+cases. Its two Markdown and three hook cases are `not_applicable`, with no
+installer commands or case evidence. These classifications describe the declared
+effects; a passed campaign qualifies only its represented paths.
 
 Each hook repair case seeds the selected conforming hook beside the personal
 `python personal_graphify_audit.py` command (timeout 17), with an explicit group
@@ -279,5 +308,5 @@ and a skill in PROJECT plus Markdown without hooks. A negative composition
 returns command success while putting the skill in HOME: verification fails
 after the first command and replay retains that verdict. Replay equality is
 checked after deleting the source inputs and execution environment. Active
-CodeBuddy and Amp YAML reading have compact checks separate from synthetic
-engine data. Simulated proofs do not qualify a real installer or host discovery.
+CodeBuddy, Amp and the four skill-only project YAML readings have compact checks
+separate from synthetic engine data. Simulated proofs do not qualify a real installer or host discovery.

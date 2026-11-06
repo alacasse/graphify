@@ -1,17 +1,7 @@
-universal_uninstall_scopes: [user]
-scopes:
-  user:
-    uninstall_mode: direct
-    effects:
-      - kind: skill
-        root: home
-        path: .agents/skills/graphify/SKILL.md
-        source: graphify/skill-agents.md
-        reference_bundle: agents
-  project:
-    effects:
-      - kind: skill
-        root: project
-        path: .agents/skills/graphify/SKILL.md
-        source: graphify/skill-agents.md
-        reference_bundle: agents
+scope: project
+directory: .agents
+effects:
+  - kind: skill
+    source: skill-agents.md
+    references: skills/agents/references
+    destination: {root: project, path: skills/graphify}

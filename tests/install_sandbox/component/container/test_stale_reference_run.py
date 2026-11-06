@@ -28,6 +28,11 @@ def test_stale_reference_removes_witness_and_replays_after_cleanup(
     assert not (proof / "steps/1/after" / skill_root / witness_path).exists()
     reinstall = json.loads((proof / "expectations/reinstall.json").read_text())
     assert [
+        (item["kind"], item["provenance"])
+        for item in reinstall["expectations"]
+        if (item["root"], item["path"]) == (skill_root, witness_path)
+    ] == [("absent", "source:absent:reference-data/stale.md")]
+    assert [
         item["provenance"]
         for item in reinstall["expectations"]
         if (item["root"], item["path"])

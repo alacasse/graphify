@@ -1,4 +1,4 @@
-"""Run a native two-step reinstall from effect YAML and explicit subject context."""
+"""Run installation and removal cases from effect YAML and explicit subject commands."""
 
 import argparse
 import sys

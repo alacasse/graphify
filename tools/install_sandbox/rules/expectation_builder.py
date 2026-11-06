@@ -26,6 +26,7 @@ from tools.install_sandbox.contracts.intermediate import (
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 
 
 def retained_bytes(snapshot: FilesystemSnapshot, root: str, path: str) -> bytes:
@@ -271,6 +272,8 @@ def build_install_expectations(
     before: FilesystemSnapshot,
     roots: dict[str, str],
 ) -> ExpectationSet:
+    if case.name == "group-uninstall-project":
+        return build_group_expectations(case, sources, before, roots, 0)
     _source_constraints(case, sources)
     baseline = preservation_baseline(before, "install")
     constraints: list[Expectation] = []
@@ -357,19 +360,35 @@ def bind_roots(expectations: ExpectationSet, roots: dict[str, str]) -> Expectati
             raise ValueError("Expectations already bound to different roots")
         return expectations
     bound = replace(expectations, roots=dict(roots))
-    destination = expectations.lock_destination
-    if destination is None:
-        return bound
-    absolute = str(PurePosixPath(roots[destination.root]) / destination.path)
-    digest = hashlib.sha256(absolute.encode("utf-8")).hexdigest()[:16]
-    path = f".cache/graphify/skill-locks/{digest}.lock"
-    kind = "absent" if bound.phase == "initial" else "file"
-    constraint = Expectation(
-        kind, "home", path, bound.phase, "rule:skill_lock", None if kind == "absent" else b""
+    destinations = (
+        tuple(
+            Destination(e.root, e.path)
+            for e in expectations.expectations
+            if e.provenance == "effect:skill"
+        )
+        if expectations.phase == "initial"
+        else (() if expectations.lock_destination is None else (expectations.lock_destination,))
     )
-    constraints = (*bound.expectations, constraint)
-    allowed = () if bound.phase == "initial" else _allowed(constraints)
-    return replace(bound, expectations=constraints, allowed_changes=allowed)
+    constraints = list(bound.expectations)
+    for destination in destinations:
+        absolute = str(PurePosixPath(roots[destination.root]) / destination.path)
+        digest = hashlib.sha256(absolute.encode("utf-8")).hexdigest()[:16]
+        path = f".cache/graphify/skill-locks/{digest}.lock"
+        kind = "absent" if bound.phase == "initial" else "file"
+        constraints.append(
+            Expectation(
+                kind,
+                "home",
+                path,
+                bound.phase,
+                "rule:skill_lock",
+                None if kind == "absent" else b"",
+            )
+        )
+    if not destinations:
+        return bound
+    allowed = () if bound.phase == "initial" else _allowed(tuple(constraints))
+    return replace(bound, expectations=tuple(constraints), allowed_changes=allowed)
 
 
 def build_reinstall_expectations(
@@ -525,3 +544,120 @@ def selected_stale_reference(
         Destination(effect.destination.root, effect.destination.path + "/references/stale.md"),
         effect.references + "/stale.md",
     )
+
+
+def build_group_expectations(
+    case: EffectInstallCase,
+    sources: FilesystemSnapshot,
+    before: FilesystemSnapshot,
+    roots: dict[str, str],
+    index: int,
+) -> ExpectationSet:
+    """Constrain one ordered group operation from sources and the prior inventory.
+
+    Only the invoked skill may change during installation. Project uninstall
+    removes the two declared project payloads; all HOME and neighboring entries
+    remain covered by exact preservation, including persistent lock files.
+    """
+    effects = case.effects.effects
+    if (
+        case.name != "group-uninstall-project"
+        or type(index) is not int
+        or index not in range(4)
+        or len(effects) != 3
+        or any(not isinstance(effect, SkillEffect) for effect in effects)
+        or tuple(effect.destination.root for effect in effects) != ("home", "project", "project")
+    ):
+        raise ValueError("Expected ordered HOME/project/project skill group operation")
+    _source_constraints(case, sources)
+    phase = ("install", "install-project-1", "install-project-2", "uninstall")[index]
+    baseline = preservation_baseline(before, phase)
+    constraints: list[Expectation] = []
+    removed: list[tuple[str, str]] = []
+    current: tuple[Expectation, ...] = ()
+    lock = None
+    for position, effect in enumerate(effects):
+        assert isinstance(effect, SkillEffect)
+        payload = tuple(
+            replace(
+                item,
+                phase=phase,
+                kind="file",
+                content=retained_bytes(before, item.root, item.path),
+                provenance="observation:prior:skill_backup",
+            )
+            if item.provenance == "rule:skill_backup"
+            and before.entry(item.root, item.path) is not None
+            else replace(item, phase=phase)
+            for item in _skill_constraints(case, effect, sources)
+        )
+        if position < index or index == 3:
+            # A failed prior operation must never become a trusted baseline.
+            prior = bind_roots(ExpectationSet(phase, payload), roots)
+            verdict = EffectVerifier().verify(prior, before)
+            if not verdict.complete or verdict.mismatches or verdict.obstacles:
+                raise ValueError("Group operation requires conforming prior skill payloads")
+        if index == 3 and effect.destination.root == "project":
+            for item in payload:
+                if (
+                    item.kind in {"file", "directory"}
+                    and item.path != effect.destination.path
+                    and item.provenance != "observation:prior:skill_backup"
+                ):
+                    removed.append((item.root, item.path))
+                    item = replace(
+                        item, kind="absent", content=None, provenance="rule:uninstall_skill"
+                    )
+                constraints.append(item)
+        elif position <= index:
+            constraints.extend(payload)
+            if position == index:
+                current = payload
+                lock = effect.destination
+        else:
+            # Prove later destinations still have no installed payload, even
+            # when their directories contain deliberate neighboring witnesses.
+            for suffix in ("/SKILL.md", "/.graphify_version", "/references"):
+                constraints.append(
+                    Expectation(
+                        "absent",
+                        effect.destination.root,
+                        effect.destination.path + suffix,
+                        phase,
+                        "effect:pending_skill_payload",
+                    )
+                )
+    if index < 3:
+        assert lock is not None
+        for suffix in ("/SKILL.md", "/.graphify_version", "/references"):
+            if not before.absent(lock.root, lock.path + suffix):
+                raise ValueError("Group install requires absent destination payload")
+    bundle = bind_roots(
+        ExpectationSet(
+            phase,
+            tuple(constraints),
+            _allowed(current),
+            baseline,
+            lock_destination=lock,
+            allowed_removals=tuple(removed),
+            new_skill_locks=tuple(
+                ".cache/graphify/skill-locks/"
+                + hashlib.sha256(
+                    str(PurePosixPath(roots["project"]) / path).encode("utf-8")
+                ).hexdigest()[:16]
+                + ".lock"
+                for path in case.subject.group_lock_destinations
+            )
+            if index == 3
+            else (),
+        ),
+        roots,
+    )
+    if index < 3:
+        # bind_roots historically expands permissions for every constraint;
+        # grouped operations must only grant writes to the current target.
+        lock_constraints = tuple(
+            e for e in bundle.expectations if e.provenance == "rule:skill_lock"
+        )
+        bundle = replace(bundle, allowed_changes=_allowed((*current, *lock_constraints)))
+    return bundle

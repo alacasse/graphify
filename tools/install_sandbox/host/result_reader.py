@@ -87,7 +87,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
     repair = check_effect_result(result, case, output_directory)
     decision = evaluate(
         CaseShape.from_case(case),
-        CaseFacts(result.preparation, (steps[0], steps[1]), repair),
+        CaseFacts(result.preparation, tuple(steps), repair),
     )
     if result.status != decision.status:
         raise ValueError("Case status contradicts published local progression")

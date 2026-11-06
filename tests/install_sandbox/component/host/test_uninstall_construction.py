@@ -9,6 +9,7 @@ from tools.install_sandbox.contracts.effect_case import (
     EffectRules,
     SubjectContext,
     build_effect_cases,
+    build_reinstall_case,
 )
 from tools.install_sandbox.contracts.effects import Destination, EffectSpec, SkillEffect
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
@@ -105,3 +106,68 @@ def test_uninstall_requires_explicit_home_path() -> None:
         build_effect_cases(
             EffectSpecReader().read(spec_path()), replace(context(), uninstall_user_skill_path=None)
         )
+
+
+def grouped_context() -> SubjectContext:
+    commands = (
+        ("install", "--platform", "agents"),
+        ("install", "--platform", "agents", "--project"),
+        ("install", "--platform", "copilot", "--project"),
+    )
+    return replace(
+        context(),
+        invocation=commands[0],
+        group_install_invocations=commands,
+        uninstall_invocation=("uninstall", "--project"),
+        uninstall_user_skill_path=None,
+    )
+
+
+def test_group_uninstall_constructs_ordered_commands_and_roundtrips() -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    built = build_effect_cases(spec, grouped_context(), "arbitrary-target")
+    assert len(built.entries) == 1
+    case = built.cases[0]
+    assert case.name == "group-uninstall-project"
+    commands = grouped_context().group_install_invocations
+    assert commands is not None
+    assert [case.invocation_for(operation) for operation in case.operations] == [
+        *commands,
+        ("uninstall", "--project"),
+    ]
+    assert case.second_phase == "uninstall"
+    assert case.from_json(case.to_json()) == case
+    files = {(item["root"], item["path"]) for item in case.initial_files}
+    assert ("project", "graphify-out/personal.txt") in files
+    for effect in spec.effects:
+        assert (effect.destination.root, effect.destination.path + "/personal.txt") in files
+    assert not any(path.endswith(("SKILL.md", ".graphify_version")) for _, path in files)
+
+
+@pytest.mark.parametrize("mutation", ["missing-command", "purge", "wrong-root"])
+def test_group_uninstall_rejects_incomplete_or_unsafe_declarations(mutation: str) -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    subject = grouped_context()
+    if mutation == "missing-command":
+        assert subject.group_install_invocations is not None
+        subject = replace(subject, group_install_invocations=subject.group_install_invocations[:2])
+    elif mutation == "purge":
+        subject = replace(subject, uninstall_invocation=("uninstall", "--project", "--purge"))
+    else:
+        first = spec.effects[0]
+        assert isinstance(first, SkillEffect)
+        spec = replace(
+            spec,
+            effects=(
+                replace(first, destination=Destination("project", "other/skill")),
+                *spec.effects[1:],
+            ),
+        )
+    with pytest.raises(ValueError):
+        build_effect_cases(spec, subject)
+
+
+def test_reinstall_constructor_rejects_grouped_context() -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    with pytest.raises(ValueError, match="Grouped operations require"):
+        build_reinstall_case(spec, grouped_context())

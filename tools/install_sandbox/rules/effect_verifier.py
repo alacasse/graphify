@@ -230,6 +230,15 @@ def _preservation(
     after = {(e["root"], e["path"]): e for e in observed.entries}
     for key in sorted(before.keys() | after.keys()):
         prior, current = before.get(key), after.get(key)
+        if (
+            prior is None
+            and current is not None
+            and key[0] == "home"
+            and current["kind"] == "file"
+            and key[1] in expected.new_skill_locks
+            and observed.contents.get(key) == b""
+        ):
+            continue
         if key in expected.allowed_removals and current is None and observed.absent(*key):
             continue
         if key in expected.allowed_changes and (

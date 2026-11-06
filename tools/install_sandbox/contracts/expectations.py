@@ -1,6 +1,7 @@
 """Explicit, serializable installation constraints with retained provenance."""
 
 import base64
+import re
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import cast
@@ -8,7 +9,15 @@ from typing import cast
 from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.spec import HookExpectation, fields, text
 
-_PHASES = {"initial", "install", "intermediate", "reinstall", "uninstall"}
+_PHASES = {
+    "initial",
+    "install",
+    "intermediate",
+    "reinstall",
+    "uninstall",
+    "install-project-1",
+    "install-project-2",
+}
 _KINDS = {
     "file",
     "directory",
@@ -158,8 +167,20 @@ class ExpectationSet:
     lock_destination: Destination | None = None
 
     allowed_removals: tuple[tuple[str, str], ...] = ()
+    new_skill_locks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if (
+            type(self.new_skill_locks) is not tuple
+            or any(
+                type(path) is not str
+                or not re.fullmatch(r"\.cache/graphify/skill-locks/[0-9a-f]{16}\.lock", path)
+                for path in self.new_skill_locks
+            )
+            or len(set(self.new_skill_locks)) != len(self.new_skill_locks)
+            or (self.new_skill_locks and self.phase != "uninstall")
+        ):
+            raise ValueError("Expected explicit unique uninstall lock paths")
         if self.phase not in _PHASES:
             raise ValueError("Invalid expectations phase")
         if any(item.phase != self.phase for item in self.expectations + self.baseline):
@@ -206,6 +227,7 @@ class ExpectationSet:
     def to_data(self) -> dict[str, object]:
         return {
             "format": "explicit-expectations-v4",
+            **({"new_skill_locks": list(self.new_skill_locks)} if self.new_skill_locks else {}),
             "phase": self.phase,
             "expectations": [item.to_data() for item in self.expectations],
             "allowed_changes": [list(item) for item in self.allowed_changes],
@@ -220,13 +242,21 @@ class ExpectationSet:
     @classmethod
     def from_data(cls, value: object) -> "ExpectationSet":
         data = fields(
-            value,
-            "format phase expectations allowed_changes allowed_removals "
+            {"new_skill_locks": [], **cast(dict[str, object], value)}
+            if isinstance(value, dict)
+            else value,
+            "new_skill_locks format phase expectations allowed_changes allowed_removals "
             "baseline roots lock_destination",
         )
         if data["format"] != "explicit-expectations-v4":
             raise ValueError("Unsupported expectations transport")
-        for key in ("expectations", "allowed_changes", "allowed_removals", "baseline"):
+        for key in (
+            "expectations",
+            "allowed_changes",
+            "allowed_removals",
+            "baseline",
+            "new_skill_locks",
+        ):
             if not isinstance(data[key], list):
                 raise ValueError("Expected expectation lists")
         allowed: list[tuple[str, str]] = []
@@ -252,6 +282,7 @@ class ExpectationSet:
             bindings,
             None if lock is None else Destination.from_data(lock),
             tuple(_pair(pair) for pair in cast(list[object], data["allowed_removals"])),
+            tuple(text(path) for path in cast(list[object], data["new_skill_locks"])),
         )
 
     def in_phase(self, phase: str) -> "ExpectationSet":

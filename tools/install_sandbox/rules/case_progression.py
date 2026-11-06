@@ -16,22 +16,20 @@ Segment = Literal[
 
 @dataclass(frozen=True)
 class CaseShape:
-    operations: tuple[str, str]
+    operations: tuple[str, ...]
     requires_repair: bool
 
     @classmethod
     def from_case(cls, case: EffectInstallCase) -> "CaseShape":
-        if len(case.operations) != 2:
-            raise ValueError("A case requires exactly two ordered operations")
-        return cls(
-            (case.operations[0], case.operations[1]), case.intermediate_preparation is not None
-        )
+        if len(case.operations) not in (2, 4):
+            raise ValueError("A case requires two or four ordered operations")
+        return cls(tuple(case.operations), case.intermediate_preparation is not None)
 
 
 @dataclass(frozen=True)
 class CaseFacts:
     initial: InitialPreparationState
-    steps: tuple[StepState, StepState]
+    steps: tuple[StepState, ...]
     repair: RepairProgress | None = None
 
 
@@ -39,27 +37,28 @@ class CaseFacts:
 class CaseDecision:
     status: Status
     segment: Segment | None
+    step_index: int | None = None
 
 
 def _validate_shape(shape: CaseShape, facts: CaseFacts) -> None:
     if (
         type(shape.operations) is not tuple
-        or len(shape.operations) != 2
+        or len(shape.operations) not in (2, 4)
         or any(type(operation) is not str or not operation for operation in shape.operations)
         or type(shape.requires_repair) is not bool
         or type(facts.steps) is not tuple
-        or len(facts.steps) != 2
+        or len(facts.steps) != len(shape.operations)
+        or (len(shape.operations) == 4 and shape.requires_repair)
     ):
-        raise ValueError("Invalid two-operation case shape or facts")
+        raise ValueError("Invalid ordered case shape or facts")
 
 
-def _validate(shape: CaseShape, facts: CaseFacts) -> tuple[Status, Status]:
+def _validate(shape: CaseShape, facts: CaseFacts) -> tuple[Status, ...]:
     _validate_shape(shape, facts)
     initial_preparation.validate(facts.initial)
-    statuses = (step_lifecycle.status(facts.steps[0]), step_lifecycle.status(facts.steps[1]))
+    statuses: tuple[Status, ...] = tuple(step_lifecycle.status(state) for state in facts.steps)
     if tuple(step.operation for step in facts.steps) != shape.operations:
         raise ValueError("Step operations contradict case order")
-    first, second = facts.steps
     repair = facts.repair
     if repair is not None:
         RepairCheckpoint.from_data(repair.checkpoint.to_data())
@@ -69,45 +68,56 @@ def _validate(shape: CaseShape, facts: CaseFacts) -> tuple[Status, Status]:
         raise ValueError("Case does not permit repair progress")
     repair_started = repair is not None and repair.checkpoint.stage != "not_started"
     if facts.initial.checkpoint != "ready" and (
-        first.phase != "idle" or second.phase != "idle" or repair_started
+        any(state.phase != "idle" for state in facts.steps) or repair_started
     ):
         raise ValueError("Installation requires ready initial preparation")
-    if statuses[0] != "passed" and (repair_started or second.phase != "idle"):
+    if statuses[0] != "passed" and repair_started:
         raise ValueError("Dependent work requires a passed first installation")
-    if (
-        shape.requires_repair
-        and second.phase != "idle"
-        and (repair is None or repair.outcome != "ready")
-    ):
-        raise ValueError("Reinstallation requires ready repair")
-    return statuses[0], statuses[1]
-
-
-def _step_decision(step: StepState, status: Status, segment: Segment) -> CaseDecision:
-    return CaseDecision(
-        status, segment if status == "incomplete" and step.phase != "stopped" else None
-    )
+    for index, state in enumerate(facts.steps):
+        if state.phase != "idle" and any(value != "passed" for value in statuses[:index]):
+            raise ValueError("Dependent work requires passed preceding operations")
+        if (
+            index == 1
+            and shape.requires_repair
+            and state.phase != "idle"
+            and (repair is None or repair.outcome != "ready")
+        ):
+            raise ValueError("Reinstallation requires ready repair")
+    return statuses
 
 
 def evaluate(shape: CaseShape, facts: CaseFacts) -> CaseDecision:
-    """Validate dependencies even when an earlier local result ends the invocation."""
-    first_status, second_status = _validate(shape, facts)
+    """Validate all dependencies before selecting the first unfinished operation."""
+    statuses = _validate(shape, facts)
     if facts.initial.checkpoint != "ready":
-        status = initial_preparation.status(facts.initial)
-        return CaseDecision(status, "initial_preparation" if status == "incomplete" else None)
-    first, second = facts.steps
-    if first.phase == "idle":
-        return CaseDecision("incomplete", "installation")
-    if first_status != "passed":
-        return _step_decision(first, first_status, "installation")
-    if shape.requires_repair and (facts.repair is None or facts.repair.outcome != "ready"):
-        status = (
-            "failed"
-            if facts.repair is not None and facts.repair.outcome == "failed"
-            else "incomplete"
+        value = initial_preparation.status(facts.initial)
+        return CaseDecision(value, "initial_preparation" if value == "incomplete" else None)
+    for index, (state, value) in enumerate(zip(facts.steps, statuses, strict=True)):
+        if (
+            index == 1
+            and shape.requires_repair
+            and (facts.repair is None or facts.repair.outcome != "ready")
+        ):
+            value = (
+                "failed"
+                if facts.repair is not None and facts.repair.outcome == "failed"
+                else "incomplete"
+            )
+            return CaseDecision(value, "repair" if value == "incomplete" else None)
+        segment: Segment = (
+            "uninstallation"
+            if state.operation == "uninstall"
+            else "reinstallation"
+            if len(shape.operations) == 2 and index == 1
+            else "installation"
         )
-        return CaseDecision(status, "repair" if status == "incomplete" else None)
-    segment: Segment = "uninstallation" if shape.operations[1] == "uninstall" else "reinstallation"
-    if second.phase == "idle":
-        return CaseDecision("incomplete", segment)
-    return _step_decision(second, second_status, segment)
+        step_index = index if len(shape.operations) == 4 else None
+        if state.phase == "idle":
+            return CaseDecision("incomplete", segment, step_index)
+        if value != "passed":
+            return CaseDecision(
+                value,
+                segment if value == "incomplete" and state.phase != "stopped" else None,
+                step_index,
+            )
+    return CaseDecision("passed", None)

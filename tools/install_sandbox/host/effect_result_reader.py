@@ -25,6 +25,7 @@ from tools.install_sandbox.host.intermediate_reader import replay_intermediate
 from tools.install_sandbox.host.step_artifacts import inventory
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
+    build_group_expectations,
     build_reinstall_expectations,
     build_uninstall_expectations,
 )
@@ -83,9 +84,9 @@ def check_effect_result(
         raise ValueError("Retained case contradicts requested case")
     initial = replay_initial(result.preparation, case, output, _snapshot)
     if initial is None:
-        _absent(output, (f"expectations/{case.second_phase}.json",))
+        _absent(output, tuple(f"expectations/{phase}.json" for phase in case.step_phases[1:]))
         for index in range(len(result.steps)):
-            loaded, staged = inventory(output, index, _snapshot, case.second_phase)
+            loaded, staged = inventory(output, index, _snapshot, case.step_phases)
             # Installation expectations belong to initial preparation, never an idle step.
             own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
             if own or staged:
@@ -139,7 +140,10 @@ def _steps(
     progress: RepairProgress | None = None
     installed = expected
     for index, step in enumerate(result.steps):
-        if index:
+        if index and case.name == "group-uninstall-project":
+            if step.phase != "idle":
+                expected = build_group_expectations(case, sources, previous, roots, index)
+        elif index:
             expected, previous, progress = _transition(
                 result, case, output, sources, installed, expected, previous, previous_verdict
             )
@@ -207,7 +211,7 @@ def _inspect_step(
     previous: FilesystemSnapshot,
     expected: ExpectationSet,
 ) -> tuple[FilesystemSnapshot | None, VerificationResult | None]:
-    loaded, staged = inventory(output, index, _snapshot, case.second_phase)
+    loaded, staged = inventory(output, index, _snapshot, case.step_phases)
     prefix = f"steps/{index}"
     failure = loaded.get(f"{prefix}/failure.json")
     stopped = None if failure is None else StepState.from_data(failure)
@@ -221,7 +225,7 @@ def _inspect_step(
             or (claim.stop is not None and claim.stop.phase == "preparation")
         )
     )
-    phase = "install" if index == 0 else case.second_phase
+    phase = case.step_phases[index]
     expectation_reference = f"expectations/{phase}.json"
     has_expectations = safe_evidence_path(output, expectation_reference).exists()
     if has_expectations:
@@ -335,4 +339,4 @@ def _partial_command_binding(
     if command["args"][1:] != list(invocation) or command["cwd"] != roots["project"]:
         raise ValueError("Partial command facts contradict invocation or retained roots")
     if first_executable is not None and command["args"][0] != first_executable:
-        raise ValueError("Second operation must use the same prepared executable")
+        raise ValueError("All operations must use the same prepared executable")

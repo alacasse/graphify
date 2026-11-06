@@ -134,7 +134,8 @@ selected unconstructible entries or no executable case. Preparation-only reports
 `scope: preparation_only`. Omitting `--case` preserves full campaign execution.
 
 The coordinator constructs the cases before allocating campaign output.
-`reinstall` is always constructed. Exactly one Markdown section also makes
+`reinstall` is always constructed for ordinary compositions. The explicit grouped
+composition described below constructs its single group case instead. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
 A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
@@ -190,7 +191,8 @@ in lexical order of relative source paths, including subdirectories. A complete
 source inventory with at least one reference is required before its first
 installer call. An empty or incomplete bundle stops initial preparation with a
 validation diagnostic: the case is `not_run` and the campaign is `incomplete`.
-Multiple skills remain unsupported by the common engine.
+Multiple skills require the explicit grouped uninstall composition described below;
+ordinary reinstall and repair compositions still support only one skill.
 
 `altered-reference` uses the same source inventory and lexical selection. After
 a conforming first installation it appends exactly `b"\nSandbox repair witness.\n"`
@@ -350,3 +352,40 @@ after the first command and replay retains that verdict. Replay equality is
 checked after deleting the source inputs and execution environment. Active
 CodeBuddy, Amp and the four skill-only project YAML readings have compact checks
 separate from synthetic engine data. Simulated proofs do not qualify a real installer or host discovery.
+
+## Group project uninstall composition
+
+`group-uninstall-project.yaml` declares three ordered skill effects: HOME Agents,
+PROJECT Agents and PROJECT Copilot. This is an explicit opt-in composition with
+one case, `group-uninstall-project`. Existing project and user specifications and
+subject contexts retain their catalogues and transport representation.
+
+Supply the usual subject fields and rules, with these explicit commands:
+
+```json
+{
+  "invocation": ["install", "--platform", "agents"],
+  "group_install_invocations": [
+    ["install", "--platform", "agents"],
+    ["install", "--platform", "agents", "--project"],
+    ["install", "--platform", "copilot", "--project"]
+  ],
+  "uninstall_invocation": ["uninstall", "--project"]
+}
+```
+
+Omit `uninstall_user_skill_path` for this composition. Each ordered command binds
+to the effect at the same position; commands and effect data select behavior,
+never the target name. The three installs must succeed and verify in order before
+the group removal command runs. Initial skill payloads are absent, while personal
+files inside each skill tree, sibling documents and `graphify-out/personal.txt`
+provide preservation witnesses. All skill sources and reference inventories must
+be retained before the first command. The HOME installation and personal content
+must survive project removal. This composition does not qualify purge or HOME
+removal.
+
+For a product that takes persistent locks while sweeping additional skill
+directories, `group_lock_destinations` lists the permitted PROJECT-relative
+skill directories for that revision. The verifier derives the exact lock paths
+from the isolated PROJECT root. Only new empty regular files at those paths
+are permitted during the final command. Existing files retain their type and bytes.

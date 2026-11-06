@@ -20,6 +20,7 @@ from tools.install_sandbox.contracts.results import (
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     bind_roots,
+    build_group_expectations,
     build_initial_expectations,
     build_install_expectations,
     build_reinstall_expectations,
@@ -148,6 +149,8 @@ class InstallTestRunner:
         writer: TestResultWriter,
         publisher: CasePublisher,
     ) -> None:
+        roots = expectations.roots
+        assert roots is not None
         while True:
             segment = publisher.decision.segment
             if segment == "repair":
@@ -160,11 +163,23 @@ class InstallTestRunner:
                 continue
             if segment not in {"installation", "reinstallation", "uninstallation"}:
                 return
-            index = 0 if segment == "installation" else 1
+            index = publisher.decision.step_index
+            if index is None:
+                index = 0 if segment == "installation" else 1
             state = start(case.operations[index])
             publisher.publish_step(index, state)
             completed = self._step(
-                case, executable, environment, expectations, before, writer, publisher, index, state
+                case,
+                executable,
+                environment,
+                sources,
+                roots,
+                expectations,
+                before,
+                writer,
+                publisher,
+                index,
+                state,
             )
             if completed is None:
                 return
@@ -175,6 +190,8 @@ class InstallTestRunner:
         case: EffectInstallCase,
         executable: Path,
         environment: EffectEnvironment,
+        sources: FilesystemSnapshot,
+        roots: dict[str, str],
         expectations: ExpectationSet,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
@@ -185,9 +202,11 @@ class InstallTestRunner:
         try:
             if index:
                 with writer.measure("step_preparation", index):
-                    previous = publisher.facts.steps[0].verification
-                    assert previous is not None
-                    if case.intermediate_preparation is None:
+                    if case.name == "group-uninstall-project":
+                        expectations = build_group_expectations(case, sources, before, roots, index)
+                    elif case.intermediate_preparation is None:
+                        previous = publisher.facts.steps[0].verification
+                        assert previous is not None
                         builder = (
                             build_uninstall_expectations
                             if case.second_phase == "uninstall"
@@ -201,7 +220,7 @@ class InstallTestRunner:
                     )
                     if not usable:
                         raise ValueError(
-                            "Environment changed or was obstructed before the second operation"
+                            "Environment changed or was obstructed before the next operation"
                         )
             else:
                 state = advance(state, PreparationObserved(REFERENCES["before"]))

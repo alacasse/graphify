@@ -36,7 +36,7 @@ class CasePublisher:
         self.writer = writer
         self.facts = CaseFacts(
             InitialPreparationState(),
-            (StepState.idle(self.shape.operations[0]), StepState.idle(self.shape.operations[1])),
+            tuple(StepState.idle(operation) for operation in self.shape.operations),
             RepairProgress(RepairCheckpoint("not_started", 0, None), "incomplete")
             if self.shape.requires_repair
             else None,
@@ -61,9 +61,12 @@ class CasePublisher:
         )
 
     def publish_step(self, index: int, state: StepState) -> None:
-        if index not in (0, 1):
-            raise ValueError("Case publication requires one of its two steps")
-        steps = (state, self.facts.steps[1]) if index == 0 else (self.facts.steps[0], state)
+        if index not in range(len(self.shape.operations)):
+            raise ValueError("Case publication requires one of its ordered steps")
+        steps = tuple(
+            state if position == index else retained
+            for position, retained in enumerate(self.facts.steps)
+        )
         self._publish(replace(self.facts, steps=steps))
 
     def publish_repair(self, session: RepairSession) -> None:

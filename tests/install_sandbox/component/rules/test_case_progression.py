@@ -218,3 +218,59 @@ def test_repair_table(
 def test_repair_dependencies(shape: CaseShape, facts: CaseFacts) -> None:
     with pytest.raises(ValueError):
         evaluate(shape, facts)
+
+
+GROUP_OPERATIONS = ("install", "install-project-1", "install-project-2", "uninstall")
+
+
+@pytest.mark.parametrize("completed", range(5))
+def test_group_authorizes_only_next_operation(completed: int) -> None:
+    states = tuple(
+        replace(PASSED if index < completed else IDLE, operation=operation)
+        for index, operation in enumerate(GROUP_OPERATIONS)
+    )
+    expected = (
+        CaseDecision("passed", None)
+        if completed == 4
+        else CaseDecision(
+            "incomplete",
+            "installation"
+            if completed == 0
+            else "uninstallation"
+            if completed == 3
+            else "installation",
+            completed,
+        )
+    )
+    assert evaluate(CaseShape(GROUP_OPERATIONS, False), CaseFacts(READY, states)) == expected
+
+
+@pytest.mark.parametrize("index", range(4))
+@pytest.mark.parametrize("stopped", [False, True])
+def test_group_stops_at_unsuccessful_operation(index: int, stopped: bool) -> None:
+    states = tuple(
+        replace(
+            PASSED
+            if position < index
+            else installation(5, stopped=True)
+            if position == index and stopped
+            else installation(code=1)
+            if position == index
+            else IDLE,
+            operation=operation,
+        )
+        for position, operation in enumerate(GROUP_OPERATIONS)
+    )
+    decision = evaluate(CaseShape(GROUP_OPERATIONS, False), CaseFacts(READY, states))
+    assert decision.segment is None
+    assert decision.status == ("incomplete" if stopped else "failed")
+
+
+@pytest.mark.parametrize("index", [1, 2, 3])
+def test_group_rejects_out_of_order_operation(index: int) -> None:
+    states = tuple(
+        replace(PASSED if position == index else IDLE, operation=operation)
+        for position, operation in enumerate(GROUP_OPERATIONS)
+    )
+    with pytest.raises(ValueError, match="preceding"):
+        evaluate(CaseShape(GROUP_OPERATIONS, False), CaseFacts(READY, states))

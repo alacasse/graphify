@@ -17,6 +17,8 @@ _PHASES = {
     "uninstall",
     "install-project-1",
     "install-project-2",
+    "install-user-2",
+    "purge",
 }
 _KINDS = {
     "file",
@@ -178,7 +180,7 @@ class ExpectationSet:
                 for path in self.new_skill_locks
             )
             or len(set(self.new_skill_locks)) != len(self.new_skill_locks)
-            or (self.new_skill_locks and self.phase != "uninstall")
+            or (self.new_skill_locks and self.phase not in {"uninstall", "purge"})
         ):
             raise ValueError("Expected explicit unique uninstall lock paths")
         if self.phase not in _PHASES:
@@ -201,7 +203,12 @@ class ExpectationSet:
             raise ValueError("Duplicate allowed change")
         if len(self.allowed_removals) != len(set(self.allowed_removals)):
             raise ValueError("Duplicate allowed removal")
-        if self.allowed_removals and self.phase not in {"intermediate", "reinstall", "uninstall"}:
+        if self.allowed_removals and self.phase not in {
+            "intermediate",
+            "reinstall",
+            "uninstall",
+            "purge",
+        }:
             raise ValueError("Removals are only allowed during preparation, reinstall or uninstall")
         for key in self.allowed_removals:
             Destination(*key)

@@ -171,3 +171,100 @@ def test_reinstall_constructor_rejects_grouped_context() -> None:
     spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
     with pytest.raises(ValueError, match="Grouped operations require"):
         build_reinstall_case(spec, grouped_context())
+
+
+def global_context() -> SubjectContext:
+    commands = (("install", "--platform", "agents"), ("install", "--platform", "copilot"))
+    return replace(
+        grouped_context(),
+        invocation=commands[0],
+        group_install_invocations=commands,
+        uninstall_invocation=("uninstall",),
+        purge_invocation=("uninstall", "--purge"),
+        home_lock_destinations=(".agents/skills/graphify", ".copilot/skills/graphify"),
+    )
+
+
+def test_global_pair_shares_state_and_declares_exact_commands() -> None:
+    spec = EffectSpecReader().read(spec_path("global-uninstall"))
+    ordinary, purge = build_effect_cases(spec, global_context()).cases
+    assert [ordinary.name, purge.name] == ["global-uninstall", "global-uninstall-purge"]
+    assert ordinary.initial_files == purge.initial_files
+    assert ordinary.step_phases == ("install", "install-user-2", "uninstall")
+    assert purge.step_phases == ("install", "install-user-2", "purge")
+    for case, final in ((ordinary, ("uninstall",)), (purge, ("uninstall", "--purge"))):
+        assert [case.invocation_for(op) for op in case.operations] == [
+            ("install", "--platform", "agents"),
+            ("install", "--platform", "copilot"),
+            final,
+        ]
+        assert case.from_json(case.to_json()) == case
+    files = {(item["root"], item["path"]) for item in ordinary.initial_files}
+    assert {
+        ("project", "graphify-out/personal.txt"),
+        ("project", "graphify-out/nested/result.json"),
+        ("project", "personal-next-to-output.txt"),
+    } <= files
+    for effect in spec.effects:
+        assert ("home", effect.destination.path + "/personal.txt") in files
+        assert ("project", effect.destination.path + "/personal.txt") in files
+        assert any(
+            root == "home"
+            and path.startswith(str(Path(effect.destination.path).parent))
+            and not path.startswith(effect.destination.path + "/")
+            for root, path in files
+        )
+
+
+def test_global_purge_is_explicit_and_ordinary_multiskill_stays_unavailable() -> None:
+    spec = EffectSpecReader().read(spec_path("global-uninstall"))
+    subject = replace(global_context(), purge_invocation=None)
+    with pytest.raises(ValueError, match="Unsupported global uninstall composition"):
+        build_effect_cases(spec, subject)
+    with pytest.raises(ValueError, match="Multiple skill effects"):
+        build_effect_cases(
+            spec,
+            replace(
+                subject,
+                group_install_invocations=None,
+                uninstall_invocation=None,
+                home_lock_destinations=(),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"purge_invocation": ("uninstall", "--project", "--purge")},
+        {"uninstall_invocation": ("uninstall", "--platform", "agents")},
+        {"group_install_invocations": (("install", "--platform", "agents"),) * 2},
+        {"home_lock_destinations": ("../unsafe",)},
+        {"home_lock_destinations": ("same", "same")},
+    ],
+)
+def test_global_rejects_inconsistent_commands_and_locks(change: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        build_effect_cases(
+            EffectSpecReader().read(spec_path("global-uninstall")),
+            replace(global_context(), **change),
+        )
+
+
+def test_global_context_roundtrips_optional_locks_in_all_three_roots() -> None:
+    subject = replace(
+        global_context(),
+        group_lock_destinations=(".kiro/skills/graphify",),
+        config_lock_destinations=("claude_config_dir/skills/graphify",),
+    )
+    cases = build_effect_cases(
+        EffectSpecReader().read(spec_path("global-uninstall")), subject
+    ).cases
+    for case in cases:
+        restored = case.from_json(case.to_json()).subject
+        assert restored.group_lock_destinations == (".kiro/skills/graphify",)
+        assert restored.home_lock_destinations == (
+            ".agents/skills/graphify",
+            ".copilot/skills/graphify",
+        )
+        assert restored.config_lock_destinations == ("claude_config_dir/skills/graphify",)

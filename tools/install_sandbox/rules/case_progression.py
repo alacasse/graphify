@@ -21,8 +21,8 @@ class CaseShape:
 
     @classmethod
     def from_case(cls, case: EffectInstallCase) -> "CaseShape":
-        if len(case.operations) not in (2, 4):
-            raise ValueError("A case requires two or four ordered operations")
+        if len(case.operations) not in (2, 3, 4):
+            raise ValueError("A case requires between two and four ordered operations")
         return cls(tuple(case.operations), case.intermediate_preparation is not None)
 
 
@@ -43,12 +43,12 @@ class CaseDecision:
 def _validate_shape(shape: CaseShape, facts: CaseFacts) -> None:
     if (
         type(shape.operations) is not tuple
-        or len(shape.operations) not in (2, 4)
+        or len(shape.operations) not in (2, 3, 4)
         or any(type(operation) is not str or not operation for operation in shape.operations)
         or type(shape.requires_repair) is not bool
         or type(facts.steps) is not tuple
         or len(facts.steps) != len(shape.operations)
-        or (len(shape.operations) == 4 and shape.requires_repair)
+        or (len(shape.operations) != 2 and shape.requires_repair)
     ):
         raise ValueError("Invalid ordered case shape or facts")
 
@@ -106,12 +106,12 @@ def evaluate(shape: CaseShape, facts: CaseFacts) -> CaseDecision:
             return CaseDecision(value, "repair" if value == "incomplete" else None)
         segment: Segment = (
             "uninstallation"
-            if state.operation == "uninstall"
+            if state.operation in {"uninstall", "purge"}
             else "reinstallation"
             if len(shape.operations) == 2 and index == 1
             else "installation"
         )
-        step_index = index if len(shape.operations) == 4 else None
+        step_index = index if len(shape.operations) > 2 else None
         if state.phase == "idle":
             return CaseDecision("incomplete", segment, step_index)
         if value != "passed":

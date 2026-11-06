@@ -1,0 +1,11 @@
+scope: user
+directory: .
+effects:
+  - kind: skill
+    source: skill-agents.md
+    references: skills/agents/references
+    destination: {root: home, path: .agents/skills/graphify}
+  - kind: skill
+    source: skill-copilot.md
+    references: skills/copilot/references
+    destination: {root: home, path: .copilot/skills/graphify}

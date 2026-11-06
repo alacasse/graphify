@@ -49,7 +49,11 @@ def group_install() -> tuple[EffectInstallCase, FilesystemSnapshot]:
         reference_case(),
         name="group-uninstall-project",
         intermediate_preparation=None,
-        subject=replace(reference_case().subject, group_lock_destinations=("other-project-skill",)),
+        subject=replace(
+            reference_case().subject,
+            group_lock_destinations=("other-project-skill",),
+            group_install_invocations=(("install",), ("install",), ("install",)),
+        ),
         effects=EffectSpec(
             tuple(
                 SkillEffect("skill.md", "refs", Destination(root, path))
@@ -152,3 +156,94 @@ def test_old_expectation_transport_omits_optional_lock_policy() -> None:
     expected = ExpectationSet("install", ())
     assert "new_skill_locks" not in expected.to_data()
     assert ExpectationSet.from_data(expected.to_data()) == expected
+
+
+@pytest.mark.parametrize("purge", [False, True])
+def test_global_uninstall_removes_both_home_payloads_and_exact_output_tree(purge: bool) -> None:
+    case = replace(
+        reference_case(),
+        name="global-uninstall-purge" if purge else "global-uninstall",
+        intermediate_preparation=None,
+        operations=["install-group-0", "install-group-1", "purge" if purge else "uninstall"],
+        subject=replace(
+            reference_case().subject,
+            group_install_invocations=(("install",), ("install",)),
+            home_lock_destinations=("other",),
+            config_lock_destinations=("claude_config_dir/skills/graphify",),
+        ),
+        effects=EffectSpec(
+            tuple(
+                SkillEffect("skill.md", "refs", Destination("home", path))
+                for path in ("first", "second")
+            )
+        ),
+    )
+    before = snapshot(
+        {
+            ("home", "first/personal.txt"): b"first neighbor",
+            ("home", "second/personal.txt"): b"second neighbor",
+            ("project", "graphify-out/nested/output"): b"output",
+            ("project", "nested/graphify-out/personal"): b"preserve",
+        },
+        (("project", "graphify-out/empty"),),
+    )
+    for index in range(2):
+        expected = build_group_expectations(case, reference_sources(), before, ROOTS, index)
+        assert EffectVerifier().verify(expected, before).mismatches
+        files = dict(before.contents)
+        dirs = {(e["root"], e["path"]) for e in before.entries if e["kind"] == "directory"}
+        for item in expected.expectations:
+            if item.kind == "file":
+                assert item.content is not None
+                files[(item.root, item.path)] = item.content
+            elif item.kind == "directory":
+                dirs.add((item.root, item.path))
+        after = snapshot(files, dirs)
+        assert not EffectVerifier().verify(expected, after).mismatches
+        if index == 0:
+            with pytest.raises(ValueError, match="conforming prior"):
+                build_group_expectations(case, reference_sources(), before, ROOTS, 1)
+            early = snapshot(
+                {k: v for k, v in files.items() if not k[1].startswith("graphify-out/")}, dirs
+            )
+            assert EffectVerifier().verify(expected, early).mismatches
+        before = after
+    expected = build_group_expectations(case, reference_sources(), before, ROOTS, 2)
+    assert ExpectationSet.from_data(expected.to_data()) == expected
+    assert EffectVerifier().verify(expected, before).mismatches
+    removed = set(expected.allowed_removals)
+    files = {k: v for k, v in before.contents.items() if k not in removed}
+    dirs = {
+        (e["root"], e["path"])
+        for e in before.entries
+        if e["kind"] == "directory" and (e["root"], e["path"]) not in removed
+    }
+    assert not EffectVerifier().verify(expected, snapshot(files, dirs)).mismatches
+    assert (("project", "graphify-out") in removed) is purge
+    for absolute in ("/home/other", "/command-tmp/configuration/claude_config_dir/skills/graphify"):
+        digest = hashlib.sha256(absolute.encode()).hexdigest()[:16]
+        path = f".cache/graphify/skill-locks/{digest}.lock"
+        assert path in expected.new_skill_locks
+        assert (
+            not EffectVerifier()
+            .verify(expected, snapshot({**files, ("home", path): b""}, dirs))
+            .mismatches
+        )
+        assert (
+            EffectVerifier()
+            .verify(expected, snapshot({**files, ("home", path): b"bad"}, dirs))
+            .mismatches
+        )
+    for key in files:
+        assert (
+            EffectVerifier().verify(expected, snapshot({**files, key: b"changed"}, dirs)).mismatches
+        )
+    for key in removed:
+        original = before.entry(*key)
+        assert original is not None
+        residual = (
+            snapshot({**files, key: before.contents[key]}, dirs)
+            if original["kind"] == "file"
+            else snapshot(files, dirs | {key})
+        )
+        assert EffectVerifier().verify(expected, residual).mismatches

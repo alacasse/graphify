@@ -202,7 +202,7 @@ class InstallTestRunner:
         try:
             if index:
                 with writer.measure("step_preparation", index):
-                    if case.name == "group-uninstall-project":
+                    if case.subject.group_install_invocations is not None:
                         expectations = build_group_expectations(case, sources, before, roots, index)
                     elif case.intermediate_preparation is None:
                         previous = publisher.facts.steps[0].verification

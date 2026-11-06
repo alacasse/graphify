@@ -79,7 +79,8 @@ The subject context is a separate JSON object with these required fields:
   removal command, shaped as `["uninstall", "--platform", "NAME", "--project"]`,
   paired with `["install", "--platform", "NAME", "--project"]` using the same
   platform name. Construction requires exactly one PROJECT skill effect and no
-  other effects. Global commands, purge and mismatched platforms fail construction.
+  other effects for this targeted case. See the grouped and global compositions below
+  for removal commands spanning multiple installations.
 - `uninstall_user_skill_path` (optional): explicit HOME-relative skill path for
   the independent user-installation witness. Supply this together with
   `uninstall_invocation`; omit both to preserve the historical catalogue and
@@ -389,3 +390,33 @@ directories, `group_lock_destinations` lists the permitted PROJECT-relative
 skill directories for that revision. The verifier derives the exact lock paths
 from the isolated PROJECT root. Only new empty regular files at those paths
 are permitted during the final command. Existing files retain their type and bytes.
+
+## Compare global uninstall with purge
+
+Use `global-uninstall.yaml` with the two HOME install commands in the same order
+as its skill effects. A full campaign with the following context fields runs
+`global-uninstall` and `global-uninstall-purge` in separate fresh environments:
+
+```json
+{
+  "invocation": ["install", "--platform", "agents"],
+  "group_install_invocations": [
+    ["install", "--platform", "agents"],
+    ["install", "--platform", "copilot"]
+  ],
+  "uninstall_invocation": ["uninstall"],
+  "purge_invocation": ["uninstall", "--purge"]
+}
+```
+
+Both cases install and verify the two skills before removal. They start with
+identical personal documents at HOME and PROJECT skill paths, a populated
+`PROJECT/graphify-out/` and a file alongside that directory. Ordinary removal
+must preserve the entire output tree. Purge must remove it, including its root.
+Both commands must remove the two HOME skill payloads and preserve the neighbors.
+
+The pinned context may list optional sweep locks by their skill directories:
+`home_lock_destinations` relative to HOME, `group_lock_destinations` relative
+to PROJECT and `config_lock_destinations` relative to isolated
+`command-tmp/configuration/`. Only new empty files at the resulting exact
+HOME cache lock paths are permitted during removal.

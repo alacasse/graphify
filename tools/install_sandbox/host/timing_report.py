@@ -102,13 +102,9 @@ def render_campaign(result: CampaignResult) -> str:
             )
             lines.append(f"  {label}: {entry.construction_reason}")
             continue
-        if entry.name == "group-uninstall-project":
-            operations = "install user, install project, install project, uninstall project"
-        elif entry.name == "uninstall":
-            operations = "install, uninstall"
-        else:
-            operations = "install, install"
-        lines.append(f"  Operations: {operations}")
+        if entry.planned_commands:
+            commands = (" ".join(args) for args in entry.planned_commands)
+            lines.append("  Planned commands: " + " → ".join(commands))
         lines.append(f"  Construction: constructed; execution: {entry.state}")
         if entry.result is None:
             lines.append(

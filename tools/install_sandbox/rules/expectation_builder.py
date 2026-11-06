@@ -272,7 +272,7 @@ def build_install_expectations(
     before: FilesystemSnapshot,
     roots: dict[str, str],
 ) -> ExpectationSet:
-    if case.name == "group-uninstall-project":
+    if case.name in {"group-uninstall-project", "global-uninstall", "global-uninstall-purge"}:
         return build_group_expectations(case, sources, before, roots, 0)
     _source_constraints(case, sources)
     baseline = preservation_baseline(before, "install")
@@ -371,9 +371,7 @@ def bind_roots(expectations: ExpectationSet, roots: dict[str, str]) -> Expectati
     )
     constraints = list(bound.expectations)
     for destination in destinations:
-        absolute = str(PurePosixPath(roots[destination.root]) / destination.path)
-        digest = hashlib.sha256(absolute.encode("utf-8")).hexdigest()[:16]
-        path = f".cache/graphify/skill-locks/{digest}.lock"
+        path = _skill_lock_path(PurePosixPath(roots[destination.root]) / destination.path)
         kind = "absent" if bound.phase == "initial" else "file"
         constraints.append(
             Expectation(
@@ -546,6 +544,24 @@ def selected_stale_reference(
     )
 
 
+def _skill_lock_path(directory: PurePosixPath) -> str:
+    digest = hashlib.sha256(str(directory).encode("utf-8")).hexdigest()[:16]
+    return f".cache/graphify/skill-locks/{digest}.lock"
+
+
+def _sweep_locks(case: EffectInstallCase, roots: dict[str, str]) -> tuple[str, ...]:
+    project = PurePosixPath(roots["project"])
+    destinations = (
+        (project, case.subject.group_lock_destinations),
+        (PurePosixPath(roots["home"]), case.subject.home_lock_destinations),
+        (
+            project.parent.parent / "command-tmp/configuration",
+            case.subject.config_lock_destinations,
+        ),
+    )
+    return tuple(_skill_lock_path(base / path) for base, paths in destinations for path in paths)
+
+
 def build_group_expectations(
     case: EffectInstallCase,
     sources: FilesystemSnapshot,
@@ -555,22 +571,25 @@ def build_group_expectations(
 ) -> ExpectationSet:
     """Constrain one ordered group operation from sources and the prior inventory.
 
-    Only the invoked skill may change during installation. Project uninstall
-    removes the two declared project payloads; all HOME and neighboring entries
-    remain covered by exact preservation, including persistent lock files.
+    Only the invoked skill may change during installation. The final operation
+    removes the declared project or HOME payloads and, for purge, the project
+    output tree. Neighbors and persistent locks retain exact preservation.
     """
     effects = case.effects.effects
+    global_case = case.name in {"global-uninstall", "global-uninstall-purge"}
+    final_index = 2 if global_case else 3
+    expected_roots = ("home", "home") if global_case else ("home", "project", "project")
     if (
-        case.name != "group-uninstall-project"
+        case.name not in {"group-uninstall-project", "global-uninstall", "global-uninstall-purge"}
         or type(index) is not int
-        or index not in range(4)
-        or len(effects) != 3
+        or index not in range(final_index + 1)
+        or len(effects) != len(expected_roots)
         or any(not isinstance(effect, SkillEffect) for effect in effects)
-        or tuple(effect.destination.root for effect in effects) != ("home", "project", "project")
+        or tuple(effect.destination.root for effect in effects) != expected_roots
     ):
-        raise ValueError("Expected ordered HOME/project/project skill group operation")
+        raise ValueError("Expected ordered project or HOME skill group operation")
     _source_constraints(case, sources)
-    phase = ("install", "install-project-1", "install-project-2", "uninstall")[index]
+    phase = case.step_phases[index]
     baseline = preservation_baseline(before, phase)
     constraints: list[Expectation] = []
     removed: list[tuple[str, str]] = []
@@ -591,13 +610,13 @@ def build_group_expectations(
             else replace(item, phase=phase)
             for item in _skill_constraints(case, effect, sources)
         )
-        if position < index or index == 3:
+        if position < index or index == final_index:
             # A failed prior operation must never become a trusted baseline.
             prior = bind_roots(ExpectationSet(phase, payload), roots)
             verdict = EffectVerifier().verify(prior, before)
             if not verdict.complete or verdict.mismatches or verdict.obstacles:
                 raise ValueError("Group operation requires conforming prior skill payloads")
-        if index == 3 and effect.destination.root == "project":
+        if index == final_index and (global_case or effect.destination.root == "project"):
             for item in payload:
                 if (
                     item.kind in {"file", "directory"}
@@ -627,11 +646,24 @@ def build_group_expectations(
                         "effect:pending_skill_payload",
                     )
                 )
-    if index < 3:
+    if index < final_index:
         assert lock is not None
         for suffix in ("/SKILL.md", "/.graphify_version", "/references"):
             if not before.absent(lock.root, lock.path + suffix):
                 raise ValueError("Group install requires absent destination payload")
+    if phase == "purge":
+        # Purge authorizes exactly the independently seeded project output tree.
+        output = tuple(
+            entry
+            for entry in baseline
+            if entry.root == "project"
+            and (entry.path == "graphify-out" or entry.path.startswith("graphify-out/"))
+        )
+        for entry in output:
+            removed.append((entry.root, entry.path))
+            constraints.append(
+                replace(entry, kind="absent", content=None, provenance="rule:purge_graphify_out")
+            )
     bundle = bind_roots(
         ExpectationSet(
             phase,
@@ -640,20 +672,11 @@ def build_group_expectations(
             baseline,
             lock_destination=lock,
             allowed_removals=tuple(removed),
-            new_skill_locks=tuple(
-                ".cache/graphify/skill-locks/"
-                + hashlib.sha256(
-                    str(PurePosixPath(roots["project"]) / path).encode("utf-8")
-                ).hexdigest()[:16]
-                + ".lock"
-                for path in case.subject.group_lock_destinations
-            )
-            if index == 3
-            else (),
+            new_skill_locks=_sweep_locks(case, roots) if index == final_index else (),
         ),
         roots,
     )
-    if index < 3:
+    if index < final_index:
         # bind_roots historically expands permissions for every constraint;
         # grouped operations must only grant writes to the current target.
         lock_constraints = tuple(

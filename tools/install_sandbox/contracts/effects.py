@@ -132,11 +132,12 @@ class EffectSpec:
             raise ValueError("Scope must be project or user")
         validate_effects(self.effects)
         if self.scope == "user" and (
-            len(self.effects) != 1
-            or not isinstance(self.effects[0], SkillEffect)
-            or self.effects[0].destination.root != "home"
+            not all(
+                isinstance(effect, SkillEffect) and effect.destination.root == "home"
+                for effect in self.effects
+            )
         ):
-            raise ValueError("User scope requires exactly one HOME skill effect")
+            raise ValueError("User scope requires HOME skill effects")
 
     def to_data(self) -> dict[str, object]:
         return {

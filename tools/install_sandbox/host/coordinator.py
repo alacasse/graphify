@@ -78,6 +78,7 @@ class CampaignCase:
     error: str | None = None
     construction: Literal["constructed", "not_applicable", "unconstructible"] = "constructed"
     construction_reason: str | None = None
+    planned_commands: tuple[tuple[str, ...], ...] = ()
 
     def __post_init__(self) -> None:
         self.validate()
@@ -157,7 +158,11 @@ class CampaignResult:
         return cls(
             output,
             [
-                CampaignCase(entry.name, output / "cases" / entry.name)
+                CampaignCase(
+                    entry.name,
+                    output / "cases" / entry.name,
+                    planned_commands=tuple(entry.invocation_for(op) for op in entry.operations),
+                )
                 if isinstance(entry, EffectInstallCase)
                 else CampaignCase(
                     entry.name,

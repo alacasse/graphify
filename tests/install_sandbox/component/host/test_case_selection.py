@@ -240,12 +240,14 @@ def test_interruption_before_first_progress_retains_explicit_selection(
     assert report["requested_cases"] == requested
     assert report["omitted_cases"] == omitted
     assert report["executed_cases"] == []
+    assert report["interrupted"] is True
     assert report["output_lifecycle"]["archive"] == "absent"
     assert report["output_lifecycle"]["raw_evidence"] is False
     assert not (output / "evidence.zip").exists()
     assert report["status"] == "partial_incomplete"
     assert report["passed"] is False
     text = (output / "campaign.txt").read_text()
+    assert "Interrupted: True" in text
     assert "Requested cases: " + ", ".join(requested) in text
     assert "Omitted cases (not selected): " + ", ".join(omitted) in text
     assert "Executed cases: none" in text

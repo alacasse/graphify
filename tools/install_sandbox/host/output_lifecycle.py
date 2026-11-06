@@ -128,6 +128,14 @@ class _Session:
         self._finalize(interrupts)
 
     def _record_error(self, error: BaseException) -> None:
+        if (
+            self.definition.requested_cases is not None
+            and self.report.phase == "allocated"
+            and isinstance(error, (KeyboardInterrupt, InterruptedError))
+        ):
+            pending = CampaignResult.from_definition(self.definition, Path("evidence"))
+            pending.interrupted = True
+            self.report.observe(pending)
         if isinstance(error, KeyboardInterrupt):
             self.report.exit_code = 130
         elif self.report.phase == "allocated":

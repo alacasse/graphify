@@ -176,12 +176,12 @@ def test_build_rejects_duplicate_or_overlapping_names(tmp_path: Path) -> None:
     )
     case = definition.built.cases[0]
     with pytest.raises(ValueError, match="Duplicate"):
-        EffectCaseBuild((case, case), ())
+        EffectCaseBuild((case, case))
     decision = CaseNonConstruction(case.name, "not_applicable", "Controlled reason")
     with pytest.raises(ValueError, match="Duplicate"):
-        EffectCaseBuild((case,), (decision,))
+        EffectCaseBuild((case, decision))
     with pytest.raises(ValueError, match="Duplicate"):
-        EffectCaseBuild((), (decision, decision))
+        EffectCaseBuild((decision, decision))
 
 
 def test_reordered_entries_execute_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,7 +199,7 @@ def test_reordered_entries_execute_by_name(tmp_path: Path, monkeypatch: pytest.M
         definition=definition, output_directory=tmp_path / "proof", progress=reorder
     )
     assert result.passed
-    assert len(transport.installer.calls) == 20
+    assert len(transport.installer.calls) == 22
     for entry in result.cases:
         assert entry.result is not None and entry.result.test is not None
         assert entry.result.test.case["name"] == entry.name

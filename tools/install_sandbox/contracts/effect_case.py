@@ -20,6 +20,7 @@ from tools.install_sandbox.contracts.intermediate import (
     JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
+    StaleVersionPreparation,
     preparation_from_data,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
@@ -291,6 +292,7 @@ class EffectInstallCase:
         | AlteredReferencePreparation
         | AlteredSkillPreparation
         | PreserveSkillBackupPreparation
+        | StaleVersionPreparation
         | None
     ) = None
 
@@ -373,92 +375,74 @@ class CaseNonConstruction:
 
 @dataclass(frozen=True)
 class EffectCaseBuild:
-    cases: tuple[EffectInstallCase, ...]
-    decisions: tuple[CaseNonConstruction, ...]
+    entries: tuple[EffectInstallCase | CaseNonConstruction, ...]
 
     def __post_init__(self) -> None:
-        names = [case.name for case in self.cases] + [item.name for item in self.decisions]
+        names = [entry.name for entry in self.entries]
         if len(names) != len(set(names)):
             raise ValueError("Duplicate campaign case name")
+
+    @property
+    def cases(self) -> tuple[EffectInstallCase, ...]:
+        return tuple(entry for entry in self.entries if isinstance(entry, EffectInstallCase))
+
+    @property
+    def decisions(self) -> tuple[CaseNonConstruction, ...]:
+        return tuple(entry for entry in self.entries if isinstance(entry, CaseNonConstruction))
 
 
 def build_effect_cases(
     spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
 ) -> EffectCaseBuild:
-    """Derive applicable native cases from effects and supported subject rules."""
+    """Derive cases and construction decisions in campaign order."""
     reinstall = build_reinstall_case(spec, subject, target)
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
     skills = [e for e in spec.effects if isinstance(e, SkillEffect)]
     hooks = [e for e in spec.effects if isinstance(e, JsonHooksEffect)]
-    hook_cases = (
-        tuple(
+    entries: list[EffectInstallCase | CaseNonConstruction] = [reinstall]
+    entries.extend(_markdown_cases(reinstall, markdown))
+    for name, preparation in (
+        ("missing-reference", MissingReferencePreparation),
+        ("altered-reference", AlteredReferencePreparation),
+        ("altered-skill", AlteredSkillPreparation),
+        ("preserve-skill-backup", PreserveSkillBackupPreparation),
+        ("stale-version", StaleVersionPreparation),
+    ):
+        entries.append(
+            replace(
+                reinstall,
+                name=name,
+                intermediate_preparation=preparation(skills[0].destination),
+            )
+            if skills
+            else CaseNonConstruction(name, "not_applicable", "No skill effect declared")
+        )
+    for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
+        entries.append(
             _json_hook_case(reinstall, hooks[0], kind)
-            for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
+            if hooks
+            else CaseNonConstruction(kind, "not_applicable", "No JSON hooks effect declared")
         )
-        if hooks
-        else ()
-    )
-    hook_decisions = (
-        ()
-        if hooks
-        else tuple(
-            CaseNonConstruction(kind, "not_applicable", "No JSON hooks effect declared")
-            for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
-        )
-    )
-    reference_cases = (
-        (
-            replace(
-                reinstall,
-                name="missing-reference",
-                intermediate_preparation=MissingReferencePreparation(skills[0].destination),
-            ),
-            replace(
-                reinstall,
-                name="altered-reference",
-                intermediate_preparation=AlteredReferencePreparation(skills[0].destination),
-            ),
-            replace(
-                reinstall,
-                name="altered-skill",
-                intermediate_preparation=AlteredSkillPreparation(skills[0].destination),
-            ),
-            replace(
-                reinstall,
-                name="preserve-skill-backup",
-                intermediate_preparation=PreserveSkillBackupPreparation(skills[0].destination),
-            ),
-        )
-        if skills
-        else ()
-    )
-    reference_decisions = (
-        ()
-        if skills
-        else (
-            CaseNonConstruction("missing-reference", "not_applicable", "No skill effect declared"),
-            CaseNonConstruction("altered-reference", "not_applicable", "No skill effect declared"),
-            CaseNonConstruction("altered-skill", "not_applicable", "No skill effect declared"),
-            CaseNonConstruction(
-                "preserve-skill-backup", "not_applicable", "No skill effect declared"
-            ),
-        )
+    return EffectCaseBuild(tuple(entries))
+
+
+def _markdown_cases(
+    reinstall: EffectInstallCase, markdown: list[MarkdownSectionEffect]
+) -> tuple[EffectInstallCase | CaseNonConstruction, ...]:
+    variants = (
+        ("missing-section", "missing-markdown-section", None),
+        ("altered-section", "altered-markdown-body", b"\nSandbox altered Markdown section.\n\n"),
     )
     if len(markdown) != 1:
-        return EffectCaseBuild(
-            (reinstall, *reference_cases, *hook_cases),
-            tuple(
-                CaseNonConstruction(
-                    name,
-                    "not_applicable" if not markdown else "unconstructible",
-                    "No Markdown effect declared"
-                    if not markdown
-                    else "The case builder currently supports only one Markdown effect",
-                )
-                for name in ("missing-section", "altered-section")
+        return tuple(
+            CaseNonConstruction(
+                name,
+                "not_applicable" if not markdown else "unconstructible",
+                "No Markdown effect declared"
+                if not markdown
+                else "The case builder currently supports only one Markdown effect",
             )
-            + reference_decisions
-            + hook_decisions,
+            for name, _, _ in variants
         )
     effect = markdown[0]
     preparation = IntermediatePreparation(
@@ -476,22 +460,12 @@ def build_effect_cases(
                 + b"\nReplace this placeholder.\n\n"
                 + preparation.after
             ).decode("utf-8")
-    missing = replace(
-        reinstall,
-        name="missing-section",
-        initial_files=initial,
-        intermediate_preparation=preparation,
-    )
-    altered = replace(
-        missing,
-        name="altered-section",
-        intermediate_preparation=replace(
-            preparation,
-            kind="altered-markdown-body",
-            body=b"\nSandbox altered Markdown section.\n\n",
-        ),
-    )
-    return EffectCaseBuild(
-        (reinstall, missing, altered, *reference_cases, *hook_cases),
-        reference_decisions + hook_decisions,
+    return tuple(
+        replace(
+            reinstall,
+            name=name,
+            initial_files=initial,
+            intermediate_preparation=replace(preparation, kind=kind, body=body),
+        )
+        for name, kind, body in variants
     )

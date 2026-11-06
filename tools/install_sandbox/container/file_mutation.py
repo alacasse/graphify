@@ -25,12 +25,14 @@ from tools.install_sandbox.contracts.intermediate import (
     IntermediatePreparation,
     JsonHookPreparation,
     PreserveSkillBackupPreparation,
+    StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.rules.expectation_builder import (
     retained_bytes,
     selected_reference,
     selected_skill,
+    selected_version,
 )
 from tools.install_sandbox.rules.json_hook_repair import prepared_hook_settings
 
@@ -131,14 +133,24 @@ def _create_file(operation: BoundFileCreation, environment: EffectEnvironment) -
         os.close(parent)
 
 
-def _validate_hook_replacement(
-    operation: BoundMutation, environment: EffectEnvironment, retained: bytes
+def _validate_replacement(
+    operation: BoundFileReplacement,
+    environment: EffectEnvironment,
+    retained: bytes,
+    sources: FilesystemSnapshot,
 ) -> None:
     preparation = environment.case.intermediate_preparation
-    if not isinstance(operation, BoundFileReplacement) or not isinstance(
-        preparation, JsonHookPreparation
-    ):
-        raise ValueError("Hook preparation requires a replacement of the selected settings")
+    if isinstance(preparation, StaleVersionPreparation):
+        destination, expected, witness = selected_version(environment.case, sources)
+        if (
+            operation.destination != destination
+            or retained != expected
+            or operation.content != witness
+        ):
+            raise ValueError("Replacement differs from the selected version preparation")
+        return
+    if not isinstance(preparation, JsonHookPreparation):
+        raise ValueError("File replacement requires a version or hook preparation")
     effect = next(e for e in environment.case.effects.effects if isinstance(e, JsonHooksEffect))
     if operation.destination != effect.destination or preparation.destination != effect.destination:
         raise ValueError("Hook preparation destination differs from selected settings")
@@ -154,16 +166,16 @@ def apply_mutation(
     sources: FilesystemSnapshot,
 ) -> None:
     retained = operation.verify_binding(case_bytes, first_after)
-    if isinstance(operation, BoundFileReplacement) or isinstance(
-        environment.case.intermediate_preparation, JsonHookPreparation
-    ):
-        _validate_hook_replacement(operation, environment, retained)
-    else:
-        _validate_destination(operation, environment, sources)
     if isinstance(operation, BoundFileReplacement):
+        _validate_replacement(operation, environment, retained, sources)
         root = environment.project if operation.destination.root == "project" else environment.home
         _replace_file(root / operation.destination.path, operation, retained)
         return
+    if isinstance(
+        environment.case.intermediate_preparation, (JsonHookPreparation, StaleVersionPreparation)
+    ):
+        raise ValueError("Selected preparation requires a file replacement")
+    _validate_destination(operation, environment, sources)
     path = _path(operation, environment)
     if isinstance(operation, BoundFileCreation):
         _create_file(operation, environment)
@@ -306,7 +318,7 @@ def _write_replacement(descriptor: int, content: bytes, mode: int) -> os.stat_re
         if os.fstat(stream.fileno()).st_nlink != 1:
             raise ValueError("Prepared replacement is shared")
         if stream.write(content) != len(content):
-            raise ValueError("Incomplete settings replacement")
+            raise ValueError("Incomplete file replacement")
         os.fchmod(stream.fileno(), stat.S_IMODE(mode))
         stream.seek(0)
         if stream.read() != content:

@@ -30,8 +30,7 @@ def backup_case(root: str = "project"):
     original = reference_case()
     spec = EffectSpec((SkillEffect("skill.md", "refs", Destination(root, "skill")),))
     builds = build_effect_cases(spec, original.subject)
-    assert [case.name for case in builds.cases][-2:] == ["altered-skill", "preserve-skill-backup"]
-    return builds.cases[-1]
+    return next(case for case in builds.cases if case.name == "preserve-skill-backup")
 
 
 @pytest.mark.parametrize("root", ["home", "project"])
@@ -153,7 +152,7 @@ def test_multiple_markdown_effects_do_not_block_backup_case() -> None:
         )
     )
     build = build_effect_cases(spec, case.subject)
-    assert build.cases[-1].name == "preserve-skill-backup"
+    assert "preserve-skill-backup" in {case.name for case in build.cases}
     assert [(item.name, item.classification) for item in build.decisions] == [
         ("missing-section", "unconstructible"),
         ("altered-section", "unconstructible"),

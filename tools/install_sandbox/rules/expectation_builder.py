@@ -20,6 +20,7 @@ from tools.install_sandbox.contracts.intermediate import (
     JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
+    StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
@@ -380,3 +381,30 @@ def selected_skill(case: EffectInstallCase) -> Destination:
     if effect is None:
         raise ValueError("Skill preparation requires matching skill effect")
     return Destination(effect.destination.root, effect.destination.path + "/SKILL.md")
+
+
+def selected_version(
+    case: EffectInstallCase, sources: FilesystemSnapshot
+) -> tuple[Destination, bytes, bytes]:
+    """Resolve the version file, exact metadata bytes, and a distinct stale witness."""
+    preparation = case.intermediate_preparation
+    if not isinstance(preparation, StaleVersionPreparation):
+        raise ValueError("Case has no stale version preparation")
+    preparation.to_data()
+    effect = next(
+        (
+            effect
+            for effect in case.effects.effects
+            if isinstance(effect, SkillEffect) and effect.destination == preparation.destination
+        ),
+        None,
+    )
+    if effect is None:
+        raise ValueError("Stale version preparation requires matching skill effect")
+    expected = _version(case, sources)
+    witness = b"0.0.1-stale" if expected == b"0.0.0-stale" else b"0.0.0-stale"
+    return (
+        Destination(effect.destination.root, effect.destination.path + "/.graphify_version"),
+        expected,
+        witness,
+    )

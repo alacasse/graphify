@@ -19,10 +19,10 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, 20, id="all-effects-home"),
+        pytest.param(False, True, "home", "home", True, 22, id="all-effects-home"),
         pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
-        pytest.param(False, False, "project", "project", True, 14, id="skill-project-markdown"),
-        pytest.param(False, False, "project", "home", False, 7, id="wrong-skill-root"),
+        pytest.param(False, False, "project", "project", True, 16, id="skill-project-markdown"),
+        pytest.param(False, False, "project", "home", False, 8, id="wrong-skill-root"),
     ],
 )
 def test_cli_real_engine_and_autonomous_reread(
@@ -41,7 +41,8 @@ def test_cli_real_engine_and_autonomous_reread(
     transport = ControlledTransport(
         tmp_path, markdown_only=markdown_only, hooks=hooks, skill_root=installed_root
     )
-
+    run_case = Mock(wraps=transport.run_case)
+    monkeypatch.setattr(transport, "run_case", run_case)
     monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     output = tmp_path / "published"
     assert main(
@@ -67,6 +68,7 @@ def test_cli_real_engine_and_autonomous_reread(
         "altered-reference",
         "altered-skill",
         "preserve-skill-backup",
+        "stale-version",
         "missing-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",
@@ -76,6 +78,7 @@ def test_cli_real_engine_and_autonomous_reread(
         for case in report["cases"]
         if case["construction"] == "constructed"
     }
+    assert [call.kwargs["case_file"].stem for call in run_case.call_args_list] == list(saved)
     if markdown_only:
         backup = next(case for case in report["cases"] if case["name"] == "preserve-skill-backup")
         assert (
@@ -91,12 +94,14 @@ def test_cli_real_engine_and_autonomous_reread(
     context.unlink()
     assert not transport.executable.exists()
     assert not (tmp_path / "environment").exists()
-    restored = tmp_path / "restored"
+    _assert_replayed_results(output, tmp_path / "restored", saved)
+
+
+def _assert_replayed_results(output: Path, restored: Path, saved: dict[str, Any]) -> None:
     with zipfile.ZipFile(output / "evidence.zip") as archive:
         archive.extractall(restored)
     for name in saved:
         reread = read_evidence(restored / "evidence/cases" / name)
-        assert reread.status == ("passed" if passed else "failed")
         decoded = asdict(reread)
         decoded["preparation"] = reread.preparation.to_data()
         decoded["steps"] = [step.to_data() for step in reread.steps]
@@ -145,7 +150,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=5 if wrong_skill else 16 if hooks else 10,
+        calls=6 if wrong_skill else 18 if hooks else 12,
     )
 
 
@@ -234,47 +239,48 @@ def _assert_partial_campaign(
     assert report["passed"] is passed
     first = next(case for case in report["cases"] if case["name"] == "reinstall")
     repairs = [case for case in report["cases"] if case["construction"] != "constructed"]
-    expected_status = "failed" if construction == "not_applicable" and calls == 5 else "passed"
+    expected_status = "failed" if construction == "not_applicable" and not passed else "passed"
     assert first["result"]["test"]["status"] == expected_status
     if expected_status == "failed":
         _assert_wrong_root_stops_after_first_command(first["result"]["test"])
-    hook_cases = ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
-    assert [case["name"] for case in repairs] == (
-        ["missing-section", "altered-section"]
-        if construction == "not_applicable"
-        else [
-            "missing-section",
-            "altered-section",
-            "missing-reference",
-            "altered-reference",
-            "altered-skill",
-            "preserve-skill-backup",
-        ]
-    ) + (hook_cases if not transport.installer.hooks else [])
-    for case in repairs:
-        if case["name"] in hook_cases:
-            assert case["construction"] == "not_applicable"
-            assert case["construction_reason"] == "No JSON hooks effect declared"
-            continue
-        assert case["construction"] == (
-            "not_applicable"
-            if case["name"]
-            in {"missing-reference", "altered-reference", "altered-skill", "preserve-skill-backup"}
-            else construction
-        )
-        assert case["construction_reason"] == (
-            "No skill effect declared"
-            if case["name"]
-            in {"missing-reference", "altered-reference", "altered-skill", "preserve-skill-backup"}
-            else reason
-        )
-        assert all(case[field] is None for field in ("state", "result", "output_directory"))
+    _assert_construction_decisions(repairs, transport, construction, reason)
     shutil.rmtree(subject)
     spec.unlink()
     context.unlink()
     assert not transport.executable.exists()
     assert not (root / "environment").exists()
     _assert_archived_partial_campaign(root, output, report, external_text, construction, reason)
+
+
+def _assert_construction_decisions(
+    repairs: list[dict[str, Any]],
+    transport: ControlledTransport,
+    construction: str,
+    reason: str,
+) -> None:
+    hook_cases = ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+    skill_cases = [
+        "missing-reference",
+        "altered-reference",
+        "altered-skill",
+        "preserve-skill-backup",
+        "stale-version",
+    ]
+    missing = ["missing-section", "altered-section"]
+    if not transport.installer.skill:
+        missing.extend(skill_cases)
+    if not transport.installer.hooks:
+        missing.extend(hook_cases)
+    assert [case["name"] for case in repairs] == missing
+    for case in repairs:
+        if case["name"] in hook_cases:
+            expected = ("not_applicable", "No JSON hooks effect declared")
+        elif case["name"] in skill_cases:
+            expected = ("not_applicable", "No skill effect declared")
+        else:
+            expected = (construction, reason)
+        assert (case["construction"], case["construction_reason"]) == expected
+        assert all(case[field] is None for field in ("state", "result", "output_directory"))
 
 
 def _assert_archived_partial_campaign(

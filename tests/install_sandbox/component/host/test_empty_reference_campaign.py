@@ -78,13 +78,14 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
         assert test.preparation.stop is not None
         assert test.preparation.stop.category == "validation"
         assert all(step.facts.command is None for step in test.steps)
-    assert len(transport.installer.calls) == 16
+    assert len(transport.installer.calls) == 18
     assert set(cases) == {
         "reinstall",
         "missing-section",
         "altered-section",
         "altered-skill",
         "preserve-skill-backup",
+        "stale-version",
         "missing-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",

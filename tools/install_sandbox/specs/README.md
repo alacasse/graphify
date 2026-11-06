@@ -54,10 +54,10 @@ The coordinator constructs the cases before allocating campaign output.
 `reinstall` is always constructed. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
-A skill makes `missing-reference`, `altered-reference`, `altered-skill` and
-`preserve-skill-backup` available in that order, independently of the Markdown
+A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
+`preserve-skill-backup` and `stale-version` available in that order, independently of the Markdown
 count. Without a skill, the campaign reports those cases as `not_applicable`.
-The eighth through tenth cases, `missing-json-hook`, `altered-json-hook` and
+The hook cases, `missing-json-hook`, `altered-json-hook` and
 `duplicate-json-hook`, select the first hook of the first `json-hooks` effect.
 A spec without that effect yields `not_applicable` for all three. Each case has two dependent
 installation steps.
@@ -121,6 +121,13 @@ expectation and uses the verified preparation baseline with no allowed changes
 or removals. Skill, references, metadata, personal content and other effects must
 also remain exact. An altered skill with a preexisting backup is a distinct case.
 Other cases continue to require the skill backup to be absent.
+
+`stale-version` replaces only the skill's `.graphify_version` after a conforming
+install. The witness is `0.0.0-stale` without a newline, or `0.0.1-stale` when
+the package version already equals the first witness. The second install runs
+after the sandbox verifies this single change. It must restore the exact UTF-8
+bytes derived from the retained `Version` header and preserve every other
+observed entry in HOME and PROJECT.
 
 For `missing-reference`, the engine binds removal to the case, observed
 file bytes and exact destination selected from retained sources. Only that file
@@ -203,6 +210,7 @@ The `kind` field identifies the operation as `markdown`, `file-removal`,
 `file-append`, `file-creation`, or `file-replacement`. The
 `preserve-skill-backup` case uses `file-creation` to seed the backup.
 All three JSON hook repair cases use `file-replacement` for the settings.
+`stale-version` uses the same operation for the version file.
 Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
 independently reconstructs the target selection, operation and expectations,
 including both repaired skill bytes and altered backup bytes from retained sources.

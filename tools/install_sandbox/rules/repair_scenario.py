@@ -31,6 +31,7 @@ from tools.install_sandbox.contracts.intermediate import (
     JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
+    StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
@@ -41,6 +42,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     retained_bytes,
     selected_reference,
     selected_skill,
+    selected_version,
 )
 from tools.install_sandbox.rules.json_hook_repair import (
     prepared_hook_settings,
@@ -397,6 +399,50 @@ class AlteredSkillScenario:
 
 
 @dataclass(frozen=True)
+class StaleVersionScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
+            destination, expected, witness = selected_version(self.case, self.sources)
+            key = destination.root, destination.path
+            if retained_bytes(first_after, *key) != expected:
+                raise ValueError("First installed version differs from retained metadata")
+            stale = Expectation("file", *key, "intermediate", "case:stale-version-witness", witness)
+            restored = Expectation(
+                "file",
+                *key,
+                "reinstall",
+                "version:subject:" + self.case.subject.version_source,
+                expected,
+            )
+            operation = BoundFileReplacement(
+                hashlib.sha256(case_bytes).hexdigest(),
+                observation_ref,
+                destination,
+                hashlib.sha256(expected).hexdigest(),
+                witness,
+            )
+            operation.verify_binding(case_bytes, first_after)
+            return PreparationPlan(
+                operation,
+                _transition(installed, first_after, (stale,), "intermediate"),
+                _transition(installed, first_after, (restored,), "reinstall"),
+            )
+        except (ValueError, UnicodeError, StopIteration) as exc:
+            return PreparationBlocked(str(exc))
+
+
+@dataclass(frozen=True)
 class PreserveSkillBackupScenario:
     case: EffectInstallCase
     sources: FilesystemSnapshot
@@ -539,6 +585,7 @@ def repair_scenario_from_case(
     | AlteredReferenceScenario
     | AlteredSkillScenario
     | PreserveSkillBackupScenario
+    | StaleVersionScenario
     | JsonHookRepairScenario
 ):
     preparation = case.intermediate_preparation
@@ -550,6 +597,7 @@ def repair_scenario_from_case(
         | type[AlteredReferenceScenario]
         | type[AlteredSkillScenario]
         | type[PreserveSkillBackupScenario]
+        | type[StaleVersionScenario]
         | type[JsonHookRepairScenario],
     ] = {
         MissingReferencePreparation: MissingReferenceScenario,
@@ -557,6 +605,7 @@ def repair_scenario_from_case(
         AlteredReferencePreparation: AlteredReferenceScenario,
         AlteredSkillPreparation: AlteredSkillScenario,
         PreserveSkillBackupPreparation: PreserveSkillBackupScenario,
+        StaleVersionPreparation: StaleVersionScenario,
     }
     scenario = scenarios.get(type(preparation))
     if scenario is not None:

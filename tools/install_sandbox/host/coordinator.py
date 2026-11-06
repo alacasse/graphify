@@ -255,32 +255,22 @@ class InstallTestCoordinator:
         materialization = Timing("materialization")
         result = CampaignResult(
             output,
-            [CampaignCase(c.name, output / "cases" / c.name) for c in built.cases]
-            + [
-                CampaignCase(
-                    decision.name,
+            [
+                CampaignCase(entry.name, output / "cases" / entry.name)
+                if isinstance(entry, EffectInstallCase)
+                else CampaignCase(
+                    entry.name,
                     None,
                     state=None,
-                    construction=decision.classification,
-                    construction_reason=decision.reason,
+                    construction=entry.classification,
+                    construction_reason=entry.reason,
                 )
-                for decision in built.decisions
+                for entry in built.entries
             ],
             timings=([construction_timing] if construction_timing is not None else [])
             + [materialization],
             prepare_only=definition.prepare_only,
         )
-        # Keep skill repairs after Markdown cases and their construction decisions.
-        repair_order = {
-            "missing-reference": 1,
-            "altered-reference": 2,
-            "altered-skill": 3,
-            "preserve-skill-backup": 4,
-            "missing-json-hook": 5,
-            "altered-json-hook": 6,
-            "duplicate-json-hook": 7,
-        }
-        result.cases.sort(key=lambda entry: repair_order.get(entry.name, 0))
         with harness:
             try:
                 self._execute_campaign(harness, definition, result, materialization, progress)

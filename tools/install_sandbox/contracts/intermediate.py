@@ -208,6 +208,27 @@ class PreserveSkillBackupPreparation:
         return result
 
 
+@dataclass(frozen=True)
+class StaleVersionPreparation:
+    destination: Destination
+    kind: str = "stale-version"
+
+    def to_data(self) -> dict[str, object]:
+        if self.kind != "stale-version":
+            raise ValueError("Unsupported stale version preparation")
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "StaleVersionPreparation":
+        data = fields(value, "kind destination")
+        result = cls(Destination.from_data(data["destination"]), text(data["kind"]))
+        result.to_data()
+        return result
+
+
 def preparation_from_data(
     value: object,
 ) -> (
@@ -217,12 +238,15 @@ def preparation_from_data(
     | AlteredReferencePreparation
     | AlteredSkillPreparation
     | PreserveSkillBackupPreparation
+    | StaleVersionPreparation
 ):
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
     if incoming.get("kind") in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
         return JsonHookPreparation.from_data(incoming)
+    if incoming.get("kind") == "stale-version":
+        return StaleVersionPreparation.from_data(incoming)
     if incoming.get("kind") == "preserve-skill-backup":
         return PreserveSkillBackupPreparation.from_data(incoming)
     if incoming.get("kind") == "missing-reference":

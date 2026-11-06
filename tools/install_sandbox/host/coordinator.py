@@ -277,6 +277,7 @@ class InstallTestCoordinator:
             "altered-skill": 3,
             "preserve-skill-backup": 4,
             "missing-json-hook": 5,
+            "altered-json-hook": 6,
         }
         result.cases.sort(key=lambda entry: repair_order.get(entry.name, 0))
         with harness:

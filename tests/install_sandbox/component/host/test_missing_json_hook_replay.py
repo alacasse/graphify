@@ -6,6 +6,7 @@ import zipfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -67,9 +68,12 @@ def conduct_hooks(
     separate: bool = False,
     fault: str | None = None,
     first: bool = False,
+    case_name: str = "missing-json-hook",
+    legacy_append: bool = False,
 ) -> tuple[dict[str, Any], Path, int]:
     subject, spec, context = arrange(root)
     transport = ControlledTransport(root)
+    transport.installer.repair_hook_timeout = not legacy_append
     execute = transport.installer.execute
     calls: dict[Path, int] = {}
 
@@ -77,7 +81,7 @@ def conduct_hooks(
         args: list[str], project: Path, environment: dict[str, str], timeout: float
     ) -> InstallerCommandResult:
         result = execute(args, project, environment, timeout)
-        if "missing-json-hook" not in project.parts:
+        if case_name not in project.parts:
             return result
         calls[project] = calls.get(project, 0) + 1
         path = project / ".synthetic/config.json"
@@ -95,12 +99,9 @@ def conduct_hooks(
 
     transport.installer.execute = controlled
 
-    def harness(**kwargs: object) -> ControlledTransport:
-        return transport
-
-    monkeypatch.setattr(coordinator, "ContainerHarness", harness)
+    monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     output = root / "published"
-    main(
+    exit_code = main(
         [
             "--spec",
             str(spec),
@@ -113,10 +114,13 @@ def conduct_hooks(
         ]
     )
     campaign = json.loads((output / "campaign.json").read_text())
-    selected = next(case for case in campaign["cases"] if case["name"] == "missing-json-hook")
+    selected = next(case for case in campaign["cases"] if case["name"] == case_name)
     assert selected["construction"] == "constructed"
     result = selected["result"]["test"]
-    proof = _replay_after_cleanup(root, subject, spec, context, transport, output, result)
+    assert exit_code == (0 if result["status"] == "passed" else 1)
+    proof = _replay_after_cleanup(
+        root, subject, spec, context, transport, output, result, case_name
+    )
     return result, proof, sum(calls.values())
 
 
@@ -128,6 +132,7 @@ def _replay_after_cleanup(
     transport: ControlledTransport,
     output: Path,
     result: dict[str, Any],
+    case_name: str,
 ) -> Path:
     shutil.rmtree(subject)
     spec.unlink()
@@ -137,7 +142,7 @@ def _replay_after_cleanup(
     proof = root / "restored"
     with zipfile.ZipFile(output / "evidence.zip") as archive:
         archive.extractall(proof)
-    proof = proof / "evidence/cases/missing-json-hook"
+    proof = proof / "evidence/cases" / case_name
     replayed = read_evidence(proof)
     decoded = asdict(replayed)
     decoded["preparation"] = replayed.preparation.to_data()
@@ -146,14 +151,29 @@ def _replay_after_cleanup(
     return proof
 
 
+@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
 @pytest.mark.parametrize("separate", [False, True], ids=["mixed", "separate"])
 def test_hook_repair_replays_exactly_after_host_cleanup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, separate: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, separate: bool, case_name: str
 ) -> None:
-    result, _, calls = conduct_hooks(tmp_path, monkeypatch, separate=separate)
+    result, proof, calls = conduct_hooks(
+        tmp_path, monkeypatch, separate=separate, case_name=case_name
+    )
     assert result["status"] == "passed" and calls == 2
+    if case_name == "altered-json-hook":
+        prepared = json.loads(
+            (proof / "intermediate/after/project/.synthetic/config.json").read_text()
+        )
+        targeted = [
+            hook
+            for group in prepared["hooks"]["PreToolUse"]
+            for hook in group["hooks"]
+            if hook.get("command") == SEARCH["command"]
+        ]
+        assert targeted == [{**SEARCH, "timeout": 11}]
 
 
+@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
 @pytest.mark.parametrize(
     "fault",
     [
@@ -171,20 +191,23 @@ def test_hook_repair_replays_exactly_after_host_cleanup(
     ],
 )
 def test_zero_exit_faults_fail_hook_repair_and_replay(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, case_name: str
 ) -> None:
-    result, _, calls = conduct_hooks(tmp_path, monkeypatch, fault=fault)
+    result, _, calls = conduct_hooks(tmp_path, monkeypatch, fault=fault, case_name=case_name)
     assert result["status"] == "failed" and calls == 2
     second = result["steps"][1]["facts"]
     assert second["command"]["exit_code"] == 0
     assert second["verification"]["mismatches"]
 
 
+@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
 @pytest.mark.parametrize("fault", ["absent", "moved"])
 def test_invalid_first_install_blocks_hook_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, case_name: str
 ) -> None:
-    result, _, calls = conduct_hooks(tmp_path, monkeypatch, fault=fault, first=True)
+    result, _, calls = conduct_hooks(
+        tmp_path, monkeypatch, fault=fault, first=True, case_name=case_name
+    )
     assert result["status"] == "failed" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
 
@@ -263,8 +286,9 @@ def test_partial_hook_preparation_blocks_second_command(
     assert result["steps"][1]["phase"] == "idle"
 
 
+@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
 def test_unobservable_hook_preparation_blocks_second_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_name: str
 ) -> None:
     from tools.install_sandbox.container.effect_environment import EffectEnvironment
     from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -273,7 +297,7 @@ def test_unobservable_hook_preparation_blocks_second_command(
 
     def incomplete(environment: EffectEnvironment, phase: str) -> FilesystemSnapshot:
         snapshot = original(environment, phase)
-        if "missing-json-hook" in environment.project.parts and phase == "after":
+        if case_name in environment.project.parts and phase == "after":
             snapshot.contents.pop(("project", ".synthetic/config.json"))
             snapshot.obstacles.append(
                 {
@@ -286,7 +310,7 @@ def test_unobservable_hook_preparation_blocks_second_command(
         return snapshot
 
     monkeypatch.setattr(EffectEnvironment, "observe_intermediate", incomplete)
-    result, _, calls = conduct_hooks(tmp_path, monkeypatch)
+    result, _, calls = conduct_hooks(tmp_path, monkeypatch, case_name=case_name)
     assert result["status"] == "incomplete" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
 
@@ -302,9 +326,10 @@ def test_hook_replay_rejects_changed_observed_document(
         read_evidence(proof)
 
 
+@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
 @pytest.mark.parametrize("fault", ["no-removal", "extra-personal-removal"])
 def test_observed_wrong_hook_mutation_blocks_second_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, case_name: str
 ) -> None:
     from tools.install_sandbox.container import intermediate_execution
     from tools.install_sandbox.container.effect_environment import EffectEnvironment
@@ -320,7 +345,7 @@ def test_observed_wrong_hook_mutation_blocks_second_command(
         first_after: FilesystemSnapshot,
         sources: FilesystemSnapshot,
     ) -> None:
-        if environment.case.name != "missing-json-hook":
+        if environment.case.name != case_name:
             original(operation, environment, case_bytes, first_after, sources)
             return
         if fault == "no-removal":
@@ -333,7 +358,7 @@ def test_observed_wrong_hook_mutation_blocks_second_command(
         path.write_text(json.dumps(data) + "\n")
 
     monkeypatch.setattr(intermediate_execution, "apply_mutation", mutate)
-    result, proof, calls = conduct_hooks(tmp_path, monkeypatch)
+    result, proof, calls = conduct_hooks(tmp_path, monkeypatch, case_name=case_name)
     assert result["status"] == "failed" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
     verification = json.loads((proof / "intermediate/verification.json").read_text())
@@ -404,7 +429,9 @@ def test_hook_repair_preserves_an_alias_outside_the_observed_roots(
         first_after: FilesystemSnapshot,
         sources: FilesystemSnapshot,
     ) -> None:
-        if isinstance(operation, BoundFileReplacement):
+        if environment.case.name == "missing-json-hook" and isinstance(
+            operation, BoundFileReplacement
+        ):
             settings = environment.project / operation.destination.path
             alias.hardlink_to(settings)
             original = alias.read_bytes()
@@ -418,3 +445,52 @@ def test_hook_repair_preserves_an_alias_outside_the_observed_roots(
     result, _, calls = conduct_hooks(tmp_path, monkeypatch)
     assert result["status"] == "passed" and calls == 2
     assert alias.is_file()
+
+
+def test_legacy_append_keeps_both_timeouts_despite_zero_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result, proof, calls = conduct_hooks(
+        tmp_path, monkeypatch, case_name="altered-json-hook", legacy_append=True
+    )
+    assert result["status"] == "failed" and calls == 2
+    assert result["steps"][1]["facts"]["command"]["exit_code"] == 0
+    settings = json.loads((proof / "steps/1/after/project/.synthetic/config.json").read_text())
+    timeouts = [
+        hook["timeout"]
+        for group in settings["hooks"]["PreToolUse"]
+        for hook in group["hooks"]
+        if hook.get("command") == SEARCH["command"]
+    ]
+    assert timeouts == [11, 10]
+
+
+def test_simulator_repairs_only_its_literal_timeout_variant(tmp_path: Path) -> None:
+    from tests.install_sandbox.component.host.native_support import LiteralInstaller
+
+    settings = tmp_path / ".synthetic/config.json"
+    settings.parent.mkdir()
+    personal = [
+        {**SEARCH, "timeout": 11, "personal": True},
+        {**SEARCH, "timeout": 12},
+        {**SEARCH, "timeout": 11.0},
+        {**SEARCH, "timeout": 10.0},
+        {"type": "command", "command": "personal check", "timeout": 11},
+    ]
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Bash|Grep", "hooks": [{**SEARCH, "timeout": 11}, *personal]}
+                    ]
+                }
+            }
+        )
+    )
+    original = settings.read_bytes()
+    installer = LiteralInstaller(skill=False, markdown=False)
+    installer.execute(["install"], tmp_path, {"HOME": str(tmp_path)}, 60)
+    data = json.loads(settings.read_text())
+    assert data["hooks"]["PreToolUse"][0]["hooks"] == [*personal, SEARCH]
+    assert settings.with_name("config.json.graphify-bak").read_bytes() == original

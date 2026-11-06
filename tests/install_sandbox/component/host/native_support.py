@@ -3,6 +3,7 @@
 import hashlib
 import json
 import shutil
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -64,6 +65,11 @@ def arrange(
     return subject, spec_file, context_file
 
 
+def _same_timed_command(candidate: Mapping[str, object], expected: Mapping[str, object]) -> bool:
+    # JSON distinguishes the integer timeout from a numerically equal float.
+    return type(candidate.get("timeout")) is int and candidate == expected
+
+
 class LiteralInstaller:
     def __init__(
         self,
@@ -79,6 +85,7 @@ class LiteralInstaller:
         self.hooks = hooks and not markdown_only
         self.skill_root = skill_root
         self.calls: list[list[str]] = []
+        self.repair_hook_timeout = True
 
     def execute(
         self, args: list[str], project: Path, environment: dict[str, str], timeout: float
@@ -130,8 +137,7 @@ class LiteralInstaller:
         digest = hashlib.sha256(str(skill.resolve()).encode()).hexdigest()[:16]
         write(home / f".cache/graphify/skill-locks/{digest}.lock", "")
 
-    @staticmethod
-    def _hooks(project: Path) -> None:
+    def _hooks(self, project: Path) -> None:
         path = project / ".synthetic/config.json"
         backup = path.with_name("config.json.graphify-bak")
         if not backup.exists():
@@ -143,8 +149,19 @@ class LiteralInstaller:
         # Search and read may live in separate groups; repair each independently.
         for matcher, hook in (("Bash|Grep", search), ("Read|Glob", read)):
             matching = [group for group in groups if group.get("matcher") == matcher]
-            if any(hook in group["hooks"] for group in matching):
+            if any(
+                _same_timed_command(item, hook) for group in matching for item in group["hooks"]
+            ):
                 continue
+            # The simulator repairs only its literal timeout variant; personal hooks survive.
+            if self.repair_hook_timeout:
+                altered = {**hook, "timeout": 11}
+                for group in matching:
+                    group["hooks"] = [
+                        existing
+                        for existing in group["hooks"]
+                        if not _same_timed_command(existing, altered)
+                    ]
             if matching:
                 matching[0]["hooks"].append(hook)
             else:

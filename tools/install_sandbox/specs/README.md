@@ -57,21 +57,28 @@ not applicable, while multiple sections remains an explicit construction limit.
 A skill makes `missing-reference`, `altered-reference`, `altered-skill` and
 `preserve-skill-backup` available in that order, independently of the Markdown
 count. Without a skill, the campaign reports those cases as `not_applicable`.
-The last case, `missing-json-hook`, selects the first hook of the first
-`json-hooks` effect. A spec without that effect yields `not_applicable` for
-this case. Each constructed case has two dependent installation steps.
+The eighth and ninth cases, `missing-json-hook` and `altered-json-hook`, select
+the first hook of the first `json-hooks` effect. A spec without that effect
+yields `not_applicable` for both. Each constructed case has two dependent
+installation steps.
 
-`missing-json-hook` alone seeds the selected conforming hook beside the personal
+Each hook repair case seeds the selected conforming hook beside the personal
 `python personal_graphify_audit.py` command (timeout 17), with an explicit group
 attribute and a neighboring personal group under the same event. Other declared
 hooks are absent initially and must be installed by the first command. The first
-installation must preserve the seeded group. Preparation removes only the selected
-hook, retaining its group, personal attributes and order, all other hooks and the
-initial JSON backup. Reinstallation restores exactly one conforming occurrence
-under the declared event and matcher in either an existing or a new group.
-All other JSON values and array ordering must match the prepared settings.
-The backup must still match the original settings byte for byte, and all
-other observed files must match their contents after the first installation.
+installation must preserve the seeded group.
+
+`missing-json-hook` then removes only the selected hook. `altered-json-hook`
+changes only its timeout from 10 to 11. Before reinstallation, the verifier
+compares the observed settings with the first installation and checks every other
+observed file. A mismatch or an incomplete observation blocks the second command.
+
+Reinstallation must leave exactly one conforming occurrence under the declared
+event and matcher, in either an existing or a new group. Leaving the altered
+occurrence beside a conforming one fails verification even when the command
+exits successfully. All other hooks, group attributes, personal ordering and
+settings must match the first installation. The backup must match the original
+settings byte for byte, and all other observed files must retain their bytes.
 
 `missing-reference` removes one representative reference: the first regular file
 in lexical order of relative source paths, including subdirectories. A complete
@@ -189,7 +196,7 @@ result `performed-mutation-v3`, and case evidence `explicit-expectations-v11`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,
 `file-append`, `file-creation`, or `file-replacement`. The
 `preserve-skill-backup` case uses `file-creation` to seed the backup.
-`missing-json-hook` uses `file-replacement` to remove one hook from the settings.
+Both JSON hook repair cases use `file-replacement` for the settings.
 Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
 independently reconstructs the target selection, operation and expectations,
 including both repaired skill bytes and altered backup bytes from retained sources.

@@ -8,6 +8,7 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import ObservationObstacle, VerificationResult
 from tools.install_sandbox.rules import comparison as checks
 from tools.install_sandbox.rules.json_hook_repair import (
+    altered_target_preserved,
     removed_target_preserved,
     repaired_json_preserved,
     target_group_preserved,
@@ -141,7 +142,7 @@ def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> 
         )
     elif item.kind in {"json-hooks", "json-hooks-seeded"}:
         _json(item, current, result)
-    elif item.kind in {"json-hook-removed", "json-hook-repair"}:
+    elif item.kind in {"json-hook-removed", "json-hook-altered", "json-hook-repair"}:
         _json_transition(item, current, result)
     else:
         raise ValueError("Unsupported expectation kind")
@@ -154,6 +155,8 @@ def _json_transition(item: Expectation, current: bytes, result: VerificationResu
         target = item.hooks[0]
         if item.kind == "json-hook-removed":
             valid = removed_target_preserved(before, after, target)
+        elif item.kind == "json-hook-altered":
+            valid = altered_target_preserved(before, after, target)
         else:
             count = len(
                 checks.hook_positions(
@@ -173,7 +176,9 @@ def _json_transition(item: Expectation, current: bytes, result: VerificationResu
                 item.root,
                 item.path,
                 "JSON structure preserved around target",
-                "JSON changed",
+                "JSON outside conforming target changed; unexpected or altered hooks may remain"
+                if item.kind == "json-hook-repair"
+                else "JSON changed",
             )
     except (ValueError, UnicodeError):
         checks.mismatch(

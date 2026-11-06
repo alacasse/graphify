@@ -1,4 +1,4 @@
-"""Select and remove a declared hook without interpreting command strings."""
+"""Mutate and compare a declared hook without interpreting command strings."""
 
 from typing import cast
 
@@ -78,6 +78,58 @@ def missing_hook_settings(effect: JsonHooksEffect, installed: bytes) -> bytes:
         raise ValueError("JSON repair requires a declared hook")
     prepared = without_target(read_json(installed), effect.hooks[0])
     return (encode_json(prepared) + "\n").encode("utf-8")
+
+
+def _altered_timeout(target: HookExpectation) -> int:
+    timeout = target.content.get("timeout")
+    if type(timeout) is not int:
+        raise ValueError("JSON hook alteration requires a declared integer timeout")
+    return timeout + 1
+
+
+def altered_hook_settings(effect: JsonHooksEffect, installed: bytes) -> bytes:
+    """Change only the unique observed target's declared integer timeout by one."""
+    if not effect.hooks:
+        raise ValueError("JSON repair requires a declared hook")
+    target = effect.hooks[0]
+    timeout = _altered_timeout(target)
+    document = read_json(installed)
+    group_index, hook_index = target_location(document, target)
+    prepared, _, contents = _copy_hook_path(document, target.event, group_index)
+    hook = cast(dict[str, object], contents[hook_index]).copy()
+    hook["timeout"] = timeout
+    contents[hook_index] = hook
+    return (encode_json(prepared) + "\n").encode("utf-8")
+
+
+def prepared_hook_settings(effect: JsonHooksEffect, installed: bytes, kind: str) -> bytes:
+    """Dispatch only supported hook preparations."""
+    if kind == "missing-json-hook":
+        return missing_hook_settings(effect, installed)
+    if kind == "altered-json-hook":
+        return altered_hook_settings(effect, installed)
+    raise ValueError("Unsupported JSON hook preparation")
+
+
+def altered_target_preserved(
+    original: dict[str, object], prepared: dict[str, object], target: HookExpectation
+) -> bool:
+    """Restore the timeout at its observed position and compare independently."""
+    timeout = _altered_timeout(target)
+    group_index, hook_index = target_location(original, target)
+    try:
+        restored, _, contents = _copy_hook_path(prepared, target.event, group_index)
+        candidate = contents[hook_index]
+        if not isinstance(candidate, dict):
+            return False
+        hook = cast(dict[str, object], candidate).copy()
+        if "timeout" not in hook or not json_equal(hook["timeout"], timeout):
+            return False
+        hook["timeout"] = target.content["timeout"]
+        contents[hook_index] = hook
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    return json_equal(original, restored)
 
 
 def repaired_json_preserved(

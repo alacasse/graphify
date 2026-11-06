@@ -10,10 +10,14 @@ from tools.install_sandbox.contracts.effects import Destination, JsonHooksEffect
 from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.rules.comparison import json_equal, read_json
 from tools.install_sandbox.rules.json_hook_repair import (
+    altered_hook_settings,
+    altered_target_preserved,
     missing_hook_settings,
+    prepared_hook_settings,
     removed_target_preserved,
     repaired_json_preserved,
     target_group_preserved,
+    without_target,
 )
 
 TARGET = HookExpectation("target", "Before", "Read", {"type": "command", "command": "run"})
@@ -222,3 +226,121 @@ def test_integer_negative_zero_is_distinct_from_other_json_zero_types():
     negative = read_json(b'{"value":-0}')
     for token in (b"0", b"-0.0", b"false"):
         assert not json_equal(negative, read_json(b'{"value":' + token + b"}"))
+
+
+TIMED_TARGET = HookExpectation(
+    "target", "Before", "Read", {"type": "command", "command": "run", "timeout": 10}
+)
+TIMED_EFFECT = JsonHooksEffect(Destination("project", "settings.json"), (TIMED_TARGET,))
+
+
+def timed_source() -> bytes:
+    return (
+        b'{"hooks":{"Before":[{"matcher":"Read","metadata":[true,1,1.0],"hooks":['
+        b'{"type":"command","command":"run","timeout":10,"extra":42},'
+        b'{"command":"personal","precision":0.123456789123456789,"offset":-0}]}]},'
+        b'"preferences":{"enabled":true}}'
+    )
+
+
+def test_alteration_changes_only_observed_timeout_and_retains_position():
+    source = timed_source()
+    expected = source.replace(b'"timeout":10', b'"timeout":11')
+    prepared = altered_hook_settings(TIMED_EFFECT, source)
+    assert json_equal(read_json(prepared), read_json(expected))
+    assert prepared_hook_settings(TIMED_EFFECT, source, "altered-json-hook") == prepared
+    assert altered_target_preserved(read_json(source), read_json(expected), TIMED_TARGET)
+    with pytest.raises(ValueError, match="Unsupported"):
+        prepared_hook_settings(TIMED_EFFECT, source, "unknown")
+
+
+@pytest.mark.parametrize("timeout", [None, True, 10.0, "10"])
+def test_alteration_requires_declared_integer_timeout(timeout: object):
+    target = HookExpectation("target", "Before", "Read", {**TARGET.content, "timeout": timeout})
+    effect = JsonHooksEffect(EFFECT.destination, (target,))
+    with pytest.raises(ValueError, match="integer timeout"):
+        altered_hook_settings(effect, timed_source())
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (b'"timeout":11', b'"timeout":11.0'),
+        (b'"timeout":11', b'"timeout":true'),
+        (b'"extra":42', b'"extra":43'),
+        (b'"offset":-0', b'"offset":0'),
+        (b"0.123456789123456789", b"0.12345678912345678"),
+        (b"[true,1,1.0]", b"[1,true,1.0]"),
+    ],
+)
+def test_alteration_oracle_rejects_collateral_and_typed_changes(old: bytes, new: bytes):
+    source = timed_source()
+    altered = source.replace(b'"timeout":10', b'"timeout":11')
+    assert not altered_target_preserved(
+        read_json(source), read_json(altered.replace(old, new)), TIMED_TARGET
+    )
+
+
+def test_alteration_oracle_rejects_moved_target_before_reinstall():
+    source = timed_source()
+    altered = cast(dict[str, Any], read_json(source.replace(b'"timeout":10', b'"timeout":11')))
+    altered["hooks"]["Before"][0]["hooks"].reverse()
+    assert not altered_target_preserved(read_json(source), altered, TIMED_TARGET)
+
+
+def test_altered_expectation_verifies_independently_from_preparation_output():
+    from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
+    from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+    from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+
+    item = Expectation(
+        "json-hook-altered",
+        "project",
+        "settings.json",
+        "intermediate",
+        "observation:first",
+        baseline=timed_source(),
+        hooks=(TIMED_TARGET,),
+    )
+    assert Expectation.from_data(item.to_data()) == item
+    expected = ExpectationSet(
+        "intermediate", (item,), roots={"home": "/home", "project": "/project"}
+    )
+    altered = timed_source().replace(b'"timeout":10', b'"timeout":11')
+    for current, valid in (
+        (altered, True),
+        (altered.replace(b'"offset":-0', b'"offset":0'), False),
+    ):
+        observed = FilesystemSnapshot(
+            entries=[
+                {"root": "home", "path": ".", "kind": "directory", "listing_complete": True},
+                {"root": "project", "path": ".", "kind": "directory", "listing_complete": True},
+                {"root": "project", "path": "settings.json", "kind": "file"},
+            ],
+            contents={("project", "settings.json"): current},
+        )
+        result = EffectVerifier().verify(expected, observed)
+        assert result.complete
+        assert (not result.mismatches) == valid
+
+
+def test_final_repair_allows_move_but_rejects_altered_remnants_anywhere():
+    original = read_json(timed_source())
+    prepared = without_target(original, TIMED_TARGET)
+    moved = cast(dict[str, Any], read_json(timed_source()))
+    group = moved["hooks"]["Before"][0]
+    hook = group["hooks"].pop(0)
+    moved["hooks"]["Before"].append({"matcher": "Read", "hooks": [hook]})
+    assert repaired_json_preserved(prepared, moved, TIMED_TARGET)
+    moved["hooks"]["Other"] = [{"matcher": "Elsewhere", "hooks": [{**hook, "timeout": 11}]}]
+    assert not repaired_json_preserved(prepared, moved, TIMED_TARGET)
+
+
+def test_alteration_uses_declared_integer_instead_of_fixed_timeout():
+    target = HookExpectation("target", "Before", "Read", {**TARGET.content, "timeout": 23})
+    source = timed_source().replace(b'"timeout":10', b'"timeout":23')
+    effect = JsonHooksEffect(EFFECT.destination, (target,))
+    assert json_equal(
+        read_json(altered_hook_settings(effect, source)),
+        read_json(source.replace(b'"timeout":23', b'"timeout":24')),
+    )

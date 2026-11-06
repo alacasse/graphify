@@ -17,7 +17,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
-    MissingJsonHookPreparation,
+    JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
 )
@@ -214,7 +214,7 @@ def _json_constraints(
     result = [
         Expectation(
             "json-hooks-seeded"
-            if isinstance(case.intermediate_preparation, MissingJsonHookPreparation)
+            if isinstance(case.intermediate_preparation, JsonHookPreparation)
             and effect.destination == case.intermediate_preparation.destination
             else "json-hooks",
             root,

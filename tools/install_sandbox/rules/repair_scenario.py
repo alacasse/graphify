@@ -13,7 +13,7 @@ from tools.install_sandbox.contracts.bound_mutation import (
     BoundMarkdownMutation,
     BoundMutation,
 )
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase, missing_json_hook_group
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase, seeded_json_hook_group
 from tools.install_sandbox.contracts.effects import (
     Destination,
     JsonHooksEffect,
@@ -28,7 +28,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
-    MissingJsonHookPreparation,
+    JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
 )
@@ -43,7 +43,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     selected_skill,
 )
 from tools.install_sandbox.rules.json_hook_repair import (
-    missing_hook_settings,
+    prepared_hook_settings,
     target_group_preserved,
 )
 
@@ -459,7 +459,7 @@ class PreserveSkillBackupScenario:
 
 
 @dataclass(frozen=True)
-class MissingJsonHookScenario:
+class JsonHookRepairScenario:
     case: EffectInstallCase
     sources: FilesystemSnapshot
 
@@ -474,8 +474,8 @@ class MissingJsonHookScenario:
         try:
             _validate_first_install(self.case, case_bytes, installed, first_after, validation)
             preparation = self.case.intermediate_preparation
-            if not isinstance(preparation, MissingJsonHookPreparation):
-                raise ValueError("Case has no missing JSON hook preparation")
+            if not isinstance(preparation, JsonHookPreparation):
+                raise ValueError("Case has no JSON hook preparation")
             effect = next(e for e in self.case.effects.effects if isinstance(e, JsonHooksEffect))
             if preparation.destination != effect.destination:
                 raise ValueError("Preparation must target the first JSON effect")
@@ -483,17 +483,21 @@ class MissingJsonHookScenario:
             document = retained_bytes(first_after, destination.root, destination.path)
             parsed = read_json(document)
             seeded: dict[str, object] = {
-                "hooks": {effect.hooks[0].event: [missing_json_hook_group(effect)]}
+                "hooks": {effect.hooks[0].event: [seeded_json_hook_group(effect)]}
             }
             if not target_group_preserved(seeded, parsed, effect.hooks[0]):
                 raise ValueError("Target hook must remain in its intact seeded personal group")
-            prepared = missing_hook_settings(effect, document)
-            removed = Expectation(
-                "json-hook-removed",
+            prepared = prepared_hook_settings(effect, document, preparation.kind)
+            if preparation.kind == "missing-json-hook":
+                kind, provenance = "json-hook-removed", "observation:remove-declared-hook"
+            else:
+                kind, provenance = "json-hook-altered", "observation:alter-declared-hook-timeout"
+            intermediate = Expectation(
+                kind,
                 destination.root,
                 destination.path,
                 "intermediate",
-                "observation:remove-declared-hook",
+                provenance,
                 baseline=document,
                 hooks=(effect.hooks[0],),
             )
@@ -516,7 +520,7 @@ class MissingJsonHookScenario:
             operation.verify_binding(case_bytes, first_after)
             return PreparationPlan(
                 operation,
-                _transition(installed, first_after, (removed,), "intermediate"),
+                _transition(installed, first_after, (intermediate,), "intermediate"),
                 _transition(installed, first_after, (repaired,), "reinstall"),
             )
         except (ValueError, UnicodeError, StopIteration) as exc:
@@ -531,7 +535,7 @@ def repair_scenario_from_case(
     | AlteredReferenceScenario
     | AlteredSkillScenario
     | PreserveSkillBackupScenario
-    | MissingJsonHookScenario
+    | JsonHookRepairScenario
 ):
     preparation = case.intermediate_preparation
     if preparation is None:
@@ -542,10 +546,10 @@ def repair_scenario_from_case(
         | type[AlteredReferenceScenario]
         | type[AlteredSkillScenario]
         | type[PreserveSkillBackupScenario]
-        | type[MissingJsonHookScenario],
+        | type[JsonHookRepairScenario],
     ] = {
         MissingReferencePreparation: MissingReferenceScenario,
-        MissingJsonHookPreparation: MissingJsonHookScenario,
+        JsonHookPreparation: JsonHookRepairScenario,
         AlteredReferencePreparation: AlteredReferenceScenario,
         AlteredSkillPreparation: AlteredSkillScenario,
         PreserveSkillBackupPreparation: PreserveSkillBackupScenario,

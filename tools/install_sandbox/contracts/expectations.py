@@ -18,6 +18,7 @@ _KINDS = {
     "json-hooks",
     "json-hooks-seeded",
     "json-hook-removed",
+    "json-hook-altered",
     "json-hook-repair",
 }
 
@@ -82,11 +83,15 @@ class Expectation:
             "json-hooks": {"baseline", "hooks"},
             "json-hooks-seeded": {"baseline", "hooks"},
             "json-hook-removed": {"baseline", "hooks"},
+            "json-hook-altered": {"baseline", "hooks"},
             "json-hook-repair": {"baseline", "hooks"},
         }
         if present != required[self.kind]:
             raise ValueError("Expectation fields do not match its kind")
-        if self.kind in {"json-hook-repair", "json-hook-removed"} and len(self.hooks) != 1:
+        if (
+            self.kind in {"json-hook-repair", "json-hook-removed", "json-hook-altered"}
+            and len(self.hooks) != 1
+        ):
             raise ValueError("JSON hook repair requires exactly one declared target")
 
     def to_data(self) -> dict[str, object]:

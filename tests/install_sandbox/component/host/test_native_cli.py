@@ -6,6 +6,7 @@ import zipfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
+from unittest.mock import Mock
 
 import pytest
 
@@ -18,7 +19,7 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, 16, id="all-effects-home"),
+        pytest.param(False, True, "home", "home", True, 18, id="all-effects-home"),
         pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
         pytest.param(False, False, "project", "project", True, 14, id="skill-project-markdown"),
         pytest.param(False, False, "project", "home", False, 7, id="wrong-skill-root"),
@@ -41,10 +42,7 @@ def test_cli_real_engine_and_autonomous_reread(
         tmp_path, markdown_only=markdown_only, hooks=hooks, skill_root=installed_root
     )
 
-    def harness(**kwargs: object) -> ControlledTransport:
-        return transport
-
-    monkeypatch.setattr(coordinator, "ContainerHarness", harness)
+    monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     output = tmp_path / "published"
     assert main(
         [
@@ -70,6 +68,7 @@ def test_cli_real_engine_and_autonomous_reread(
         "altered-skill",
         "preserve-skill-backup",
         "missing-json-hook",
+        "altered-json-hook",
     ]
     saved = {
         case["name"]: case["result"]["test"]
@@ -77,9 +76,10 @@ def test_cli_real_engine_and_autonomous_reread(
         if case["construction"] == "constructed"
     }
     if markdown_only:
+        backup = next(case for case in report["cases"] if case["name"] == "preserve-skill-backup")
         assert (
-            report["cases"][-2]["construction"],
-            report["cases"][-2]["construction_reason"],
+            backup["construction"],
+            backup["construction_reason"],
         ) == ("not_applicable", "No skill effect declared")
     for result in saved.values():
         assert result["status"] == ("passed" if passed else "failed")
@@ -144,7 +144,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=5 if wrong_skill else 12 if hooks else 10,
+        calls=5 if wrong_skill else 14 if hooks else 10,
     )
 
 
@@ -248,9 +248,9 @@ def _assert_partial_campaign(
             "altered-skill",
             "preserve-skill-backup",
         ]
-    ) + (["missing-json-hook"] if not transport.installer.hooks else [])
+    ) + (["missing-json-hook", "altered-json-hook"] if not transport.installer.hooks else [])
     for case in repairs:
-        if case["name"] == "missing-json-hook":
+        if case["name"] in {"missing-json-hook", "altered-json-hook"}:
             assert case["construction"] == "not_applicable"
             assert case["construction_reason"] == "No JSON hooks effect declared"
             continue

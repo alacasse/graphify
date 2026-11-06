@@ -23,7 +23,7 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
-    MissingJsonHookPreparation,
+    JsonHookPreparation,
     PreserveSkillBackupPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -32,7 +32,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     selected_reference,
     selected_skill,
 )
-from tools.install_sandbox.rules.json_hook_repair import missing_hook_settings
+from tools.install_sandbox.rules.json_hook_repair import prepared_hook_settings
 
 
 def _path(operation: BoundMutation, environment: EffectEnvironment) -> Path:
@@ -131,19 +131,19 @@ def _create_file(operation: BoundFileCreation, environment: EffectEnvironment) -
         os.close(parent)
 
 
-def _validate_hook_removal(
+def _validate_hook_replacement(
     operation: BoundMutation, environment: EffectEnvironment, retained: bytes
 ) -> None:
     preparation = environment.case.intermediate_preparation
     if not isinstance(operation, BoundFileReplacement) or not isinstance(
-        preparation, MissingJsonHookPreparation
+        preparation, JsonHookPreparation
     ):
-        raise ValueError("Hook removal requires a replacement of the selected settings")
+        raise ValueError("Hook preparation requires a replacement of the selected settings")
     effect = next(e for e in environment.case.effects.effects if isinstance(e, JsonHooksEffect))
     if operation.destination != effect.destination or preparation.destination != effect.destination:
-        raise ValueError("Hook removal destination differs from selected settings")
-    if operation.content != missing_hook_settings(effect, retained):
-        raise ValueError("Replacement differs from the selected hook removal")
+        raise ValueError("Hook preparation destination differs from selected settings")
+    if operation.content != prepared_hook_settings(effect, retained, preparation.kind):
+        raise ValueError("Replacement differs from the selected hook preparation")
 
 
 def apply_mutation(
@@ -155,9 +155,9 @@ def apply_mutation(
 ) -> None:
     retained = operation.verify_binding(case_bytes, first_after)
     if isinstance(operation, BoundFileReplacement) or isinstance(
-        environment.case.intermediate_preparation, MissingJsonHookPreparation
+        environment.case.intermediate_preparation, JsonHookPreparation
     ):
-        _validate_hook_removal(operation, environment, retained)
+        _validate_hook_replacement(operation, environment, retained)
     else:
         _validate_destination(operation, environment, sources)
     if isinstance(operation, BoundFileReplacement):

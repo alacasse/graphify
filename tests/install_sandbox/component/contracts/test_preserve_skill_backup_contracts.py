@@ -158,6 +158,7 @@ def test_multiple_markdown_effects_do_not_block_backup_case() -> None:
         ("missing-section", "unconstructible"),
         ("altered-section", "unconstructible"),
         ("missing-json-hook", "not_applicable"),
+        ("altered-json-hook", "not_applicable"),
     ]
 
 

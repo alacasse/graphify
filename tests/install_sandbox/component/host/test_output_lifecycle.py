@@ -45,6 +45,7 @@ def test_archive_is_readable_after_move_and_extraction(
         "preserve-skill-backup",
         "missing-json-hook",
         "altered-json-hook",
+        "duplicate-json-hook",
     )
     for name in case_names:
         assert read_evidence(evidence / "cases" / name).status == "passed"
@@ -118,7 +119,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 10  # One verification and nine constructed cases.
+        == 11  # One verification and ten constructed cases.
     )
 
 

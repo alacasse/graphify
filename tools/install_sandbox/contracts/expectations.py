@@ -19,6 +19,7 @@ _KINDS = {
     "json-hooks-seeded",
     "json-hook-removed",
     "json-hook-altered",
+    "json-hook-duplicated",
     "json-hook-repair",
 }
 
@@ -84,12 +85,19 @@ class Expectation:
             "json-hooks-seeded": {"baseline", "hooks"},
             "json-hook-removed": {"baseline", "hooks"},
             "json-hook-altered": {"baseline", "hooks"},
+            "json-hook-duplicated": {"baseline", "hooks"},
             "json-hook-repair": {"baseline", "hooks"},
         }
         if present != required[self.kind]:
             raise ValueError("Expectation fields do not match its kind")
         if (
-            self.kind in {"json-hook-repair", "json-hook-removed", "json-hook-altered"}
+            self.kind
+            in {
+                "json-hook-repair",
+                "json-hook-removed",
+                "json-hook-altered",
+                "json-hook-duplicated",
+            }
             and len(self.hooks) != 1
         ):
             raise ValueError("JSON hook repair requires exactly one declared target")

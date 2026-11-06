@@ -344,3 +344,113 @@ def test_alteration_uses_declared_integer_instead_of_fixed_timeout():
         read_json(altered_hook_settings(effect, source)),
         read_json(source.replace(b'"timeout":23', b'"timeout":24')),
     )
+
+
+def duplicate_source() -> dict[str, Any]:
+    document = settings()
+    document["hooks"]["Before"].append(
+        {
+            "matcher": "Read",
+            "sandbox_personal": "duplicate-destination",
+            "hooks": [{"command": "personal A"}, {"command": "personal B"}],
+        }
+    )
+    return document
+
+
+def test_duplication_copies_complete_observed_hook_between_witnesses():
+    from tools.install_sandbox.rules.json_hook_repair import duplicated_target_preserved
+
+    source = duplicate_source()
+    original = copy.deepcopy(source)
+    prepared = prepared_hook_settings(EFFECT, json.dumps(source).encode(), "duplicate-json-hook")
+    expected = copy.deepcopy(source)
+    expected["hooks"]["Before"][1]["hooks"].insert(
+        1, copy.deepcopy(source["hooks"]["Before"][0]["hooks"][0])
+    )
+    assert json_equal(read_json(prepared), expected)
+    assert duplicated_target_preserved(source, expected, TARGET)
+    assert source == original
+
+
+def mutate_duplicate_candidate(current: dict[str, Any], mutation: str) -> None:
+    groups = current["hooks"]["Before"]
+    copied = groups[1]["hooks"][1]
+    if mutation == "missing":
+        groups[1]["hooks"].pop(1)
+    elif mutation == "triple":
+        groups[0]["hooks"].append(copy.deepcopy(copied))
+    else:
+        mutate_duplicate_structure(current, mutation)
+
+
+def mutate_duplicate_structure(current: dict[str, Any], mutation: str) -> None:
+    groups = current["hooks"]["Before"]
+    copied = groups[1]["hooks"][1]
+    if mutation == "lost-extra":
+        copied.pop("extra")
+    elif mutation == "typed-extra":
+        copied["extra"] = 42.0
+    elif mutation == "moved-original":
+        groups[0]["hooks"].reverse()
+    elif mutation == "reversed":
+        groups[1]["hooks"].reverse()
+    elif mutation == "wrong-group":
+        groups[0]["hooks"].append(groups[1]["hooks"].pop(1))
+    elif mutation == "other":
+        current["preferences"]["enabled"] = 1
+    else:
+        assert mutation == "none"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "mismatch"),
+    [
+        ("none", None),
+        ("lost-extra", "user_content_lost"),
+        ("typed-extra", "user_content_lost"),
+        ("moved-original", "user_content_lost"),
+        ("reversed", "user_content_lost"),
+        ("wrong-group", "user_content_lost"),
+        ("other", "user_content_lost"),
+        ("missing", "hook_count"),
+        ("triple", "hook_count"),
+    ],
+)
+def test_duplication_verifier_independently_checks_full_copy_and_inverse(
+    mutation: str, mismatch: str | None
+):
+    from tools.install_sandbox.contracts.expectations import Expectation, ExpectationSet
+    from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+    from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+
+    source = duplicate_source()
+    # Construct the observed candidate without using the preparation mutator.
+    current = copy.deepcopy(source)
+    groups = current["hooks"]["Before"]
+    groups[1]["hooks"].insert(1, copy.deepcopy(groups[0]["hooks"][0]))
+    mutate_duplicate_candidate(current, mutation)
+    item = Expectation(
+        "json-hook-duplicated",
+        "project",
+        "settings.json",
+        "intermediate",
+        "observation:first",
+        baseline=json.dumps(source).encode(),
+        hooks=(TARGET,),
+    )
+    assert Expectation.from_data(item.to_data()) == item
+    expected = ExpectationSet(
+        "intermediate", (item,), roots={"home": "/home", "project": "/project"}
+    )
+    observed = FilesystemSnapshot(
+        entries=[
+            {"root": "home", "path": ".", "kind": "directory", "listing_complete": True},
+            {"root": "project", "path": ".", "kind": "directory", "listing_complete": True},
+            {"root": "project", "path": "settings.json", "kind": "file"},
+        ],
+        contents={("project", "settings.json"): json.dumps(current).encode()},
+    )
+    result = EffectVerifier().verify(expected, observed)
+    assert result.complete
+    assert [item.type for item in result.mismatches] == ([] if mismatch is None else [mismatch])

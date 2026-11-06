@@ -19,7 +19,7 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, 18, id="all-effects-home"),
+        pytest.param(False, True, "home", "home", True, 20, id="all-effects-home"),
         pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
         pytest.param(False, False, "project", "project", True, 14, id="skill-project-markdown"),
         pytest.param(False, False, "project", "home", False, 7, id="wrong-skill-root"),
@@ -69,6 +69,7 @@ def test_cli_real_engine_and_autonomous_reread(
         "preserve-skill-backup",
         "missing-json-hook",
         "altered-json-hook",
+        "duplicate-json-hook",
     ]
     saved = {
         case["name"]: case["result"]["test"]
@@ -144,7 +145,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=5 if wrong_skill else 14 if hooks else 10,
+        calls=5 if wrong_skill else 16 if hooks else 10,
     )
 
 
@@ -237,6 +238,7 @@ def _assert_partial_campaign(
     assert first["result"]["test"]["status"] == expected_status
     if expected_status == "failed":
         _assert_wrong_root_stops_after_first_command(first["result"]["test"])
+    hook_cases = ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
     assert [case["name"] for case in repairs] == (
         ["missing-section", "altered-section"]
         if construction == "not_applicable"
@@ -248,9 +250,9 @@ def _assert_partial_campaign(
             "altered-skill",
             "preserve-skill-backup",
         ]
-    ) + (["missing-json-hook", "altered-json-hook"] if not transport.installer.hooks else [])
+    ) + (hook_cases if not transport.installer.hooks else [])
     for case in repairs:
-        if case["name"] in {"missing-json-hook", "altered-json-hook"}:
+        if case["name"] in hook_cases:
             assert case["construction"] == "not_applicable"
             assert case["construction_reason"] == "No JSON hooks effect declared"
             continue

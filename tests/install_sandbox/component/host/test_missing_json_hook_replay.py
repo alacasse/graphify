@@ -5,7 +5,7 @@ import shutil
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import Mock
 
 import pytest
@@ -38,6 +38,12 @@ def _fault(data: dict[str, Any], fault: str) -> None:
     elif fault == "moved":
         group["hooks"].remove(SEARCH)
         groups.append({"matcher": "Bash|Grep", "hooks": [SEARCH]})
+    elif fault == "moved-destination":
+        group["hooks"].remove(SEARCH)
+        destination = next(
+            entry for entry in groups if entry.get("sandbox_personal") == "duplicate-destination"
+        )
+        destination["hooks"].insert(1, dict(SEARCH))
 
     else:
         _personal_fault(data, fault)
@@ -51,6 +57,10 @@ def _personal_fault(data: dict[str, Any], fault: str) -> None:
         next(group for group in groups if "sandbox_personal" in group).pop("sandbox_personal")
     elif fault == "personal-order":
         groups.reverse()
+    elif fault == "duplicate-destination":
+        groups[:] = [
+            group for group in groups if group.get("sandbox_personal") != "duplicate-destination"
+        ]
     elif fault == "read":
         read = next(
             hook
@@ -70,10 +80,12 @@ def conduct_hooks(
     first: bool = False,
     case_name: str = "missing-json-hook",
     legacy_append: bool = False,
+    duplicate_survivor: Literal["first", "last", "all"] = "first",
 ) -> tuple[dict[str, Any], Path, int]:
     subject, spec, context = arrange(root)
     transport = ControlledTransport(root)
     transport.installer.repair_hook_timeout = not legacy_append
+    transport.installer.duplicate_hook_survivor = duplicate_survivor
     execute = transport.installer.execute
     calls: dict[Path, int] = {}
 
@@ -89,7 +101,12 @@ def conduct_hooks(
         if calls[project] == 2 and separate:
             _fault(data, "moved")
         if fault is not None and calls[project] == (1 if first else 2):
-            _fault(data, fault)
+            effective_fault = (
+                "moved-destination"
+                if first and case_name == "duplicate-json-hook" and fault == "moved"
+                else fault
+            )
+            _fault(data, effective_fault)
             if fault == "backup":
                 path.with_name("config.json.graphify-bak").write_text("Altered backup.\n")
             elif fault == "other-file":
@@ -113,15 +130,19 @@ def conduct_hooks(
             str(output),
         ]
     )
-    campaign = json.loads((output / "campaign.json").read_text())
-    selected = next(case for case in campaign["cases"] if case["name"] == case_name)
-    assert selected["construction"] == "constructed"
-    result = selected["result"]["test"]
+    result = _selected_result(output, case_name)
     assert exit_code == (0 if result["status"] == "passed" else 1)
     proof = _replay_after_cleanup(
         root, subject, spec, context, transport, output, result, case_name
     )
     return result, proof, sum(calls.values())
+
+
+def _selected_result(output: Path, case_name: str) -> dict[str, Any]:
+    campaign = json.loads((output / "campaign.json").read_text())
+    selected = next(case for case in campaign["cases"] if case["name"] == case_name)
+    assert selected["construction"] == "constructed"
+    return selected["result"]["test"]
 
 
 def _replay_after_cleanup(
@@ -200,16 +221,29 @@ def test_zero_exit_faults_fail_hook_repair_and_replay(
     assert second["verification"]["mismatches"]
 
 
-@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
+@pytest.mark.parametrize(
+    "case_name", ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+)
 @pytest.mark.parametrize("fault", ["absent", "moved"])
 def test_invalid_first_install_blocks_hook_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, case_name: str
 ) -> None:
-    result, _, calls = conduct_hooks(
+    result, proof, calls = conduct_hooks(
         tmp_path, monkeypatch, fault=fault, first=True, case_name=case_name
     )
     assert result["status"] == "failed" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
+    assert result["steps"][1]["facts"]["command"] is None
+
+    if case_name == "duplicate-json-hook" and fault == "moved":
+        data = json.loads((proof / "steps/0/after/project/.synthetic/config.json").read_text())
+        groups = data["hooks"]["PreToolUse"]
+        assert sum(hook == SEARCH for group in groups for hook in group["hooks"]) == 1
+        assert SEARCH in next(
+            group["hooks"]
+            for group in groups
+            if group.get("sandbox_personal") == "duplicate-destination"
+        )
 
 
 @pytest.mark.parametrize(
@@ -243,7 +277,11 @@ def test_hook_replay_requires_retained_artifacts(
     ],
 )
 def test_hook_replay_rejects_forged_facts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str, field: str, value: object
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+    field: str,
+    value: object,
 ) -> None:
     _, proof, _ = conduct_hooks(tmp_path, monkeypatch)
     path = proof / relative
@@ -284,9 +322,12 @@ def test_partial_hook_preparation_blocks_second_command(
     result, _, calls = conduct_hooks(tmp_path, monkeypatch)
     assert result["status"] == "incomplete" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
+    assert result["steps"][1]["facts"]["command"] is None
 
 
-@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
+@pytest.mark.parametrize(
+    "case_name", ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+)
 def test_unobservable_hook_preparation_blocks_second_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_name: str
 ) -> None:
@@ -313,6 +354,7 @@ def test_unobservable_hook_preparation_blocks_second_command(
     result, _, calls = conduct_hooks(tmp_path, monkeypatch, case_name=case_name)
     assert result["status"] == "incomplete" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
+    assert result["steps"][1]["facts"]["command"] is None
 
 
 @pytest.mark.parametrize("phase", ["before", "after"])
@@ -326,7 +368,9 @@ def test_hook_replay_rejects_changed_observed_document(
         read_evidence(proof)
 
 
-@pytest.mark.parametrize("case_name", ["missing-json-hook", "altered-json-hook"])
+@pytest.mark.parametrize(
+    "case_name", ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+)
 @pytest.mark.parametrize("fault", ["no-removal", "extra-personal-removal"])
 def test_observed_wrong_hook_mutation_blocks_second_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, case_name: str
@@ -361,6 +405,7 @@ def test_observed_wrong_hook_mutation_blocks_second_command(
     result, proof, calls = conduct_hooks(tmp_path, monkeypatch, case_name=case_name)
     assert result["status"] == "failed" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
+    assert result["steps"][1]["facts"]["command"] is None
     verification = json.loads((proof / "intermediate/verification.json").read_text())
     assert verification["complete"] is True
     assert verification["mismatches"]
@@ -409,6 +454,7 @@ def test_physical_hook_guard_rejects_unauthorized_bytes_before_write(
     assert rejected == [True]
     assert result["status"] == "incomplete" and calls == 1
     assert result["steps"][1]["phase"] == "idle"
+    assert result["steps"][1]["facts"]["command"] is None
 
 
 def test_hook_repair_preserves_an_alias_outside_the_observed_roots(
@@ -494,3 +540,118 @@ def test_simulator_repairs_only_its_literal_timeout_variant(tmp_path: Path) -> N
     data = json.loads(settings.read_text())
     assert data["hooks"]["PreToolUse"][0]["hooks"] == [*personal, SEARCH]
     assert settings.with_name("config.json.graphify-bak").read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "survivor,fault,status,diagnostic",
+    [
+        ("first", None, "passed", None),
+        ("last", None, "passed", None),
+        ("all", None, "failed", "hook_count"),
+        ("first", "duplicate-destination", "failed", "user_content_lost"),
+    ],
+)
+def test_duplicate_hook_four_observed_outcomes_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    survivor: Literal["first", "last", "all"],
+    fault: str | None,
+    status: str,
+    diagnostic: str | None,
+) -> None:
+    result, proof, calls = conduct_hooks(
+        tmp_path,
+        monkeypatch,
+        case_name="duplicate-json-hook",
+        duplicate_survivor=survivor,
+        fault=fault,
+    )
+    assert calls == 2 and result["status"] == status
+    second = result["steps"][1]["facts"]
+    assert second["command"]["exit_code"] == 0
+    _assert_hook_diagnostic(second["verification"]["mismatches"], diagnostic)
+    before = json.loads((proof / "steps/0/after/project/.synthetic/config.json").read_text())
+    prepared = json.loads((proof / "intermediate/after/project/.synthetic/config.json").read_text())
+    final = json.loads((proof / "steps/1/after/project/.synthetic/config.json").read_text())
+    initial_groups = before["hooks"]["PreToolUse"]
+    prepared_groups = prepared["hooks"]["PreToolUse"]
+    groups = final["hooks"]["PreToolUse"]
+    original = next(
+        group for group in initial_groups if group.get("sandbox_personal") == "preserve"
+    )
+    personal = next(
+        group
+        for group in initial_groups
+        if group.get("sandbox_personal") == "duplicate-destination"
+    )
+    duplicated = next(
+        group
+        for group in prepared_groups
+        if group.get("sandbox_personal") == "duplicate-destination"
+    )
+    assert duplicated["hooks"] == [personal["hooks"][0], SEARCH, personal["hooks"][1]]
+    count = sum(hook == SEARCH for group in groups for hook in group["hooks"])
+    assert count == (2 if survivor == "all" else 1)
+    final_original = next(group for group in groups if group.get("sandbox_personal") == "preserve")
+    if survivor == "last":
+        assert final_original["hooks"] == [hook for hook in original["hooks"] if hook != SEARCH]
+    else:
+        assert final_original == original
+    destinations = [
+        group for group in groups if group.get("sandbox_personal") == "duplicate-destination"
+    ]
+    if fault is not None:
+        assert destinations == []
+    else:
+        assert len(destinations) == 1
+        assert destinations[0] == (duplicated if survivor in {"last", "all"} else personal)
+
+
+def test_simulator_deduplicates_only_its_literal_search(tmp_path: Path) -> None:
+    from tests.install_sandbox.component.host.native_support import LiteralInstaller
+
+    settings = tmp_path / ".synthetic/config.json"
+    settings.parent.mkdir()
+    personal = [{**SEARCH, "personal": True}, {**SEARCH, "timeout": 10.0}]
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Bash|Grep", "hooks": [SEARCH, *personal]},
+                        {"matcher": "Bash|Grep", "hooks": [dict(SEARCH)]},
+                    ]
+                }
+            }
+        )
+    )
+    installer = LiteralInstaller(skill=False, markdown=False)
+    installer.execute(["install"], tmp_path, {"HOME": str(tmp_path)}, 60)
+    groups = json.loads(settings.read_text())["hooks"]["PreToolUse"]
+    assert groups[0]["hooks"] == [SEARCH, *personal]
+    assert groups[1]["hooks"] == []
+
+
+@pytest.mark.parametrize("forged", [False, True], ids=["missing", "forged"])
+def test_duplicate_hook_replay_requires_authentic_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forged: bool
+) -> None:
+    _, proof, _ = conduct_hooks(tmp_path, monkeypatch, case_name="duplicate-json-hook")
+    path = proof / "intermediate/verification.json"
+    if forged:
+        payload = json.loads(path.read_text())
+        payload["complete"] = False
+        path.write_text(json.dumps(payload))
+    else:
+        path.unlink()
+    with pytest.raises((ValueError, OSError)):
+        read_evidence(proof)
+
+
+def _assert_hook_diagnostic(mismatches: list[dict[str, Any]], diagnostic: str | None) -> None:
+    if diagnostic is not None:
+        assert diagnostic in {item["type"] for item in mismatches}
+        if diagnostic == "hook_count":
+            assert (
+                next(item for item in mismatches if item["type"] == diagnostic)["observed"] == "2"
+            )

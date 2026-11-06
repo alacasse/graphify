@@ -231,7 +231,7 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
         build_reinstall_case(spec, context())
 
 
-def test_nine_cases_have_strict_independent_preparations() -> None:
+def test_ten_cases_have_strict_independent_preparations() -> None:
     cases = build_effect_cases(structured_spec(), context()).cases
     assert [case.name for case in cases] == [
         "reinstall",
@@ -243,6 +243,7 @@ def test_nine_cases_have_strict_independent_preparations() -> None:
         "preserve-skill-backup",
         "missing-json-hook",
         "altered-json-hook",
+        "duplicate-json-hook",
     ]
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
@@ -323,7 +324,7 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
         )
     ] + [
         (name, "not_applicable", "No JSON hooks effect declared")
-        for name in ("missing-json-hook", "altered-json-hook")
+        for name in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
     ]
 
 
@@ -369,6 +370,7 @@ def test_backup_preservation_case_follows_skill_across_effect_combinations(
             ("altered-section", "unconstructible"),
             ("missing-json-hook", "not_applicable"),
             ("altered-json-hook", "not_applicable"),
+            ("duplicate-json-hook", "not_applicable"),
         ]
 
 

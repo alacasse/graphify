@@ -157,7 +157,7 @@ def test_case_derivation_reports_missing_markdown_capability() -> None:
         for name in ("missing-section", "altered-section")
     ] + [
         (name, "not_applicable", "No JSON hooks effect declared")
-        for name in ("missing-json-hook", "altered-json-hook")
+        for name in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
     ]
 
 

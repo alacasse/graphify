@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+from tests.install_sandbox.component.contracts.test_effect_contracts import context
 from tests.install_sandbox.component.host.native_support import FIXTURE
+from tools.install_sandbox.contracts.effect_case import build_effect_cases
 from tools.install_sandbox.contracts.effects import (
     Destination,
     EffectSpec,
@@ -81,4 +83,28 @@ def test_active_codebuddy_spec_has_current_retained_target_facts() -> None:
     assert [(hook.matcher, hook.content["command"]) for hook in hooks.hooks] == [
         ("Bash|Grep", "graphify hook-guard search"),
         ("Read|Glob", "graphify hook-guard read"),
+    ]
+
+
+def test_active_project_specs_construct_supported_cases_without_running_installer() -> None:
+    specs = Path(__file__).resolve().parents[4] / "tools/install_sandbox/specs"
+    common = [
+        "reinstall",
+        "missing-section",
+        "altered-section",
+        "missing-reference",
+        "altered-reference",
+        "altered-skill",
+        "preserve-skill-backup",
+    ]
+    hooks = ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+    codebuddy = build_effect_cases(EffectSpecReader().read(specs / "codebuddy.yaml"), context())
+    assert [case.name for case in codebuddy.cases] == common + hooks
+    assert all(case.scope == "project" for case in codebuddy.cases)
+    assert codebuddy.decisions == ()
+    amp = build_effect_cases(EffectSpecReader().read(specs / "amp.yaml"), context())
+    assert [case.name for case in amp.cases] == common
+    assert all(case.scope == "project" for case in amp.cases)
+    assert [(item.name, item.classification, item.reason) for item in amp.decisions] == [
+        (kind, "not_applicable", "No JSON hooks effect declared") for kind in hooks
     ]

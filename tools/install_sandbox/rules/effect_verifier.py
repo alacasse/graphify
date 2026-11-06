@@ -9,6 +9,7 @@ from tools.install_sandbox.contracts.results import ObservationObstacle, Verific
 from tools.install_sandbox.rules import comparison as checks
 from tools.install_sandbox.rules.json_hook_repair import (
     altered_target_preserved,
+    duplicated_target_preserved,
     removed_target_preserved,
     repaired_json_preserved,
     target_group_preserved,
@@ -142,7 +143,12 @@ def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> 
         )
     elif item.kind in {"json-hooks", "json-hooks-seeded"}:
         _json(item, current, result)
-    elif item.kind in {"json-hook-removed", "json-hook-altered", "json-hook-repair"}:
+    elif item.kind in {
+        "json-hook-removed",
+        "json-hook-altered",
+        "json-hook-duplicated",
+        "json-hook-repair",
+    }:
         _json_transition(item, current, result)
     else:
         raise ValueError("Unsupported expectation kind")
@@ -158,17 +164,27 @@ def _json_transition(item: Expectation, current: bytes, result: VerificationResu
         elif item.kind == "json-hook-altered":
             valid = altered_target_preserved(before, after, target)
         else:
+            expected_count = 2 if item.kind == "json-hook-duplicated" else 1
             count = len(
                 checks.hook_positions(
                     after, target.event, target.matcher, target.content, exact=False
                 )
             )
-            if count != 1:
+            if count != expected_count:
                 checks.mismatch(
-                    result, "hook_count", item.root, item.path, "one conforming hook", str(count)
+                    result,
+                    "hook_count",
+                    item.root,
+                    item.path,
+                    "two conforming hooks" if expected_count == 2 else "one conforming hook",
+                    str(count),
                 )
                 return
-            valid = repaired_json_preserved(without_target(before, target), after, target)
+            valid = (
+                duplicated_target_preserved(before, after, target)
+                if item.kind == "json-hook-duplicated"
+                else repaired_json_preserved(without_target(before, target), after, target)
+            )
         if not valid:
             checks.mismatch(
                 result,

@@ -240,15 +240,28 @@ def seeded_json_hook_group(effect: JsonHooksEffect) -> dict[str, object]:
 def _json_hook_case(
     reinstall: "EffectInstallCase", effect: JsonHooksEffect, kind: str
 ) -> "EffectInstallCase":
-    neighbor = {
+    neighbor: dict[str, object] = {
         "matcher": "SandboxPersonalNeighbor",
         "sandbox_neighbor": True,
         "hooks": [{"type": "command", "command": "python personal_neighbor.py", "timeout": 23}],
     }
+    groups = [seeded_json_hook_group(effect)]
+    if kind == "duplicate-json-hook":
+        groups.append(
+            {
+                "matcher": effect.hooks[0].matcher,
+                "sandbox_personal": "duplicate-destination",
+                "hooks": [
+                    {"type": "command", "command": "python personal_duplicate_a.py", "timeout": 19},
+                    {"type": "command", "command": "python personal_duplicate_b.py", "timeout": 29},
+                ],
+            }
+        )
+    groups.append(neighbor)
     settings = {
         "theme": "dark",
         "metadata": {"owner": "personal"},
-        "hooks": {effect.hooks[0].event: [seeded_json_hook_group(effect), neighbor]},
+        "hooks": {effect.hooks[0].event: groups},
     }
     initial = [dict(item) for item in reinstall.initial_files]
     for item in initial:
@@ -380,7 +393,7 @@ def build_effect_cases(
     hook_cases = (
         tuple(
             _json_hook_case(reinstall, hooks[0], kind)
-            for kind in ("missing-json-hook", "altered-json-hook")
+            for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
         )
         if hooks
         else ()
@@ -390,7 +403,7 @@ def build_effect_cases(
         if hooks
         else tuple(
             CaseNonConstruction(kind, "not_applicable", "No JSON hooks effect declared")
-            for kind in ("missing-json-hook", "altered-json-hook")
+            for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
         )
     )
     reference_cases = (

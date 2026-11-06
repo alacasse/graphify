@@ -86,6 +86,7 @@ class LiteralInstaller:
         self.skill_root = skill_root
         self.calls: list[list[str]] = []
         self.repair_hook_timeout = True
+        self.duplicate_hook_survivor: Literal["first", "last", "all"] = "first"
 
     def execute(
         self, args: list[str], project: Path, environment: dict[str, str], timeout: float
@@ -149,9 +150,7 @@ class LiteralInstaller:
         # Search and read may live in separate groups; repair each independently.
         for matcher, hook in (("Bash|Grep", search), ("Read|Glob", read)):
             matching = [group for group in groups if group.get("matcher") == matcher]
-            if any(
-                _same_timed_command(item, hook) for group in matching for item in group["hooks"]
-            ):
+            if self._existing_hooks(matching, hook, search):
                 continue
             # The simulator repairs only its literal timeout variant; personal hooks survive.
             if self.repair_hook_timeout:
@@ -167,6 +166,28 @@ class LiteralInstaller:
             else:
                 groups.append({"matcher": matcher, "hooks": [hook]})
         path.write_text(json.dumps(data) + "\n")
+
+    def _existing_hooks(
+        self, groups: list[dict[str, Any]], hook: Mapping[str, object], search: Mapping[str, object]
+    ) -> bool:
+        occurrences = [
+            (group, index)
+            for group in groups
+            for index, item in enumerate(group["hooks"])
+            if _same_timed_command(item, hook)
+        ]
+        if not occurrences:
+            return False
+        if hook is search and self.duplicate_hook_survivor != "all":
+            survivor = occurrences[-1 if self.duplicate_hook_survivor == "last" else 0]
+            for group in groups:
+                group["hooks"] = [
+                    item
+                    for index, item in enumerate(group["hooks"])
+                    if not _same_timed_command(item, hook)
+                    or (group is survivor[0] and index == survivor[1])
+                ]
+        return True
 
 
 def completed() -> ContainerRunResult:

@@ -108,6 +108,8 @@ def prepared_hook_settings(effect: JsonHooksEffect, installed: bytes, kind: str)
         return missing_hook_settings(effect, installed)
     if kind == "altered-json-hook":
         return altered_hook_settings(effect, installed)
+    if kind == "duplicate-json-hook":
+        return duplicated_hook_settings(effect, installed)
     raise ValueError("Unsupported JSON hook preparation")
 
 
@@ -173,6 +175,54 @@ def removed_target_preserved(
         if hook_index > len(contents):
             return False
         contents.insert(hook_index, observed_hook)
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    return json_equal(original, restored)
+
+
+def _duplicate_destination(document: dict[str, object], target: HookExpectation) -> int:
+    matches = [
+        index
+        for index, group in enumerate(event_groups(document, target.event))
+        if isinstance(group, dict)
+        and cast(dict[str, object], group).get("matcher") == target.matcher
+        and cast(dict[str, object], group).get("sandbox_personal") == "duplicate-destination"
+    ]
+    if len(matches) != 1:
+        raise ValueError("Expected unique marked duplicate destination group")
+    return matches[0]
+
+
+def duplicated_hook_settings(effect: JsonHooksEffect, installed: bytes) -> bytes:
+    """Insert the full unique observed hook between the destination witnesses."""
+    if not effect.hooks:
+        raise ValueError("JSON repair requires a declared hook")
+    target = effect.hooks[0]
+    document = read_json(installed)
+    group_index, hook_index = target_location(document, target)
+    source = cast(dict[str, object], event_groups(document, target.event)[group_index])
+    observed_hook = cast(list[object], source["hooks"])[hook_index]
+    destination = _duplicate_destination(document, target)
+    prepared, _, contents = _copy_hook_path(document, target.event, destination)
+    if len(contents) != 2 or destination == group_index:
+        raise ValueError("Expected two personal destination witnesses")
+    contents.insert(1, observed_hook)
+    return (encode_json(prepared) + "\n").encode("utf-8")
+
+
+def duplicated_target_preserved(
+    original: dict[str, object], prepared: dict[str, object], target: HookExpectation
+) -> bool:
+    """Undo only the observed copy, independently of preparation generation."""
+    group_index, hook_index = target_location(original, target)
+    source = cast(dict[str, object], event_groups(original, target.event)[group_index])
+    observed_hook = cast(list[object], source["hooks"])[hook_index]
+    try:
+        destination = _duplicate_destination(prepared, target)
+        restored, _, contents = _copy_hook_path(prepared, target.event, destination)
+        if len(contents) != 3 or not json_equal(contents[1], observed_hook):
+            return False
+        del contents[1]
     except (KeyError, IndexError, TypeError, ValueError):
         return False
     return json_equal(original, restored)

@@ -490,8 +490,12 @@ class JsonHookRepairScenario:
             prepared = prepared_hook_settings(effect, document, preparation.kind)
             if preparation.kind == "missing-json-hook":
                 kind, provenance = "json-hook-removed", "observation:remove-declared-hook"
-            else:
+            elif preparation.kind == "altered-json-hook":
                 kind, provenance = "json-hook-altered", "observation:alter-declared-hook-timeout"
+            elif preparation.kind == "duplicate-json-hook":
+                kind, provenance = "json-hook-duplicated", "observation:duplicate-declared-hook"
+            else:
+                raise ValueError("Unsupported JSON hook preparation")
             intermediate = Expectation(
                 kind,
                 destination.root,

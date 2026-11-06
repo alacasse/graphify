@@ -182,11 +182,11 @@ def test_case_scope_must_agree_with_effect_scope(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("fault", ["project-destination", "markdown", "second-skill"])
-def test_user_scope_rejects_effects_outside_skill_only_contract(
+def test_ordinary_user_campaign_rejects_effects_outside_single_skill_contract(
     tmp_path: Path,
     fault: str,
 ) -> None:
-    _, spec, _ = arrange_user(tmp_path)
+    subject, spec, context = arrange_user(tmp_path)
     raw = yaml.safe_load(spec.read_text())
     if fault == "project-destination":
         raw["effects"][0]["destination"]["root"] = "project"
@@ -207,5 +207,13 @@ def test_user_scope_rejects_effects_outside_skill_only_contract(
                 "destination": {"root": "home", "path": "another-skill"},
             }
         )
-    with pytest.raises(ValueError):
-        EffectSpecReader().from_yaml(yaml.safe_dump(raw))
+    spec.write_text(yaml.safe_dump(raw))
+    reason = (
+        "Multiple skill effects" if fault == "second-skill" else "User scope requires HOME skill"
+    )
+    with pytest.raises(ValueError, match=reason):
+        load_campaign_definition(
+            spec_file=spec,
+            subject_context_file=context,
+            subject_checkout=subject,
+        )

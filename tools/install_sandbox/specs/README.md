@@ -50,6 +50,34 @@ The first two select the effect YAML and subject context JSON. `--repo` selects
 the subject checkout. `--output` selects a fresh result location; omitting it uses
 the managed output directory and its retention policy.
 
+Repeat `--case NAME` to execute only named cases, for example
+`--case reinstall --case stale-version`. The complete catalogue is constructed
+and classified first, then selected entries retain their canonical campaign order
+regardless of argument order. Unknown or duplicate names and combining `--case`
+with `--prepare-only` are input errors before output allocation or Docker access.
+Only selected executable cases are materialized and run; a selected
+`not_applicable` or `unconstructible` entry retains its classification and reason.
+A selection with no executable case fails without preparing an image.
+
+Every explicit selection is a **partial campaign**, even when it names the whole
+catalogue. Text, JSON and archived campaign reports retain `requested_cases`
+(argument order), `omitted_cases` (catalogue order), and `executed_cases` (catalogue
+order). Omission means not selected, never not applicable. `executed_cases` lists
+only cases with validated retained evidence of at least one started installer
+command, including interrupted commands; it does not claim all case steps passed.
+A pending case, failed container launch, or unavailable/invalid result supplies no
+such execution evidence. Their individual execution states and errors remain in
+`cases`.
+
+A successful selection exits zero with `scope: partial`, `successful: true`,
+`status: partial_passed` and `passed: false`; it cannot establish full campaign
+coverage. The selection declaration is retained even if execution stops before
+its first progress report; its status remains `partial_incomplete` with no
+executed cases. An interruption before raw evidence exists does not create an
+empty evidence archive. Other selections report `partial_incomplete` and exit nonzero, including
+selected unconstructible entries or no executable case. Preparation-only reports
+`scope: preparation_only`. Omitting `--case` preserves full campaign execution.
+
 The coordinator constructs the cases before allocating campaign output.
 `reinstall` is always constructed. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases

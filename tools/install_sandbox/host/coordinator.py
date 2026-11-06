@@ -146,6 +146,54 @@ class CampaignResult:
     timings: list[Timing] = field(default_factory=list[Timing])
     prepare_only: bool = False
     preparation_result: PreparationResult | None = None
+    requested_cases: tuple[str, ...] | None = None
+    omitted_cases: tuple[str, ...] = ()
+
+    @classmethod
+    def from_definition(
+        cls, definition: CampaignDefinition, output: Path, *, timings: list[Timing] | None = None
+    ) -> "CampaignResult":
+        """Declare classified cases before any execution or filesystem allocation."""
+        return cls(
+            output,
+            [
+                CampaignCase(entry.name, output / "cases" / entry.name)
+                if isinstance(entry, EffectInstallCase)
+                else CampaignCase(
+                    entry.name,
+                    None,
+                    state=None,
+                    construction=entry.classification,
+                    construction_reason=entry.reason,
+                )
+                for entry in definition.built.entries
+            ],
+            timings=timings or [],
+            prepare_only=definition.prepare_only,
+            requested_cases=definition.requested_cases,
+            omitted_cases=definition.omitted_cases,
+        )
+
+    @property
+    def scope(self) -> str:
+        if self.prepare_only:
+            return "preparation_only"
+        return "partial" if self.requested_cases is not None else "full"
+
+    @property
+    def executed_cases(self) -> list[str]:
+        """Cases with retained evidence of at least one started installer command."""
+        return [
+            entry.name
+            for entry in self.cases
+            if entry.result is not None
+            and entry.result.test is not None
+            and entry.result.result_error is None
+            and any(
+                step.facts.command is not None and step.facts.command.state != "not_started"
+                for step in entry.result.test.steps
+            )
+        ]
 
     @property
     def prepared(self) -> bool:
@@ -164,11 +212,13 @@ class CampaignResult:
 
     @property
     def successful(self) -> bool:
-        return self.prepared if self.prepare_only else self.passed
+        return self.prepared if self.prepare_only else self._execution_passed
 
     @property
     def status(self) -> str:
         if not self.prepare_only:
+            if self.scope == "partial":
+                return "partial_passed" if self.successful else "partial_incomplete"
             return "passed" if self.passed else "incomplete"
         if self.prepared:
             return "prepared"
@@ -178,6 +228,10 @@ class CampaignResult:
 
     @property
     def passed(self) -> bool:
+        return self.scope == "full" and self._execution_passed
+
+    @property
+    def _execution_passed(self) -> bool:
         return (
             not self.interrupted
             and self.error is None
@@ -195,6 +249,9 @@ class CampaignResult:
             "version": 3,
             "passed": self.passed,
             "status": self.status,
+            "scope": self.scope,
+            "successful": self.successful,
+            "executed_cases": self.executed_cases,
             **asdict(self, dict_factory=_campaign_fields),
         }
 
@@ -242,6 +299,22 @@ class InstallTestCoordinator:
         destination = output_directory.expanduser().absolute()
         output = destination.resolve()
         _check_campaign_paths(definition.subject_checkout, destination, output)
+        built = definition.built
+        materialization = Timing("materialization")
+        result = CampaignResult.from_definition(
+            definition,
+            output,
+            timings=([construction_timing] if construction_timing is not None else [])
+            + [materialization],
+        )
+        if definition.requested_cases is not None and not built.cases:
+            output.mkdir(parents=True, exist_ok=True)
+            result.error, result.duration_seconds = (
+                "Selected cases contain no executable case",
+                elapsed(started),
+            )
+            _save_progress(result, progress)
+            return result
         harness = ContainerHarness(
             runtime_executable=runtime_executable,
             build_timeout_seconds=build_timeout_seconds,
@@ -250,26 +323,6 @@ class InstallTestCoordinator:
             graceful_termination_seconds=graceful_termination_seconds,
             interrupts=interrupts,
             observer=observer,
-        )
-        built = definition.built
-        materialization = Timing("materialization")
-        result = CampaignResult(
-            output,
-            [
-                CampaignCase(entry.name, output / "cases" / entry.name)
-                if isinstance(entry, EffectInstallCase)
-                else CampaignCase(
-                    entry.name,
-                    None,
-                    state=None,
-                    construction=entry.classification,
-                    construction_reason=entry.reason,
-                )
-                for entry in built.entries
-            ],
-            timings=([construction_timing] if construction_timing is not None else [])
-            + [materialization],
-            prepare_only=definition.prepare_only,
         )
         with harness:
             try:

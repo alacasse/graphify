@@ -9,6 +9,13 @@ from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--case",
+        action="append",
+        dest="requested_cases",
+        metavar="NAME",
+        help="Run only this case; repeat to select more (always a partial campaign)",
+    )
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--subject-context", type=Path, required=True)
@@ -33,6 +40,7 @@ def main(arguments: list[str] | None = None) -> int:
         subject_checkout=args.repo,
         output_directory=args.output,
         prepare_only=args.prepare_only,
+        requested_cases=tuple(args.requested_cases) if args.requested_cases else None,
     )
     report = result.report.render()
     if result.exit_code:

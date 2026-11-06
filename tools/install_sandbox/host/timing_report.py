@@ -73,6 +73,14 @@ def render_campaign(result: CampaignResult) -> str:
         "Common phases (counted once):",
         *[_line(record) for record in result.timings],
     ]
+    if result.scope == "partial":
+        lines[0:0] = [
+            "Scope: partial campaign (does not establish full campaign coverage)",
+            f"Selection result: {result.status}; successful: {result.successful}",
+            "Requested cases: " + ", ".join(result.requested_cases or ()),
+            "Executed cases: " + (", ".join(result.executed_cases) or "none"),
+            "Omitted cases (not selected): " + (", ".join(result.omitted_cases) or "none"),
+        ]
     dependencies = preparation.dependency_preparation if preparation else None
     lines.append(f"Dependency mode: {dependencies.mode if dependencies else 'unavailable'}")
     if dependencies is not None and dependencies.warning is not None:

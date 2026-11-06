@@ -59,6 +59,7 @@ class CampaignOutput:
         output_directory: Path | None = None,
         runtime_executable: str | Path = "docker",
         prepare_only: bool = False,
+        requested_cases: tuple[str, ...] | None = None,
     ) -> CampaignCommandResult:
         report = OutputReport(
             self.now().astimezone(UTC).isoformat(),
@@ -77,6 +78,7 @@ class CampaignOutput:
                         subject_context_file=subject_context_file,
                         subject_checkout=subject_checkout,
                         prepare_only=prepare_only,
+                        requested_cases=requested_cases,
                     )
             except (Exception, KeyboardInterrupt) as error:
                 report.exit_code = 130 if isinstance(error, KeyboardInterrupt) else 2
@@ -102,6 +104,8 @@ class _Session:
         self.definition, self.construction = definition, construction
         self.directory: Path | None = None
         self.lock: FileLock | None = None
+        if definition.requested_cases is not None:
+            report.observe(CampaignResult.from_definition(definition, Path("evidence")))
 
     def run(
         self, requested: Path | None, runtime: str, interrupts: SignalCapture
@@ -227,7 +231,10 @@ class _Session:
             raise ValueError(
                 "Writer termination uncertain; raw evidence retained for manual inspection"
             )
-        (self.directory / "evidence").mkdir(exist_ok=True)
+        evidence = self.directory / "evidence"
+        if self.definition.requested_cases is not None and not evidence.exists():
+            return
+        evidence.mkdir(exist_ok=True)
         self.report.raw_evidence = True
         self.report.phase, self.report.archive = "archiving", "pending"
         self._save()

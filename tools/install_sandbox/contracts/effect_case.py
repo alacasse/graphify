@@ -20,6 +20,7 @@ from tools.install_sandbox.contracts.intermediate import (
     JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
+    StaleReferencePreparation,
     StaleVersionPreparation,
     preparation_from_data,
 )
@@ -293,6 +294,7 @@ class EffectInstallCase:
         | AlteredSkillPreparation
         | PreserveSkillBackupPreparation
         | StaleVersionPreparation
+        | StaleReferencePreparation
         | None
     ) = None
 
@@ -407,6 +409,7 @@ def build_effect_cases(
         ("altered-skill", AlteredSkillPreparation),
         ("preserve-skill-backup", PreserveSkillBackupPreparation),
         ("stale-version", StaleVersionPreparation),
+        ("stale-reference", StaleReferencePreparation),
     ):
         entries.append(
             replace(

@@ -229,6 +229,30 @@ class StaleVersionPreparation:
         return result
 
 
+STALE_REFERENCE_CONTENT = b"Stale reference.\n"
+
+
+@dataclass(frozen=True)
+class StaleReferencePreparation:
+    destination: Destination
+    kind: str = "stale-reference"
+
+    def to_data(self) -> dict[str, object]:
+        if self.kind != "stale-reference":
+            raise ValueError("Unsupported stale reference preparation")
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "StaleReferencePreparation":
+        data = fields(value, "kind destination")
+        result = cls(Destination.from_data(data["destination"]), text(data["kind"]))
+        result.to_data()
+        return result
+
+
 def preparation_from_data(
     value: object,
 ) -> (
@@ -239,20 +263,20 @@ def preparation_from_data(
     | AlteredSkillPreparation
     | PreserveSkillBackupPreparation
     | StaleVersionPreparation
+    | StaleReferencePreparation
 ):
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
     if incoming.get("kind") in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
         return JsonHookPreparation.from_data(incoming)
-    if incoming.get("kind") == "stale-version":
-        return StaleVersionPreparation.from_data(incoming)
-    if incoming.get("kind") == "preserve-skill-backup":
-        return PreserveSkillBackupPreparation.from_data(incoming)
-    if incoming.get("kind") == "missing-reference":
-        return MissingReferencePreparation.from_data(incoming)
-    if incoming.get("kind") == "altered-reference":
-        return AlteredReferencePreparation.from_data(incoming)
-    if incoming.get("kind") == "altered-skill":
-        return AlteredSkillPreparation.from_data(incoming)
-    return IntermediatePreparation.from_data(incoming)
+    parsers = {
+        "stale-reference": StaleReferencePreparation.from_data,
+        "stale-version": StaleVersionPreparation.from_data,
+        "preserve-skill-backup": PreserveSkillBackupPreparation.from_data,
+        "missing-reference": MissingReferencePreparation.from_data,
+        "altered-reference": AlteredReferencePreparation.from_data,
+        "altered-skill": AlteredSkillPreparation.from_data,
+    }
+    parser = parsers.get(text(incoming.get("kind")), IntermediatePreparation.from_data)
+    return parser(incoming)

@@ -180,8 +180,8 @@ class ExpectationSet:
             raise ValueError("Duplicate allowed change")
         if len(self.allowed_removals) != len(set(self.allowed_removals)):
             raise ValueError("Duplicate allowed removal")
-        if self.allowed_removals and self.phase != "intermediate":
-            raise ValueError("Removals are only allowed during intermediate preparation")
+        if self.allowed_removals and self.phase not in {"intermediate", "reinstall"}:
+            raise ValueError("Removals are only allowed during preparation or reinstall")
         for key in self.allowed_removals:
             Destination(*key)
             if key in self.allowed_changes:

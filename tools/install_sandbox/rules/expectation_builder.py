@@ -20,6 +20,7 @@ from tools.install_sandbox.contracts.intermediate import (
     JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
+    StaleReferencePreparation,
     StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -140,6 +141,8 @@ def build_initial_expectations(
         case.intermediate_preparation, (MissingReferencePreparation, AlteredReferencePreparation)
     ):
         selected_reference(case, sources)
+    if isinstance(case.intermediate_preparation, StaleReferencePreparation):
+        selected_stale_reference(case, sources)
     constraints = [
         Expectation(
             "file",
@@ -289,6 +292,17 @@ def build_install_expectations(
             )
         else:
             constraints.extend(_json_constraints(case, effect, before))
+    if isinstance(case.intermediate_preparation, StaleReferencePreparation):
+        destination, source_path = selected_stale_reference(case, sources)
+        constraints.append(
+            Expectation(
+                "absent",
+                destination.root,
+                destination.path,
+                "install",
+                "source:absent:" + source_path,
+            )
+        )
     bundle = ExpectationSet(
         "install", tuple(constraints), _allowed(tuple(constraints)), baseline, lock_destination=lock
     )
@@ -407,4 +421,31 @@ def selected_version(
         Destination(effect.destination.root, effect.destination.path + "/.graphify_version"),
         expected,
         witness,
+    )
+
+
+def selected_stale_reference(
+    case: EffectInstallCase, sources: FilesystemSnapshot
+) -> tuple[Destination, str]:
+    """Prove the fixed witness is absent from the complete source reference bundle."""
+    preparation = case.intermediate_preparation
+    if not isinstance(preparation, StaleReferencePreparation):
+        raise ValueError("Case has no stale reference preparation")
+    preparation.to_data()
+    _source_constraints(case, sources)
+    effect = next(
+        (
+            effect
+            for effect in case.effects.effects
+            if isinstance(effect, SkillEffect) and effect.destination == preparation.destination
+        ),
+        None,
+    )
+    if effect is None:
+        raise ValueError("Stale reference preparation requires matching skill effect")
+    if not sources.absent("subject", effect.references + "/stale.md"):
+        raise ValueError("Stale reference witness must be absent from retained sources")
+    return (
+        Destination(effect.destination.root, effect.destination.path + "/references/stale.md"),
+        effect.references + "/stale.md",
     )

@@ -231,7 +231,7 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
         build_reinstall_case(spec, context())
 
 
-def test_eleven_cases_have_strict_independent_preparations() -> None:
+def test_twelve_cases_have_strict_independent_preparations() -> None:
     cases = build_effect_cases(structured_spec(), context()).cases
     assert [case.name for case in cases] == [
         "reinstall",
@@ -242,6 +242,7 @@ def test_eleven_cases_have_strict_independent_preparations() -> None:
         "altered-skill",
         "preserve-skill-backup",
         "stale-version",
+        "stale-reference",
         "missing-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",
@@ -323,6 +324,7 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
             "altered-skill",
             "preserve-skill-backup",
             "stale-version",
+            "stale-reference",
         )
     ] + [
         (name, "not_applicable", "No JSON hooks effect declared")
@@ -358,10 +360,11 @@ def test_backup_preservation_case_follows_skill_across_effect_combinations(
     )
     spec = EffectSpec((skill, *markdown))
     built = build_effect_cases(spec, context())
-    assert [case.name for case in built.cases][-3:] == [
+    assert [case.name for case in built.cases][-4:] == [
         "altered-skill",
         "preserve-skill-backup",
         "stale-version",
+        "stale-reference",
     ]
     case = next(case for case in built.cases if case.name == "preserve-skill-backup")
     assert case.effects == spec

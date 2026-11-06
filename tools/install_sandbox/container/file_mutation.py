@@ -20,11 +20,13 @@ from tools.install_sandbox.contracts.bound_mutation import (
 )
 from tools.install_sandbox.contracts.effects import Destination, JsonHooksEffect, SkillEffect
 from tools.install_sandbox.contracts.intermediate import (
+    STALE_REFERENCE_CONTENT,
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
     JsonHookPreparation,
     PreserveSkillBackupPreparation,
+    StaleReferencePreparation,
     StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -32,6 +34,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     retained_bytes,
     selected_reference,
     selected_skill,
+    selected_stale_reference,
     selected_version,
 )
 from tools.install_sandbox.rules.json_hook_repair import prepared_hook_settings
@@ -68,6 +71,15 @@ def _validate_destination(
     operation: BoundMutation, environment: EffectEnvironment, sources: FilesystemSnapshot
 ) -> None:
     preparation = environment.case.intermediate_preparation
+    if isinstance(preparation, StaleReferencePreparation):
+        destination, _ = selected_stale_reference(environment.case, sources)
+        if (
+            not isinstance(operation, BoundFileCreation)
+            or operation.destination != destination
+            or operation.content != STALE_REFERENCE_CONTENT
+        ):
+            raise ValueError("Creation differs from the selected stale reference preparation")
+        return
     if isinstance(preparation, PreserveSkillBackupPreparation) or isinstance(
         operation, BoundFileCreation
     ):
@@ -124,11 +136,11 @@ def _create_file(operation: BoundFileCreation, environment: EffectEnvironment) -
         )
         with os.fdopen(descriptor, "w+b") as stream:
             if stream.write(operation.content) != len(operation.content):
-                raise ValueError("Incomplete backup creation")
+                raise ValueError("Incomplete file creation")
             stream.flush()
             stream.seek(0)
             if stream.read() != operation.content:
-                raise ValueError("Created backup differs from intended bytes")
+                raise ValueError("Created file differs from intended bytes")
     finally:
         os.close(parent)
 

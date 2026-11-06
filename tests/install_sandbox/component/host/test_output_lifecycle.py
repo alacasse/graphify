@@ -44,6 +44,7 @@ def test_archive_is_readable_after_move_and_extraction(
         "altered-skill",
         "preserve-skill-backup",
         "stale-version",
+        "stale-reference",
         "missing-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",
@@ -120,7 +121,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 12  # One verification and eleven constructed cases.
+        == 13  # One verification and twelve constructed cases.
     )
 
 

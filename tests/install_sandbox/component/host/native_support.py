@@ -85,6 +85,7 @@ class LiteralInstaller:
         self.hooks = hooks and not markdown_only
         self.skill_root = skill_root
         self.calls: list[list[str]] = []
+        self.rebuild_references = True
         self.repair_hook_timeout = True
         self.duplicate_hook_survivor: Literal["first", "last", "all"] = "first"
 
@@ -124,8 +125,7 @@ class LiteralInstaller:
             separator = "" if "## Personal before" in content else "\n"
             path.write_text(content + separator + "## graphify\nConsult the synthetic map.\n")
 
-    @staticmethod
-    def _skill(root: Path, home: Path) -> None:
+    def _skill(self, root: Path, home: Path) -> None:
         skill = root / ".synthetic/skills/package"
         document = skill / "SKILL.md"
         canonical = b"# Synthetic package\n"
@@ -133,7 +133,10 @@ class LiteralInstaller:
             document.with_name("SKILL.md.bak").write_bytes(document.read_bytes())
         document.parent.mkdir(parents=True, exist_ok=True)
         document.write_bytes(canonical)
-        write(skill / "references/nested/reference.md", "Independent nested reference.\n")
+        references = skill / "references"
+        if self.rebuild_references and references.exists():
+            shutil.rmtree(references)
+        write(references / "nested/reference.md", "Independent nested reference.\n")
         write(skill / ".graphify_version", "8.7.6")
         digest = hashlib.sha256(str(skill.resolve()).encode()).hexdigest()[:16]
         write(home / f".cache/graphify/skill-locks/{digest}.lock", "")

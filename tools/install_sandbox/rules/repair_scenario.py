@@ -25,12 +25,14 @@ from tools.install_sandbox.contracts.expectations import (
     ExpectationSet,
 )
 from tools.install_sandbox.contracts.intermediate import (
+    STALE_REFERENCE_CONTENT,
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
     JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
+    StaleReferencePreparation,
     StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -42,6 +44,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     retained_bytes,
     selected_reference,
     selected_skill,
+    selected_stale_reference,
     selected_version,
 )
 from tools.install_sandbox.rules.json_hook_repair import (
@@ -443,6 +446,52 @@ class StaleVersionScenario:
 
 
 @dataclass(frozen=True)
+class StaleReferenceScenario:
+    case: EffectInstallCase
+    sources: FilesystemSnapshot
+
+    def bind(
+        self,
+        first_after: FilesystemSnapshot,
+        observation_ref: str,
+        validation: VerificationResult,
+        installed: ExpectationSet,
+        case_bytes: bytes,
+    ) -> PreparationPlan | PreparationBlocked:
+        try:
+            _validate_first_install(self.case, case_bytes, installed, first_after, validation)
+            destination, _ = selected_stale_reference(self.case, self.sources)
+            witness = STALE_REFERENCE_CONTENT
+            key = destination.root, destination.path
+            stale = Expectation(
+                "file", *key, "intermediate", "case:stale-reference-witness", witness
+            )
+            operation = BoundFileCreation(
+                hashlib.sha256(case_bytes).hexdigest(), observation_ref, destination, witness
+            )
+            operation.verify_binding(case_bytes, first_after)
+            intermediate = replace(
+                _transition(installed, first_after, (stale,), "intermediate"),
+                allowed_removals=(),
+            )
+            # The shared protocol replaces this predicted baseline with the observed,
+            # verified intermediate inventory before publishing effective expectations.
+            baseline = (
+                *preservation_baseline(first_after, "reinstall"),
+                replace(stale, phase="reinstall"),
+            )
+            repaired = replace(
+                installed.in_phase("reinstall"),
+                allowed_changes=(),
+                baseline=baseline,
+                allowed_removals=(key,),
+            )
+            return PreparationPlan(operation, intermediate, repaired)
+        except (ValueError, UnicodeError, StopIteration) as exc:
+            return PreparationBlocked(str(exc))
+
+
+@dataclass(frozen=True)
 class PreserveSkillBackupScenario:
     case: EffectInstallCase
     sources: FilesystemSnapshot
@@ -586,6 +635,7 @@ def repair_scenario_from_case(
     | AlteredSkillScenario
     | PreserveSkillBackupScenario
     | StaleVersionScenario
+    | StaleReferenceScenario
     | JsonHookRepairScenario
 ):
     preparation = case.intermediate_preparation
@@ -598,6 +648,7 @@ def repair_scenario_from_case(
         | type[AlteredSkillScenario]
         | type[PreserveSkillBackupScenario]
         | type[StaleVersionScenario]
+        | type[StaleReferenceScenario]
         | type[JsonHookRepairScenario],
     ] = {
         MissingReferencePreparation: MissingReferenceScenario,
@@ -606,6 +657,7 @@ def repair_scenario_from_case(
         AlteredSkillPreparation: AlteredSkillScenario,
         PreserveSkillBackupPreparation: PreserveSkillBackupScenario,
         StaleVersionPreparation: StaleVersionScenario,
+        StaleReferencePreparation: StaleReferenceScenario,
     }
     scenario = scenarios.get(type(preparation))
     if scenario is not None:

@@ -199,7 +199,7 @@ def test_reordered_entries_execute_by_name(tmp_path: Path, monkeypatch: pytest.M
         definition=definition, output_directory=tmp_path / "proof", progress=reorder
     )
     assert result.passed
-    assert len(transport.installer.calls) == 22
+    assert len(transport.installer.calls) == 2 * len(definition.built.cases)
     for entry in result.cases:
         assert entry.result is not None and entry.result.test is not None
         assert entry.result.test.case["name"] == entry.name

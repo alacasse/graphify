@@ -55,8 +55,9 @@ The coordinator constructs the cases before allocating campaign output.
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
 A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
-`preserve-skill-backup` and `stale-version` available in that order, independently of the Markdown
-count. Without a skill, the campaign reports those cases as `not_applicable`.
+`preserve-skill-backup`, `stale-version` and `stale-reference` available in that
+order, independently of the Markdown count. Without a skill, the campaign
+reports those cases as `not_applicable`.
 The hook cases, `missing-json-hook`, `altered-json-hook` and
 `duplicate-json-hook`, select the first hook of the first `json-hooks` effect.
 A spec without that effect yields `not_applicable` for all three. Each case has two dependent
@@ -128,6 +129,14 @@ the package version already equals the first witness. The second install runs
 after the sandbox verifies this single change. It must restore the exact UTF-8
 bytes derived from the retained `Version` header and preserve every other
 observed entry in HOME and PROJECT.
+
+`stale-reference` requires a complete package reference inventory with no entry
+named `stale.md` at its root. An empty reference directory is valid. After a
+conforming first install, preparation creates only `references/stale.md` in the
+installed skill, with the exact bytes `b"Stale reference.\n"`. The second install
+runs only after this addition is verified. It must remove that file, preserve
+the package references byte for byte, and preserve every other observed entry
+in HOME and PROJECT.
 
 For `missing-reference`, the engine binds removal to the case, observed
 file bytes and exact destination selected from retained sources. Only that file
@@ -208,7 +217,8 @@ The current formats are case `explicit-expectations-v9`, expectations
 result `performed-mutation-v3`, and case evidence `explicit-expectations-v11`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,
 `file-append`, `file-creation`, or `file-replacement`. The
-`preserve-skill-backup` case uses `file-creation` to seed the backup.
+`preserve-skill-backup` and `stale-reference` cases use `file-creation` to
+create their respective witnesses.
 All three JSON hook repair cases use `file-replacement` for the settings.
 `stale-version` uses the same operation for the version file.
 Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay

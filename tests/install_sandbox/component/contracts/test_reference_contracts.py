@@ -72,11 +72,12 @@ def test_selection_uses_nested_source_lexical_order_and_requires_complete_nonemp
         build_initial_expectations(case, sources)
 
 
-def test_removal_permissions_require_intermediate_baseline_file_and_exact_absence():
-    absent = Expectation("absent", "project", "reference", "intermediate", "case")
-    original = Expectation("file", "project", "reference", "intermediate", "prior", b"ref")
+@pytest.mark.parametrize("phase", ["intermediate", "reinstall"])
+def test_removal_permissions_require_baseline_file_and_exact_absence(phase: str) -> None:
+    absent = Expectation("absent", "project", "reference", phase, "case")
+    original = Expectation("file", "project", "reference", phase, "prior", b"ref")
     expected = ExpectationSet(
-        "intermediate",
+        phase,
         (absent,),
         baseline=(original,),
         roots={"home": "/home", "project": "/project"},
@@ -94,13 +95,16 @@ def test_removal_permissions_require_intermediate_baseline_file_and_exact_absenc
             replace(expected, **changes)
 
 
-def test_removal_allows_only_selected_file_and_requires_complete_observed_absence():
+@pytest.mark.parametrize("phase", ["intermediate", "reinstall"])
+def test_removal_allows_only_selected_file_and_requires_complete_observed_absence(
+    phase: str,
+) -> None:
     expected = ExpectationSet(
-        "intermediate",
-        (Expectation("absent", "project", "reference", "intermediate", "case"),),
+        phase,
+        (Expectation("absent", "project", "reference", phase, "case"),),
         baseline=(
-            Expectation("file", "project", "reference", "intermediate", "prior", b"ref"),
-            Expectation("file", "home", "personal", "intermediate", "prior", b"keep"),
+            Expectation("file", "project", "reference", phase, "prior", b"ref"),
+            Expectation("file", "home", "personal", phase, "prior", b"keep"),
         ),
         roots={"home": "/home", "project": "/project"},
         allowed_removals=(("project", "reference"),),
@@ -198,3 +202,16 @@ def test_altered_reference_shares_selection_and_source_preconditions():
     sources.contents.pop(("subject", "refs/a/nested.md"))
     with pytest.raises(ValueError, match="unavailable"):
         build_initial_expectations(case, sources)
+
+
+@pytest.mark.parametrize("phase", ["initial", "install"])
+def test_removal_permission_is_rejected_before_first_install_even_with_matching_baseline(
+    phase: str,
+) -> None:
+    with pytest.raises(ValueError, match="Removals"):
+        ExpectationSet(
+            phase,
+            (Expectation("absent", "project", "reference", phase, "case"),),
+            baseline=(Expectation("file", "project", "reference", phase, "prior", b"ref"),),
+            allowed_removals=(("project", "reference"),),
+        )

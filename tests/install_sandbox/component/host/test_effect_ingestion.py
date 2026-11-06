@@ -97,16 +97,17 @@ def test_active_project_specs_construct_supported_cases_without_running_installe
         "altered-skill",
         "preserve-skill-backup",
         "stale-version",
+        "stale-reference",
     ]
     hooks = ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
     codebuddy = build_effect_cases(EffectSpecReader().read(specs / "codebuddy.yaml"), context())
     assert [case.name for case in codebuddy.cases] == common + hooks
-    assert len(codebuddy.cases) == 11
+    assert len(codebuddy.cases) == 12
     assert all(case.scope == "project" for case in codebuddy.cases)
     assert codebuddy.decisions == ()
     amp = build_effect_cases(EffectSpecReader().read(specs / "amp.yaml"), context())
     assert [case.name for case in amp.cases] == common
-    assert len(amp.cases) == 8
+    assert len(amp.cases) == 9
     assert all(case.scope == "project" for case in amp.cases)
     assert [(item.name, item.classification, item.reason) for item in amp.decisions] == [
         (kind, "not_applicable", "No JSON hooks effect declared") for kind in hooks

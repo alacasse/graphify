@@ -1,0 +1,7 @@
+scope: user
+directory: .agents
+effects:
+  - kind: skill
+    source: skill-agents.md
+    references: skills/agents/references
+    destination: {root: home, path: skills/graphify}

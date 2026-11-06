@@ -33,9 +33,28 @@ remain available in the immutable
 [original YAML](https://github.com/alacasse/graphify/tree/e181166ae11bda165e23bbd83d6357fe4872db49/tools/install_sandbox/specs);
 conversion does not qualify or retire those capabilities.
 
-Other YAML files
-retain historical target facts and are outside the current execution interface.
-User scope, uninstall, other platforms and other effects are outside this scope.
+The active user-scope specifications are separate files; the project files above
+retain their project scope:
+
+| Spec | Skill destination | Subject invocation after the executable |
+| --- | --- | --- |
+| `user/agents.yaml` | HOME `.agents/skills/graphify` | `install --platform agents` |
+| `user/copilot.yaml` | HOME `.copilot/skills/graphify` | `install --platform copilot` |
+| `user/kimi.yaml` | HOME `.kimi/skills/graphify` | `install --platform kimi` |
+| `user/pi.yaml` | HOME `.pi/agent/skills/graphify` | `install --platform pi` |
+
+Each declares `scope: user`, exactly one skill with destination root HOME, and
+the same package skill and reference sources as its project counterpart. These
+user mappings are verified independently against the same pinned product's
+user destination resolver and generic install command. Run each command from
+the isolated PROJECT, without `--project`, using its own subject context and
+campaign. PROJECT remains part of the observation and preservation checks;
+user scope identifies the operation, while the effect identifies its destination.
+These specs declare no Markdown, hooks or Claude registration.
+
+Other YAML files retain historical target facts and are outside the current
+execution interface. Uninstall, other platforms and other effects remain outside
+these compositions.
 
 ## Data and responsibilities
 
@@ -116,7 +135,7 @@ The hook cases, `missing-json-hook`, `altered-json-hook` and
 A spec without that effect yields `not_applicable` for all three. Each case has two dependent
 installation steps. A successful CodeBuddy project campaign runs 13 cases (26 installer
 calls). Amp project runs 10 (20 installer calls). Each of Agents, Copilot, Kimi
-and Pi project runs 8 cases (16 installer calls): reinstall and the seven skill
+and Pi project or user runs 8 cases (16 installer calls): reinstall and the seven skill
 cases. Its two Markdown and three hook cases are `not_applicable`, with no
 installer commands or case evidence. These classifications describe the declared
 effects; a passed campaign qualifies only its represented paths.

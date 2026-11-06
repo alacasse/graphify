@@ -128,9 +128,15 @@ class EffectSpec:
     scope: str = "project"
 
     def __post_init__(self) -> None:
-        if self.scope != "project":
-            raise ValueError("Only project scope is supported")
+        if self.scope not in {"project", "user"}:
+            raise ValueError("Scope must be project or user")
         validate_effects(self.effects)
+        if self.scope == "user" and (
+            len(self.effects) != 1
+            or not isinstance(self.effects[0], SkillEffect)
+            or self.effects[0].destination.root != "home"
+        ):
+            raise ValueError("User scope requires exactly one HOME skill effect")
 
     def to_data(self) -> dict[str, object]:
         return {

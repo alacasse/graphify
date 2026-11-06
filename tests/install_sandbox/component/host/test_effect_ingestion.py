@@ -4,9 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.install_sandbox.component.contracts.test_effect_contracts import context
 from tests.install_sandbox.component.host.native_support import FIXTURE
-from tools.install_sandbox.contracts.effect_case import build_effect_cases
+from tools.install_sandbox.contracts.effect_case import (
+    EffectRules,
+    SubjectContext,
+    build_effect_cases,
+)
 from tools.install_sandbox.contracts.effects import (
     Destination,
     EffectSpec,
@@ -16,6 +19,15 @@ from tools.install_sandbox.contracts.effects import (
 )
 from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
+
+
+def context() -> SubjectContext:
+    return SubjectContext(
+        "controlled-fixture",
+        ("controlled", "install"),
+        "METADATA",
+        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+    )
 
 
 def test_generic_effect_fixture_has_exact_structured_representation() -> None:
@@ -126,13 +138,26 @@ def test_active_project_specs_construct_supported_cases_without_running_installe
         ("pi", "skill-pi.md", "skills/pi/references", ".pi/agent/skills/graphify"),
     ],
 )
-def test_active_skill_only_project_spec_has_exact_representation(
-    target: str, source: str, references: str, destination: str
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_active_skill_only_spec_has_exact_representation(
+    target: str,
+    source: str,
+    references: str,
+    destination: str,
+    scope: str,
 ) -> None:
-    active = Path(__file__).resolve().parents[4] / f"tools/install_sandbox/specs/{target}.yaml"
+    specs = Path(__file__).resolve().parents[4] / "tools/install_sandbox/specs"
+    active = specs / ("user" if scope == "user" else "") / f"{target}.yaml"
     spec = EffectSpecReader().read(active)
     assert spec == EffectSpec(
-        (SkillEffect(source, references, Destination("project", destination)),)
+        (
+            SkillEffect(
+                source,
+                references,
+                Destination("home" if scope == "user" else "project", destination),
+            ),
+        ),
+        scope,
     )
     construction = build_effect_cases(spec, context())
     assert [case.name for case in construction.cases] == [
@@ -145,7 +170,7 @@ def test_active_skill_only_project_spec_has_exact_representation(
         "stale-reference",
         "stale-references-tmp",
     ]
-    assert all(case.scope == "project" for case in construction.cases)
+    assert all(case.scope == scope for case in construction.cases)
     assert [(item.name, item.classification, item.reason) for item in construction.decisions] == [
         ("missing-section", "not_applicable", "No Markdown effect declared"),
         ("altered-section", "not_applicable", "No Markdown effect declared"),

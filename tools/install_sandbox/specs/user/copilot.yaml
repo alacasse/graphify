@@ -1,0 +1,7 @@
+scope: user
+directory: .copilot
+effects:
+  - kind: skill
+    source: skill-copilot.md
+    references: skills/copilot/references
+    destination: {root: home, path: skills/graphify}

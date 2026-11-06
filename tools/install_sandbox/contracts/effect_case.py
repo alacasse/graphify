@@ -225,7 +225,30 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
         ):
             occupied.add((opposite, destination.path))
             files.append({"root": opposite, "path": destination.path, "content": content})
+    if spec.scope == "user":
+        files.extend(_project_skill_witnesses(spec))
     return files
+
+
+def _project_skill_witnesses(spec: EffectSpec) -> list[InitialFile]:
+    """Seed a distinct project installation that HOME installation must leave intact."""
+    effect = spec.effects[0]
+    assert isinstance(effect, SkillEffect)
+    path = effect.destination.path
+    documents = {
+        path + "/SKILL.md": "# Project skill witness\nPreserve this project installation.\n",
+        path + "/references/sandbox-project-witness.md": "Project reference witness.\n",
+        path + "/.graphify_version": "project-witness-version\n",
+        path + "/personal.txt": "Personal project skill content.\n",
+    }
+    occupied = {("project", name) for name in documents}
+    instructions = "AGENTS.md"
+    while not _witness_available("project", instructions, spec, occupied):
+        instructions = "sandbox-project-" + instructions
+    documents[instructions] = "# Personal project instructions\nPreserve these instructions.\n"
+    return [
+        {"root": "project", "path": name, "content": content} for name, content in documents.items()
+    ]
 
 
 def seeded_json_hook_group(effect: JsonHooksEffect) -> dict[str, object]:
@@ -356,7 +379,7 @@ def build_reinstall_case(
     return EffectInstallCase(
         "reinstall",
         text(target),
-        "project",
+        spec.scope,
         spec,
         subject,
         effect_initial_files(spec),

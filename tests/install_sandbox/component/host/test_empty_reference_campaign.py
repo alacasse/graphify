@@ -28,6 +28,7 @@ def _unavailable_sources(subject: Path, monkeypatch: pytest.MonkeyPatch, fault: 
                 "missing-reference",
                 "altered-reference",
                 "stale-reference",
+                "stale-references-tmp",
             }:
                 snapshot.contents.pop(("subject", "reference-data/nested/reference.md"))
                 snapshot.obstacles.append(
@@ -76,7 +77,7 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
     assert result.status == "incomplete"
     cases = {case.name: case for case in result.cases}
     blocked = ["missing-reference", "altered-reference"] + (
-        ["stale-reference"] if fault == "incomplete" else []
+        ["stale-reference", "stale-references-tmp"] if fault == "incomplete" else []
     )
     for name in blocked:
         repair = cases.pop(name)
@@ -87,7 +88,7 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
         assert test.preparation.stop is not None
         assert test.preparation.stop.category == "validation"
         assert all(step.facts.command is None for step in test.steps)
-    assert len(transport.installer.calls) == (20 if fault == "empty" else 18)
+    assert len(transport.installer.calls) == (22 if fault == "empty" else 18)
     assert set(cases) == {
         "reinstall",
         "missing-section",
@@ -98,7 +99,7 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
         "missing-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",
-    } | ({"stale-reference"} if fault == "empty" else set())
+    } | ({"stale-reference", "stale-references-tmp"} if fault == "empty" else set())
     for case in cases.values():
         assert case.result is not None and case.result.passed
 

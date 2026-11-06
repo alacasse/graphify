@@ -295,11 +295,54 @@ class BoundFileCreation:
         )
 
 
+@dataclass(frozen=True)
+class BoundStaleReferencesTmpCreation(BoundFileCreation):
+    """Create one absent temporary directory and its stale witness file."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        path = PurePosixPath(self.destination.path)
+        if path.name != "stale.md" or path.parent.name != "references.tmp":
+            raise ValueError("Temporary reference requires references.tmp/stale.md")
+
+    def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
+        content = super().verify_binding(case_bytes, first_after)
+        path = PurePosixPath(self.destination.path)
+        parent = str(path.parent)
+        skill = first_after.entry(self.destination.root, str(path.parent.parent))
+        if (
+            not first_after.absent(self.destination.root, parent)
+            or skill is None
+            or skill["kind"] != "directory"
+        ):
+            raise ValueError("Temporary reference requires absent directory under observed skill")
+        return content
+
+    def to_data(self) -> dict[str, object]:
+        return {**super().to_data(), "kind": "stale-references-tmp-creation"}
+
+    @classmethod
+    def from_data(cls, value: object) -> "BoundStaleReferencesTmpCreation":
+        data = fields(value, "format kind case_sha256 observation_ref destination content")
+        if (
+            data["format"] != "prepared-mutation-v3"
+            or data["kind"] != "stale-references-tmp-creation"
+        ):
+            raise ValueError("Unsupported prepared operation")
+        return cls(
+            text(data["case_sha256"]),
+            text(data["observation_ref"]),
+            Destination.from_data(data["destination"]),
+            _replacement(data["content"]),
+        )
+
+
 BoundMutation = (
     BoundMarkdownMutation
     | BoundFileRemoval
     | BoundFileAppend
     | BoundFileCreation
+    | BoundStaleReferencesTmpCreation
     | BoundFileReplacement
 )
 
@@ -308,6 +351,8 @@ def mutation_from_data(value: object) -> BoundMutation:
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
+    if incoming.get("kind") == "stale-references-tmp-creation":
+        return BoundStaleReferencesTmpCreation.from_data(incoming)
     if incoming.get("kind") == "file-replacement":
         return BoundFileReplacement.from_data(incoming)
     if incoming.get("kind") == "file-creation":
@@ -332,13 +377,14 @@ class PerformedMutation:
             BoundFileRemoval,
             BoundFileAppend,
             BoundFileCreation,
+            BoundStaleReferencesTmpCreation,
             BoundFileReplacement,
         ):
             raise ValueError("Unsupported performed mutation")
         if type(self.operation) is BoundFileRemoval:
             if self.document_sha256 is not None:
                 raise ValueError("Removed file cannot have resulting bytes")
-        elif type(self.operation) is BoundFileCreation and self.document_sha256 is None:
+        elif isinstance(self.operation, BoundFileCreation) and self.document_sha256 is None:
             # A complete failed creation is evaluated by the expectation verifier.
             pass
         elif (
@@ -375,7 +421,7 @@ class PerformedMutation:
             # A physical claim must not turn an observed failed removal into a replay error.
             return
         document = observed.contents.get(key)
-        if type(operation) is BoundFileCreation and self.document_sha256 is None:
+        if isinstance(operation, BoundFileCreation) and self.document_sha256 is None:
             entry = observed.entry(*key)
             ancestors = {str(parent) for parent in PurePosixPath(destination.path).parents}
             obstructed = any(

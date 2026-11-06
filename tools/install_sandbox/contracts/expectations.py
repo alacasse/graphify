@@ -186,10 +186,22 @@ class ExpectationSet:
             Destination(*key)
             if key in self.allowed_changes:
                 raise ValueError("Removal permission differs from change permission")
-            if not any((e.root, e.path) == key and e.kind == "file" for e in self.baseline):
-                raise ValueError("Removal requires a baseline regular file")
+            if not any(
+                (e.root, e.path) == key and e.kind in {"file", "directory"} for e in self.baseline
+            ):
+                raise ValueError("Removal requires a baseline file or directory")
             if not any((e.root, e.path) == key and e.kind == "absent" for e in self.expectations):
                 raise ValueError("Removal requires an absence expectation")
+            self._validate_removed_descendants(key)
+
+    def _validate_removed_descendants(self, key: tuple[str, str]) -> None:
+        for entry in self.baseline:
+            if (
+                entry.root == key[0]
+                and entry.path.startswith(key[1] + "/")
+                and (entry.root, entry.path) not in self.allowed_removals
+            ):
+                raise ValueError("Directory removal requires explicit descendant removals")
 
     def to_data(self) -> dict[str, object]:
         return {

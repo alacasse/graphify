@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from tests.install_sandbox.component.contracts.test_reference_contracts import reference_case
+from tests.install_sandbox.component.contracts.reference_support import reference_case
 from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileCreation,
     PerformedMutation,

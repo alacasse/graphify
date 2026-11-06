@@ -126,7 +126,7 @@ def test_decisions_survive_coordinator_failure_paths(
     saved = json.loads((result.output_directory / "campaign.json").read_text())
     assert saved["status"] == "incomplete" and saved["passed"] is False
     assert result.interrupted is ("interruption" in fault)
-    assert len(transport.installer.calls) == (20 if fault == "cleanup" else 0)
+    assert len(transport.installer.calls) == (22 if fault == "cleanup" else 0)
     first = result.cases[0]
     if fault == "cleanup":
         assert first.state == "finished" and first.result is not None and first.result.passed
@@ -154,7 +154,7 @@ def test_two_markdown_definition_retains_decisions_after_inputs_disappear(
         definition=definition, output_directory=tmp_path / "proof"
     )
     assert not result.passed
-    assert len(transport.installer.calls) == 20
+    assert len(transport.installer.calls) == 22
     first = result.cases[0]
     assert first.result is not None and first.result.passed
     assert [

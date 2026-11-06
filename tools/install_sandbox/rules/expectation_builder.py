@@ -21,6 +21,7 @@ from tools.install_sandbox.contracts.intermediate import (
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
     StaleReferencePreparation,
+    StaleReferencesTmpPreparation,
     StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -301,6 +302,15 @@ def build_install_expectations(
                 destination.path,
                 "install",
                 "source:absent:" + source_path,
+            )
+        )
+    if isinstance(case.intermediate_preparation, StaleReferencesTmpPreparation):
+        preparation = case.intermediate_preparation
+        constraints.extend(
+            Expectation("absent", destination.root, destination.path, "install", provenance)
+            for destination, provenance in (
+                (preparation.directory_destination, "rule:references_tmp"),
+                (preparation.witness_destination, "case:stale-references-tmp-witness"),
             )
         )
     bundle = ExpectationSet(

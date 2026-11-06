@@ -243,6 +243,7 @@ def test_twelve_cases_have_strict_independent_preparations() -> None:
         "preserve-skill-backup",
         "stale-version",
         "stale-reference",
+        "stale-references-tmp",
         "missing-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",
@@ -325,6 +326,7 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
             "preserve-skill-backup",
             "stale-version",
             "stale-reference",
+            "stale-references-tmp",
         )
     ] + [
         (name, "not_applicable", "No JSON hooks effect declared")
@@ -360,11 +362,12 @@ def test_backup_preservation_case_follows_skill_across_effect_combinations(
     )
     spec = EffectSpec((skill, *markdown))
     built = build_effect_cases(spec, context())
-    assert [case.name for case in built.cases][-4:] == [
+    assert [case.name for case in built.cases][-5:] == [
         "altered-skill",
         "preserve-skill-backup",
         "stale-version",
         "stale-reference",
+        "stale-references-tmp",
     ]
     case = next(case for case in built.cases if case.name == "preserve-skill-backup")
     assert case.effects == spec

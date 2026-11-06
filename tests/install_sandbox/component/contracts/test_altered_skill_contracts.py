@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from tests.install_sandbox.component.contracts.test_reference_contracts import reference_case
+from tests.install_sandbox.component.contracts.reference_support import reference_case
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.intermediate import AlteredSkillPreparation

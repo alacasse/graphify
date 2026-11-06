@@ -86,6 +86,8 @@ class LiteralInstaller:
         self.skill_root = skill_root
         self.calls: list[list[str]] = []
         self.rebuild_references = True
+        self.cleanup_references_tmp = True
+        self.packaged_stale_reference = False
         self.repair_hook_timeout = True
         self.duplicate_hook_survivor: Literal["first", "last", "all"] = "first"
 
@@ -133,10 +135,19 @@ class LiteralInstaller:
             document.with_name("SKILL.md.bak").write_bytes(document.read_bytes())
         document.parent.mkdir(parents=True, exist_ok=True)
         document.write_bytes(canonical)
+        temporary_references = skill / "references.tmp"
+        if (
+            self.cleanup_references_tmp
+            and temporary_references.is_dir()
+            and not temporary_references.is_symlink()
+        ):
+            shutil.rmtree(temporary_references)
         references = skill / "references"
         if self.rebuild_references and references.exists():
             shutil.rmtree(references)
         write(references / "nested/reference.md", "Independent nested reference.\n")
+        if self.packaged_stale_reference:
+            write(references / "stale.md", "Packaged stale reference.\n")
         write(skill / ".graphify_version", "8.7.6")
         digest = hashlib.sha256(str(skill.resolve()).encode()).hexdigest()[:16]
         write(home / f".cache/graphify/skill-locks/{digest}.lock", "")

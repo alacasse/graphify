@@ -253,6 +253,34 @@ class StaleReferencePreparation:
         return result
 
 
+@dataclass(frozen=True)
+class StaleReferencesTmpPreparation:
+    destination: Destination
+    kind = "stale-references-tmp"
+
+    @property
+    def directory_destination(self) -> Destination:
+        return Destination(self.destination.root, self.destination.path + "/references.tmp")
+
+    @property
+    def witness_destination(self) -> Destination:
+        directory = self.directory_destination
+        return Destination(directory.root, directory.path + "/stale.md")
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "StaleReferencesTmpPreparation":
+        data = fields(value, "kind destination")
+        if data["kind"] != cls.kind:
+            raise ValueError("Unsupported temporary references preparation")
+        return cls(Destination.from_data(data["destination"]))
+
+
 def preparation_from_data(
     value: object,
 ) -> (
@@ -264,6 +292,7 @@ def preparation_from_data(
     | PreserveSkillBackupPreparation
     | StaleVersionPreparation
     | StaleReferencePreparation
+    | StaleReferencesTmpPreparation
 ):
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
@@ -272,6 +301,7 @@ def preparation_from_data(
         return JsonHookPreparation.from_data(incoming)
     parsers = {
         "stale-reference": StaleReferencePreparation.from_data,
+        StaleReferencesTmpPreparation.kind: StaleReferencesTmpPreparation.from_data,
         "stale-version": StaleVersionPreparation.from_data,
         "preserve-skill-backup": PreserveSkillBackupPreparation.from_data,
         "missing-reference": MissingReferencePreparation.from_data,

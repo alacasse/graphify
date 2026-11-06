@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -47,6 +48,19 @@ def conduct_stale_reference(
                 (project / "personal-effect-1.txt").unlink()
         return result
 
+    result = run_retained_reference_case(root, subject, spec, context, execute)
+    return result, installer
+
+
+def run_retained_reference_case(
+    root: Path,
+    subject: Path,
+    spec: Path,
+    context: Path,
+    execute: Callable[[list[str], Path, dict[str, str], float], InstallerCommandResult],
+) -> InstallTestResult:
+    """Run the prepared case and reconstruct its result after removing live inputs."""
+    case_file = root / "case.json"
     result = InstallTestRunner(InstallerDriver(execute)).run_case(
         reference_sources=subject,
         prepared_executable=root / "controlled-executable",
@@ -59,4 +73,4 @@ def conduct_stale_reference(
     for path in (case_file, spec, context):
         path.unlink()
     assert read_evidence(root / "proof") == result
-    return result, installer
+    return result

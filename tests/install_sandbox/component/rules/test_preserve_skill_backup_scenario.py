@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from tests.install_sandbox.component.contracts.test_reference_contracts import (
+from tests.install_sandbox.component.contracts.reference_support import (
     reference_case,
     reference_sources,
 )

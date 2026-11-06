@@ -12,6 +12,7 @@ from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileReplacement,
     BoundMarkdownMutation,
     BoundMutation,
+    BoundStaleReferencesTmpCreation,
 )
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase, seeded_json_hook_group
 from tools.install_sandbox.contracts.effects import (
@@ -33,6 +34,7 @@ from tools.install_sandbox.contracts.intermediate import (
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
     StaleReferencePreparation,
+    StaleReferencesTmpPreparation,
     StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -450,6 +452,47 @@ class StaleReferenceScenario:
     case: EffectInstallCase
     sources: FilesystemSnapshot
 
+    def _witnesses(
+        self, case_digest: str, observation_ref: str
+    ) -> tuple[BoundFileCreation, tuple[Expectation, ...]]:
+        preparation = self.case.intermediate_preparation
+        if isinstance(preparation, StaleReferencesTmpPreparation):
+            directory = preparation.directory_destination
+            destination = preparation.witness_destination
+            operation = BoundStaleReferencesTmpCreation(
+                case_digest, observation_ref, destination, STALE_REFERENCE_CONTENT
+            )
+            return operation, (
+                Expectation(
+                    "directory",
+                    directory.root,
+                    directory.path,
+                    "intermediate",
+                    "rule:references_tmp",
+                ),
+                Expectation(
+                    "file",
+                    destination.root,
+                    destination.path,
+                    "intermediate",
+                    "case:stale-references-tmp-witness",
+                    STALE_REFERENCE_CONTENT,
+                ),
+            )
+        destination, _ = selected_stale_reference(self.case, self.sources)
+        return BoundFileCreation(
+            case_digest, observation_ref, destination, STALE_REFERENCE_CONTENT
+        ), (
+            Expectation(
+                "file",
+                destination.root,
+                destination.path,
+                "intermediate",
+                "case:stale-reference-witness",
+                STALE_REFERENCE_CONTENT,
+            ),
+        )
+
     def bind(
         self,
         first_after: FilesystemSnapshot,
@@ -460,31 +503,19 @@ class StaleReferenceScenario:
     ) -> PreparationPlan | PreparationBlocked:
         try:
             _validate_first_install(self.case, case_bytes, installed, first_after, validation)
-            destination, _ = selected_stale_reference(self.case, self.sources)
-            witness = STALE_REFERENCE_CONTENT
-            key = destination.root, destination.path
-            stale = Expectation(
-                "file", *key, "intermediate", "case:stale-reference-witness", witness
-            )
-            operation = BoundFileCreation(
-                hashlib.sha256(case_bytes).hexdigest(), observation_ref, destination, witness
+            operation, additions = self._witnesses(
+                hashlib.sha256(case_bytes).hexdigest(), observation_ref
             )
             operation.verify_binding(case_bytes, first_after)
-            intermediate = replace(
-                _transition(installed, first_after, (stale,), "intermediate"),
-                allowed_removals=(),
-            )
-            # The shared protocol replaces this predicted baseline with the observed,
-            # verified intermediate inventory before publishing effective expectations.
-            baseline = (
-                *preservation_baseline(first_after, "reinstall"),
-                replace(stale, phase="reinstall"),
-            )
+            intermediate = _transition(installed, first_after, additions, "intermediate")
             repaired = replace(
                 installed.in_phase("reinstall"),
                 allowed_changes=(),
-                baseline=baseline,
-                allowed_removals=(key,),
+                baseline=(
+                    *preservation_baseline(first_after, "reinstall"),
+                    *(replace(item, phase="reinstall") for item in additions),
+                ),
+                allowed_removals=tuple((item.root, item.path) for item in additions),
             )
             return PreparationPlan(operation, intermediate, repaired)
         except (ValueError, UnicodeError, StopIteration) as exc:
@@ -658,6 +689,7 @@ def repair_scenario_from_case(
         PreserveSkillBackupPreparation: PreserveSkillBackupScenario,
         StaleVersionPreparation: StaleVersionScenario,
         StaleReferencePreparation: StaleReferenceScenario,
+        StaleReferencesTmpPreparation: StaleReferenceScenario,
     }
     scenario = scenarios.get(type(preparation))
     if scenario is not None:

@@ -28,8 +28,9 @@ class EffectEnvironment(ObservedEnvironment):
         self.case = EffectInstallCase.from_json(case.to_json())
         self.project = directory / "project"
         self.home = directory / "home"
-        self.project.mkdir(parents=True, exist_ok=False)
-        self.home.mkdir(parents=True, exist_ok=False)
+        directory.mkdir(mode=0o700, parents=True)
+        self.project.mkdir()
+        self.home.mkdir()
 
     def prepare(self) -> None:
         for initial in self.case.initial_files:

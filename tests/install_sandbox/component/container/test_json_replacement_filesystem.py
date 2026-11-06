@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -11,6 +12,11 @@ import pytest
 from tools.install_sandbox.container import file_mutation
 from tools.install_sandbox.contracts.bound_mutation import BoundFileReplacement
 from tools.install_sandbox.contracts.effects import Destination
+
+pytestmark = pytest.mark.skipif(
+    os.name != "posix",
+    reason="requires POSIX dir_fd operations and O_DIRECTORY/O_NOFOLLOW",
+)
 
 
 def operation() -> BoundFileReplacement:
@@ -146,7 +152,7 @@ def test_capture_uses_pinned_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert captured.document_sha256 == hashlib.sha256(b"new").hexdigest()
 
 
-@pytest.mark.parametrize("fault", ["open-directory", "open-content", "write"])
+@pytest.mark.parametrize("fault", ["open", "write"])
 def test_staging_failure_cleans_owned_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
@@ -158,15 +164,12 @@ def test_staging_failure_cleans_owned_entries(
     def fail_open(
         target: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
     ) -> int:
-        if (fault == "open-directory" and str(target).startswith(".graphify-replacement-")) or (
-            fault == "open-content" and target == "content"
-        ):
+        if fault == "open" and str(target).startswith(".graphify-replacement-"):
             raise OSError("injected staging failure")
         return original_open(target, flags, mode, dir_fd=dir_fd)
 
     def fail_write(descriptor: int, content: bytes, mode: int) -> os.stat_result:
         if fault == "write":
-            os.close(descriptor)
             raise OSError("injected staging failure")
         return original_write(descriptor, content, mode)
 
@@ -178,7 +181,10 @@ def test_staging_failure_cleans_owned_entries(
     assert list(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file mode restrictions")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses POSIX file mode restrictions",
+)
 def test_readonly_original_is_not_replaced(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     path.write_bytes(b"old")
@@ -198,7 +204,7 @@ def test_shared_staging_file_is_rejected(
     write = file_mutation._write_replacement
 
     def linked_write(descriptor: int, content: bytes, mode: int) -> os.stat_result:
-        staged = next(tmp_path.glob(".graphify-replacement-*/content"))
+        staged = next(tmp_path.glob(".graphify-replacement-*"))
         if when == "before-write":
             os.link(staged, alias)
         info = write(descriptor, content, mode)
@@ -212,3 +218,251 @@ def test_shared_staging_file_is_rejected(
     assert path.read_bytes() == b"old"
     if when == "before-write":
         assert alias.read_bytes() == b""
+
+
+@pytest.fixture
+def opened_content(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    descriptors: list[int] = []
+    original_open = os.open
+
+    def track_open(
+        target: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        fd = original_open(target, flags, mode, dir_fd=dir_fd)
+        if str(target).startswith(".graphify-replacement-"):
+            descriptors.append(fd)
+        return fd
+
+    monkeypatch.setattr(os, "open", track_open)
+    return descriptors
+
+
+def assert_closed(descriptors: list[int]) -> None:
+    assert descriptors
+    for descriptor in descriptors:
+        with pytest.raises(OSError) as caught:
+            os.fstat(descriptor)
+        assert caught.value.errno == errno.EBADF
+
+
+def test_staging_stat_failure_cleans_owned_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened_content: list[int]
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"old")
+    original_stat = os.stat
+    error = OSError(errno.EIO, "injected staging stat failure")
+
+    def fail_stat(
+        target: str | os.PathLike[str] | int,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        if isinstance(target, str) and target.startswith(".graphify-replacement-"):
+            monkeypatch.setattr(os, "stat", original_stat)
+            raise error
+        return original_stat(target, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(os, "stat", fail_stat)
+    with pytest.raises(OSError) as caught:
+        file_mutation._replace_file(path, operation(), b"old")
+    assert caught.value is error
+    assert path.read_bytes() == b"old"
+    assert list(tmp_path.iterdir()) == [path]
+    assert_closed(opened_content)
+
+
+@pytest.mark.parametrize("directory", [False, True], ids=["file", "directory"])
+def test_substitution_before_initial_fstat_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened_content: list[int], directory: bool
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"old")
+    original_open = os.open
+    substitute: Path | None = None
+    identity: tuple[int, int] | None = None
+
+    def substitute_open(
+        target: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        nonlocal substitute, identity
+        descriptor = original_open(target, flags, mode, dir_fd=dir_fd)
+        if str(target).startswith(".graphify-replacement-"):
+            substitute = tmp_path / target
+            # Keep the staged inode linked so the substitution cannot be detected by nlink.
+            substitute.rename(tmp_path / "detached")
+            if directory:
+                substitute.mkdir()
+            else:
+                substitute.write_bytes(b"substitute")
+            info = substitute.stat()
+            identity = (info.st_dev, info.st_ino)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", substitute_open)
+    with pytest.raises(ValueError, match="replacement changed"):
+        file_mutation._replace_file(path, operation(), b"old")
+    assert substitute is not None
+    info = substitute.stat()
+    assert (info.st_dev, info.st_ino) == identity
+    if directory:
+        assert list(substitute.iterdir()) == []
+    else:
+        assert substitute.read_bytes() == b"substitute"
+    assert (tmp_path / "detached").read_bytes() == b""
+    assert path.read_bytes() == b"old"
+    assert_closed(opened_content)
+
+
+@pytest.mark.parametrize("permanent", [False, True], ids=["retry", "no-identity"])
+def test_initial_fstat_failure_preserves_error_and_closes_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened_content: list[int], permanent: bool
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"old")
+    original_fstat = os.fstat
+    error = OSError(errno.EIO, "injected initial fstat failure")
+    calls = 0
+
+    def fail_fstat(fd: int) -> os.stat_result:
+        nonlocal calls
+        if fd in opened_content:
+            calls += 1
+            if permanent or calls == 1:
+                raise error
+        return original_fstat(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fstat", fail_fstat)
+        with pytest.raises(OSError) as caught:
+            file_mutation._replace_file(path, operation(), b"old")
+    assert caught.value is error
+    assert path.read_bytes() == b"old"
+    assert_closed(opened_content)
+    staged = list(tmp_path.glob(".graphify-replacement-*"))
+    assert len(staged) == int(permanent)
+    if permanent:
+        assert staged[0].read_bytes() == b""
+
+
+def test_cached_identity_cleans_after_all_later_fstats_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened_content: list[int]
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"old")
+    original_fstat = os.fstat
+    error = OSError(errno.EIO, "injected later fstat failure")
+    calls = 0
+
+    def fail_fstat(fd: int) -> os.stat_result:
+        nonlocal calls
+        if fd in opened_content:
+            calls += 1
+            if calls > 1:
+                raise error
+        return original_fstat(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fstat", fail_fstat)
+        with pytest.raises(OSError) as caught:
+            file_mutation._replace_file(path, operation(), b"old")
+    assert caught.value is error
+    assert path.read_bytes() == b"old"
+    assert list(tmp_path.iterdir()) == [path]
+    assert_closed(opened_content)
+
+
+@pytest.mark.parametrize("write_fails", [False, True])
+def test_content_close_failure_aborts_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened_content: list[int], write_fails: bool
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"old")
+    original_close = os.close
+    close_error = OSError(errno.EIO, "injected content close failure")
+    write_error = OSError(errno.ENOSPC, "injected write failure")
+
+    def fail_close(fd: int) -> None:
+        original_close(fd)
+        if fd in opened_content:
+            raise close_error
+
+    def fail_write(descriptor: int, content: bytes, mode: int) -> os.stat_result:
+        raise write_error
+
+    if write_fails:
+        monkeypatch.setattr(file_mutation, "_write_replacement", fail_write)
+    monkeypatch.setattr(os, "close", fail_close)
+    with pytest.raises(OSError) as caught:
+        file_mutation._replace_file(path, operation(), b"old")
+    assert caught.value is (write_error if write_fails else close_error)
+    assert path.read_bytes() == b"old"
+    assert list(tmp_path.iterdir()) == [path]
+    assert_closed(opened_content)
+
+
+@pytest.mark.parametrize("write_fails", [False, True])
+def test_parent_close_failure_preserves_primary_write_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opened_content: list[int], write_fails: bool
+) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"old")
+    original_close = os.close
+    parent = tmp_path.stat()
+    write_error = OSError(errno.ENOSPC, "injected write failure")
+    closed: list[int] = []
+    close_error = OSError(errno.EIO, "injected parent close failure")
+
+    def fail_close(fd: int) -> None:
+        is_parent = os.path.samestat(os.fstat(fd), parent)
+        original_close(fd)
+        if is_parent:
+            closed.append(fd)
+            raise close_error
+
+    def fail_write(descriptor: int, content: bytes, mode: int) -> os.stat_result:
+        raise write_error
+
+    monkeypatch.setattr(os, "close", fail_close)
+    if write_fails:
+        monkeypatch.setattr(file_mutation, "_write_replacement", fail_write)
+    with pytest.raises(OSError) as caught:
+        file_mutation._replace_file(path, operation(), b"old")
+    assert caught.value is (write_error if write_fails else close_error)
+    assert len(closed) == 1
+    assert path.read_bytes() == (b"old" if write_fails else b"new")
+    assert list(tmp_path.iterdir()) == [path]
+    assert_closed([*opened_content, *closed])
+
+
+def test_traversal_close_failure_closes_each_opened_descriptor_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_open = os.open
+    original_close = os.close
+    opened: list[int] = []
+    closed: list[int] = []
+    error = OSError(errno.EIO, "injected traversal close failure")
+
+    def track_open(
+        target: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        descriptor = original_open(target, flags, mode, dir_fd=dir_fd)
+        opened.append(descriptor)
+        return descriptor
+
+    def fail_close(fd: int) -> None:
+        closed.append(fd)
+        original_close(fd)
+        if len(closed) == 1:
+            raise error
+
+    monkeypatch.setattr(os, "open", track_open)
+    monkeypatch.setattr(os, "close", fail_close)
+    with pytest.raises(OSError) as caught, file_mutation._pinned_parent(tmp_path / "settings.json"):
+        pytest.fail("traversal must fail before yielding")
+    assert caught.value is error
+    assert sorted(closed) == sorted(opened)
+    assert len(closed) == len(set(closed))
+    assert_closed(opened)

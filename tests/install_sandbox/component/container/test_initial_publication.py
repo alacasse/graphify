@@ -1,6 +1,8 @@
 """Initial preparation advances only across successfully published checkpoints."""
 
+import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ from tests.install_sandbox.component.container.test_step_publication import (
 )
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
+from tools.install_sandbox.container.installer import InstallerCommandResult
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
 from tools.install_sandbox.host.result_reader import read_evidence
@@ -25,6 +28,32 @@ CHECKPOINTS = (
     "verified",
     "ready",
 )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory permission bits")
+@pytest.mark.parametrize("umask", [0o000, 0o077])
+def test_case_environment_is_private_before_installer_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, umask: int
+) -> None:
+    subject = ControlledRun(tmp_path)
+    execute = subject.execute
+    modes: list[int] = []
+
+    def inspect_environment(
+        args: list[str], cwd: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        modes.append(stat.S_IMODE(cwd.parent.stat().st_mode))
+        return execute(args, cwd, environment, timeout)
+
+    monkeypatch.setattr(subject, "execute", inspect_environment)
+    previous_umask = os.umask(umask)
+    try:
+        result = subject.run()
+    finally:
+        os.umask(previous_umask)
+
+    assert result.status == "passed"
+    assert modes == [0o700, 0o700]
 
 
 @pytest.mark.parametrize("case_name", ["reinstall", "missing-section", "altered-section"])

@@ -5,7 +5,7 @@ import os
 import secrets
 import stat
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
@@ -204,11 +204,15 @@ def _pinned_parent(path: Path) -> Generator[int]:
     parent = os.open(path.anchor, flags)
     try:
         for part in path.parts[1:-1]:
-            child = os.open(part, flags, dir_fd=parent)
-            os.close(parent)
-            parent = child
+            previous = parent
+            parent = os.open(part, flags, dir_fd=previous)
+            os.close(previous)
         yield parent
-    finally:
+    except BaseException:
+        with suppress(OSError):
+            os.close(parent)
+        raise
+    else:
         os.close(parent)
 
 
@@ -225,43 +229,51 @@ def _regular_bytes(
         return info, stream.read()
 
 
+@contextmanager
+def _staged_replacement(
+    parent: int, content: bytes, mode: int
+) -> Generator[tuple[str, os.stat_result]]:
+    name = ".graphify-replacement-" + secrets.token_hex(16)
+    descriptor = os.open(
+        name, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=parent
+    )
+    identity = None
+    try:
+        identity = os.fstat(descriptor)
+        _validate_staged_file(parent, name, identity)
+        prepared = _write_replacement(descriptor, content, mode)
+    except BaseException:
+        try:
+            # Retry only if the first fstat failed. The open fd still identifies
+            # our inode even if someone already substituted the directory entry.
+            with suppress(OSError):
+                if identity is None:
+                    identity = os.fstat(descriptor)
+                _unlink_owned(parent, name, identity)
+        finally:
+            with suppress(OSError):
+                os.close(descriptor)
+        raise
+
+    try:
+        os.close(descriptor)
+        yield name, prepared
+    except BaseException:
+        with suppress(OSError):
+            _unlink_owned(parent, name, identity)
+        raise
+
+
 def _replace_file(path: Path, operation: BoundFileReplacement, retained: bytes) -> None:
     """Publish a new inode; never write through a possibly shared original inode."""
     with _pinned_parent(path) as parent:
         original, content = _regular_bytes(parent, path.name, writable=True)
         if content != retained:
             raise ValueError("File changed since validated observation")
-        private = ".graphify-replacement-" + secrets.token_hex(16)
-        os.mkdir(private, 0o700, dir_fd=parent)
-        private_info = os.stat(private, dir_fd=parent, follow_symlinks=False)
-        directory: int | None = None
-        staged_info: os.stat_result | None = None
-        try:
-            directory = os.open(
-                private, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
-            )
-            opened = os.fstat(directory)
-            if (opened.st_dev, opened.st_ino) != (private_info.st_dev, private_info.st_ino):
-                raise ValueError("Private staging directory changed")
-            descriptor = os.open(
-                "content",
-                os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=directory,
-            )
-            staged_info = os.fstat(descriptor)
-            prepared = _write_replacement(descriptor, operation.content, original.st_mode)
-            _validate_publication(parent, path.name, original, retained, directory, prepared)
+        with _staged_replacement(parent, operation.content, original.st_mode) as (name, prepared):
+            _validate_publication(parent, path.name, original, retained, name, prepared)
             # rename is atomic, but is not a compare-and-swap against an adversarial writer.
-            os.replace("content", path.name, src_dir_fd=directory, dst_dir_fd=parent)
-        finally:
-            if directory is not None:
-                try:
-                    if staged_info is not None:
-                        _unlink_owned(directory, "content", staged_info)
-                finally:
-                    os.close(directory)
-            _unlink_owned(parent, private, private_info, directory=True)
+            os.replace(name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
 
 
 def _validate_publication(
@@ -269,7 +281,7 @@ def _validate_publication(
     name: str,
     original: os.stat_result,
     retained: bytes,
-    directory: int,
+    staged_name: str,
     prepared: os.stat_result,
 ) -> None:
     current, content = _regular_bytes(parent, name)
@@ -278,20 +290,23 @@ def _validate_publication(
         original.st_ino,
     ) or content != retained:
         raise ValueError("File changed since validated observation")
-    staged = os.stat("content", dir_fd=directory, follow_symlinks=False)
+    _validate_staged_file(parent, staged_name, prepared)
+
+
+def _validate_staged_file(parent: int, name: str, expected: os.stat_result) -> None:
+    staged = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if not os.path.samestat(staged, expected):
+        raise ValueError("Prepared replacement changed")
     if staged.st_nlink != 1:
         raise ValueError("Prepared replacement is shared")
-    if (staged.st_dev, staged.st_ino) != (prepared.st_dev, prepared.st_ino):
-        raise ValueError("Prepared replacement changed before publication")
 
 
 def _write_replacement(descriptor: int, content: bytes, mode: int) -> os.stat_result:
-    with os.fdopen(descriptor, "w+b") as stream:
+    with os.fdopen(descriptor, "w+b", buffering=0, closefd=False) as stream:
         if os.fstat(stream.fileno()).st_nlink != 1:
             raise ValueError("Prepared replacement is shared")
         if stream.write(content) != len(content):
             raise ValueError("Incomplete settings replacement")
-        stream.flush()
         os.fchmod(stream.fileno(), stat.S_IMODE(mode))
         stream.seek(0)
         if stream.read() != content:
@@ -299,19 +314,10 @@ def _write_replacement(descriptor: int, content: bytes, mode: int) -> os.stat_re
         return os.fstat(stream.fileno())
 
 
-def _unlink_owned(
-    parent: int, name: str, expected: os.stat_result, *, directory: bool = False
-) -> None:
-    """Best-effort cleanup, without deleting a detected substituted entry."""
-    try:
-        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        if (current.st_dev, current.st_ino) == (expected.st_dev, expected.st_ino):
-            if directory:
-                os.rmdir(name, dir_fd=parent)
-            else:
-                os.unlink(name, dir_fd=parent)
-    except FileNotFoundError:
-        pass
+def _unlink_owned(parent: int, name: str, expected: os.stat_result) -> None:
+    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if os.path.samestat(current, expected):
+        os.unlink(name, dir_fd=parent)
 
 
 def capture_performed_mutation(

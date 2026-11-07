@@ -140,7 +140,7 @@ def _steps(
     progress: RepairProgress | None = None
     installed = expected
     for index, step in enumerate(result.steps):
-        if index and case.subject.group_install_invocations is not None:
+        if index and case.subject.group_installs is not None:
             if step.phase != "idle":
                 expected = build_group_expectations(case, sources, previous, roots, index)
         elif index:

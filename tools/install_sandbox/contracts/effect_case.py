@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict, cast
 
 from tools.install_sandbox.contracts.effects import (
+    Destination,
     EffectSpec,
     JsonHooksEffect,
     MarkdownSectionEffect,
@@ -66,6 +67,37 @@ class EffectRules:
 
 
 @dataclass(frozen=True)
+class GroupInstall:
+    invocation: tuple[str, ...]
+    destination: Destination
+
+    def __post_init__(self) -> None:
+        command = self.invocation
+        suffix = ("--project",) if self.destination.root == "project" else ()
+        if (
+            len(command) != 3 + len(suffix)
+            or command[:2] != ("install", "--platform")
+            or re.fullmatch(r"[a-z][a-z0-9-]*", command[2]) is None
+            or command[3:] != suffix
+        ):
+            raise ValueError("Unsupported grouped install command")
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "invocation": list(self.invocation),
+            "destination": {"root": self.destination.root, "path": self.destination.path},
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "GroupInstall":
+        data = fields(value, "invocation destination")
+        invocation = _optional_invocation(data["invocation"])
+        if invocation is None:
+            raise ValueError("Grouped install requires an explicit invocation")
+        return cls(invocation, Destination.from_data(data["destination"]))
+
+
+@dataclass(frozen=True)
 class SubjectContext:
     identity: str
     invocation: tuple[str, ...]
@@ -75,7 +107,7 @@ class SubjectContext:
     revision: str | None = None
     uninstall_invocation: tuple[str, ...] | None = None
     uninstall_user_skill_path: str | None = None
-    group_install_invocations: tuple[tuple[str, ...], ...] | None = None
+    group_installs: tuple[GroupInstall, ...] | None = None
 
     group_lock_destinations: tuple[str, ...] = ()
     purge_invocation: tuple[str, ...] | None = None
@@ -88,8 +120,8 @@ class SubjectContext:
             data.pop("uninstall_invocation")
         if self.uninstall_user_skill_path is None:
             data.pop("uninstall_user_skill_path")
-        if self.group_install_invocations is None:
-            data.pop("group_install_invocations")
+        if self.group_installs is None:
+            data.pop("group_installs")
         if not self.group_lock_destinations:
             data.pop("group_lock_destinations")
         if self.purge_invocation is None:
@@ -118,7 +150,7 @@ class SubjectContext:
             cast(str | None, data["revision"]),
             _optional_invocation(data["uninstall_invocation"]),
             cast(str | None, data["uninstall_user_skill_path"]),
-            _group_invocations(data["group_install_invocations"]),
+            _group_installs(data["group_installs"]),
             _group_lock_destinations(data),
             _optional_invocation(data["purge_invocation"]),
             _lock_destinations(data, "home_lock_destinations"),
@@ -137,15 +169,12 @@ def _optional_invocation(value: object) -> tuple[str, ...] | None:
     return arguments
 
 
-def _group_invocations(value: object) -> tuple[tuple[str, ...], ...] | None:
+def _group_installs(value: object) -> tuple[GroupInstall, ...] | None:
     if value is None:
         return None
-    if not isinstance(value, list) or len(cast(list[object], value)) not in {2, 3}:
-        raise ValueError("Grouped uninstall requires two or three install commands")
-    commands = tuple(_optional_invocation(item) for item in cast(list[object], value))
-    if any(command is None for command in commands):
-        raise ValueError("Grouped uninstall requires explicit install commands")
-    return cast(tuple[tuple[str, ...], ...], commands)
+    if not isinstance(value, list) or not value:
+        raise ValueError("Grouped uninstall requires at least one install command")
+    return tuple(GroupInstall.from_data(item) for item in cast(list[object], value))
 
 
 def _group_lock_destinations(data: dict[str, object]) -> tuple[str, ...]:
@@ -157,7 +186,7 @@ def _lock_destinations(data: dict[str, object], field: str) -> tuple[str, ...]:
     if not isinstance(raw, list):
         raise ValueError("Expected a list of project skill lock destinations")
     paths = tuple(relative_path(item) for item in cast(list[object], raw))
-    if paths and (data["group_install_invocations"] is None or len(set(paths)) != len(paths)):
+    if paths and (data["group_installs"] is None or len(set(paths)) != len(paths)):
         raise ValueError("Group lock destinations require a grouped case and unique paths")
     return paths
 
@@ -172,7 +201,7 @@ def _context_fields(value: object) -> dict[str, object]:
             "revision": None,
             "uninstall_invocation": None,
             "uninstall_user_skill_path": None,
-            "group_install_invocations": None,
+            "group_installs": None,
             "group_lock_destinations": [],
             "home_lock_destinations": [],
             "config_lock_destinations": [],
@@ -180,16 +209,16 @@ def _context_fields(value: object) -> dict[str, object]:
             **incoming,
         },
         "identity invocation version_source rules package_root revision uninstall_invocation "
-        "uninstall_user_skill_path group_install_invocations group_lock_destinations "
+        "uninstall_user_skill_path group_installs group_lock_destinations "
         "purge_invocation home_lock_destinations config_lock_destinations",
     )
-    if data["group_install_invocations"] is None and (
+    if data["group_installs"] is None and (
         (data["uninstall_invocation"] is None) != (data["uninstall_user_skill_path"] is None)
     ):
         raise ValueError("Uninstall requires an explicit command and HOME skill path together")
     if data["uninstall_user_skill_path"] is not None:
         relative_path(data["uninstall_user_skill_path"])
-    if data["purge_invocation"] is not None and data["group_install_invocations"] is None:
+    if data["purge_invocation"] is not None and data["group_installs"] is None:
         raise ValueError("Purge invocation requires an explicit global grouped case")
     root, revision = data["package_root"], data["revision"]
     if root is not None:
@@ -220,7 +249,7 @@ def _validate_hook_rules(effect: JsonHooksEffect, rules: EffectRules) -> None:
 def _validate_rules(spec: EffectSpec, subject: SubjectContext) -> None:
     rules = subject.rules
     if (
-        subject.group_install_invocations is None
+        subject.group_installs is None
         and sum(isinstance(effect, SkillEffect) for effect in spec.effects) > 1
     ):
         raise ValueError("Multiple skill effects require unavailable lock observation capability")
@@ -251,7 +280,21 @@ def _witness_available(
     )
 
 
-def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
+def _output_witness(files: list[InitialFile], preferred: str, content: str) -> InitialFile:
+    """Choose an output test file alongside the other declared personal files."""
+    occupied = {PurePosixPath(item["path"]) for item in files if item["root"] == "project"}
+    candidate = PurePosixPath(preferred)
+    path = candidate
+    index = 0
+    while path in occupied or any(path in other.parents for other in occupied):
+        index += 1
+        path = candidate.with_name(f"sandbox-{index}-{candidate.name}")
+    return {"root": "project", "path": str(path), "content": content}
+
+
+def effect_initial_files(
+    spec: EffectSpec, *, project_skill_witnesses: bool = True
+) -> list[InitialFile]:
     """Compose independent personal documents around each actual destination."""
     files: list[InitialFile] = []
     occupied = {(effect.destination.root, effect.destination.path) for effect in spec.effects}
@@ -318,7 +361,7 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
         ):
             occupied.add((opposite, destination.path))
             files.append({"root": opposite, "path": destination.path, "content": content})
-    if spec.scope == "user" and len(spec.effects) == 1:
+    if project_skill_witnesses and spec.scope == "user" and len(spec.effects) == 1:
         files.extend(_project_skill_witnesses(spec))
     return files
 
@@ -423,18 +466,28 @@ class EffectInstallCase:
         return "reinstall"
 
     @property
+    def group_skills(self) -> tuple[SkillEffect, ...]:
+        installs = self.subject.group_installs
+        if installs is None:
+            return ()
+        skills = {
+            effect.destination: effect
+            for effect in self.effects.effects
+            if isinstance(effect, SkillEffect)
+        }
+        return tuple(skills[install.destination] for install in installs)
+
+    @property
     def step_phases(self) -> tuple[str, ...]:
-        if self.subject.group_install_invocations is not None:
-            if len(self.subject.group_install_invocations) == 2:
-                return ("install", "install-user-2", self.second_phase)
-            return ("install", "install-project-1", "install-project-2", "uninstall")
+        if self.subject.group_installs is not None:
+            return tuple(self.operations)
         return ("install", self.second_phase)
 
     def invocation_for(self, operation: str) -> tuple[str, ...]:
-        if self.subject.group_install_invocations is not None:
-            for index, invocation in enumerate(self.subject.group_install_invocations):
-                if operation == f"install-group-{index}":
-                    return invocation
+        if self.subject.group_installs is not None:
+            for index, install in enumerate(self.subject.group_installs):
+                if operation == ("install" if index == 0 else f"install-group-{index}"):
+                    return install.invocation
         if operation == "install":
             return self.subject.invocation
         if operation == "uninstall" and self.subject.uninstall_invocation is not None:
@@ -504,7 +557,7 @@ def build_reinstall_case(
     spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
 ) -> EffectInstallCase:
     spec, subject = _validated_inputs(spec, subject)
-    if subject.group_install_invocations is not None:
+    if subject.group_installs is not None:
         raise ValueError("Grouped operations require a grouped case")
     return EffectInstallCase(
         "reinstall",
@@ -552,8 +605,8 @@ def build_effect_cases(
     spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
 ) -> EffectCaseBuild:
     """Derive cases and construction decisions in campaign order."""
-    if subject.group_install_invocations is not None:
-        if len(subject.group_install_invocations) == 2:
+    if subject.group_installs is not None:
+        if subject.uninstall_invocation == ("uninstall",):
             return EffectCaseBuild(_global_uninstall_cases(spec, subject, target))
         return EffectCaseBuild((_group_uninstall_case(spec, subject, target),))
     reinstall = build_reinstall_case(spec, subject, target)
@@ -678,36 +731,50 @@ def _uninstall_case(reinstall: EffectInstallCase) -> EffectInstallCase:
     )
 
 
+def _validated_group_skills(spec: EffectSpec, subject: SubjectContext) -> tuple[SkillEffect, ...]:
+    installs = subject.group_installs
+    assert installs is not None
+    skills = {
+        effect.destination: effect for effect in spec.effects if isinstance(effect, SkillEffect)
+    }
+    destinations = tuple(install.destination for install in installs)
+    commands = tuple(install.invocation for install in installs)
+    if (
+        len(skills) != len(spec.effects)
+        or len(destinations) != len(set(destinations))
+        or set(destinations) != set(skills)
+        or len(commands) != len(set(commands))
+        or subject.invocation != commands[0]
+        or subject.uninstall_user_skill_path is not None
+    ):
+        raise ValueError("Unsupported grouped uninstall composition or subject invocation")
+    return tuple(skills[destination] for destination in destinations)
+
+
+def _group_operations(subject: SubjectContext, final: str) -> list[str]:
+    assert subject.group_installs is not None
+    return [
+        "install",
+        *(f"install-group-{index}" for index in range(1, len(subject.group_installs))),
+        final,
+    ]
+
+
 def _group_uninstall_case(
     spec: EffectSpec, subject: SubjectContext, target: str
 ) -> EffectInstallCase:
-    """Declare ordered installations and group removal without platform dispatch."""
+    """Declare arbitrary ordered HOME and project installations with project removal."""
     spec, subject = _validated_inputs(spec, subject)
-    commands = subject.group_install_invocations
-    assert commands is not None
-    skills = spec.effects
+    skills = _validated_group_skills(spec, subject)
     if (
         spec.scope != "project"
         or subject.purge_invocation is not None
         or subject.home_lock_destinations
         or subject.config_lock_destinations
-        or len(skills) != 3
-        or not all(isinstance(effect, SkillEffect) for effect in skills)
-        or tuple(effect.destination.root for effect in skills) != ("home", "project", "project")
+        or {effect.destination.root for effect in skills} != {"home", "project"}
         or subject.uninstall_invocation != ("uninstall", "--project")
-        or subject.uninstall_user_skill_path is not None
-        or subject.invocation != commands[0]
     ):
         raise ValueError("Unsupported grouped uninstall composition or subject invocation")
-    for index, command in enumerate(commands):
-        expected_length = 3 if index == 0 else 4
-        if (
-            len(command) != expected_length
-            or command[:2] != ("install", "--platform")
-            or re.fullmatch(r"[a-z][a-z0-9-]*", command[2]) is None
-            or command[3:] != (() if index == 0 else ("--project",))
-        ):
-            raise ValueError("Unsupported grouped install command")
     witnesses: list[InitialFile] = [
         {
             "root": effect.destination.root,
@@ -716,21 +783,18 @@ def _group_uninstall_case(
         }
         for effect in skills
     ]
-    witnesses.append(
-        {
-            "root": "project",
-            "path": "graphify-out/personal.txt",
-            "content": "Personal graph output witness.\n",
-        }
+    initial = [*effect_initial_files(spec), *witnesses]
+    initial.append(
+        _output_witness(initial, "graphify-out/personal.txt", "Personal graph output witness.\n")
     )
     return EffectInstallCase(
-        name="group-uninstall-project",
-        target=text(target),
-        scope=spec.scope,
-        effects=spec,
-        subject=subject,
-        operations=["install-group-0", "install-group-1", "install-group-2", "uninstall"],
-        initial_files=[*effect_initial_files(spec), *witnesses],
+        "group-uninstall-project",
+        text(target),
+        spec.scope,
+        spec,
+        subject,
+        initial,
+        _group_operations(subject, "uninstall"),
     )
 
 
@@ -739,46 +803,30 @@ def _global_uninstall_cases(
 ) -> tuple[EffectInstallCase, ...]:
     """Pair ordinary global removal with its explicit output-purging variant."""
     spec, subject = _validated_inputs(spec, subject)
-    commands = subject.group_install_invocations
-    assert commands is not None
+    skills = _validated_group_skills(spec, subject)
     if (
         spec.scope != "user"
-        or len(spec.effects) != 2
-        or not all(
-            isinstance(effect, SkillEffect) and effect.destination.root == "home"
-            for effect in spec.effects
-        )
-        or subject.invocation != commands[0]
+        or any(effect.destination.root != "home" for effect in skills)
         or subject.uninstall_invocation != ("uninstall",)
         or subject.purge_invocation != ("uninstall", "--purge")
-        or subject.uninstall_user_skill_path is not None
-        or any(
-            len(command) != 3
-            or command[:2] != ("install", "--platform")
-            or re.fullmatch(r"[a-z][a-z0-9-]*", command[2]) is None
-            for command in commands
-        )
-        or commands[0][2] == commands[1][2]
     ):
         raise ValueError("Unsupported global uninstall composition or subject invocation")
-    initial = effect_initial_files(spec)
+    initial = effect_initial_files(spec, project_skill_witnesses=False)
     initial.extend(
         {
             "root": root,
             "path": effect.destination.path + "/personal.txt",
             "content": "Personal skill content to preserve.\n",
         }
-        for effect in spec.effects
+        for effect in skills
         for root in ("home", "project")
     )
-    initial.extend(
-        {"root": "project", "path": path, "content": content}
-        for path, content in (
-            ("graphify-out/personal.txt", "Graph output witness.\n"),
-            ("graphify-out/nested/result.json", '{"graph": "witness"}\n'),
-            ("personal-next-to-output.txt", "Personal output sibling.\n"),
-        )
-    )
+    for preferred, content in (
+        ("graphify-out/personal.txt", "Graph output witness.\n"),
+        ("graphify-out/nested/result.json", '{"graph": "witness"}\n'),
+        ("personal-next-to-output.txt", "Personal output sibling.\n"),
+    ):
+        initial.append(_output_witness(initial, preferred, content))
     ordinary = EffectInstallCase(
         "global-uninstall",
         text(target),
@@ -786,13 +834,11 @@ def _global_uninstall_cases(
         spec,
         subject,
         initial,
-        ["install-group-0", "install-group-1", "uninstall"],
+        _group_operations(subject, "uninstall"),
     )
     return (
         ordinary,
         replace(
-            ordinary,
-            name="global-uninstall-purge",
-            operations=["install-group-0", "install-group-1", "purge"],
+            ordinary, name="global-uninstall-purge", operations=_group_operations(subject, "purge")
         ),
     )

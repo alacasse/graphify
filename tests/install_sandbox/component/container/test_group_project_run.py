@@ -7,16 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.install_sandbox.component.container.group_run_support import grouped_cases
 from tests.install_sandbox.component.host.native_support import write
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
-from tools.install_sandbox.contracts.effect_case import (
-    EffectRules,
-    SubjectContext,
-    build_effect_cases,
-)
 from tools.install_sandbox.contracts.results import InstallTestResult
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 
 SPEC = (
@@ -41,15 +36,7 @@ def conduct_group(
             f"{platform} reference.\n",
         )
     write(subject / "METADATA", "Metadata-Version: 2.4\nName: controlled\nVersion: 8.7.6\n")
-    context = SubjectContext(
-        "controlled-group",
-        COMMANDS[0],
-        "METADATA",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
-        uninstall_invocation=COMMANDS[3],
-        group_install_invocations=COMMANDS[:3],
-    )
-    case = build_effect_cases(EffectSpecReader().read(SPEC), context).cases[0]
+    case = grouped_cases(root, SPEC, ("uninstall", "--project"))[0]
     case_file = root / "case.json"
     case.write(case_file)
     calls: list[list[str]] = []

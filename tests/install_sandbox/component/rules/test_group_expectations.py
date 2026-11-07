@@ -12,7 +12,7 @@ from tests.install_sandbox.component.contracts.reference_support import (
     reference_case,
     reference_sources,
 )
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase, GroupInstall
 from tools.install_sandbox.contracts.effects import Destination, EffectSpec, SkillEffect
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -44,6 +44,13 @@ def snapshot(
     )
 
 
+def member(destination: Destination) -> GroupInstall:
+    command = ("install", "--platform", destination.path)
+    if destination.root == "project":
+        command += ("--project",)
+    return GroupInstall(command, destination)
+
+
 def group_install() -> tuple[EffectInstallCase, FilesystemSnapshot]:
     case = replace(
         reference_case(),
@@ -52,8 +59,13 @@ def group_install() -> tuple[EffectInstallCase, FilesystemSnapshot]:
         subject=replace(
             reference_case().subject,
             group_lock_destinations=("other-project-skill",),
-            group_install_invocations=(("install",), ("install",), ("install",)),
+            uninstall_invocation=("uninstall", "--project"),
+            group_installs=tuple(
+                member(Destination(root, path))
+                for root, path in (("home", "user"), ("project", "agents"), ("project", "copilot"))
+            ),
         ),
+        operations=["install", "install-group-1", "install-group-2", "uninstall"],
         effects=EffectSpec(
             tuple(
                 SkillEffect("skill.md", "refs", Destination(root, path))
@@ -164,10 +176,11 @@ def test_global_uninstall_removes_both_home_payloads_and_exact_output_tree(purge
         reference_case(),
         name="global-uninstall-purge" if purge else "global-uninstall",
         intermediate_preparation=None,
-        operations=["install-group-0", "install-group-1", "purge" if purge else "uninstall"],
+        operations=["install", "install-group-1", "purge" if purge else "uninstall"],
         subject=replace(
             reference_case().subject,
-            group_install_invocations=(("install",), ("install",)),
+            uninstall_invocation=("uninstall",),
+            group_installs=tuple(member(Destination("home", path)) for path in ("first", "second")),
             home_lock_destinations=("other",),
             config_lock_destinations=("claude_config_dir/skills/graphify",),
         ),
@@ -247,3 +260,89 @@ def test_global_uninstall_removes_both_home_payloads_and_exact_output_tree(purge
             else snapshot(files, dirs | {key})
         )
         assert EffectVerifier().verify(expected, residual).mismatches
+
+
+def observed_group(
+    destinations: tuple[Destination, ...], installed: int, removed: set[Destination]
+) -> FilesystemSnapshot:
+    files = {(d.root, d.path + "/personal.txt"): b"neighbor" for d in destinations}
+    for destination in destinations[:installed]:
+        root, skill = destination.root, destination.path
+        digest = hashlib.sha256(f"{ROOTS[root]}/{skill}".encode()).hexdigest()[:16]
+        files[("home", f".cache/graphify/skill-locks/{digest}.lock")] = b""
+        if destination not in removed:
+            for suffix, value in {
+                "SKILL.md": b"skill",
+                ".graphify_version": b"1",
+                "references/a/nested.md": b"a",
+                "references/z.md": b"z",
+            }.items():
+                files[(root, f"{skill}/{suffix}")] = value
+    return snapshot(files)
+
+
+@pytest.mark.parametrize(("count", "project_removal"), [(1, False), (23, False), (23, True)])
+def test_dynamic_group_order_preserves_pending_prior_locks_and_neighbors(
+    count: int, project_removal: bool
+) -> None:
+    destinations = tuple(
+        Destination("project" if project_removal and index % 2 else "home", f"skill-{index}")
+        for index in range(count)
+    )
+    effects = tuple(SkillEffect("skill.md", "refs", destination) for destination in destinations)
+    case = replace(
+        reference_case(),
+        name="arbitrary-name",
+        intermediate_preparation=None,
+        operations=[
+            "install",
+            *(f"install-group-{index}" for index in range(1, count)),
+            "uninstall",
+        ],
+        subject=replace(
+            reference_case().subject,
+            group_installs=tuple(member(destination) for destination in destinations),
+            uninstall_invocation=("uninstall", "--project") if project_removal else ("uninstall",),
+        ),
+        # Effect declaration order must not become invocation order.
+        effects=EffectSpec(tuple(reversed(effects))),
+    )
+    before = observed_group(destinations, 0, set())
+    for index, current in enumerate(destinations):
+        expected = build_group_expectations(case, reference_sources(), before, ROOTS, index)
+        assert ExpectationSet.from_data(expected.to_data()) == expected
+        assert expected.lock_destination == current
+        assert EffectVerifier().verify(expected, before).mismatches
+        if index < count - 1:
+            with pytest.raises(ValueError, match="conforming prior"):
+                build_group_expectations(case, reference_sources(), before, ROOTS, index + 1)
+        after = observed_group(destinations, index + 1, set())
+        assert not EffectVerifier().verify(expected, after).mismatches
+        before = after
+
+    final = build_group_expectations(case, reference_sources(), before, ROOTS, count)
+    removed = {d for d in destinations if not project_removal or d.root == "project"}
+    after = observed_group(destinations, count, removed)
+    assert not EffectVerifier().verify(final, after).mismatches
+    for destination in destinations:
+        wrong_scope = observed_group(destinations, count, removed ^ {destination})
+        assert EffectVerifier().verify(final, wrong_scope).mismatches
+        damaged = dict(after.contents)
+        damaged[(destination.root, destination.path + "/personal.txt")] = b"changed"
+        assert EffectVerifier().verify(final, snapshot(damaged)).mismatches
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "install-group-0",
+        "install-group-01",
+        "install-group--1",
+        "install-group-1x",
+        "install-group-",
+        "install-project-1",
+    ],
+)
+def test_noncanonical_group_expectation_phase_is_rejected(phase: str) -> None:
+    with pytest.raises(ValueError, match="phase"):
+        ExpectationSet(phase, ())

@@ -15,11 +15,14 @@ _PHASES = {
     "intermediate",
     "reinstall",
     "uninstall",
-    "install-project-1",
-    "install-project-2",
-    "install-user-2",
     "purge",
 }
+
+
+def _valid_phase(phase: str) -> bool:
+    return phase in _PHASES or re.fullmatch(r"install-group-[1-9][0-9]*", phase) is not None
+
+
 _KINDS = {
     "file",
     "directory",
@@ -72,7 +75,7 @@ class Expectation:
 
     def __post_init__(self) -> None:
         _validate_values(self.content, self.baseline, self.marker, self.hooks)
-        if self.kind not in _KINDS or self.phase not in _PHASES or not self.provenance:
+        if self.kind not in _KINDS or not _valid_phase(self.phase) or not self.provenance:
             raise ValueError("Invalid expectation kind, phase or provenance")
         if self.path == ".":
             if self.root not in {"home", "project"}:
@@ -183,7 +186,7 @@ class ExpectationSet:
             or (self.new_skill_locks and self.phase not in {"uninstall", "purge"})
         ):
             raise ValueError("Expected explicit unique uninstall lock paths")
-        if self.phase not in _PHASES:
+        if not _valid_phase(self.phase):
             raise ValueError("Invalid expectations phase")
         if any(item.phase != self.phase for item in self.expectations + self.baseline):
             raise ValueError("Expectation phase differs from bundle phase")

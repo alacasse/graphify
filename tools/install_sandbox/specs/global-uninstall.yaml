@@ -1,11 +1,10 @@
 scope: user
-directory: .
-effects:
-  - kind: skill
-    source: skill-agents.md
-    references: skills/agents/references
-    destination: {root: home, path: .agents/skills/graphify}
-  - kind: skill
-    source: skill-copilot.md
-    references: skills/copilot/references
-    destination: {root: home, path: .copilot/skills/graphify}
+installations:
+  - spec: user/agents.yaml
+    invocation: [install, --platform, agents]
+  - spec: user/copilot.yaml
+    invocation: [install, --platform, copilot]
+  - spec: user/kimi.yaml
+    invocation: [install, --platform, kimi]
+  - spec: user/pi.yaml
+    invocation: [install, --platform, pi]

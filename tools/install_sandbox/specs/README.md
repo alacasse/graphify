@@ -74,7 +74,8 @@ The subject context is a separate JSON object with these required fields:
 - `identity`: declared subject identity.
 - `revision` and `package_root`: exact Git commit and package-relative source
   directory for a packaged subject; `package_root` is `graphify` for this product.
-- `invocation`: argument words following the prepared executable.
+- `invocation`: argument words following the prepared executable. Required for ordinary
+  target specs; compositions derive it from their first installation member.
 - `uninstall_invocation` (optional): explicit argument words for the targeted
   removal command, shaped as `["uninstall", "--platform", "NAME", "--project"]`,
   paired with `["install", "--platform", "NAME", "--project"]` using the same
@@ -356,34 +357,39 @@ separate from synthetic engine data. Simulated proofs do not qualify a real inst
 
 ## Group project uninstall composition
 
-`group-uninstall-project.yaml` declares three ordered skill effects: HOME Agents,
-PROJECT Agents and PROJECT Copilot. This is an explicit opt-in composition with
-one case, `group-uninstall-project`. Existing project and user specifications and
-subject contexts retain their catalogues and transport representation.
+`group-uninstall-project.yaml` is a composition manifest referencing the existing
+HOME Agents, PROJECT Agents and PROJECT Copilot target specifications. Pass it
+through the ordinary `--spec` option. A manifest has this exact structure:
 
-Supply the usual subject fields and rules, with these explicit commands:
-
-```json
-{
-  "invocation": ["install", "--platform", "agents"],
-  "group_install_invocations": [
-    ["install", "--platform", "agents"],
-    ["install", "--platform", "agents", "--project"],
-    ["install", "--platform", "copilot", "--project"]
-  ],
-  "uninstall_invocation": ["uninstall", "--project"]
-}
+```yaml
+scope: project
+installations:
+  - spec: user/agents.yaml
+    invocation: [install, --platform, agents]
+  - spec: agents.yaml
+    invocation: [install, --platform, agents, --project]
+  - spec: copilot.yaml
+    invocation: [install, --platform, copilot, --project]
 ```
 
-Omit `uninstall_user_skill_path` for this composition. Each ordered command binds
-to the effect at the same position; commands and effect data select behavior,
-never the target name. The three installs must succeed and verify in order before
-the group removal command runs. Initial skill payloads are absent, while personal
-files inside each skill tree, sibling documents and `graphify-out/personal.txt`
-provide preservation witnesses. All skill sources and reference inventories must
-be retained before the first command. The HOME installation and personal content
-must survive project removal. This composition does not qualify purge or HOME
-removal.
+Each relative member path resolves inside the manifest directory, including after
+symlink resolution. Members must be ordinary specifications declaring exactly one
+skill. The member scope and destination root must match its explicit invocation.
+The ordered entries bind commands to destinations without a platform registry or
+fixed member count. Duplicate or overlapping destinations are rejected.
+
+Supply the usual subject identity, sources and rules with
+`"uninstall_invocation": ["uninstall", "--project"]`. The host derives the context
+`invocation` from the first member; an optional matching value is accepted.
+Contradictory values and context-supplied `group_installs` or
+`group_install_invocations` are rejected. The generated case transport retains
+`group_installs`, each containing its `invocation` and `destination` (`root`, `path`),
+so replay retains the explicit association after the manifest disappears.
+
+All installs must succeed and verify before removal runs. All skill sources and
+reference inventories are retained before the first command. HOME installation,
+personal files, sibling documents and `graphify-out/personal.txt` must survive
+project removal. This composition does not qualify purge or HOME removal.
 
 For a product that takes persistent locks while sweeping additional skill
 directories, `group_lock_destinations` lists the permitted PROJECT-relative
@@ -393,27 +399,21 @@ are permitted during the final command. Existing files retain their type and byt
 
 ## Compare global uninstall with purge
 
-Use `global-uninstall.yaml` with the two HOME install commands in the same order
-as its skill effects. A full campaign with the following context fields runs
-`global-uninstall` and `global-uninstall-purge` in separate fresh environments:
+Use `global-uninstall.yaml` through `--spec`. This user-scope manifest references
+`user/agents.yaml`, `user/copilot.yaml`, `user/kimi.yaml` and `user/pi.yaml`, with
+an explicit install command per member. A full campaign uses these context fields:
 
 ```json
 {
-  "invocation": ["install", "--platform", "agents"],
-  "group_install_invocations": [
-    ["install", "--platform", "agents"],
-    ["install", "--platform", "copilot"]
-  ],
   "uninstall_invocation": ["uninstall"],
   "purge_invocation": ["uninstall", "--purge"]
 }
 ```
 
-Both cases install and verify the two skills before removal. They start with
-identical personal documents at HOME and PROJECT skill paths, a populated
-`PROJECT/graphify-out/` and a file alongside that directory. Ordinary removal
-must preserve the entire output tree. Purge must remove it, including its root.
-Both commands must remove the two HOME skill payloads and preserve the neighbors.
+`global-uninstall` and `global-uninstall-purge` run in separate fresh environments.
+Both install and verify all four skills before removal and preserve personal
+content and neighboring files. Ordinary removal preserves the complete PROJECT
+`graphify-out/` tree; purge removes it including its root.
 
 The pinned context may list optional sweep locks by their skill directories:
 `home_lock_destinations` relative to HOME, `group_lock_destinations` relative

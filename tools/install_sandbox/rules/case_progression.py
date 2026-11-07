@@ -21,8 +21,8 @@ class CaseShape:
 
     @classmethod
     def from_case(cls, case: EffectInstallCase) -> "CaseShape":
-        if len(case.operations) not in (2, 3, 4):
-            raise ValueError("A case requires between two and four ordered operations")
+        if len(case.operations) < 2:
+            raise ValueError("A case requires at least two ordered operations")
         return cls(tuple(case.operations), case.intermediate_preparation is not None)
 
 
@@ -43,7 +43,7 @@ class CaseDecision:
 def _validate_shape(shape: CaseShape, facts: CaseFacts) -> None:
     if (
         type(shape.operations) is not tuple
-        or len(shape.operations) not in (2, 3, 4)
+        or len(shape.operations) < 2
         or any(type(operation) is not str or not operation for operation in shape.operations)
         or type(shape.requires_repair) is not bool
         or type(facts.steps) is not tuple

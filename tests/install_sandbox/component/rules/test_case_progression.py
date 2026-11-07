@@ -220,7 +220,7 @@ def test_repair_dependencies(shape: CaseShape, facts: CaseFacts) -> None:
         evaluate(shape, facts)
 
 
-GROUP_OPERATIONS = ("install", "install-project-1", "install-project-2", "uninstall")
+GROUP_OPERATIONS = ("install", "install-group-1", "install-group-2", "uninstall")
 
 
 @pytest.mark.parametrize("completed", range(5))
@@ -274,3 +274,17 @@ def test_group_rejects_out_of_order_operation(index: int) -> None:
     )
     with pytest.raises(ValueError, match="preceding"):
         evaluate(CaseShape(GROUP_OPERATIONS, False), CaseFacts(READY, states))
+
+
+@pytest.mark.parametrize("count", [1, 23, 31])
+def test_dynamic_group_progression(count: int) -> None:
+    operations = ("install", *(f"install-group-{index}" for index in range(1, count)), "uninstall")
+    for completed in range(len(operations) + 1):
+        states = tuple(
+            replace(PASSED if index < completed else IDLE, operation=operation)
+            for index, operation in enumerate(operations)
+        )
+        decision = evaluate(CaseShape(operations, False), CaseFacts(READY, states))
+        assert decision.status == ("passed" if completed == len(operations) else "incomplete")
+        if completed < len(operations):
+            assert decision.segment == ("uninstallation" if completed == count else "installation")

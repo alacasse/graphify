@@ -1,12 +1,14 @@
 """Agents uninstall requires an independently declared, exact command and composition."""
 
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
 from tools.install_sandbox.contracts.effect_case import (
+    EffectInstallCase,
     EffectRules,
+    GroupInstall,
     SubjectContext,
     build_effect_cases,
     build_reinstall_case,
@@ -117,7 +119,14 @@ def grouped_context() -> SubjectContext:
     return replace(
         context(),
         invocation=commands[0],
-        group_install_invocations=commands,
+        group_installs=tuple(
+            GroupInstall(command, effect.destination)
+            for command, effect in zip(
+                commands,
+                EffectSpecReader().read(spec_path("group-uninstall-project")).effects,
+                strict=True,
+            )
+        ),
         uninstall_invocation=("uninstall", "--project"),
         uninstall_user_skill_path=None,
     )
@@ -129,10 +138,10 @@ def test_group_uninstall_constructs_ordered_commands_and_roundtrips() -> None:
     assert len(built.entries) == 1
     case = built.cases[0]
     assert case.name == "group-uninstall-project"
-    commands = grouped_context().group_install_invocations
+    commands = grouped_context().group_installs
     assert commands is not None
     assert [case.invocation_for(operation) for operation in case.operations] == [
-        *commands,
+        *(install.invocation for install in commands),
         ("uninstall", "--project"),
     ]
     assert case.second_phase == "uninstall"
@@ -149,8 +158,8 @@ def test_group_uninstall_rejects_incomplete_or_unsafe_declarations(mutation: str
     spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
     subject = grouped_context()
     if mutation == "missing-command":
-        assert subject.group_install_invocations is not None
-        subject = replace(subject, group_install_invocations=subject.group_install_invocations[:2])
+        assert subject.group_installs is not None
+        subject = replace(subject, group_installs=subject.group_installs[:2])
     elif mutation == "purge":
         subject = replace(subject, uninstall_invocation=("uninstall", "--project", "--purge"))
     else:
@@ -174,11 +183,22 @@ def test_reinstall_constructor_rejects_grouped_context() -> None:
 
 
 def global_context() -> SubjectContext:
-    commands = (("install", "--platform", "agents"), ("install", "--platform", "copilot"))
+    spec = EffectSpecReader().read(spec_path("global-uninstall"))
+    installs = tuple(
+        GroupInstall(
+            (
+                "install",
+                "--platform",
+                PurePosixPath(effect.destination.path).parts[0].removeprefix("."),
+            ),
+            effect.destination,
+        )
+        for effect in spec.effects
+    )
     return replace(
         grouped_context(),
-        invocation=commands[0],
-        group_install_invocations=commands,
+        invocation=installs[0].invocation,
+        group_installs=installs,
         uninstall_invocation=("uninstall",),
         purge_invocation=("uninstall", "--purge"),
         home_lock_destinations=(".agents/skills/graphify", ".copilot/skills/graphify"),
@@ -190,12 +210,11 @@ def test_global_pair_shares_state_and_declares_exact_commands() -> None:
     ordinary, purge = build_effect_cases(spec, global_context()).cases
     assert [ordinary.name, purge.name] == ["global-uninstall", "global-uninstall-purge"]
     assert ordinary.initial_files == purge.initial_files
-    assert ordinary.step_phases == ("install", "install-user-2", "uninstall")
-    assert purge.step_phases == ("install", "install-user-2", "purge")
+    assert ordinary.step_phases == tuple(ordinary.operations)
+    assert purge.step_phases == tuple(purge.operations)
     for case, final in ((ordinary, ("uninstall",)), (purge, ("uninstall", "--purge"))):
         assert [case.invocation_for(op) for op in case.operations] == [
-            ("install", "--platform", "agents"),
-            ("install", "--platform", "copilot"),
+            *(install.invocation for install in global_context().group_installs or ()),
             final,
         ]
         assert case.from_json(case.to_json()) == case
@@ -226,7 +245,7 @@ def test_global_purge_is_explicit_and_ordinary_multiskill_stays_unavailable() ->
             spec,
             replace(
                 subject,
-                group_install_invocations=None,
+                group_installs=None,
                 uninstall_invocation=None,
                 home_lock_destinations=(),
             ),
@@ -238,7 +257,12 @@ def test_global_purge_is_explicit_and_ordinary_multiskill_stays_unavailable() ->
     [
         {"purge_invocation": ("uninstall", "--project", "--purge")},
         {"uninstall_invocation": ("uninstall", "--platform", "agents")},
-        {"group_install_invocations": (("install", "--platform", "agents"),) * 2},
+        {
+            "group_installs": (
+                GroupInstall(("install", "--platform", "agents"), Destination("home", "same")),
+            )
+            * 2
+        },
         {"home_lock_destinations": ("../unsafe",)},
         {"home_lock_destinations": ("same", "same")},
     ],
@@ -268,3 +292,176 @@ def test_global_context_roundtrips_optional_locks_in_all_three_roots() -> None:
             ".copilot/skills/graphify",
         )
         assert restored.config_lock_destinations == ("claude_config_dir/skills/graphify",)
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 23])
+def test_global_arbitrary_cardinality_and_reordered_effects(count: int) -> None:
+    skills = tuple(
+        SkillEffect("skill.md", "refs", Destination("home", f"platform-{i}/skill"))
+        for i in range(count)
+    )
+    installs = tuple(
+        GroupInstall(("install", "--platform", f"platform-{i}"), skill.destination)
+        for i, skill in enumerate(skills)
+    )
+    subject = replace(global_context(), invocation=installs[0].invocation, group_installs=installs)
+    ordinary, purge = build_effect_cases(
+        EffectSpec(tuple(reversed(skills)), scope="user"), subject
+    ).cases
+    assert ordinary.group_skills == skills
+    assert ordinary.operations == [
+        "install",
+        *(f"install-group-{i}" for i in range(1, count)),
+        "uninstall",
+    ]
+    assert purge.operations[-1] == "purge"
+    assert ordinary.from_json(ordinary.to_json()) == ordinary
+    paths = [(item["root"], item["path"]) for item in ordinary.initial_files]
+    assert len(paths) == len(set(paths))
+
+
+def test_project_group_permits_arbitrary_installation_order() -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    subject = grouped_context()
+    assert subject.group_installs is not None
+    installs = tuple(reversed(subject.group_installs))
+    case = build_effect_cases(
+        spec, replace(subject, invocation=installs[0].invocation, group_installs=installs)
+    ).cases[0]
+    assert tuple(skill.destination for skill in case.group_skills) == tuple(
+        install.destination for install in installs
+    )
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "mismatch", "scope", "grammar"])
+def test_group_association_requires_bijection_and_scope_grammar(mutation: str) -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    subject = grouped_context()
+    assert subject.group_installs is not None
+    installs = subject.group_installs
+    with pytest.raises(ValueError):
+        if mutation == "missing":
+            installs = installs[:-1]
+        elif mutation == "duplicate":
+            installs = (*installs[:-1], installs[0])
+        elif mutation == "mismatch":
+            installs = (
+                replace(installs[0], destination=Destination("home", "other/skill")),
+                *installs[1:],
+            )
+        elif mutation == "scope":
+            installs = (
+                replace(installs[0], invocation=(*installs[0].invocation, "--project")),
+                *installs[1:],
+            )
+        else:
+            installs = (
+                replace(installs[0], invocation=("install", "--platform", "INVALID")),
+                *installs[1:],
+            )
+        build_effect_cases(
+            spec, replace(subject, invocation=installs[0].invocation, group_installs=installs)
+        )
+
+
+@pytest.mark.parametrize("count", [2, 3, 23])
+def test_project_group_arbitrary_cardinality(count: int) -> None:
+    skills = tuple(
+        SkillEffect(
+            "skill.md",
+            "refs",
+            Destination("home" if i == count - 1 else "project", f"platform-{i}/skill"),
+        )
+        for i in range(count)
+    )
+    installs = tuple(
+        GroupInstall(
+            (
+                "install",
+                "--platform",
+                f"platform-{i}",
+                *(() if skill.destination.root == "home" else ("--project",)),
+            ),
+            skill.destination,
+        )
+        for i, skill in enumerate(skills)
+    )
+    subject = replace(grouped_context(), invocation=installs[0].invocation, group_installs=installs)
+    case = build_effect_cases(EffectSpec(tuple(reversed(skills))), subject).cases[0]
+    assert case.group_skills == skills
+    assert len(case.operations) == count + 1
+    assert case.from_json(case.to_json()) == case
+
+
+def _assert_initial_files_can_be_prepared(case: EffectInstallCase, tmp_path: Path) -> None:
+    for item in case.initial_files:
+        path = tmp_path / item["root"] / item["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(item["content"])
+    for skill in case.group_skills:
+        path = tmp_path / skill.destination.root / skill.destination.path
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def test_global_output_sibling_avoids_mirrored_skill_directory(tmp_path: Path) -> None:
+    skill = SkillEffect("skill.md", "refs", Destination("home", "personal-next-to-output.txt"))
+    install = GroupInstall(("install", "--platform", "custom"), skill.destination)
+    subject = replace(global_context(), invocation=install.invocation, group_installs=(install,))
+    ordinary, purge = build_effect_cases(EffectSpec((skill,), scope="user"), subject).cases
+    _assert_initial_files_can_be_prepared(ordinary, tmp_path)
+    assert ordinary.initial_files == purge.initial_files
+    assert any(
+        item["path"] == "sandbox-1-personal-next-to-output.txt" for item in ordinary.initial_files
+    )
+    assert ordinary.from_json(ordinary.to_json()) == ordinary
+
+
+def test_project_output_witness_avoids_actual_skill_directory(tmp_path: Path) -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    subject = grouped_context()
+    assert subject.group_installs is not None
+    old = spec.effects[1]
+    assert isinstance(old, SkillEffect)
+    destination = Destination("project", "graphify-out/personal.txt")
+    spec = replace(
+        spec, effects=(spec.effects[0], replace(old, destination=destination), *spec.effects[2:])
+    )
+    installs = tuple(
+        replace(item, destination=destination) if item.destination == old.destination else item
+        for item in subject.group_installs
+    )
+    case = build_effect_cases(spec, replace(subject, group_installs=installs)).cases[0]
+    _assert_initial_files_can_be_prepared(case, tmp_path)
+    assert any(item["path"] == "graphify-out/sandbox-1-personal.txt" for item in case.initial_files)
+
+
+@pytest.mark.parametrize("path", ["graphify-out", "graphify-out/custom/skill"])
+def test_global_project_witnesses_inside_output_are_part_of_the_purge(
+    path: str, tmp_path: Path
+) -> None:
+    skill = SkillEffect("skill.md", "refs", Destination("home", path))
+    install = GroupInstall(("install", "--platform", "custom"), skill.destination)
+    subject = replace(global_context(), invocation=install.invocation, group_installs=(install,))
+    ordinary, purge = build_effect_cases(EffectSpec((skill,), scope="user"), subject).cases
+    assert ordinary.initial_files == purge.initial_files
+    _assert_initial_files_can_be_prepared(ordinary, tmp_path)
+    assert (tmp_path / "project" / path / "personal.txt").is_file()
+
+
+def test_project_skill_at_output_root_preserves_personal_witnesses(tmp_path: Path) -> None:
+    spec = EffectSpecReader().read(spec_path("group-uninstall-project"))
+    subject = grouped_context()
+    assert subject.group_installs is not None
+    old = spec.effects[1]
+    assert isinstance(old, SkillEffect)
+    destination = Destination("project", "graphify-out")
+    spec = replace(
+        spec, effects=(spec.effects[0], replace(old, destination=destination), *spec.effects[2:])
+    )
+    installs = tuple(
+        replace(item, destination=destination) if item.destination == old.destination else item
+        for item in subject.group_installs
+    )
+    case = build_effect_cases(spec, replace(subject, group_installs=installs)).cases[0]
+    _assert_initial_files_can_be_prepared(case, tmp_path)
+    assert len(list((tmp_path / "project/graphify-out").iterdir())) >= 2

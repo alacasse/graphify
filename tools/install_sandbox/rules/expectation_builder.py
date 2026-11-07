@@ -272,7 +272,7 @@ def build_install_expectations(
     before: FilesystemSnapshot,
     roots: dict[str, str],
 ) -> ExpectationSet:
-    if case.name in {"group-uninstall-project", "global-uninstall", "global-uninstall-purge"}:
+    if case.subject.group_installs is not None:
         return build_group_expectations(case, sources, before, roots, 0)
     _source_constraints(case, sources)
     baseline = preservation_baseline(before, "install")
@@ -575,17 +575,16 @@ def build_group_expectations(
     removes the declared project or HOME payloads and, for purge, the project
     output tree. Neighbors and persistent locks retain exact preservation.
     """
-    effects = case.effects.effects
-    global_case = case.name in {"global-uninstall", "global-uninstall-purge"}
-    final_index = 2 if global_case else 3
-    expected_roots = ("home", "home") if global_case else ("home", "project", "project")
+    effects = case.group_skills
+    global_case = case.subject.uninstall_invocation == ("uninstall",)
+    final_index = len(effects)
     if (
-        case.name not in {"group-uninstall-project", "global-uninstall", "global-uninstall-purge"}
+        case.subject.group_installs is None
+        or case.subject.uninstall_invocation not in {("uninstall",), ("uninstall", "--project")}
         or type(index) is not int
         or index not in range(final_index + 1)
-        or len(effects) != len(expected_roots)
-        or any(not isinstance(effect, SkillEffect) for effect in effects)
-        or tuple(effect.destination.root for effect in effects) != expected_roots
+        or not effects
+        or len(case.operations) != final_index + 1
     ):
         raise ValueError("Expected ordered project or HOME skill group operation")
     _source_constraints(case, sources)

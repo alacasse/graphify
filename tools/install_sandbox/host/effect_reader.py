@@ -6,10 +6,12 @@ from typing import cast
 
 import yaml
 
+from tools.install_sandbox.contracts.effect_case import GroupInstall
 from tools.install_sandbox.contracts.effects import (
     Destination,
     Effect,
     EffectSpec,
+    SkillEffect,
     effect_from_data,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
@@ -106,10 +108,56 @@ def _effect(value: object, directory: str) -> Effect:
 
 class EffectSpecReader:
     def read(self, path: Path) -> EffectSpec:
-        return self.from_yaml(path.read_text(encoding="utf-8"))
+        return self.read_campaign(path)[0]
+
+    def read_campaign(self, path: Path) -> tuple[EffectSpec, tuple[GroupInstall, ...] | None]:
+        raw = yaml.load(path.read_text(encoding="utf-8"), Loader=EffectLoader)
+        if not isinstance(raw, dict) or "installations" not in raw:
+            return self._from_data(cast(object, raw)), None
+        data = fields(cast(dict[str, object], raw), "scope installations")
+        scope = text(data["scope"])
+        if scope not in {"project", "user"}:
+            raise ValueError("Composition scope must be project or user")
+        members = data["installations"]
+        if not isinstance(members, list) or not members:
+            raise ValueError("Expected non-empty installations list")
+        base = path.resolve(strict=True).parent
+        resolved = tuple(self._member(member, base) for member in cast(list[object], members))
+        effects = tuple(effect for effect, _ in resolved)
+        installs = tuple(install for _, install in resolved)
+        roots = {effect.destination.root for effect in effects}
+        if scope == "user" and roots != {"home"}:
+            raise ValueError("User composition cannot contain project installs")
+        if scope == "project" and "project" not in roots:
+            raise ValueError("Project composition requires a project installation")
+        return EffectSpec(effects, scope), installs
+
+    def _member(self, value: object, base: Path) -> tuple[SkillEffect, GroupInstall]:
+        entry = fields(value, "spec invocation")
+        target = (base / relative_path(entry["spec"])).resolve(strict=True)
+        if not target.is_relative_to(base):
+            raise ValueError("Member spec escapes composition directory")
+        # A member must be a target specification, never another composition.
+        spec = self.from_yaml(target.read_text(encoding="utf-8"))
+        if len(spec.effects) != 1 or not isinstance(spec.effects[0], SkillEffect):
+            raise ValueError("Composition members require exactly one skill effect")
+        effect = spec.effects[0]
+        install = GroupInstall.from_data(
+            {
+                "invocation": entry["invocation"],
+                "destination": {"root": effect.destination.root, "path": effect.destination.path},
+            }
+        )
+        expected_scope = "project" if effect.destination.root == "project" else "user"
+        if spec.scope != expected_scope:
+            raise ValueError("Member scope contradicts install destination")
+        return effect, install
 
     def from_yaml(self, payload: str) -> EffectSpec:
-        data = fields(yaml.load(payload, Loader=EffectLoader), "scope directory effects")
+        return self._from_data(yaml.load(payload, Loader=EffectLoader))
+
+    def _from_data(self, value: object) -> EffectSpec:
+        data = fields(value, "scope directory effects")
         directory = text(data["directory"])
         if directory != ".":
             relative_path(directory)

@@ -8,6 +8,12 @@
 repos:
   - repo: local
     hooks:
+      - id: install-sandbox-catalog
+        name: Check staged install sandbox catalog against supported tools
+        entry: python3 scripts/check_install_sandbox_catalog.py
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: skillgen-check
         name: skillgen --check (generated skill artifacts are up to date)
         entry: python -m tools.skillgen --check

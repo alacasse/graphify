@@ -1,0 +1,16 @@
+name: Install sandbox catalog
+
+on:
+  pull_request:
+    branches: [feat/install-sandbox-v2]
+  push:
+    branches: [feat/install-sandbox-v2]
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - run: python3 scripts/check_install_sandbox_catalog.py

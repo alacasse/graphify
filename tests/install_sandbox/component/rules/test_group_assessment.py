@@ -365,3 +365,12 @@ def test_removal_preserves_previously_verified_backup_bytes() -> None:
     assert report["target"]["summary"] == "all_removed"
     assert report["target"]["preservation"] == "violated"
     assert any(m.path == "settings.json.graphify-bak" for m in verdict.mismatches)
+
+
+def test_hook_inspection_does_not_trust_bytes_for_non_file() -> None:
+    initial = snapshot((("project", "settings.json", document(("personal", 7))),))
+    observed = snapshot((("project", "settings.json", document(("personal", 7))),))
+    observed.entries[-1]["kind"] = "other"
+    facts = inspect(hook_effect(), initial, observed)
+    assert all(item.presence == "indeterminate" for item in facts.items)
+    assert facts.preservation == "indeterminate"

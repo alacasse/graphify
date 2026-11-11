@@ -133,7 +133,8 @@ def _inspect_json(
     document = None
     diagnostics: list[Diagnostic] = []
     items: tuple[ElementState, ...] = ()
-    if content is not None:
+    entry = observed.entry(root, path)
+    if entry is not None and entry["kind"] == "file" and content is not None:
         try:
             document = checks.read_json(content)
             items = _json_items(effect, document)

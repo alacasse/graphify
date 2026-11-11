@@ -296,3 +296,36 @@ def test_group_omitting_selected_tool_rejected_before_preparation(tmp_path: Path
     assert result.returncode == 2, result.stdout + result.stderr
     assert not (output / "preparation").exists()
     assert not (output / "evidence.zip").exists()
+
+
+def test_group_replay_rejects_non_file_with_retained_json(tmp_path: Path) -> None:
+    from tools.install_sandbox.host.campaign_replay import replay_campaign
+
+    subject, spec, context, request, _ = arrange_group(tmp_path, "none")
+    output = tmp_path / "output"
+    result = cli(subject, spec, context, output, "--request", str(request))
+    assert result.returncode == 0, result.stdout + result.stderr
+    original = output / "evidence.zip"
+    assert replay_campaign(original)["status"] == "partial_passed"
+    tampered = tmp_path / "non-file.zip"
+    observation = terminal_result(output)["steps"][-1]["retained"]["after"]
+    with zipfile.ZipFile(original) as source, zipfile.ZipFile(tampered, "w") as destination:
+        (name,) = [name for name in source.namelist() if name.endswith("/" + observation)]
+        snapshot_data = json.loads(source.read(name))
+        (entry,) = [
+            entry
+            for entry in snapshot_data["entries"]
+            if (entry["root"], entry["path"]) == ("project", ".birch/hooks.json")
+        ]
+        assert entry["kind"] == "file" and entry["content_file"]
+        entry["kind"] = "other"
+        for member in source.namelist():
+            destination.writestr(
+                member,
+                json.dumps(snapshot_data).encode() if member == name else source.read(member),
+            )
+    with pytest.raises(
+        ValueError,
+        match=r"project/\.birch/hooks\.json kind other forbids fields: content_file, sha256$",
+    ):
+        replay_campaign(tampered)

@@ -14,6 +14,14 @@ from tools.install_sandbox.contracts.results import (
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 
+_ENTRY_FIELDS = {"root", "path", "kind"}
+_KIND_FIELDS: dict[str, set[str]] = {
+    "file": {"content_file", "sha256"},
+    "directory": {"listing_complete"},
+    "unknown": set(),
+    "other": set(),
+}
+
 
 def safe_evidence_path(output_directory: Path, relative: str) -> Path:
     """Resolve a result-relative evidence reference without leaving its directory."""
@@ -111,22 +119,21 @@ def snapshot_entry(value: object, output: Path, reference: str) -> dict[str, obj
     if not isinstance(value, dict):
         raise ValueError("Invalid snapshot entry")
     entry = cast(dict[str, object], value)
-    if not {"root", "path", "kind"} <= entry.keys() or entry.keys() - {
-        "root",
-        "path",
-        "kind",
-        "content_file",
-        "sha256",
-        "listing_complete",
-    }:
+    if not _ENTRY_FIELDS.issubset(entry):
         raise ValueError("Invalid snapshot entry fields")
     root, path, kind = text(entry["root"]), text(entry["path"]), text(entry["kind"])
     if path != ".":
         relative_path(path)
     if root not in ({"subject"} if reference == "expected.json" else {"project", "home"}):
         raise ValueError("Invalid snapshot root")
-    if kind not in {"file", "directory", "unknown", "other"}:
+    allowed = _KIND_FIELDS.get(kind)
+    if allowed is None:
         raise ValueError("Invalid snapshot entry kind")
+    forbidden = entry.keys() - _ENTRY_FIELDS - allowed
+    if forbidden:
+        raise ValueError(
+            f"Snapshot {root}/{path} kind {kind} forbids fields: {', '.join(sorted(forbidden))}"
+        )
     if "listing_complete" in entry:
         boolean(entry["listing_complete"])
     check_content_binding(entry, output, reference)

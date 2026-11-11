@@ -220,7 +220,7 @@ def require_absent(
         )
 
 
-def _managed_hook(
+def managed_hook(
     hooks: tuple[HookExpectation, ...],
     event: str,
     group: dict[str, object],
@@ -247,7 +247,7 @@ def _personal_groups(
         group = cast(dict[str, object], raw)
         contents = group_hooks(group, event)
         personal = [
-            content for _, content in contents if not _managed_hook(hooks, event, group, content)
+            content for _, content in contents if not managed_hook(hooks, event, group, content)
         ]
         removed = len(personal) != len(contents)
         if removed and not personal and set(group) == {"matcher", "hooks"}:

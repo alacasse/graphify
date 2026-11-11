@@ -627,7 +627,7 @@ class JsonHookRepairScenario:
             seeded: dict[str, object] = {
                 "hooks": {target.event: [seeded_json_hook_group(effect, target, self.case.effects)]}
             }
-            if not target_group_preserved(seeded, parsed, target):
+            if not target_group_preserved(seeded, parsed, target, effect.hooks):
                 raise ValueError("Target hook must remain in its intact seeded personal group")
             prepared = prepared_hook_settings(
                 replace(effect, hooks=(target,)), document, preparation.kind

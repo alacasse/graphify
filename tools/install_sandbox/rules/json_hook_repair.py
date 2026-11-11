@@ -4,7 +4,7 @@ from typing import cast
 
 from tools.install_sandbox.contracts.effects import JsonHooksEffect
 from tools.install_sandbox.contracts.spec import HookExpectation
-from tools.install_sandbox.rules.comparison import group_hooks, json_equal, read_json
+from tools.install_sandbox.rules.comparison import group_hooks, json_equal, managed_hook, read_json
 from tools.install_sandbox.rules.lossless_json import encode_json
 
 
@@ -145,18 +145,23 @@ def repaired_json_preserved(
 
 
 def target_group_preserved(
-    before: dict[str, object], after: dict[str, object], target: HookExpectation
+    before: dict[str, object],
+    after: dict[str, object],
+    target: HookExpectation,
+    declared_hooks: tuple[HookExpectation, ...],
 ) -> bool:
-    """Keep the selected target in the initial mixed group with its witnesses."""
+    """Compare the selected group after excluding every declared effect member."""
 
     def personal_group(document: dict[str, object]) -> dict[str, object]:
-        group_index, hook_index = target_location(document, target)
+        group_index, _ = target_location(document, target)
         events = cast(dict[str, object], document["hooks"])
         groups = cast(list[dict[str, object]], events[target.event])
         group = dict(groups[group_index])
-        contents = list(cast(list[object], group["hooks"]))
-        del contents[hook_index]
-        group["hooks"] = contents
+        group["hooks"] = [
+            content
+            for _, content in group_hooks(group, target.event)
+            if not managed_hook(declared_hooks, target.event, group, content)
+        ]
         return group
 
     return json_equal(personal_group(before), personal_group(after))

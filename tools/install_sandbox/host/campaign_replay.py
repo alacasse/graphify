@@ -197,6 +197,35 @@ def _verify_case_bindings(cases: list[CampaignCase], binding: dict[str, str]) ->
             raise ValueError("Case did not run the prepared executable")
 
 
+def _verify_chronology(definition: CampaignDefinition, result: CampaignResult) -> None:
+    preparation = result.preparation
+    blocked = None
+    if preparation is None:
+        blocked = "Common preparation missing"
+    elif preparation.state != "completed":
+        blocked = "Common preparation not completed"
+    elif not preparation.cleanup_complete:
+        blocked = "Common preparation cleanup incomplete"
+    entries = {entry.key: entry for entry in result.cases}
+    for case in definition.built.cases:
+        entry = entries[case.key]
+        started = entry.state in {"running", "incomplete", "finished"} or entry.result is not None
+        if blocked:
+            if started:
+                raise ValueError(f"{blocked}; contradictory started CaseKey: {case.key.to_data()}")
+            continue
+        if entry.result is None:
+            blocked = (
+                f"Previous case {entry.state} without a container receipt ({case.key.to_data()})"
+            )
+        else:
+            container = entry.result.container
+            if not container.cleanup_complete:
+                blocked = f"Previous container cleanup incomplete ({case.key.to_data()})"
+            elif container.state == "interrupted":
+                blocked = f"Previous container interrupted ({case.key.to_data()})"
+
+
 def replay_directory(root: Path) -> dict[str, Any]:
     definition = define_campaign(read_json_evidence(root, "definition.json"), root)
     result = CampaignResult.from_definition(definition, root)
@@ -213,6 +242,7 @@ def replay_directory(root: Path) -> dict[str, Any]:
         _container(receipts["cleanup"]),
     )
     _replay_entries(root, definition, result, report, _object(receipts["cases"]))
+    _verify_chronology(definition, result)
     _verify_dependencies(root, receipts["preparation"])
     _replay_preparation(root, definition, report, result)
     derived = result.payload()

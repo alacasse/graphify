@@ -75,7 +75,7 @@ def _json(item: Expectation, current: bytes, result: VerificationResult) -> None
         if (
             item.kind == "json-hooks-seeded"
             and counts[0] == 1
-            and not target_group_preserved(before, after, item.hooks[0])
+            and not target_group_preserved(before, after, item.hooks[0], item.hooks)
         ):
             checks.mismatch(
                 result,

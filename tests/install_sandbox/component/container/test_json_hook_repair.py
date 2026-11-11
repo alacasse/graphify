@@ -49,7 +49,7 @@ def test_removal_keeps_observed_values_and_repair_can_use_existing_or_new_group(
     new_group = copy.deepcopy(prepared)
     new_group["hooks"]["Before"].append({"matcher": "Read", "hooks": [dict(TARGET.content)]})
     assert repaired_json_preserved(prepared, new_group, TARGET)
-    assert not target_group_preserved(original, new_group, TARGET)
+    assert not target_group_preserved(original, new_group, TARGET, EFFECT.hooks)
 
 
 @pytest.mark.parametrize("mutation", ["duplicate", "personal", "metadata", "type", "group"])
@@ -170,7 +170,7 @@ def test_parser_supported_deep_hook_values_survive_preparation_and_reinstall():
     assert nested in prepared_bytes
     assert removed_target_preserved(original, prepared, TARGET)
     assert repaired_json_preserved(prepared, original, TARGET)
-    assert target_group_preserved(original, read_json(source), TARGET)
+    assert target_group_preserved(original, read_json(source), TARGET, EFFECT.hooks)
     # The observation remains unchanged by shallow path mutations.
     assert json_equal(original, read_json(source))
     changed = read_json(prepared_bytes.replace(b"0.123456789123456789", b"0.1"))

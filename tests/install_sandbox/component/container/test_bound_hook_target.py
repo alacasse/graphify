@@ -117,3 +117,81 @@ def _reject_wrong_argv(proof: Path) -> None:
         with pytest.raises(ValueError):
             read_evidence(proof)
         (proof / "result.json").write_text(original)
+
+
+@pytest.mark.parametrize("lose_neighbor", [False, True])
+def test_same_group_declared_hooks_preserve_neighbor_through_repair_and_replay(
+    tmp_path: Path, lose_neighbor: bool
+) -> None:
+    subject, spec_path, context_path = arrange(tmp_path, skill=False, markdown=False)
+    effects = EffectSpecReader().read(spec_path).scopes[0].effects
+    assert effects is not None
+    original = effects.effects[0]
+    assert isinstance(original, JsonHooksEffect)
+    first = replace(original.hooks[0], id="A")
+    second = replace(original.hooks[1], id="B", matcher=first.matcher)
+    effect = replace(original, hooks=(first, second))
+    context = SubjectContext.from_data(json.loads(context_path.read_text()))
+    case = next(
+        case
+        for case in build_effect_cases(EffectSpec((effect,)), context).cases
+        if case.key.operation == "missing-json-hook" and case.key.member == "A"
+    )
+    case_file = tmp_path / "case.json"
+    case.write(case_file)
+    calls = 0
+    seeded_members: list[dict[str, object]] = []
+
+    def execute(
+        args: list[str], project: Path, environment: dict[str, str], timeout: float
+    ) -> InstallerCommandResult:
+        nonlocal calls
+        calls += 1
+        path = project / ".synthetic/config.json"
+        backup = path.with_name("config.json.graphify-bak")
+        if not backup.exists():
+            backup.write_bytes(path.read_bytes())
+        data = json.loads(path.read_text())
+        group = next(
+            group for group in data["hooks"][first.event] if group["matcher"] == first.matcher
+        )
+        if calls == 1:
+            seeded_members.extend(group["hooks"])
+            assert group["hooks"][0] == first.content
+            assert len(group["hooks"]) == 2
+            if lose_neighbor:
+                group["hooks"].pop(1)
+        else:
+            assert group["hooks"] == [seeded_members[1], second.content]
+        for hook in (first, second):
+            if hook.content not in group["hooks"]:
+                group["hooks"].append(dict(hook.content))
+        path.write_text(json.dumps(data) + "\n")
+        return InstallerCommandResult(args, str(project), "completed", 0, None)
+
+    proof = tmp_path / "proof"
+    result = InstallTestRunner(InstallerDriver(execute)).run_case(
+        reference_sources=subject,
+        prepared_executable=tmp_path / "executable",
+        case_file=case_file,
+        work_directory=tmp_path / "work",
+        output_directory=proof,
+    )
+    first_verification = result.steps[0].verification
+    assert first_verification is not None
+    if lose_neighbor:
+        assert result.status == "failed"
+        assert calls == 1
+        assert "user_content_lost" in {item.type for item in first_verification.mismatches}
+        assert not (proof / "intermediate/operation.json").exists()
+    else:
+        assert result.status == "passed"
+        assert calls == 2
+        assert first_verification.complete and not first_verification.mismatches
+        installed = json.loads((proof / "steps/0/after/project/.synthetic/config.json").read_text())
+        assert installed["hooks"][first.event][0]["hooks"] == [*seeded_members, second.content]
+        prepared = json.loads(
+            (proof / "intermediate/after/project/.synthetic/config.json").read_text()
+        )
+        assert prepared["hooks"][first.event][0]["hooks"] == [seeded_members[1], second.content]
+    assert read_evidence(proof) == result

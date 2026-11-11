@@ -285,21 +285,84 @@ def assert_targeted_mutation(archive_path: Path, report: dict[str, Any]) -> None
 
 @pytest.mark.parametrize("permuted", [False, True])
 def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: bool) -> None:
-    subject, spec, context = arrange(tmp_path, fault="permuted" if permuted else "none")
+    subject, spec, context = arrange(tmp_path, fault="permuted" if permuted else "layout")
+    data = yaml.safe_load(spec.read_text())
+    data["scopes"]["project"][1]["hooks"].append(
+        {
+            "id": "layout",
+            "event": "SessionStart",
+            "matcher": "FixtureLayout",
+            "content": {"type": "command", "command": "birch layout", "timeout": 10},
+        }
+    )
     if permuted:
-        data = yaml.safe_load(spec.read_text())
         data["scopes"]["project"].reverse()
-        spec.write_text(yaml.safe_dump(data))
+    spec.write_text(yaml.safe_dump(data))
     result = cli(subject, spec, context, tmp_path / "complete")
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / "complete/campaign.json").read_text())
     assert report["status"] == "passed" and report["passed"] is True
-    assert duplicate_keys(report) == EXPECTED_DUPLICATES
-    assert repair_keys(report) == EXPECTED_REPAIRS
+    assert duplicate_keys(report) == EXPECTED_DUPLICATES | {
+        ("birch", "project", "duplicate-json-hook", "assistant-hooks", "layout")
+    }
+    assert repair_keys(report) == EXPECTED_REPAIRS | {
+        ("birch", "project", operation, "assistant-hooks", "layout")
+        for operation in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
+    }
+    assert len([case for case in report["cases"] if case["construction"] == "constructed"]) == 14
+    archive_path = tmp_path / "complete/evidence.zip"
+    assert_permuted_target_archive(archive_path, report, permuted)
+    from tools.install_sandbox.host.campaign_replay import replay_campaign
+
+    assert replay_campaign(archive_path)["status"] == "passed"
     if not permuted:
         assert_campaign_rejects_missing_substituted_and_retargeted_proof(
-            tmp_path / "complete/evidence.zip", report, tmp_path
+            archive_path, report, tmp_path
         )
+
+
+def assert_permuted_target_archive(
+    archive_path: Path, report: dict[str, Any], permuted: bool
+) -> None:
+    """Undo the literal archived duplicate without sandbox mutation helpers."""
+    case = next(
+        case
+        for case in report["cases"]
+        if case["key"]
+        == {
+            "tool": "birch",
+            "scope": "project",
+            "operation": "duplicate-json-hook",
+            "effect_id": "assistant-hooks",
+            "member": "run",
+        }
+    )
+    prefix = case["output_directory"].rstrip("/") + "/"
+    with zipfile.ZipFile(archive_path) as archive:
+        target = "home/.birch/assistant.json"
+        before = json.loads(archive.read(prefix + f"steps/0/after/{target}"))
+        prepared = json.loads(archive.read(prefix + f"intermediate/after/{target}"))
+    locations = [
+        (group_index, member_index)
+        for group_index, group in enumerate(before["hooks"]["SessionStart"])
+        for member_index, member in enumerate(group["hooks"])
+        if member.get("command") == "birch run"
+    ]
+    assert locations == ([(1, 1)] if permuted else [(0, 0)])
+    group_index, member_index = locations[0]
+    observed = before["hooks"]["SessionStart"][group_index]["hooks"][member_index]
+    destinations = [
+        group
+        for group in prepared["hooks"]["SessionStart"]
+        if group.get("sandbox_personal") == "duplicate-destination"
+    ]
+    assert len(destinations) == 1
+    members = destinations[0]["hooks"]
+    assert len(members) == 3
+    assert members[0]["command"] == "python personal_duplicate_a.py"
+    assert members[2]["command"] == "python personal_duplicate_b.py"
+    assert json.dumps(members.pop(1), sort_keys=True) == json.dumps(observed, sort_keys=True)
+    assert json.dumps(prepared, sort_keys=True) == json.dumps(before, sort_keys=True)
 
 
 def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
@@ -307,11 +370,12 @@ def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
 ) -> None:
     from tools.install_sandbox.host.campaign_replay import replay_campaign
 
-    assert replay_campaign(archive_path)["status"] == "passed"
     targets = {
         case["key"]["effect_id"]: case
         for case in report["cases"]
-        if case["key"]["operation"] == "duplicate-json-hook" and case["key"]["scope"] == "project"
+        if case["key"]["operation"] == "duplicate-json-hook"
+        and case["key"]["scope"] == "project"
+        and case["key"]["member"] == "run"
     }
     victim = targets["assistant-hooks"]["output_directory"].rstrip("/") + "/"
     donor = targets["editor-hooks"]["output_directory"].rstrip("/") + "/"

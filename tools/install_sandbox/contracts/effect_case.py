@@ -37,24 +37,10 @@ class CaseKey:
     operation: str
     effect_id: str | None = None
     member: str | None = None
-    prepare: tuple[str, ...] = ()
-    remove: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for value in (self.tool, self.scope, self.operation):
             text(value)
-        if self.prepare or self.remove:
-            if self.operation != "group-uninstall" or not self.prepare or not self.remove:
-                raise ValueError("Ordered participants require a group-uninstall key")
-            if (
-                len(set(self.prepare)) != len(self.prepare)
-                or len(set(self.remove)) != len(self.remove)
-                or not set(self.remove) <= set(self.prepare)
-            ):
-                raise ValueError("Invalid ordered group participants")
-            for participant in self.prepare:
-                if len(participant.split(":")) != 2 or not all(participant.split(":")):
-                    raise ValueError("Expected participant tool:scope")
         if self.effect_id is not None:
             text(self.effect_id)
         if self.member is not None:
@@ -63,31 +49,28 @@ class CaseKey:
                 raise ValueError("Case member requires an effect ID")
 
     def to_data(self) -> dict[str, object]:
-        data = json.loads(json.dumps(asdict(self)))
-        if not self.prepare and not self.remove:
-            data.pop("prepare")
-            data.pop("remove")
-        return data
+        return json.loads(json.dumps(asdict(self)))
 
     @classmethod
     def from_data(cls, value: object) -> "CaseKey":
         if not isinstance(value, dict):
             raise ValueError("Expected case key object")
-        data = fields(
-            {"prepare": [], "remove": [], **cast(dict[str, object], value)},
-            "tool scope operation effect_id member prepare remove",
-        )
-        if not isinstance(data["prepare"], list) or not isinstance(data["remove"], list):
-            raise ValueError("Expected ordered participant arrays")
-        return cls(
+        incoming = cast(dict[str, object], value)
+        grouped = "prepare" in incoming or "remove" in incoming
+        names = "tool scope operation effect_id member" + (" prepare remove" if grouped else "")
+        data = fields(incoming, names)
+        key = (
             text(data["tool"]),
             text(data["scope"]),
             text(data["operation"]),
             cast(str | None, data["effect_id"]),
             cast(str | None, data["member"]),
-            tuple(text(item) for item in cast(list[object], data["prepare"])),
-            tuple(text(item) for item in cast(list[object], data["remove"])),
         )
+        if grouped:
+            return GroupCaseKey(
+                *key, prepare=_participants(data["prepare"]), remove=_participants(data["remove"])
+            )
+        return CaseKey(*key)
 
     @property
     def storage_id(self) -> str:
@@ -96,6 +79,29 @@ class CaseKey:
                 self.to_data(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
             ).encode()
         ).hexdigest()
+
+
+def _participants(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValueError("Expected ordered participant arrays")
+    return tuple(text(item) for item in cast(list[object], value))
+
+
+@dataclass(frozen=True, kw_only=True)
+class GroupCaseKey(CaseKey):
+    prepare: tuple[str, ...]
+    remove: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.operation != "group-uninstall" or not self.prepare or not self.remove:
+            raise ValueError("Ordered participants require a group-uninstall key")
+        if len(set(self.prepare)) != len(self.prepare) or len(set(self.remove)) != len(self.remove):
+            raise ValueError("Duplicate ordered group participants")
+        if not set(self.remove) <= set(self.prepare):
+            raise ValueError("Removed participants must have been prepared")
+        if any(len(p.split(":")) != 2 or not all(p.split(":")) for p in self.prepare):
+            raise ValueError("Expected participant tool:scope")
 
 
 class InitialFile(TypedDict):
@@ -462,6 +468,8 @@ class EffectInstallCase:
             return None
         from tools.install_sandbox.contracts.group_case import GroupPlan
 
+        if not isinstance(self.key, GroupCaseKey):
+            raise ValueError("Group participants require a grouped key")
         return GroupPlan(dict(self.participants), self.key.prepare, self.key.remove)
 
     @property

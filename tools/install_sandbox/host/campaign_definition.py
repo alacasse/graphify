@@ -11,6 +11,7 @@ from tools.install_sandbox.contracts.effect_case import (
     CaseNonConstruction,
     EffectCaseBuild,
     EffectInstallCase,
+    GroupCaseKey,
     SubjectContext,
     build_effect_cases,
     unique_object,
@@ -205,7 +206,7 @@ def _group_build(
         built = EffectCaseBuild(
             (
                 CaseNonConstruction(
-                    CaseKey(
+                    GroupCaseKey(
                         declaration.tool,
                         "group",
                         "group-uninstall",

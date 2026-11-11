@@ -172,8 +172,8 @@ def _test_diagnostics(test: InstallTestResult | None) -> list[str]:
             for participant, value in step.assessment.items():
                 assessment = cast(dict[str, object], value)
                 lines.append(
-                    f"  Step {index + 1} ({step.operation}), {participant}: {assessment['summary']}, "
-                    f"preservation {assessment['preservation']}"
+                    f"  Step {index + 1} ({step.operation}), {participant}: "
+                    f"{assessment['summary']}, preservation {assessment['preservation']}"
                 )
         verification = step.verification
         if verification is not None:

@@ -10,6 +10,7 @@ import pytest
 from tools.install_sandbox.contracts.effect_case import (
     EffectInstallCase,
     EffectRules,
+    GroupCaseKey,
     StepInvocation,
     SubjectContext,
 )
@@ -132,7 +133,7 @@ def test_archived_campaign_rebuilds_group_without_catalog_files(tmp_path: Path) 
     result = CampaignResult.from_definition(rebuilt, tmp_path / "output")
     assert result.scope == "partial"
     assert "group" in result.declared_scopes
-    assert result.cases[0].key is not None
+    assert isinstance(result.cases[0].key, GroupCaseKey)
     assert result.cases[0].key.prepare == prepare
 
 
@@ -216,6 +217,7 @@ def test_valid_group_without_required_capability_is_unconstructible(
     assert not definition.built.cases
     assert len(definition.built.decisions) == 1
     assert definition.built.decisions[0].classification == "unconstructible"
+    assert isinstance(definition.built.decisions[0].key, GroupCaseKey)
     assert definition.built.decisions[0].key.prepare == prepare
 
 
@@ -307,3 +309,22 @@ def test_redundant_group_effect_facts_preserve_json_types() -> None:
     transport["effects"]["effects"][-1]["hooks"][0]["content"]["timeout"] = 10.0
     with pytest.raises(ValueError, match="Group transport"):
         EffectInstallCase.from_json(json.dumps(transport))
+
+
+def test_ordinary_and_group_keys_keep_distinct_serialized_fields() -> None:
+    from dataclasses import asdict
+
+    from tools.install_sandbox.contracts.effect_case import CaseKey
+
+    ordinary = CaseKey("cedar", "project", "reinstall")
+    assert set(asdict(ordinary)) == {"tool", "scope", "operation", "effect_id", "member"}
+    assert CaseKey.from_data(ordinary.to_data()) == ordinary
+    grouped = GroupCaseKey(
+        "cedar",
+        "group",
+        "group-uninstall",
+        prepare=("cedar:project", "birch:project"),
+        remove=("birch:project",),
+    )
+    assert set(asdict(grouped)) == set(asdict(ordinary)) | {"prepare", "remove"}
+    assert CaseKey.from_data(grouped.to_data()) == grouped

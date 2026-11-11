@@ -8,6 +8,7 @@ from typing import Any, cast
 from tools.install_sandbox.contracts.effect_case import (
     CaseKey,
     EffectInstallCase,
+    GroupCaseKey,
     StepInvocation,
     SubjectContext,
     effect_initial_files,
@@ -97,7 +98,7 @@ def build_group_case(
     plan = (*installs, removals[0])
     return EffectInstallCase(
         "group-uninstall",
-        CaseKey(selected_tool, "group", "group-uninstall", prepare=prepare, remove=remove),
+        GroupCaseKey(selected_tool, "group", "group-uninstall", prepare=prepare, remove=remove),
         subject.identity,
         "group",
         effects,
@@ -111,6 +112,8 @@ def build_group_case(
 
 def group_from_data(data: dict[str, Any]) -> EffectInstallCase:
     key = CaseKey.from_data(data["key"])
+    if not isinstance(key, GroupCaseKey):
+        raise ValueError("Group participants require a grouped key")
     if not isinstance(data["participants"], list):
         raise ValueError("Invalid group participant transport")
     raw = cast(list[object], data["participants"])

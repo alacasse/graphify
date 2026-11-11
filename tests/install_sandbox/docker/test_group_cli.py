@@ -3,6 +3,7 @@
 import json
 import shutil
 import zipfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -115,10 +116,8 @@ def evidence_lines(output: Path) -> list[dict[str, Any]]:
         lines: list[dict[str, Any]] = []
         for name in sorted(stdout):
             for line in archive.read(name).decode().splitlines():
-                try:
+                with suppress(json.JSONDecodeError):
                     lines.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
         return lines
 
 
@@ -151,6 +150,23 @@ def replay_without_subject(
     return replay_campaign(moved)
 
 
+def assert_removed_members_preserve_personal_commands(final: dict[str, Any]) -> None:
+    for participant in REMOVE:
+        document = json.loads(final[participant])
+        members = [
+            member
+            for groups in document["hooks"].values()
+            for group in groups
+            for member in group["hooks"]
+        ]
+        assert any(
+            member.get("command") == "python personal_graphify_audit.py" for member in members
+        )
+        assert not any(
+            member.get("command", "").startswith(("cedar ", "birch ")) for member in members
+        )
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_group_exact_commands_order_disk_and_autonomous_replay(
     tmp_path: Path, reverse: bool
@@ -176,20 +192,7 @@ def test_group_exact_commands_order_disk_and_autonomous_replay(
     assert final["cedar:receipt"] is None
     for participant in PREPARE:
         assert final[participant + ":backup"] == observed[2][participant + ":backup"]
-    for participant in REMOVE:
-        document = json.loads(final[participant])
-        members = [
-            member
-            for groups in document["hooks"].values()
-            for group in groups
-            for member in group["hooks"]
-        ]
-        assert any(
-            member.get("command") == "python personal_graphify_audit.py" for member in members
-        )
-        assert not any(
-            member.get("command", "").startswith(("cedar ", "birch ")) for member in members
-        )
+    assert_removed_members_preserve_personal_commands(final)
     assessment = terminal_assessment(output)
     assert assessment["cedar:user"]["preservation"] == "preserved"
     assert assessment["cedar:user"]["summary"] == "none_removed"
@@ -219,6 +222,21 @@ def test_group_second_prepare_failure_prevents_dependents(tmp_path: Path, fault:
         assert observed[-1]["cedar:user"] == {"error": 2}
 
 
+def assert_interrupted_disk(observed: list[dict[str, Any]], fault: str) -> None:
+    if fault in ("partial-signal", "between-signal"):
+        assert observed[-1]["cedar:project"] == observed[2]["cedar:project"]
+        assert observed[-1]["cedar:user"] == observed[2]["cedar:user"]
+        members = [
+            member
+            for group in json.loads(observed[-1]["birch:project"])["hooks"].get("SessionStart", [])
+            for member in group["hooks"]
+        ]
+        assert not any(member["command"] == "birch first" for member in members)
+        assert any(member["command"] == "birch second" for member in members) == (
+            fault == "partial-signal"
+        )
+
+
 @pytest.mark.parametrize(
     "fault",
     [
@@ -238,18 +256,7 @@ def test_group_faults_preserve_observed_disk_and_fail(tmp_path: Path, fault: str
     lines = evidence_lines(output)
     assert len([line for line in lines if "fixture_invocation" in line]) == 4
     observed = [line["disk_oracle"] for line in lines if "disk_oracle" in line]
-    if fault in ("partial-signal", "between-signal"):
-        assert observed[-1]["cedar:project"] == observed[2]["cedar:project"]
-        assert observed[-1]["cedar:user"] == observed[2]["cedar:user"]
-        members = [
-            member
-            for group in json.loads(observed[-1]["birch:project"])["hooks"].get("SessionStart", [])
-            for member in group["hooks"]
-        ]
-        assert not any(member["command"] == "birch first" for member in members)
-        assert any(member["command"] == "birch second" for member in members) == (
-            fault == "partial-signal"
-        )
+    assert_interrupted_disk(observed, fault)
     assessment = terminal_assessment(output)
     if fault in ("partial-signal", "between-signal"):
         command = terminal_result(output)["steps"][-1]["facts"]["command"]

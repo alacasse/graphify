@@ -346,13 +346,6 @@ class CampaignResult:
 
 
 def _campaign_fields(fields: list[tuple[str, object]]) -> dict[str, object]:
-    values = dict(fields)
-    if (
-        set(values) == {"tool", "scope", "operation", "effect_id", "member", "prepare", "remove"}
-        and not values["prepare"]
-        and not values["remove"]
-    ):
-        fields = [(key, value) for key, value in fields if key not in {"prepare", "remove"}]
     return {
         key: value for key, value in fields if key != "dependency_preparation" or value is not None
     }

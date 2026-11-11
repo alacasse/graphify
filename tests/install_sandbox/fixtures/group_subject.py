@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -83,6 +84,11 @@ def apply_removal_fault(fault):
         shutil.rmtree(Path(os.environ["HOME"]))
 
 
+def interrupt_after_observation():
+    observer = [sys.executable, __file__, "--interrupt-installer", str(os.getpid())]
+    subprocess.run(observer, check=True)
+
+
 def uninstall(participant, fault):
     destination = paths()[participant]
     document = json.loads(destination.read_text())
@@ -90,8 +96,9 @@ def uninstall(participant, fault):
     managed = "birch " if participant.startswith("birch:") else "cedar "
     if participant == "birch:project" and fault == "partial-signal":
         members[:] = [member for member in members if member["command"] != "birch first"]
-    else:
-        members[:] = [member for member in members if not member["command"].startswith(managed)]
+        destination.write_text(json.dumps(document) + "\n")
+        interrupt_after_observation()
+    members[:] = [member for member in members if not member["command"].startswith(managed)]
     if not members:
         document["hooks"].pop("SessionStart")
     if fault == "lost-personal":
@@ -100,9 +107,9 @@ def uninstall(participant, fault):
     apply_removal_fault(fault)
     if participant == "cedar:project":
         (Path.cwd() / ".cedar/receipt.txt").unlink()
+    if fault == "between-signal":
+        interrupt_after_observation()
     oracle()
-    if fault in ("partial-signal", "between-signal"):
-        os.kill(os.getpid(), signal.SIGTERM)
 
 
 def main():
@@ -116,3 +123,10 @@ def main():
     for participant in argv[1:]:
         uninstall(participant, fault)
     return 0
+
+
+if __name__ == "__main__" and sys.argv[1:2] == ["--interrupt-installer"]:
+    installer_pid = int(sys.argv[2])
+    oracle()
+    if installer_pid == os.getppid():
+        os.kill(installer_pid, signal.SIGTERM)

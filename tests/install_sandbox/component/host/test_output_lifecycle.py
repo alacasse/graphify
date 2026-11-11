@@ -84,6 +84,11 @@ def test_refusal_has_report_without_starting_docker(tmp_path: Path) -> None:
     assert not (tmp_path / "out").exists()
     assert result.report.writers == [] and result.report.execution == {}
     assert result.report.finished_at is None
+    assert result.report.payload()["preservation_check_roots"] == ["home", "project"]
+    assert result.report.render().splitlines()[:2] == [
+        "Execution has not started.",
+        "Filesystem preservation checks cover the isolated HOME and PROJECT directories.",
+    ]
 
 
 def test_existing_internal_destination_is_never_modified(tmp_path: Path) -> None:
@@ -156,5 +161,6 @@ def test_failed_case_is_archived_after_confirmed_writer_cleanup(
     assert all(writer.state == "stopped" for writer in result.report.writers)
     with zipfile.ZipFile(result.output_directory / "evidence.zip") as archive:
         payload = json.loads(archive.read("evidence/campaign.json"))
+    assert "preservation_check_roots" not in payload
     reinstall = next(case for case in payload["cases"] if case["name"] == "reinstall")
     assert payload["passed"] is False and reinstall["result"]["test"]["status"] == "passed"

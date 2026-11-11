@@ -13,6 +13,13 @@ from typing import cast
 from tools.install_sandbox.contracts.results import EvidenceWriteError
 from tools.install_sandbox.host.coordinator import CampaignResult
 from tools.install_sandbox.host.timing_report import render_campaign
+from tools.install_sandbox.rules.effect_verifier import PRESERVATION_CHECK_ROOTS
+
+
+_PRESERVATION_COVERAGE = (
+    "Filesystem preservation checks cover the isolated "
+    f"{' and '.join(root.upper() for root in PRESERVATION_CHECK_ROOTS)} directories."
+)
 
 
 @dataclass
@@ -43,7 +50,7 @@ class OutputReport:
     writers: list[Writer] = field(default_factory=list[Writer])
     diagnostics: list[str] = field(default_factory=list[str])
     execution: dict[str, object] = field(default_factory=dict[str, object])
-    execution_text: str = "Execution has not started.\n"
+    execution_text: str = f"Execution has not started.\n{_PRESERVATION_COVERAGE}\n"
 
     def observe(self, result: CampaignResult) -> None:
         # Export references, never mutate the raw coordinator result or its readers.
@@ -52,15 +59,19 @@ class OutputReport:
         self.execution = cast(
             dict[str, object], relative_values(self.execution, result.output_directory, "evidence")
         )
-        self.execution_text = render_campaign(result).replace(
-            str(result.output_directory), "evidence"
-        )
+        self.execution_text = render_campaign(
+            result, preservation_coverage=_PRESERVATION_COVERAGE
+        ).replace(str(result.output_directory), "evidence")
 
     def payload(self) -> dict[str, object]:
         lifecycle = asdict(self)
         lifecycle.pop("execution")
         lifecycle.pop("execution_text")
-        return {**self.execution, "output_lifecycle": {"version": 1, **lifecycle}}
+        return {
+            **self.execution,
+            "preservation_check_roots": list(PRESERVATION_CHECK_ROOTS),
+            "output_lifecycle": {"version": 1, **lifecycle},
+        }
 
     def render(self) -> str:
         return (

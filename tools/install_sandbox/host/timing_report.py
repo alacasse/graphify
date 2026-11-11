@@ -69,7 +69,7 @@ def _coverage_lines(result: CampaignResult) -> list[str]:
     return lines
 
 
-def render_campaign(result: CampaignResult) -> str:
+def render_campaign(result: CampaignResult, *, preservation_coverage: str | None = None) -> str:
     preparation = result.preparation
     cleanup = result.cleanup
     lines = [
@@ -90,6 +90,8 @@ def render_campaign(result: CampaignResult) -> str:
         "Common phases (counted once):",
         *[_line(record) for record in result.timings],
     ]
+    if preservation_coverage is not None:
+        lines.insert(1, preservation_coverage)
     lines = _coverage_lines(result) + lines
     dependencies = preparation.dependency_preparation if preparation else None
     lines.append(f"Dependency mode: {dependencies.mode if dependencies else 'unavailable'}")

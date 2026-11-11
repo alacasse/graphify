@@ -266,12 +266,18 @@ def test_interruption_before_first_progress_retains_explicit_selection(
     assert report["omitted_cases"] == omitted
     assert report["executed_cases"] == []
     assert report["interrupted"] is True
-    assert report["output_lifecycle"]["archive"] == "absent"
-    assert report["output_lifecycle"]["raw_evidence"] is False
+    assert (
+        report["output_lifecycle"]["archive"] == "absent"
+        and report["output_lifecycle"]["raw_evidence"] is False
+    )
     assert not (output / "evidence.zip").exists()
-    assert report["status"] == "partial_incomplete"
-    assert report["passed"] is False
+    assert report["status"] == "partial_incomplete" and report["passed"] is False
+    assert report["preservation_check_roots"] == ["home", "project"]
     text = (output / "campaign.txt").read_text()
+    assert (
+        "Campaign passed: False\n"
+        "Filesystem preservation checks cover the isolated HOME and PROJECT directories."
+    ) in text
     assert "Interrupted: True" in text
     assert "Requested cases: " + ", ".join(requested) in text
     assert "Omitted cases (not selected): " + ", ".join(omitted) in text

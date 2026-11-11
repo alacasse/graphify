@@ -17,6 +17,7 @@ from tools.install_sandbox.host.docker_runtime import ContainerRunResult
 from tools.install_sandbox.host.evidence_reader import json_list, read_json_evidence
 from tools.install_sandbox.host.preparation_reader import read_preparation, retained_inputs
 from tools.install_sandbox.host.result_reader import read_evidence
+from tools.install_sandbox.rules.effect_verifier import PRESERVATION_CHECK_ROOTS
 
 
 def _require(actual: object, expected: object, location: str) -> None:
@@ -264,7 +265,7 @@ def replay_directory(root: Path) -> dict[str, Any]:
         "request",
     ):
         _require(report[field], derived[field], field)
-    return report
+    return {**report, "preservation_check_roots": list(PRESERVATION_CHECK_ROOTS)}
 
 
 def _count_paths(path: PurePosixPath, allocated: set[PurePosixPath], limit: int) -> None:

@@ -26,6 +26,7 @@ from tools.install_sandbox.contracts.intermediate import (
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
+from tools.install_sandbox.rules.effect_verifier import PRESERVATION_CHECK_ROOTS
 
 
 def retained_bytes(snapshot: FilesystemSnapshot, root: str, path: str) -> bytes:
@@ -196,7 +197,7 @@ def _allowed(constraints: tuple[Expectation, ...]) -> tuple[tuple[str, str], ...
 
 
 def preservation_baseline(snapshot: FilesystemSnapshot, phase: str) -> tuple[Expectation, ...]:
-    _complete(snapshot, ("home", "project"))
+    _complete(snapshot, PRESERVATION_CHECK_ROOTS)
     return tuple(
         Expectation(
             e["kind"],

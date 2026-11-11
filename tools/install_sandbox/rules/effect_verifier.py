@@ -16,6 +16,8 @@ from tools.install_sandbox.rules.json_hook_repair import (
     without_target,
 )
 
+PRESERVATION_CHECK_ROOTS = ("home", "project")
+
 
 def _obstacle(result: VerificationResult, root: str, path: str, reason: str) -> None:
     result.obstacles.append(
@@ -42,7 +44,7 @@ def _complete(snapshot: FilesystemSnapshot, result: VerificationResult) -> None:
 
 
 def _roots_complete(snapshot: FilesystemSnapshot, result: VerificationResult) -> None:
-    for root in ("home", "project"):
+    for root in PRESERVATION_CHECK_ROOTS:
         entry = snapshot.entry(root, ".")
         if entry is None or entry["kind"] != "directory":
             _obstacle(result, root, ".", "Complete observed root unavailable")

@@ -302,6 +302,13 @@ def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: 
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / "complete/campaign.json").read_text())
     assert report["status"] == "passed" and report["passed"] is True
+    assert report["preservation_check_roots"] == ["home", "project"]
+    verdict = (
+        "Campaign passed: True\n"
+        "Filesystem preservation checks cover the isolated HOME and PROJECT directories."
+    )
+    assert verdict in result.stdout
+    assert verdict in (tmp_path / "complete/campaign.txt").read_text()
     assert duplicate_keys(report) == EXPECTED_DUPLICATES | {
         ("birch", "project", "duplicate-json-hook", "assistant-hooks", "layout")
     }
@@ -314,7 +321,9 @@ def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: 
     assert_permuted_target_archive(archive_path, report, permuted)
     from tools.install_sandbox.host.campaign_replay import replay_campaign
 
-    assert replay_campaign(archive_path)["status"] == "passed"
+    replayed = replay_campaign(archive_path)
+    assert replayed["status"] == "passed"
+    assert replayed["preservation_check_roots"] == ["home", "project"]
     if not permuted:
         assert_campaign_rejects_missing_substituted_and_retargeted_proof(
             archive_path, report, tmp_path

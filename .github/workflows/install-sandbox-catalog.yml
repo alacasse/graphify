@@ -14,3 +14,9 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 scripts/check_install_sandbox_catalog.py
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Check catalog contents and declared scopes
+        run: uv run --frozen python -m pytest tests/install_sandbox/component/host/test_effect_catalog.py -q --tb=short

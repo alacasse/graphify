@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 from unittest.mock import patch
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+)
 from tools.install_sandbox.container import intermediate_execution
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
@@ -17,7 +21,6 @@ from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import ArtifactReceipt
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import MalformedEvidence, read_evidence
 from tools.install_sandbox.rules.repair_actions import JsonArtifact, SnapshotArtifact
 
@@ -44,7 +47,7 @@ def replay(proof: Path) -> str:
 def run_fixture(root: Path, vector: FixtureVector) -> FixtureOutcome:
     subject, spec, context = arrange(root)
     cases = build_effect_cases(
-        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in cases.cases if case.name == vector["case"])
     case_file = root / "case.json"

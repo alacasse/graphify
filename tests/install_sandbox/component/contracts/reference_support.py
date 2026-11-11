@@ -10,7 +10,7 @@ from tools.install_sandbox.contracts.effects import Destination, EffectSpec, Ski
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 
 
-def reference_case() -> EffectInstallCase:
+def reference_case(operation: str = "missing-reference") -> EffectInstallCase:
     builds = build_effect_cases(
         EffectSpec((SkillEffect("skill.md", "refs", Destination("project", "skill")),)),
         SubjectContext(
@@ -20,7 +20,7 @@ def reference_case() -> EffectInstallCase:
             EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
         ),
     )
-    return next(case for case in builds.cases if case.name == "missing-reference")
+    return next(case for case in builds.cases if case.name == operation)
 
 
 def reference_sources() -> FilesystemSnapshot:

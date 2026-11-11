@@ -7,14 +7,18 @@ from typing import Literal
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange, write
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+    write,
+)
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import InstallTestResult
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
@@ -62,7 +66,9 @@ def _prepare_reference_sources(
         import yaml
 
         raw = yaml.safe_load(spec.read_text())
-        markdown = next(effect for effect in raw["scopes"]["project"] if effect["family"] == "markdown-section")
+        markdown = next(
+            effect for effect in raw["scopes"]["project"] if effect["family"] == "markdown-section"
+        )
         from copy import deepcopy
 
         second = deepcopy(markdown)
@@ -120,7 +126,7 @@ def conduct_altered_skill(
     )
     _prepare_reference_sources(subject, spec, empty, multiple, content, markdown_count)
     cases = build_effect_cases(
-        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in cases.cases if case.name == "altered-skill")
     case_file = root / "case.json"

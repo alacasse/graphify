@@ -10,8 +10,6 @@ from tests.install_sandbox.component.contracts.reference_support import (
     reference_sources,
 )
 from tools.install_sandbox.contracts.bound_mutation import BoundFileCreation
-from tools.install_sandbox.contracts.effects import Destination
-from tools.install_sandbox.contracts.intermediate import PreserveSkillBackupPreparation
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import SnapshotEntry
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
@@ -27,11 +25,7 @@ from tools.install_sandbox.rules.repair_scenario import (
 
 
 def _installed_skill(content: bytes):
-    case = replace(
-        reference_case(),
-        name="preserve-skill-backup",
-        intermediate_preparation=PreserveSkillBackupPreparation(Destination("project", "skill")),
-    )
+    case = reference_case("preserve-skill-backup")
     sources = reference_sources()
     sources.contents[("subject", "skill.md")] = content
     first = FilesystemSnapshot(

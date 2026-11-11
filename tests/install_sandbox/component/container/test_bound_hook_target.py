@@ -32,11 +32,10 @@ def test_second_effect_second_member_binds_through_mutation_and_replay(
         effect_id="secondary",
         destination=Destination("project", ".secondary/.synthetic/config.json"),
     )
-    spec = EffectSpec((first, second))
     context = SubjectContext.from_data(json.loads(context_path.read_text()))
     case = next(
         case
-        for case in build_effect_cases(spec, context).cases
+        for case in build_effect_cases(EffectSpec((first, second)), context).cases
         if case.key.operation == operation
         and case.key.effect_id == "secondary"
         and case.key.member == "PreToolUse-read"
@@ -75,6 +74,12 @@ def test_second_effect_second_member_binds_through_mutation_and_replay(
         "path": ".secondary/.synthetic/config.json",
     }
     assert read_evidence(proof) == result
+    _assert_member_counts(proof, operation)
+    _reject_wrong_mutation_target(proof)
+    _reject_wrong_argv(proof)
+
+
+def _assert_member_counts(proof: Path, operation: str) -> None:
     # The mutation removes/changes/copies read, even though search was declared first.
     prepared = json.loads(
         (proof / "intermediate/after/project/.secondary/.synthetic/config.json").read_text()
@@ -85,9 +90,6 @@ def test_second_effect_second_member_binds_through_mutation_and_replay(
         hook.get("command") == "graphify hook-guard read" and hook.get("timeout") == 10
         for hook in hooks
     ) == (2 if operation == "duplicate-json-hook" else 0)
-
-    _reject_wrong_mutation_target(proof)
-    _reject_wrong_argv(proof)
 
 
 def _reject_wrong_mutation_target(proof: Path) -> None:
@@ -104,7 +106,6 @@ def _reject_wrong_mutation_target(proof: Path) -> None:
         with pytest.raises(ValueError):
             read_evidence(proof)
     operation_path.write_text(original_operation)
-
 
 
 def _reject_wrong_argv(proof: Path) -> None:

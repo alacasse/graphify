@@ -147,7 +147,11 @@ def test_hook_disk_identity_ignores_timeout_and_allows_different_commands() -> N
     declaration = EffectSpecReader().from_yaml(two_hooks())
     data = cast(dict[str, Any], declaration.to_data())
     first = data["scopes"][0]["effects"]["effects"][0]["hooks"][0]
-    second: dict[str, Any] = {**first, "id": "other", "content": {**first["content"], "timeout": 20}}
+    second: dict[str, Any] = {
+        **first,
+        "id": "other",
+        "content": {**first["content"], "timeout": 20},
+    }
     data["scopes"][0]["effects"]["effects"][0]["hooks"].append(second)
     with pytest.raises(ValueError, match="Duplicate hook destination"):
         ToolDeclaration.from_data(data)

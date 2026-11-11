@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+)
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
@@ -19,7 +23,6 @@ from tools.install_sandbox.contracts.effect_case import (
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import InstallTestResult, VerificationResult
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 from tools.install_sandbox.rules.repair_scenario import MarkdownRepairScenario, PreparationPlan
 
@@ -34,7 +37,7 @@ def conduct(
 ):
     subject, spec, context = arrange(root)
     built = build_effect_cases(
-        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in built.cases if case.name == "missing-section")
     case_file = root / "case.json"
@@ -218,7 +221,7 @@ def test_unpersisted_preparation_intent_prevents_mutation(
 
     subject, spec, context = arrange(tmp_path)
     case = build_effect_cases(
-        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     ).cases[1]
     case.write(tmp_path / "case.json")
     write_result = TestResultWriter.write_result

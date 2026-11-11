@@ -180,7 +180,8 @@ class ScopeDeclaration:
     reason: str | None = None
 
     def __post_init__(self) -> None:
-        text(self.scope)
+        if ":" in text(self.scope):
+            raise ValueError("Scope name cannot contain the participant separator")
         if self.effects is not None:
             if (
                 self.effects.scope != self.scope

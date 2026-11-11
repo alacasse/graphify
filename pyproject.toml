@@ -195,6 +195,7 @@ norecursedirs = [
     "graphify-benchmark", "graphify_eval", "graphify_test",
     "worked", "llm-stack-corpus", "llm-stack-demo", "product-site",
     "scripts", "ebook", ".github", "dist", "build",
+    "tests/install_sandbox/docker",
 ]
 
 [tool.bandit]

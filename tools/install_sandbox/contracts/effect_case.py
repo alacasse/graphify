@@ -115,7 +115,9 @@ class SubjectContext:
     rules: EffectRules
     package_root: str | None = None
     revision: str | None = None
-    invocations: dict[str, tuple[str, ...]] = field(default_factory=lambda: dict[str, tuple[str, ...]]())
+    invocations: dict[str, tuple[str, ...]] = field(
+        default_factory=lambda: dict[str, tuple[str, ...]]()
+    )
 
     def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
         argv = self.invocations.get(f"{tool}:{scope}")
@@ -218,6 +220,22 @@ def _witness_available(
     )
 
 
+def _json_witness(spec: EffectSpec, command: str, timeout: int) -> dict[str, object]:
+    """Choose a personal command disjoint from every declared managed hook."""
+    reserved = {
+        hook.content.get("command")
+        for effect in spec.effects
+        if isinstance(effect, JsonHooksEffect)
+        for hook in effect.hooks
+    }
+    candidate = command
+    suffix = 0
+    while candidate in reserved:
+        suffix += 1
+        candidate = f"{command}.sandbox-{suffix}"
+    return {"type": "command", "command": candidate, "timeout": timeout}
+
+
 def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
     """Compose independent personal documents around each actual destination."""
     files: list[InitialFile] = []
@@ -237,11 +255,7 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
                                 {
                                     "matcher": "Bash|Grep",
                                     "hooks": [
-                                        {
-                                            "type": "command",
-                                            "command": "python personal_graphify_audit.py",
-                                            "timeout": 17,
-                                        }
+                                        _json_witness(spec, "python personal_graphify_audit.py", 17)
                                     ],
                                 }
                             ],
@@ -249,11 +263,7 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
                                 {
                                     "matcher": "Read",
                                     "hooks": [
-                                        {
-                                            "type": "command",
-                                            "command": "python personal_after_read.py",
-                                            "timeout": 9,
-                                        }
+                                        _json_witness(spec, "python personal_after_read.py", 9)
                                     ],
                                 }
                             ],
@@ -288,7 +298,9 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
     return files
 
 
-def seeded_json_hook_group(effect: JsonHooksEffect, member: HookExpectation) -> dict[str, object]:
+def seeded_json_hook_group(
+    effect: JsonHooksEffect, member: HookExpectation, spec: EffectSpec
+) -> dict[str, object]:
     """Independent cohabitation witness for the selected declared hook."""
     if member not in effect.hooks:
         raise ValueError("Selected hook does not belong to the effect")
@@ -298,7 +310,7 @@ def seeded_json_hook_group(effect: JsonHooksEffect, member: HookExpectation) -> 
         "sandbox_personal": "preserve",
         "hooks": [
             dict(hook.content),
-            {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17},
+            _json_witness(spec, "python personal_graphify_audit.py", 17),
         ],
     }
 
@@ -309,17 +321,17 @@ def _json_hook_case(
     neighbor: dict[str, object] = {
         "matcher": "SandboxPersonalNeighbor",
         "sandbox_neighbor": True,
-        "hooks": [{"type": "command", "command": "python personal_neighbor.py", "timeout": 23}],
+        "hooks": [_json_witness(reinstall.effects, "python personal_neighbor.py", 23)],
     }
-    groups = [seeded_json_hook_group(effect, hook)]
+    groups = [seeded_json_hook_group(effect, hook, reinstall.effects)]
     if kind == "duplicate-json-hook":
         groups.append(
             {
                 "matcher": hook.matcher,
                 "sandbox_personal": "duplicate-destination",
                 "hooks": [
-                    {"type": "command", "command": "python personal_duplicate_a.py", "timeout": 19},
-                    {"type": "command", "command": "python personal_duplicate_b.py", "timeout": 29},
+                    _json_witness(reinstall.effects, "python personal_duplicate_a.py", 19),
+                    _json_witness(reinstall.effects, "python personal_duplicate_b.py", 29),
                 ],
             }
         )
@@ -478,6 +490,7 @@ def build_effect_cases(
 ) -> EffectCaseBuild:
     """Enumerate participant obligations before binding executable commands."""
     spec = EffectSpec.from_data(spec.to_data())
+    subject = SubjectContext.from_data(json.loads(json.dumps(asdict(subject))))
     entries: list[EffectInstallCase | CaseNonConstruction] = []
     missing: str | None = None
     try:

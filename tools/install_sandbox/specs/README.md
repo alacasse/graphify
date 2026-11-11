@@ -284,7 +284,9 @@ Reinstall preservation uses that independently validated first observation;
 managed content still comes from the original retained sources.
 
 Use `tools.install_sandbox.host.campaign_replay.replay_campaign(path_to_zip)` to
-verify the complete or partial report. This re-enumerates the archived spec and
+verify the complete or partial report. The ZIP reader limits temporary extraction
+to 1 GiB and 100,000 entries by default. For larger archives, pass explicit
+`max_bytes` and `max_entries` budgets. Replay re-enumerates the archived spec and
 selection, checks the host receipts and replays every finished case. Each
 selected key includes tool, scope, operation, effect ID and member. The
 directory name is a SHA-256 digest of that key. To inspect one extracted case,
@@ -327,3 +329,6 @@ after the first command and replay retains that verdict. Replay equality is
 checked after deleting the source inputs and execution environment. Active
 CodeBuddy, Amp and the four skill-only project YAML readings have compact checks
 separate from synthetic engine data. Simulated proofs do not qualify a real installer or host discovery.
+
+Run the dedicated synthetic Docker acceptance lane with
+`python -m pytest tests/install_sandbox/docker/test_lot_one_cli.py`.

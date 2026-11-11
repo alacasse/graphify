@@ -7,14 +7,18 @@ from typing import Literal
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange, write
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+    write,
+)
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import InstallTestResult
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
@@ -55,7 +59,7 @@ def conduct_reference(
         write(subject / "reference-data/a/first.md", "First lexical reference.\n")
         write(subject / "reference-data/z-last.md", "Last lexical reference.\n")
     cases = build_effect_cases(
-        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in cases.cases if case.name == "missing-reference")
     case_file = root / "case.json"

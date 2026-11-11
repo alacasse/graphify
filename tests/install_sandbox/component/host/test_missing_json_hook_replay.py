@@ -98,8 +98,6 @@ def conduct_hooks(
         args: list[str], project: Path, environment: dict[str, str], timeout: float
     ) -> InstallerCommandResult:
         result = execute(args, project, environment, timeout)
-        if _key(case_name).storage_id not in project.parts:
-            return result
         calls[project] = calls.get(project, 0) + 1
         path = project / ".synthetic/config.json"
         data = json.loads(path.read_text())

@@ -1,6 +1,7 @@
 """Acceptance of effect identity through the real CLI and Docker (no transport mocks)."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -27,7 +28,11 @@ EXPECTED_REPAIRS = {
 
 def git(subject: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(subject), *args], check=True, text=True, capture_output=True
+        ["git", "-C", str(subject), *args],
+        check=True,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull},
     ).stdout.strip()
 
 

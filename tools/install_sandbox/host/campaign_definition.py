@@ -91,7 +91,7 @@ def _target_key(request: object) -> CaseKey:
     if operation not in {"duplicate-json-hook", "missing-json-hook", "altered-json-hook"}:
         raise ValueError("Unknown target operation: " + text(data["operation"]))
     target = fields(data["target"], "participant effect_id member")
-    participant = text(target["participant"]).split(":")
+    participant = text(target["participant"]).rsplit(":", 1)
     if len(participant) != 2 or not all(participant):
         raise ValueError("Expected participant tool:scope")
     return CaseKey(

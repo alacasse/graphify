@@ -250,7 +250,7 @@ class _Session:
         self.report.phase, self.report.archive = "archiving", "pending"
         self._save()
         archive_evidence(self.directory, interrupts)
-        if self.report.exit_code == 0:
+        if self.report.exit_code == 0 or (evidence / "definition.json").is_file():
             replay_directory(evidence)
         self.report.archive = "verified"
         self._save()

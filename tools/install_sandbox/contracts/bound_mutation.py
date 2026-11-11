@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import cast
 
-from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.effect_case import CaseKey, EffectInstallCase
+from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 

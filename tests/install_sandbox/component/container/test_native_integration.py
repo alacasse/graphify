@@ -6,18 +6,22 @@ from pathlib import Path
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange, write
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+    write,
+)
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_reinstall_case
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
 def prepared(root: Path) -> Path:
     subject, spec, context = arrange(root)
     case = build_reinstall_case(
-        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     )
     case.write(root / "case.json")
     return subject

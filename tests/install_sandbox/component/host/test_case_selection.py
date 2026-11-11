@@ -16,6 +16,7 @@ from tests.install_sandbox.component.host.native_support import ControlledTransp
 from tools.install_sandbox.__main__ import main
 from tools.install_sandbox.host import coordinator
 from tools.install_sandbox.host.campaign_definition import load_campaign_definition
+from tools.install_sandbox.host.campaign_replay import replay_directory
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
@@ -122,6 +123,26 @@ def assert_archived_selection(
         decoded["preparation"] = reread.preparation.to_data()
         decoded["steps"] = [step.to_data() for step in reread.steps]
         assert decoded == case["result"]["test"]
+
+
+def test_replay_rejects_contradictory_cleanup_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    subject, spec, context = arrange(tmp_path)
+    transport = ControlledTransport(tmp_path)
+    monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
+    output = tmp_path / "proof"
+    assert main([*arguments(subject, spec, context, output), "--case", "reinstall"]) == 0
+    with zipfile.ZipFile(output / "evidence.zip") as archive:
+        archive.extractall(tmp_path / "moved")
+    root = tmp_path / "moved/evidence"
+    for filename in ("campaign.json", "host-receipts.json"):
+        path = root / filename
+        document = json.loads(path.read_text())
+        document["cleanup"]["exit_code"] = 1
+        path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="Completed runtime receipt"):
+        replay_directory(root)
 
 
 @pytest.mark.parametrize(
@@ -338,3 +359,31 @@ def test_unknown_explicit_member_replays_without_runtime(
     report = replay_campaign(output / "evidence.zip")
     assert [entry["construction"] for entry in report["cases"]] == ["unconstructible"]
     assert report["executed_keys"] == []
+
+
+def test_qualified_tool_name_selects_the_same_key_as_the_full_campaign(tmp_path: Path) -> None:
+    subject, spec, context = arrange(tmp_path)
+    spec.write_text(spec.read_text().replace("tool: synthetic", "tool: acme:synthetic"))
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "operation": "duplicate",
+                "target": {
+                    "participant": "acme:synthetic:project",
+                    "effect_id": "json-hooks",
+                    "member": "PreToolUse-read",
+                },
+            }
+        )
+    )
+    full = load_campaign_definition(
+        spec_file=spec, subject_context_file=context, subject_checkout=subject
+    )
+    selected = load_campaign_definition(
+        spec_file=spec, subject_context_file=context, subject_checkout=subject, request_file=request
+    )
+    (case,) = selected.built.cases
+    assert case.key.tool == "acme:synthetic"
+    assert case.key.member == "PreToolUse-read"
+    assert case in full.built.cases

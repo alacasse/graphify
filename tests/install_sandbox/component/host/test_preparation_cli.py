@@ -13,6 +13,7 @@ from tests.install_sandbox.component.host.native_support import arrange
 from tools.install_sandbox.__main__ import main
 from tools.install_sandbox.host import output_lifecycle
 from tools.install_sandbox.host.campaign_definition import load_campaign_definition
+from tools.install_sandbox.host.campaign_replay import replay_campaign, replay_directory
 from tools.install_sandbox.host.coordinator import InstallTestCoordinator
 from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 from tools.install_sandbox.host.preparation_reader import read_preparation
@@ -115,6 +116,12 @@ def test_prepare_cli_retains_replay_without_case_or_install(
     assert (proof / "expected/package.md").read_text() == "# Synthetic package\n"
     assert (proof / "expected/METADATA").read_text() == "Version: 1.2.3\n"
     assert not (proof.parent / "cases").exists()
+    assert replay_directory(proof.parent)["status"] == "prepared"
+    with pytest.raises(ValueError, match="budget"):
+        replay_campaign(output / "evidence.zip", max_bytes=16)
+    (proof / "dependencies/dependencies.json").unlink()
+    with pytest.raises((ValueError, OSError)):
+        replay_directory(proof.parent)
 
 
 @pytest.mark.parametrize(
@@ -137,6 +144,14 @@ def test_failed_preparation_is_archived_and_blocks_cases(
     assert result.report.execution["cases"] == []
     proof = restore(result.output_directory, tmp_path / "readback")
     assert read_preparation(proof).status == status
+    if status == "nonconformant":
+        assert replay_directory(proof.parent)["status"] == status
+        definition = proof.parent / "definition.json"
+        data = json.loads(definition.read_text())
+        data["context"]["revision"] = "a" * 40
+        definition.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="declared campaign inputs"):
+            replay_directory(proof.parent)
 
 
 def test_bound_sources_feed_normal_engine_only_through_controlled_transport(

@@ -10,6 +10,7 @@ from zipfile import ZipFile
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.spec import fields
+from tools.install_sandbox.host.build_context import read_dependency_preparation
 from tools.install_sandbox.host.campaign_definition import CampaignDefinition, define_campaign
 from tools.install_sandbox.host.coordinator import CampaignCase, CampaignResult, CoordinatedResult
 from tools.install_sandbox.host.docker_runtime import ContainerRunResult
@@ -42,6 +43,12 @@ def _container(value: object) -> ContainerRunResult | None:
         "interrupted",
     }:
         raise ValueError("Invalid host runtime receipt")
+    if type(data.get("exit_code")) is not int:
+        raise ValueError("Invalid runtime exit code")
+    if data["state"] == "completed" and (
+        data["phase"] != "complete" or data["exit_code"] != 0 or not data["cleanup_complete"]
+    ):
+        raise ValueError("Completed runtime receipt contradicts its phase, exit code or cleanup")
     return ContainerRunResult(**data)
 
 
@@ -126,13 +133,41 @@ def _replay_entries(
             _require(record, asdict(entry), "nonconstructible case")
 
 
+def _verify_dependencies(root: Path, preparation: object) -> None:
+    if preparation is None:
+        return
+    saved = _object(preparation).get("dependency_preparation")
+    directory = root / "preparation/dependencies"
+    if saved is None:
+        if directory.is_dir() and _object(preparation)["state"] == "completed":
+            raise ValueError("Completed verification has no dependency receipt")
+        return
+    replayed = read_dependency_preparation(directory)
+    path = replayed.diagnostic_path
+    _require(
+        saved,
+        {
+            "mode": replayed.mode,
+            "warning": replayed.warning,
+            "diagnostic_path": None if path is None else "./" + path.relative_to(root).as_posix(),
+        },
+        "dependency preparation",
+    )
+    observation = directory / "observation.json"
+    if (
+        observation.exists()
+        and observation.read_bytes() != (root / "preparation/observation.json").read_bytes()
+    ):
+        raise ValueError("Copied package observation differs from the verification receipt")
+
+
 def _replay_preparation(
     root: Path, definition: CampaignDefinition, report: dict[str, Any], result: CampaignResult
 ) -> None:
     if definition.context.package_root and (root / "preparation" / "result.json").is_file():
         output = root / "preparation"
         result.preparation_result = read_preparation(output)
-        if result.preparation_result.status == "prepared":
+        if (output / "inputs.json").exists() or result.preparation_result.status != "incomplete":
             _, effects, context = retained_inputs(output)
             if context != definition.context or effects != definition.effects:
                 raise ValueError("Prepared package differs from declared campaign inputs")
@@ -178,6 +213,7 @@ def replay_directory(root: Path) -> dict[str, Any]:
         _container(receipts["cleanup"]),
     )
     _replay_entries(root, definition, result, report, _object(receipts["cases"]))
+    _verify_dependencies(root, receipts["preparation"])
     _replay_preparation(root, definition, report, result)
     derived = result.payload()
     for field in (
@@ -201,15 +237,20 @@ def replay_directory(root: Path) -> dict[str, Any]:
     return report
 
 
-def replay_campaign(archive: Path) -> dict[str, Any]:
+def replay_campaign(
+    archive: Path, *, max_bytes: int = 1024**3, max_entries: int = 100_000
+) -> dict[str, Any]:
     """Return the verified report from a stand-alone ZIP, without the original subject."""
     with (
         TemporaryDirectory(prefix="install-sandbox-replay-") as temporary,
         ZipFile(archive) as source,
     ):
+        infos = source.infolist()
+        if len(infos) > max_entries or sum(info.file_size for info in infos) > max_bytes:
+            raise ValueError("Archive exceeds the campaign replay extraction budget")
         root = Path(temporary)
         seen: set[PurePosixPath] = set()
-        for info in source.infolist():
+        for info in infos:
             path = PurePosixPath(info.filename)
             if (
                 not path.parts

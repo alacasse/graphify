@@ -11,9 +11,7 @@ from tests.install_sandbox.component.contracts.reference_support import (
 )
 from tools.install_sandbox.contracts.bound_mutation import BoundStaleReferencesTmpCreation
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.effects import Destination
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.intermediate import StaleReferencesTmpPreparation
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import SnapshotEntry
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
@@ -24,11 +22,7 @@ from tools.install_sandbox.rules.repair_scenario import PreparationPlan, repair_
 def tmp_first_install(
     empty: bool,
 ) -> tuple[EffectInstallCase, FilesystemSnapshot, FilesystemSnapshot, ExpectationSet]:
-    case = replace(
-        reference_case(),
-        name="stale-references-tmp",
-        intermediate_preparation=StaleReferencesTmpPreparation(Destination("project", "skill")),
-    )
+    case = reference_case("stale-references-tmp")
     sources = reference_sources()
     if empty:
         sources.entries = [e for e in sources.entries if not e["path"].startswith("refs/")]

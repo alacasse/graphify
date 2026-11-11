@@ -39,6 +39,7 @@ from tools.install_sandbox.contracts.intermediate import (
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
+from tools.install_sandbox.contracts.spec import HookExpectation
 from tools.install_sandbox.rules.comparison import markdown_byte_parts, read_json
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
@@ -589,6 +590,26 @@ class JsonHookRepairScenario:
     case: EffectInstallCase
     sources: FilesystemSnapshot
 
+    def _target(self) -> tuple[JsonHookPreparation, JsonHooksEffect, HookExpectation]:
+        preparation = self.case.intermediate_preparation
+        if not isinstance(preparation, JsonHookPreparation):
+            raise ValueError("Case has no JSON hook preparation")
+        effect = next(
+            e
+            for e in self.case.effects.effects
+            if isinstance(e, JsonHooksEffect) and e.effect_id == preparation.effect_id
+        )
+        target = next(hook for hook in effect.hooks if hook.id == preparation.member)
+        if preparation.destination != effect.destination:
+            raise ValueError("Preparation destination differs from its declared effect")
+        if (
+            self.case.key.effect_id != effect.effect_id
+            or self.case.key.member != target.id
+            or self.case.key.operation != preparation.kind
+        ):
+            raise ValueError("Preparation target differs from the bound case key")
+        return preparation, effect, target
+
     def bind(
         self,
         first_after: FilesystemSnapshot,
@@ -599,28 +620,12 @@ class JsonHookRepairScenario:
     ) -> PreparationPlan | PreparationBlocked:
         try:
             _validate_first_install(self.case, case_bytes, installed, first_after, validation)
-            preparation = self.case.intermediate_preparation
-            if not isinstance(preparation, JsonHookPreparation):
-                raise ValueError("Case has no JSON hook preparation")
-            effect = next(
-                e
-                for e in self.case.effects.effects
-                if isinstance(e, JsonHooksEffect) and e.effect_id == preparation.effect_id
-            )
-            target = next(hook for hook in effect.hooks if hook.id == preparation.member)
-            if preparation.destination != effect.destination:
-                raise ValueError("Preparation destination differs from its declared effect")
-            if (
-                self.case.key.effect_id != effect.effect_id
-                or self.case.key.member != target.id
-                or self.case.key.operation != preparation.kind
-            ):
-                raise ValueError("Preparation target differs from the bound case key")
+            preparation, effect, target = self._target()
             destination = effect.destination
             document = retained_bytes(first_after, destination.root, destination.path)
             parsed = read_json(document)
             seeded: dict[str, object] = {
-                "hooks": {target.event: [seeded_json_hook_group(effect, target)]}
+                "hooks": {target.event: [seeded_json_hook_group(effect, target, self.case.effects)]}
             }
             if not target_group_preserved(seeded, parsed, target):
                 raise ValueError("Target hook must remain in its intact seeded personal group")

@@ -10,8 +10,6 @@ from tests.install_sandbox.component.contracts.reference_support import (
     reference_sources,
 )
 from tools.install_sandbox.contracts.bound_mutation import BoundFileAppend
-from tools.install_sandbox.contracts.effects import Destination
-from tools.install_sandbox.contracts.intermediate import AlteredSkillPreparation
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import SnapshotEntry
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
@@ -25,11 +23,7 @@ from tools.install_sandbox.rules.repair_scenario import (
 
 @pytest.mark.parametrize("content", [b"", b"\x00\xff", b"\nSandbox skill repair witness.\n"])
 def test_skill_plan_uses_source_plus_one_suffix_and_exact_restoration(content: bytes):
-    case = replace(
-        reference_case(),
-        name="altered-skill",
-        intermediate_preparation=AlteredSkillPreparation(Destination("project", "skill")),
-    )
+    case = reference_case("altered-skill")
     sources = reference_sources()
     sources.contents[("subject", "skill.md")] = content
     first = FilesystemSnapshot(

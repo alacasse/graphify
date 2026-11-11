@@ -106,12 +106,12 @@ def test_initial_terminal_results_end_the_invocation(state: InitialPreparationSt
 @pytest.mark.parametrize(
     "first,second,expected",
     [
-        (IDLE, IDLE, CaseDecision("incomplete", "installation")),
-        (installation(3), IDLE, CaseDecision("incomplete", "installation")),
+        (IDLE, IDLE, CaseDecision("incomplete", "step", 0)),
+        (installation(3), IDLE, CaseDecision("incomplete", "step", 0)),
         (installation(3, stopped=True), IDLE, CaseDecision("incomplete", None)),
         (installation(code=1), IDLE, CaseDecision("failed", None)),
-        (PASSED, IDLE, CaseDecision("incomplete", "reinstallation")),
-        (PASSED, installation(5), CaseDecision("incomplete", "reinstallation")),
+        (PASSED, IDLE, CaseDecision("incomplete", "step", 1)),
+        (PASSED, installation(5), CaseDecision("incomplete", "step", 1)),
         (PASSED, installation(5, stopped=True), CaseDecision("incomplete", None)),
         (PASSED, installation(code=1), CaseDecision("failed", None)),
         (PASSED, PASSED, CaseDecision("passed", None)),
@@ -128,7 +128,7 @@ def test_reinstall_table(first: StepState, second: StepState, expected: CaseDeci
 def test_first_step_publication_prefixes(count: int) -> None:
     assert evaluate(
         CaseShape(("install", "install"), False), CaseFacts(READY, (installation(count), IDLE))
-    ) == CaseDecision("incomplete", "installation")
+    ) == CaseDecision("incomplete", "step", 0)
 
 
 def test_records_are_frozen() -> None:
@@ -177,7 +177,7 @@ def test_invalid_local_facts_and_dependencies_are_never_hidden(
         (repair("not_started"), IDLE, CaseDecision("incomplete", "repair")),
         (repair(), IDLE, CaseDecision("incomplete", "repair")),
         (repair("verification_retained", "failed"), IDLE, CaseDecision("failed", None)),
-        (repair("ready", "ready"), IDLE, CaseDecision("incomplete", "reinstallation")),
+        (repair("ready", "ready"), IDLE, CaseDecision("incomplete", "step", 1)),
         (repair("ready", "ready"), PASSED, CaseDecision("passed", None)),
     ],
 )

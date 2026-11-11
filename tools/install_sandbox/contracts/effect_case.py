@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict, cast
 
 from tools.install_sandbox.contracts.effects import (
+    JSON_BACKUP_SUFFIX,
     EffectSpec,
     JsonHooksEffect,
     MarkdownSectionEffect,
@@ -36,10 +37,24 @@ class CaseKey:
     operation: str
     effect_id: str | None = None
     member: str | None = None
+    prepare: tuple[str, ...] = ()
+    remove: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for value in (self.tool, self.scope, self.operation):
             text(value)
+        if self.prepare or self.remove:
+            if self.operation != "group-uninstall" or not self.prepare or not self.remove:
+                raise ValueError("Ordered participants require a group-uninstall key")
+            if (
+                len(set(self.prepare)) != len(self.prepare)
+                or len(set(self.remove)) != len(self.remove)
+                or not set(self.remove) <= set(self.prepare)
+            ):
+                raise ValueError("Invalid ordered group participants")
+            for participant in self.prepare:
+                if len(participant.split(":")) != 2 or not all(participant.split(":")):
+                    raise ValueError("Expected participant tool:scope")
         if self.effect_id is not None:
             text(self.effect_id)
         if self.member is not None:
@@ -48,17 +63,30 @@ class CaseKey:
                 raise ValueError("Case member requires an effect ID")
 
     def to_data(self) -> dict[str, object]:
-        return asdict(self)
+        data = json.loads(json.dumps(asdict(self)))
+        if not self.prepare and not self.remove:
+            data.pop("prepare")
+            data.pop("remove")
+        return data
 
     @classmethod
     def from_data(cls, value: object) -> "CaseKey":
-        data = fields(value, "tool scope operation effect_id member")
+        if not isinstance(value, dict):
+            raise ValueError("Expected case key object")
+        data = fields(
+            {"prepare": [], "remove": [], **cast(dict[str, object], value)},
+            "tool scope operation effect_id member prepare remove",
+        )
+        if not isinstance(data["prepare"], list) or not isinstance(data["remove"], list):
+            raise ValueError("Expected ordered participant arrays")
         return cls(
             text(data["tool"]),
             text(data["scope"]),
             text(data["operation"]),
             cast(str | None, data["effect_id"]),
             cast(str | None, data["member"]),
+            tuple(text(item) for item in cast(list[object], data["prepare"])),
+            tuple(text(item) for item in cast(list[object], data["remove"])),
         )
 
     @property
@@ -108,6 +136,40 @@ class EffectRules:
 
 
 @dataclass(frozen=True)
+class StepInvocation:
+    action: str
+    participants: tuple[str, ...]
+    argv: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.action not in {"install", "uninstall"} or not self.participants or not self.argv:
+            raise ValueError("Expected an explicit step invocation")
+        if len(set(self.participants)) != len(self.participants):
+            raise ValueError("Duplicate step participant")
+        for item in (*self.participants, *self.argv):
+            if "\x00" in text(item):
+                raise ValueError("Invalid step argument")
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "action": self.action,
+            "participants": list(self.participants),
+            "argv": list(self.argv),
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "StepInvocation":
+        data = fields(value, "action participants argv")
+        if not isinstance(data["participants"], list) or not isinstance(data["argv"], list):
+            raise ValueError("Expected step argument lists")
+        return cls(
+            text(data["action"]),
+            tuple(text(x) for x in cast(list[object], data["participants"])),
+            tuple(text(x) for x in cast(list[object], data["argv"])),
+        )
+
+
+@dataclass(frozen=True)
 class SubjectContext:
     identity: str
     invocation: tuple[str, ...]
@@ -118,6 +180,8 @@ class SubjectContext:
     invocations: dict[str, tuple[str, ...]] = field(
         default_factory=lambda: dict[str, tuple[str, ...]]()
     )
+
+    removals: tuple["StepInvocation", ...] = ()
 
     def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
         argv = self.invocations.get(f"{tool}:{scope}")
@@ -130,6 +194,8 @@ class SubjectContext:
     @classmethod
     def from_data(cls, value: object) -> "SubjectContext":
         data = _context_fields(value)
+        if not isinstance(data["removals"], list):
+            raise ValueError("Expected grouped removal invocations")
         raw = data["invocation"]
         if not isinstance(raw, list):
             raise ValueError("Expected explicit subject invocation arguments")
@@ -144,6 +210,7 @@ class SubjectContext:
             cast(str | None, data["package_root"]),
             cast(str | None, data["revision"]),
             _invocations(data["invocations"]),
+            tuple(StepInvocation.from_data(item) for item in cast(list[object], data["removals"])),
         )
 
 
@@ -166,8 +233,15 @@ def _context_fields(value: object) -> dict[str, object]:
         raise ValueError("Expected a subject context object")
     incoming = cast(dict[str, object], value)
     data = fields(
-        {"package_root": None, "revision": None, "invocation": [], "invocations": {}, **incoming},
-        "identity invocation version_source rules package_root revision invocations",
+        {
+            "package_root": None,
+            "revision": None,
+            "invocation": [],
+            "invocations": {},
+            "removals": [],
+            **incoming,
+        },
+        "identity invocation version_source rules package_root revision invocations removals",
     )
     root, revision = data["package_root"], data["revision"]
     if root is not None:
@@ -180,7 +254,7 @@ def _context_fields(value: object) -> dict[str, object]:
 
 
 def _validate_hook_rules(effect: JsonHooksEffect, rules: EffectRules) -> None:
-    if rules.json_backup != ".graphify-bak" or rules.json_registry is not False:
+    if rules.json_backup != JSON_BACKUP_SUFFIX or rules.json_registry is not False:
         raise ValueError("Unsupported or missing JSON hooks reinstall rule")
     if any(
         "timeout" in hook.content and type(hook.content["timeout"]) is not int
@@ -189,7 +263,7 @@ def _validate_hook_rules(effect: JsonHooksEffect, rules: EffectRules) -> None:
         raise ValueError("Hook timeout must be an integer when declared")
 
 
-def _validate_rules(spec: EffectSpec, subject: SubjectContext) -> None:
+def validate_effect_rules(spec: EffectSpec, subject: SubjectContext) -> None:
     rules = subject.rules
     if sum(isinstance(effect, SkillEffect) for effect in spec.effects) > 1:
         raise ValueError("Multiple skill effects require unavailable lock observation capability")
@@ -379,9 +453,32 @@ class EffectInstallCase:
         | None
     ) = None
 
+    participants: tuple[tuple[str, EffectSpec], ...] = ()
+    plan: tuple[StepInvocation, ...] = ()
+
+    @property
+    def group(self):
+        if not self.participants:
+            return None
+        from tools.install_sandbox.contracts.group_case import GroupPlan
+
+        return GroupPlan(dict(self.participants), self.key.prepare, self.key.remove)
+
+    @property
+    def steps(self) -> tuple[StepInvocation, ...]:
+        return self.plan or tuple(
+            StepInvocation(op, (f"{self.key.tool}:{self.scope}",), self.subject.invocation)
+            for op in self.operations
+        )
+
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v10"
+        data["key"] = self.key.to_data()
+        data["format"] = "explicit-expectations-v11"
+        data["participants"] = [
+            {"participant": name, "effects": spec.to_data()} for name, spec in self.participants
+        ]
+        data["plan"] = [step.to_data() for step in self.steps]
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -400,10 +497,16 @@ class EffectInstallCase:
         data = fields(
             json.loads(payload, object_pairs_hook=unique_object),
             "format name key target scope effects subject initial_files operations "
-            "intermediate_preparation",
+            "intermediate_preparation participants plan",
         )
-        if data["format"] != "explicit-expectations-v10":
+        if data["format"] != "explicit-expectations-v11":
             raise ValueError("Unsupported effects case format or operation")
+        if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
+            raise ValueError("Expected participant and ordered step arrays")
+        if data["participants"]:
+            from tools.install_sandbox.contracts.group_case import group_from_data
+
+            return group_from_data(data)
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
             SubjectContext.from_data(data["subject"]),
@@ -420,7 +523,9 @@ class EffectInstallCase:
         preparation = data["intermediate_preparation"]
         parsed = None if preparation is None else preparation_from_data(preparation)
         if (
-            parsed != case.intermediate_preparation
+            tuple(StepInvocation.from_data(step) for step in cast(list[object], data["plan"]))
+            != case.steps
+            or parsed != case.intermediate_preparation
             or data["target"] != case.target
             or SubjectContext.from_data(data["subject"]) != case.subject
             or data["scope"] != case.scope
@@ -438,7 +543,7 @@ def build_reinstall_case(
     spec = EffectSpec.from_data(spec.to_data())
     subject = SubjectContext.from_data(json.loads(json.dumps(asdict(subject))))
     subject = subject.bind_participant(target, spec.scope)
-    _validate_rules(spec, subject)
+    validate_effect_rules(spec, subject)
     return EffectInstallCase(
         "reinstall",
         CaseKey(text(target), spec.scope, "reinstall"),
@@ -501,7 +606,7 @@ def build_effect_cases(
     executable_subject = bound
     multi_skill = sum(isinstance(e, SkillEffect) for e in spec.effects) > 1
     for effect in spec.effects:
-        _validate_rules(EffectSpec((effect,), spec.scope), executable_subject)
+        validate_effect_rules(EffectSpec((effect,), spec.scope), executable_subject)
     reinstall = EffectInstallCase(
         "reinstall",
         CaseKey(target, spec.scope, "reinstall"),

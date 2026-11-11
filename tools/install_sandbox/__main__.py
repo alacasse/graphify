@@ -17,7 +17,9 @@ def main(arguments: list[str] | None = None) -> int:
         help="Run only this case; repeat to select more (always a partial campaign)",
     )
     parser.add_argument(
-        "--request", type=Path, help="JSON scope or hook selection (partial campaign)"
+        "--request",
+        type=Path,
+        help="JSON scope, hook, or ordered group-uninstall request (partial campaign)",
     )
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--spec", type=Path, required=True)

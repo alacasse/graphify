@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.install_sandbox.container.installer import InstallerCommandResult
+from tools.install_sandbox.contracts.effect_case import unique_object
 from tools.install_sandbox.contracts.evidence_layout import (
     SnapshotPublication,
     plan_json,
@@ -80,12 +81,54 @@ class TestResultWriter:
             raise EvidenceWriteError("Published artifact differs from retained facts")
         return ArtifactReceipt(relative, artifact_digest(artifact))
 
+    def _read_regular(self, path: Path) -> bytes:
+        if path.resolve() != path.absolute() or not path.is_file():
+            raise EvidenceWriteError(f"Missing regular evidence file: {path.name}")
+        return path.read_bytes()
+
+    def _check_json(self, path: Path, expected: object) -> None:
+        document = json.loads(self._read_regular(path), object_pairs_hook=unique_object)
+        if artifact_digest(document) != artifact_digest(expected):
+            raise EvidenceWriteError(f"Retained document contradicts its receipt: {path.name}")
+
     def _check_snapshot_receipt(self, path: Path, plan: SnapshotPublication) -> None:
         for reference, content in plan.blobs:
-            if (self.output_directory / reference).read_bytes() != content:
+            if self._read_regular(self.output_directory / reference) != content:
                 raise EvidenceWriteError("Published snapshot differs from retained facts")
-        if json.loads(path.read_bytes()) != plan.manifest.document:
-            raise EvidenceWriteError("Published manifest differs from retained facts")
+        self._check_json(path, plan.manifest.document)
+
+    def verify_inputs(
+        self, reference: str, expected: object, before_reference: str, before: FilesystemSnapshot
+    ) -> None:
+        try:
+            self._check_json(self.output_directory / reference, expected)
+            self._check_snapshot_receipt(
+                self.output_directory / before_reference, plan_snapshot(before_reference, before)
+            )
+        except (OSError, ValueError) as error:
+            raise EvidenceWriteError(f"Cannot verify command inputs: {error}") from error
+
+    def verify_receipt(
+        self,
+        index: int,
+        command: InstallerCommandResult,
+        after: FilesystemSnapshot,
+        verdict: VerificationResult,
+    ) -> None:
+        """Only the process outputs and observations actually retained may authorize dependents."""
+        directory = self.output_directory / "steps" / str(index)
+        reference = f"steps/{index}/after.json"
+        try:
+            self._check_snapshot_receipt(directory / "after.json", plan_snapshot(reference, after))
+            self._check_json(directory / "verification.json", asdict(verdict))
+            self._check_json(directory / "environment.json", command.environment)
+            for name, expected in (("stdout.txt", command.stdout), ("stderr.txt", command.stderr)):
+                if self._read_regular(directory / name) != expected:
+                    raise EvidenceWriteError(
+                        f"Retained command stream contradicts its receipt: {name}"
+                    )
+        except (OSError, ValueError) as error:
+            raise EvidenceWriteError(f"Cannot verify command receipt: {error}") from error
 
     def initialize_timings(self, case_name: str, step_count: int) -> None:
         self.timings = case_timings(case_name, step_count)
@@ -209,15 +252,7 @@ class TestResultWriter:
             self._write_json(f"steps/{step_index}/environment.json", result.environment)
         self._write_bytes(f"steps/{step_index}/stdout.txt", result.stdout)
         self._write_bytes(f"steps/{step_index}/stderr.txt", result.stderr)
-        return {
-            "args": result.args,
-            "cwd": result.cwd,
-            "state": result.state,
-            "exit_code": result.exit_code,
-            "reason": result.reason,
-            "stdout_file": f"steps/{step_index}/stdout.txt",
-            "stderr_file": f"steps/{step_index}/stderr.txt",
-        }
+        return result.evidence(f"steps/{step_index}/stdout.txt", f"steps/{step_index}/stderr.txt")
 
     def write_result(self, result: InstallTestResult) -> None:
         self._write_json("result.json", result_document(result))

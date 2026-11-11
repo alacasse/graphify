@@ -20,24 +20,34 @@ from tools.install_sandbox.host.evidence_reader import (
 
 
 def inventory(
-    output: Path, index: int, snapshot: Callable[[Path, str], FilesystemSnapshot]
+    output: Path,
+    index: int,
+    snapshot: Callable[[Path, str], FilesystemSnapshot],
+    *,
+    grouped: bool = False,
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     """Load final artifacts even when the last publication does not reference them."""
     prefix = f"steps/{index}"
-    transports: tuple[tuple[str, Literal["json", "snapshot"]], ...] = (
+    transports: list[tuple[str, Literal["json", "snapshot"]]] = [
         ("before.json", "snapshot"),
         ("after.json", "snapshot"),
         ("environment.json", "json"),
         ("verification.json", "json"),
         ("failure.json", "json"),
-    )
+    ]
+    if grouped and index:
+        transports.append(("expectations.json", "json"))
     descriptors = tuple(
         ArtifactLocation(f"{prefix}/{name}", transport)
         for name, transport in transports
         if index != 0 or name != "before.json"
     ) + tuple(
         ArtifactLocation(f"expectations/{phase}.json", "json")
-        for phase in ("initial", "install", "intermediate", "reinstall")
+        for phase in (
+            ("initial", "install")
+            if grouped
+            else ("initial", "install", "intermediate", "reinstall")
+        )
     )
     entries: list[FilesystemEntry] = []
 

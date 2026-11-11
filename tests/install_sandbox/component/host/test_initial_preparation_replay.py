@@ -82,6 +82,8 @@ def idle_step() -> dict[str, Any]:
     return {
         "operation": "install",
         "phase": "idle",
+        "intent": None,
+        "assessment": None,
         "facts": {"prepared": False, "command": None, "verification": None},
         "retained": {
             "before": None,
@@ -199,4 +201,15 @@ def test_intact_unusable_sources_support_deterministic_stop(
     # Altering the already retained bytes is corruption, not another valid builder rejection.
     source.write_bytes(b"Different invalid instructions.\n")
     with pytest.raises(MalformedEvidence, match="digest"):
+        read_evidence(output)
+
+
+@pytest.mark.parametrize("field", ["intent", "assessment"])
+def test_incomplete_preparation_cannot_claim_command_authority(tmp_path: Path, field: str) -> None:
+    output = archive(tmp_path, 1, 1)
+    path = output / "result.json"
+    document = json.loads(path.read_bytes())
+    document["steps"][0][field] = {"fabricated": True}
+    path.write_text(json.dumps(document))
+    with pytest.raises(MalformedEvidence):
         read_evidence(output)

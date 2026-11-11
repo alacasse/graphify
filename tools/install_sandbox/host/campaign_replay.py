@@ -131,7 +131,7 @@ def _replay_entries(
                 _object(receipts[entry.key.storage_id]),
             )
         else:
-            _require(record, asdict(entry), "nonconstructible case")
+            _require(record, {**asdict(entry), "key": entry.key.to_data()}, "nonconstructible case")
 
 
 def _verify_dependencies(root: Path, preparation: object) -> None:

@@ -7,6 +7,14 @@ from typing import cast
 
 from tools.install_sandbox.contracts.spec import HookExpectation, fields, relative_path, text
 
+JSON_BACKUP_SUFFIX = ".graphify-bak"
+JSON_FORBIDDEN_SUFFIXES = (
+    ".bak",
+    ".graphify-state.json",
+    ".graphify.lock",
+    ".graphify-journal.json",
+)
+
 
 @dataclass(frozen=True)
 class Destination:
@@ -22,6 +30,14 @@ class Destination:
     def from_data(cls, value: object) -> "Destination":
         data = fields(value, "root path")
         return cls(text(data["root"]), relative_path(data["path"]))
+
+
+@dataclass(frozen=True)
+class FileEffect:
+    content: str
+    destination: Destination
+    kind: str = "file"
+    effect_id: str = "file"
 
 
 @dataclass(frozen=True)
@@ -50,7 +66,7 @@ class JsonHooksEffect:
     effect_id: str = "json-hooks"
 
 
-Effect = SkillEffect | MarkdownSectionEffect | JsonHooksEffect
+Effect = SkillEffect | MarkdownSectionEffect | JsonHooksEffect | FileEffect
 
 
 def effect_from_data(value: object) -> Effect:
@@ -58,6 +74,15 @@ def effect_from_data(value: object) -> Effect:
         raise ValueError("Expected effect object")
     incoming = cast(dict[str, object], value)
     kind = incoming.get("kind")
+    if kind == "file":
+        data = fields(incoming, "kind content destination effect_id")
+        if not isinstance(data["content"], str):
+            raise ValueError("File content must be a string")
+        return FileEffect(
+            data["content"],
+            Destination.from_data(data["destination"]),
+            effect_id=text(data["effect_id"]),
+        )
     if kind == "skill":
         data = fields(incoming, "kind source references destination effect_id")
         return SkillEffect(
@@ -114,11 +139,8 @@ def physical_destinations(effect: Effect) -> tuple[Destination, ...]:
             Destination(destination.root, destination.path + suffix)
             for suffix in (
                 "",
-                ".graphify-bak",
-                ".bak",
-                ".graphify-state.json",
-                ".graphify.lock",
-                ".graphify-journal.json",
+                JSON_BACKUP_SUFFIX,
+                *JSON_FORBIDDEN_SUFFIXES,
             )
         )
     return (destination,)

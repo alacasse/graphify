@@ -36,7 +36,7 @@ class CasePublisher:
         self.writer = writer
         self.facts = CaseFacts(
             InitialPreparationState(),
-            (StepState.idle(self.shape.operations[0]), StepState.idle(self.shape.operations[1])),
+            tuple(StepState.idle(operation) for operation in self.shape.operations),
             RepairProgress(RepairCheckpoint("not_started", 0, None), "incomplete")
             if self.shape.requires_repair
             else None,
@@ -66,9 +66,9 @@ class CasePublisher:
         )
 
     def publish_step(self, index: int, state: StepState) -> None:
-        if index not in (0, 1):
-            raise ValueError("Case publication requires one of its two steps")
-        steps = (state, self.facts.steps[1]) if index == 0 else (self.facts.steps[0], state)
+        if self.decision.index != index:
+            raise ValueError("Step publication is not authorized at this index")
+        steps = (*self.facts.steps[:index], state, *self.facts.steps[index + 1 :])
         self._publish(replace(self.facts, steps=steps))
 
     def publish_repair(self, session: RepairSession) -> None:

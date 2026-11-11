@@ -370,10 +370,16 @@ class ContainerHarness:
             assert self.logs is not None
             retained = read_preparation(self.logs)
             assert self._subject_context is not None and self._effects is not None
+            group = parsed.group
+            expected_context = (
+                self._subject_context
+                if group
+                else self._subject_context.bind_participant(parsed.key.tool, parsed.scope)
+            )
+            selected_effects = tuple(group.participants.values()) if group else (parsed.effects,)
             if (
-                parsed.subject
-                != self._subject_context.bind_participant(parsed.key.tool, parsed.scope)
-                or parsed.effects not in self._effects
+                parsed.subject != expected_context
+                or any(effect not in self._effects for effect in selected_effects)
                 or self.binding.get("image_id") != self.image_id
                 or retained.status != "prepared"
                 or retained.binding != self.binding

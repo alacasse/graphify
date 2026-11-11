@@ -10,7 +10,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.effect_case import StepInvocation
+from tools.install_sandbox.contracts.results import CommandEvidence
 from tools.install_sandbox.contracts.timings import elapsed
 
 
@@ -25,6 +26,17 @@ class InstallerCommandResult:
     stderr: bytes = b""
     duration_seconds: float | None = None
     environment: dict[str, str] | None = None
+
+    def evidence(self, stdout: str | None = None, stderr: str | None = None) -> CommandEvidence:
+        return {
+            "args": self.args,
+            "cwd": self.cwd,
+            "state": self.state,
+            "exit_code": self.exit_code,
+            "reason": self.reason,
+            "stdout_file": stdout,
+            "stderr_file": stderr,
+        }
 
 
 CommandExecutor = Callable[[list[str], Path, dict[str, str], float], InstallerCommandResult]
@@ -93,22 +105,20 @@ class InstallerDriver:
         self.execute = execute
         self.timeout = timeout
 
-    def install(
+    def run(
         self,
-        case: EffectInstallCase,
+        invocation: StepInvocation,
         executable: Path,
         project: Path,
         home: Path,
         temporary: Path,
-        resolution: Path | None = None,
     ) -> InstallerCommandResult:
-        case = EffectInstallCase.from_json(case.to_json())
-        args = [str(executable), *case.subject.invocation]
-        if resolution is not None:
-            raise ValueError("Native effects do not declare managed resolution")
+        args = [str(executable), *invocation.argv]
         environment = command_environment(home, temporary)
         environment.update(isolated_configuration(home, temporary))
         result = self.execute(args, project, environment, self.timeout)
+        if result.args != args or result.cwd != str(project):
+            raise ValueError("Executed command contradicts published intent")
         return replace(result, environment=environment)
 
 

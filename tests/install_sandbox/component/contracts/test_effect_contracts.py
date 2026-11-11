@@ -257,7 +257,7 @@ def test_twelve_cases_have_strict_independent_preparations() -> None:
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(next(case for case in cases if case.name == "altered-section").to_json())
-    assert raw["format"] == "explicit-expectations-v10"
+    assert raw["format"] == "explicit-expectations-v11"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"

@@ -1,5 +1,7 @@
 """Plain-language duration report; container details are never added to host totals."""
 
+from typing import cast
+
 from tools.install_sandbox.contracts.results import InstallTestResult
 from tools.install_sandbox.contracts.timings import Timing
 from tools.install_sandbox.host.coordinator import CampaignResult
@@ -18,7 +20,7 @@ _LABELS = {
     "venv": "Create the Python environment",
     "pip": "Install the package and dependencies",
     "initial": "Prepare and check the initial state",
-    "command": "Run the installation command",
+    "command": "Run the installer command",
     "checks": "Observe, verify and save evidence",
     "step_preparation": "Prepare and check the next step",
     "finalize": "Finalize the case result",
@@ -79,7 +81,7 @@ def render_campaign(result: CampaignResult, *, preservation_coverage: str | None
         f"Interrupted: {result.interrupted}",
         "Operation: prepare-only (zero installation steps)"
         if result.prepare_only
-        else "Operation: reinstall (two installation steps)",
+        else "Operation: execute selected installer steps",
         f"Evidence: {result.output_directory}",
         f"Preparation: {preparation.state if preparation else 'not completed'}",
         f"Preparation diagnostic: {preparation.detail if preparation else 'unavailable'}",
@@ -164,6 +166,15 @@ def _test_diagnostics(test: InstallTestResult | None) -> list[str]:
         )
         if reason:
             lines.append(f"  Step {index + 1}: {reason}")
+        if step.intent is not None and step.phase != "terminal":
+            lines.append(f"  Step {index + 1}: in flight; current installation state indeterminate")
+        if step.assessment is not None:
+            for participant, value in step.assessment.items():
+                assessment = cast(dict[str, object], value)
+                lines.append(
+                    f"  Step {index + 1} ({step.operation}), {participant}: {assessment['summary']}, "
+                    f"preservation {assessment['preservation']}"
+                )
         verification = step.verification
         if verification is not None:
             lines.extend(

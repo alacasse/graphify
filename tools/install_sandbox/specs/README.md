@@ -298,9 +298,9 @@ validates phase continuity and recalculates verdicts. Partial failures retain th
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
 
-The current formats are case `explicit-expectations-v10`, expectations
+The current formats are case `explicit-expectations-v11`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
-result `performed-mutation-v3`, and case evidence `explicit-expectations-v12`.
+result `performed-mutation-v3`, and case evidence `explicit-expectations-v13`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,
 `file-append`, `file-creation`, `stale-references-tmp-creation`, or `file-replacement`. The
 `preserve-skill-backup` and `stale-reference` cases use `file-creation` to
@@ -332,3 +332,26 @@ separate from synthetic engine data. Simulated proofs do not qualify a real inst
 
 Run the dedicated synthetic Docker acceptance lane with
 `python -m pytest tests/install_sandbox/docker/test_lot_one_cli.py`.
+
+### Ordered group requests
+
+A partial campaign can prepare explicit participants and remove an ordered subset:
+
+```json
+{"operation":"group-uninstall","prepare":["cedar:user","cedar:project","birch:project"],"remove":["birch:project","cedar:project"]}
+```
+
+The chosen `--spec` tool must participate. Other tools resolve by canonical filename
+in that spec's directory; only requested tools are read, and declared identities
+must match. Campaign definition v2 archives their source once for autonomous replay.
+The subject context binds install argv in `invocations` by `tool:scope`, and binds
+one exact ordered removal in `removals`, for example:
+
+```json
+{"removals":[{"action":"uninstall","participants":["birch:project","cedar:project"],"argv":["uninstall","birch","cedar"]}]}
+```
+
+Every argv includes its operation and is copied verbatim. No CLI syntax or scope
+option is inferred. Duplicate participants and overlapping physical destinations,
+including auxiliary paths and parent/child paths, are rejected before execution.
+Case transport v11 includes immutable ordered command steps and participant specs.

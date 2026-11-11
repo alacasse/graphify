@@ -14,7 +14,11 @@ from tools.install_sandbox.container.installer import InstallerCommandResult, In
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import build_effect_cases
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.contracts.results import EvidenceWriteError, InstallTestResult
+from tools.install_sandbox.contracts.results import (
+    EvidenceWriteError,
+    InstallTestResult,
+    VerificationResult,
+)
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
@@ -107,7 +111,9 @@ def assert_retained_result(subject: ControlledRun, phase: str, *, step: int = 0)
 @pytest.mark.parametrize("case_name", ["reinstall", "missing-section", "altered-section"])
 @pytest.mark.parametrize("step", [0, 1], ids=["install", "reinstall"])
 @pytest.mark.parametrize(
-    "phase", ["preparation", "observation", "terminal"], ids=["start", "command", "terminal"]
+    "phase",
+    ["preparation", "command", "observation", "terminal"],
+    ids=["start", "intent", "command", "terminal"],
 )
 @pytest.mark.parametrize("after", [False, True], ids=["before-write", "after-write"])
 def test_interruption_preserves_last_publication_and_blocks_dependent_step(
@@ -137,8 +143,8 @@ def test_interruption_preserves_last_publication_and_blocks_dependent_step(
     with pytest.raises(InterruptedPublication):
         subject.run()
     assert attempts == [phase]
-    assert len(subject.calls) == step + (phase != "preparation")
-    phases = ["idle", "preparation", "observation", "terminal"]
+    assert len(subject.calls) == step + (phase in {"observation", "terminal"})
+    phases = ["idle", "preparation", "command", "observation", "terminal"]
     index = phases.index(phase)
     assert in_memory[0].steps[step].phase == phase
     retained_phase = phase if after else phases[index - 1]
@@ -184,8 +190,12 @@ def test_authoritative_write_failure_stops_without_retry_or_final_rewrite(
     assert writes.count(target) == 1
     assert all(path == "timings.json.tmp" for path in writes[writes.index(target) + 1 :])
     command_retained = "/after" in target or target.endswith("verification.json")
-    assert publications == (["preparation", "observation"] if command_retained else ["preparation"])
-    assert_retained_result(subject, "observation" if command_retained else "preparation", step=step)
+    assert publications == (
+        ["preparation", "command", "observation"]
+        if command_retained
+        else ["preparation", "command"]
+    )
+    assert_retained_result(subject, "observation" if command_retained else "command", step=step)
     assert not (subject.output / f"steps/{step}/failure.json").exists()
     if step == 0:
         assert not (subject.output / "steps/1").exists()
@@ -335,7 +345,7 @@ def test_repair_command_prefix_before_checkpoint_uses_protocol_expectations(
     assert len(subject.calls) == 2
     assert (subject.output / "steps/1/stderr.txt").is_file()
     assert not (subject.output / "steps/1/after.json").exists()
-    assert_retained_result(subject, "preparation", step=1)
+    assert_retained_result(subject, "command", step=1)
 
 
 def test_terminal_publication_keeps_finalization_timing_without_extra_result_write(
@@ -357,3 +367,24 @@ def test_terminal_publication_keeps_finalization_timing_without_extra_result_wri
     finalization = next(phase for phase in timings["phases"] if phase["phase"] == "finalize")
     assert finalization["state"] == "measured"
     assert finalization["diagnostic"] is None
+
+
+@pytest.mark.parametrize(
+    "damaged",
+    ["verification.json", "environment.json", "stdout.txt", "after.json", "after/project/GUIDE.md"],
+)
+def test_silently_damaged_receipt_stops_dependent_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damaged: str
+) -> None:
+    subject = ControlledRun(tmp_path)
+    original = Writer.write_verification
+
+    def damage(writer: Writer, verdict: VerificationResult, *, step_index: int = 0) -> None:
+        original(writer, verdict, step_index=step_index)
+        (writer.output_directory / "steps" / str(step_index) / damaged).write_bytes(b"corrupt")
+
+    monkeypatch.setattr(Writer, "write_verification", damage)
+    with pytest.raises(EvidenceWriteError):
+        subject.run()
+    assert subject.calls == ["command"]
+    assert [step["phase"] for step in subject.saved()["steps"]] == ["observation", "idle"]

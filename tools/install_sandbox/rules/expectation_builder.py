@@ -7,7 +7,10 @@ from pathlib import PurePosixPath
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import (
+    JSON_BACKUP_SUFFIX,
+    JSON_FORBIDDEN_SUFFIXES,
     Destination,
+    FileEffect,
     JsonHooksEffect,
     MarkdownSectionEffect,
     SkillEffect,
@@ -134,10 +137,48 @@ def _source_constraints(case: EffectInstallCase, sources: FilesystemSnapshot) ->
                 raise ValueError("Retained Markdown source has duplicate markers")
 
 
+def _group_initial_expectations(case: EffectInstallCase) -> ExpectationSet:
+    initial = [
+        Expectation(
+            "file",
+            f["root"],
+            f["path"],
+            "initial",
+            "case:initial_files",
+            f["content"].encode("utf-8"),
+        )
+        for f in case.initial_files
+    ]
+    for effect in case.effects.effects:
+        if isinstance(effect, FileEffect):
+            initial.append(
+                Expectation(
+                    "absent",
+                    effect.destination.root,
+                    effect.destination.path,
+                    "initial",
+                    "effect:file",
+                )
+            )
+        elif isinstance(effect, JsonHooksEffect):
+            initial.append(
+                Expectation(
+                    "absent",
+                    effect.destination.root,
+                    effect.destination.path + case.subject.rules.json_backup,
+                    "initial",
+                    "rule:json_backup",
+                )
+            )
+    return ExpectationSet("initial", tuple(initial))
+
+
 def build_initial_expectations(
     case: EffectInstallCase, sources: FilesystemSnapshot
 ) -> ExpectationSet:
     """Validate source construction and describe the prepared, uninstalled state."""
+    if case.participants:
+        return _group_initial_expectations(case)
     _source_constraints(case, sources)
     if isinstance(
         case.intermediate_preparation, (MissingReferencePreparation, AlteredReferencePreparation)
@@ -159,7 +200,9 @@ def build_initial_expectations(
     lock = None
     for effect in case.effects.effects:
         root, path = effect.destination.root, effect.destination.path
-        if isinstance(effect, SkillEffect):
+        if isinstance(effect, FileEffect):
+            constraints.append(Expectation("absent", root, path, "initial", "effect:file"))
+        elif isinstance(effect, SkillEffect):
             lock = effect.destination
             constraints.extend(
                 (
@@ -211,6 +254,39 @@ def preservation_baseline(snapshot: FilesystemSnapshot, phase: str) -> tuple[Exp
     )
 
 
+def json_forbidden_expectations(effect: JsonHooksEffect) -> tuple[Expectation, ...]:
+    return tuple(
+        Expectation(
+            "absent",
+            effect.destination.root,
+            effect.destination.path + suffix,
+            "install",
+            "rule:json_registry",
+        )
+        for suffix in JSON_FORBIDDEN_SUFFIXES
+    )
+
+
+def json_auxiliary_expectations(
+    effect: JsonHooksEffect, before: FilesystemSnapshot
+) -> tuple[Expectation, ...]:
+    """Shared obligations for the supported backup-without-registry JSON contract."""
+    root, path = effect.destination.root, effect.destination.path
+    backup = path + JSON_BACKUP_SUFFIX
+    origin = backup if before.entry(root, backup) is not None else path
+    return (
+        Expectation(
+            "file",
+            root,
+            backup,
+            "install",
+            "observation:prior:" + origin,
+            retained_bytes(before, root, origin),
+        ),
+        *json_forbidden_expectations(effect),
+    )
+
+
 def _json_constraints(
     case: EffectInstallCase, effect: JsonHooksEffect, before: FilesystemSnapshot
 ) -> tuple[Expectation, ...]:
@@ -220,8 +296,6 @@ def _json_constraints(
         selected = next(hook for hook in hooks if hook.id == preparation.member)
         hooks = (selected, *(hook for hook in hooks if hook.id != selected.id))
     root, path = effect.destination.root, effect.destination.path
-    backup = path + case.subject.rules.json_backup
-    origin = backup if before.entry(root, backup) is not None else path
     result = [
         Expectation(
             "json-hooks-seeded"
@@ -235,20 +309,42 @@ def _json_constraints(
             baseline=retained_bytes(before, root, path),
             hooks=hooks,
         ),
-        Expectation(
+        *json_auxiliary_expectations(effect, before),
+    ]
+    return tuple(result)
+
+
+def _markdown_install_constraint(
+    case: EffectInstallCase,
+    effect: MarkdownSectionEffect,
+    sources: FilesystemSnapshot,
+    before: FilesystemSnapshot,
+) -> Expectation:
+    preparation = case.intermediate_preparation
+    content = retained_bytes(sources, "subject", effect.source)
+    root, path = effect.destination.root, effect.destination.path
+    if (
+        isinstance(preparation, IntermediatePreparation)
+        and preparation.destination == effect.destination
+    ):
+        return Expectation(
             "file",
             root,
-            backup,
+            path,
             "install",
-            "observation:prior:" + origin,
-            retained_bytes(before, root, origin),
-        ),
-    ]
-    result.extend(
-        Expectation("absent", root, path + suffix, "install", "rule:json_registry")
-        for suffix in (".bak", ".graphify-state.json", ".graphify.lock", ".graphify-journal.json")
+            "case:fragments+source",
+            preparation.before + content + preparation.after,
+        )
+    return Expectation(
+        "markdown",
+        root,
+        path,
+        "install",
+        "source:subject:" + effect.source,
+        content,
+        retained_bytes(before, root, path),
+        effect.marker,
     )
-    return tuple(result)
 
 
 def build_install_expectations(
@@ -257,46 +353,25 @@ def build_install_expectations(
     before: FilesystemSnapshot,
     roots: dict[str, str],
 ) -> ExpectationSet:
+    if case.participants:
+        return ExpectationSet("install", (), roots=dict(roots))
     _source_constraints(case, sources)
     baseline = preservation_baseline(before, "install")
     constraints: list[Expectation] = []
     lock = None
     for effect in case.effects.effects:
         root, path = effect.destination.root, effect.destination.path
-        if isinstance(effect, SkillEffect):
+        if isinstance(effect, FileEffect):
+            constraints.append(
+                Expectation(
+                    "file", root, path, "install", "effect:file", effect.content.encode("utf-8")
+                )
+            )
+        elif isinstance(effect, SkillEffect):
             lock = effect.destination
             constraints.extend(_skill_constraints(case, effect, sources))
         elif isinstance(effect, MarkdownSectionEffect):
-            preparation = case.intermediate_preparation
-            if (
-                isinstance(preparation, IntermediatePreparation)
-                and preparation.destination == effect.destination
-            ):
-                constraints.append(
-                    Expectation(
-                        "file",
-                        root,
-                        path,
-                        "install",
-                        "case:fragments+source",
-                        preparation.before
-                        + retained_bytes(sources, "subject", effect.source)
-                        + preparation.after,
-                    )
-                )
-                continue
-            constraints.append(
-                Expectation(
-                    "markdown",
-                    root,
-                    path,
-                    "install",
-                    "source:subject:" + effect.source,
-                    retained_bytes(sources, "subject", effect.source),
-                    retained_bytes(before, root, path),
-                    effect.marker,
-                )
-            )
+            constraints.append(_markdown_install_constraint(case, effect, sources, before))
         else:
             constraints.extend(_json_constraints(case, effect, before))
     if isinstance(case.intermediate_preparation, StaleReferencePreparation):

@@ -37,6 +37,8 @@ def declaration(phase: str = "preparation") -> dict[str, Any]:
             "verification": None,
         },
         "stop": None,
+        "intent": None,
+        "assessment": None,
     }
 
 
@@ -55,9 +57,15 @@ def retain_begin(archive: Path, index: int = 0) -> dict[str, Any]:
     return result
 
 
-def test_begin_accepts_environment_stdout_prefix_without_promotion(archive: Path) -> None:
+def test_command_intent_accepts_environment_stdout_prefix_without_promotion(archive: Path) -> None:
     environment = (archive / "steps/0/environment.json").read_bytes()
-    retain_begin(archive)
+    complete = json.loads((archive / "result.json").read_text())["steps"][0]
+    prefix = retain_begin(archive)
+    step = prefix["steps"][0]
+    step.update(phase="command", intent=complete["intent"])
+    step["facts"]["prepared"] = True
+    step["retained"].update(before="initial/before.json", expectations="expectations/install.json")
+    (archive / "result.json").write_text(json.dumps(prefix))
     (archive / "steps/0/environment.json").write_bytes(environment)
     (archive / "steps/0/stdout.txt").write_bytes(b"partial output")
     assert read_evidence(archive).status == "incomplete"

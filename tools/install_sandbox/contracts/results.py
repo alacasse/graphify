@@ -213,6 +213,9 @@ class StepState:
     retained: StepRetained = field(default_factory=StepRetained)
     stop: StepStop | None = None
 
+    intent: dict[str, object] | None = None
+    assessment: dict[str, object] | None = None
+
     @classmethod
     def idle(cls, operation: str) -> "StepState":
         return cls(text(operation))
@@ -236,6 +239,8 @@ class StepState:
         return {
             "operation": self.operation,
             "phase": self.phase,
+            "intent": self.intent,
+            "assessment": self.assessment,
             "facts": {
                 "prepared": self.facts.prepared,
                 "command": self.command,
@@ -247,7 +252,7 @@ class StepState:
 
     @classmethod
     def from_data(cls, value: object) -> "StepState":
-        data = fields(value, "operation phase facts retained stop")
+        data = fields(value, "operation phase facts retained stop intent assessment")
         fact = fields(data["facts"], "prepared command verification")
         retained = fields(
             data["retained"], "before before_usable expectations command after verification"
@@ -295,7 +300,17 @@ class StepState:
                 _optional_text(retained["verification"]),
             ),
             stop,
+            _optional_object(data["intent"]),
+            _optional_object(data["assessment"]),
         )
+
+
+def _optional_object(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Expected a structured step record")
+    return cast(dict[str, object], value)
 
 
 def _optional_text(value: object) -> str | None:

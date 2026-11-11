@@ -1,12 +1,13 @@
 """Execute native reinstall phases against expectations retained before commands."""
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from tools.install_sandbox.container.case_publication import CasePublisher
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter
-from tools.install_sandbox.container.installer import InstallerDriver
+from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
@@ -25,6 +26,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
 )
 from tools.install_sandbox.rules.initial_preparation import InitialPreparationLifecycle
+from tools.install_sandbox.rules.ordered_step import command_intent, expectation_path, verify_step
 from tools.install_sandbox.rules.step_lifecycle import (
     CommandRetained,
     CommandReturned,
@@ -75,7 +77,7 @@ class InstallTestRunner:
         _check_directories(subject, case_path, work, output)
         writer = TestResultWriter(output)
         case.write(output / "case.json")
-        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v12"})
+        writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v13"})
         writer.initialize_timings(case.name, len(case.operations))
         publisher = CasePublisher(case, writer)
         lifecycle = InitialPreparationLifecycle()
@@ -121,7 +123,7 @@ class InstallTestRunner:
                     lifecycle.retain_failure(REFERENCES["failure"])
                 # Failed publication cannot become an operational diagnostic or a retry.
                 publisher.publish_initial(lifecycle)
-        if publisher.decision.segment != "installation":
+        if publisher.decision.segment != "step":
             return
         assert operations.environment is not None and operations.sources is not None
         assert operations.expectations is not None and operations.before is not None
@@ -147,8 +149,10 @@ class InstallTestRunner:
         writer: TestResultWriter,
         publisher: CasePublisher,
     ) -> None:
+        initial = before
         while True:
-            segment = publisher.decision.segment
+            decision = publisher.decision
+            segment = decision.segment
             if segment == "repair":
                 transition = conduct_intermediate(
                     case, sources, expectations, before, environment, writer, publisher
@@ -157,17 +161,48 @@ class InstallTestRunner:
                     return
                 expectations, before = transition
                 continue
-            if segment not in {"installation", "reinstallation"}:
+            if segment != "step" or decision.index is None:
                 return
-            index = 0 if segment == "installation" else 1
+            index = decision.index
             state = start(case.operations[index])
             publisher.publish_step(index, state)
             completed = self._step(
-                case, executable, environment, expectations, before, writer, publisher, index, state
+                case,
+                executable,
+                environment,
+                expectations,
+                initial,
+                before,
+                writer,
+                publisher,
+                index,
+                state,
             )
             if completed is None:
                 return
             expectations, before = completed
+
+    def _command(
+        self,
+        case: EffectInstallCase,
+        index: int,
+        executable: Path,
+        environment: EffectEnvironment,
+        writer: TestResultWriter,
+    ) -> InstallerCommandResult:
+        with writer.measure("command", index) as timing:
+            command = self.driver.run(
+                case.steps[index],
+                executable,
+                environment.project,
+                environment.home,
+                environment.project.parent.parent / "command-tmp",
+            )
+            timing.duration_seconds = command.duration_seconds
+            if command.duration_seconds is None:
+                timing.state = "unavailable"
+                timing.diagnostic = "Command executor did not supply a duration"
+        return command
 
     def _step(
         self,
@@ -175,6 +210,7 @@ class InstallTestRunner:
         executable: Path,
         environment: EffectEnvironment,
         expectations: ExpectationSet,
+        initial: FilesystemSnapshot,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
         publisher: CasePublisher,
@@ -182,11 +218,12 @@ class InstallTestRunner:
         state: StepState,
     ) -> tuple[ExpectationSet, FilesystemSnapshot] | None:
         try:
+            observed = before
             if index:
                 with writer.measure("step_preparation", index):
-                    previous = publisher.facts.steps[0].verification
+                    previous = publisher.facts.steps[index - 1].verification
                     assert previous is not None
-                    if case.intermediate_preparation is None:
+                    if case.intermediate_preparation is None and case.group is None:
                         expectations = build_reinstall_expectations(expectations, before, previous)
                     observed = environment.observe(writer, "before", step_index=index)
                     usable = not observed.obstacles and same_observation(before, observed)
@@ -195,56 +232,37 @@ class InstallTestRunner:
                     )
                     if not usable:
                         raise ValueError(
-                            "Environment changed or was obstructed before the second installation"
+                            "Environment changed or was obstructed before the next command"
                         )
             else:
                 state = advance(state, PreparationObserved(REFERENCES["before"]))
             state = advance(state, Prepared())
+            reference = expectation_path(case, index)
             if index and case.intermediate_preparation is None:
-                writer.write_metadata(
-                    f"expectations/{expectations.phase}.json", expectations.to_data()
-                )
-            state = advance(state, ExpectationsRetained(f"expectations/{expectations.phase}.json"))
-            with writer.measure("command", index) as timing:
-                command = self.driver.install(
-                    case,
-                    executable,
-                    environment.project,
-                    environment.home,
-                    environment.project.parent.parent / "command-tmp",
-                )
-                timing.duration_seconds = command.duration_seconds
-                if command.duration_seconds is None:
-                    timing.state = "unavailable"
-                    timing.diagnostic = "Command executor did not supply a duration"
-            state = advance(
-                state,
-                CommandReturned(
-                    {
-                        "args": command.args,
-                        "cwd": command.cwd,
-                        "state": command.state,
-                        "exit_code": command.exit_code,
-                        "reason": command.reason,
-                        "stdout_file": None,
-                        "stderr_file": None,
-                    }
-                ),
-            )
+                writer.write_metadata(reference, expectations.to_data())
+            state = advance(state, ExpectationsRetained(reference))
+            assert state.retained.before is not None
+            writer.verify_inputs(reference, expectations.to_data(), state.retained.before, observed)
+            state = replace(state, intent=command_intent(case, index))
+            publisher.publish_step(index, state)
+            command = self._command(case, index, executable, environment, writer)
+            state = advance(state, CommandReturned(command.evidence()))
             retained = writer.write_command(command, step_index=index)
-            assert retained["stdout_file"] is not None and retained["stderr_file"] is not None
-            state = advance(
-                state, CommandRetained(retained["stdout_file"], retained["stderr_file"])
-            )
+            stdout = f"steps/{index}/stdout.txt"
+            stderr = f"steps/{index}/stderr.txt"
+            if retained != command.evidence(stdout, stderr):
+                raise EvidenceWriteError("Retained command differs from the executed command")
+            state = advance(state, CommandRetained(stdout, stderr))
             publisher.publish_step(index, state)
             with writer.measure("checks", index):
                 after = environment.observe(writer, "after", step_index=index)
                 state = advance(state, ObservationRetained(f"steps/{index}/after.json"))
-                verdict = self.verifier.verify(expectations, after)
+                assessment, verdict = verify_step(case, index, expectations, initial, before, after)
                 state = advance(state, VerificationComputed(verdict))
                 writer.write_verification(verdict, step_index=index)
+                writer.verify_receipt(index, command, after, verdict)
                 state = advance(state, VerificationRetained(f"steps/{index}/verification.json"))
-            state = advance(state, Terminate())
+            state = replace(advance(state, Terminate()), assessment=assessment)
         except EvidenceWriteError:
             # Authority was not retained. Keep the previous declaration and stop all effects.
             writer.halted = True

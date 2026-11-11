@@ -39,7 +39,12 @@ def _effect(value: object) -> Effect:
         raise ValueError("Expected effect")
     incoming = cast(dict[str, object], value)
     family = incoming.get("family")
-    extra = {"skill": "source references", "markdown-section": "source", "json-hooks": "hooks"}
+    extra = {
+        "file": "content",
+        "skill": "source references",
+        "markdown-section": "source",
+        "json-hooks": "hooks",
+    }
     if family not in extra:
         raise ValueError(f"Unsupported effect family: {family}")
     optional = " marker" if "marker" in incoming and family == "markdown-section" else ""
@@ -53,13 +58,15 @@ def _effect(value: object) -> Effect:
         "kind": family,
         "destination": {"root": roots[root], "path": relative_path(data["path"])},
     }
-    if family == "json-hooks":
+    if family == "file":
+        resolved["content"] = data["content"]
+    elif family == "json-hooks":
         resolved["hooks"] = data["hooks"]
     else:
         resolved["source"] = data["source"]
         if family == "skill":
             resolved["references"] = data["references"]
-        else:
+        elif family == "markdown-section":
             resolved["marker"] = data.get("marker", "## graphify")
     return effect_from_data(resolved)
 

@@ -248,3 +248,21 @@ def _preservation(
         checks.mismatch(
             result, "unexpected_change", *key, "entry preserved", "entry added, removed or changed"
         )
+
+
+def observation_obstacles(snapshot: FilesystemSnapshot) -> list[ObservationObstacle]:
+    """Report incomplete inventory without suppressing successfully observed entries."""
+    result = VerificationResult()
+    _complete(snapshot, result)
+    return result.obstacles
+
+
+def verify_constraints(
+    constraints: tuple[Expectation, ...], observed: FilesystemSnapshot
+) -> VerificationResult:
+    """Compare a focused constraint bundle without imposing unrelated root bindings."""
+    result = VerificationResult()
+    for item in constraints:
+        _constraint(item, observed, result)
+    result.complete = not result.obstacles
+    return result

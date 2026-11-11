@@ -271,7 +271,7 @@ def inspect(published_state: StepState, retained_facts: RetainedFacts) -> None:
     """Check all physical facts without promoting the last published statement."""
     validate(published_state)
     state, present = published_state, retained_facts
-    if state.phase not in {"idle", "preparation", "observation", "terminal", "stopped"}:
+    if state.phase not in {"idle", "preparation", "command", "observation", "terminal", "stopped"}:
         raise ValueError("Step was not published at a publication boundary")
     diagnostic = present.stopped_state
     if diagnostic is not None:
@@ -340,7 +340,7 @@ def inspect(published_state: StepState, retained_facts: RetainedFacts) -> None:
             raise ValueError("Stop diagnostic is unreachable from declaration")
         if state.phase == "terminal":
             raise ValueError("Terminal step cannot have a stop diagnostic")
-        if state.phase == "preparation" and PHASES.index(stop.phase) >= 5:
+        if state.phase in {"preparation", "command"} and PHASES.index(stop.phase) >= 5:
             raise ValueError("Stop crossed an unpublished command checkpoint")
         phase = stop.phase
     if state.phase == "idle":

@@ -92,7 +92,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
     repair = check_effect_result(result, case, output_directory)
     decision = evaluate(
         CaseShape.from_case(case),
-        CaseFacts(result.preparation, (steps[0], steps[1]), repair),
+        CaseFacts(result.preparation, tuple(steps), repair),
     )
     if result.status != decision.status:
         raise ValueError("Case status contradicts published local progression")
@@ -102,7 +102,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
 def _read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
-        "format": "explicit-expectations-v12"
+        "format": "explicit-expectations-v13"
     }:
         raise ValueError("Unsupported evidence format; use its identified historical reader")
     case = EffectInstallCase.from_json(

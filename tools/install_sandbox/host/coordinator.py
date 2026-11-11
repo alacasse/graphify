@@ -212,7 +212,12 @@ class CampaignResult:
             requested_cases=definition.requested_cases,
             omitted_cases=tuple(key.operation for key in definition.omitted),
             omitted_keys=definition.omitted,
-            declared_scopes=tuple(scope.scope for scope in definition.declaration.scopes),
+            declared_scopes=tuple(scope.scope for scope in definition.declaration.scopes)
+            + (
+                ("group",)
+                if any(entry.key.scope == "group" for entry in definition.built.entries)
+                else ()
+            ),
             request=definition.manifest["request"],
         )
 
@@ -291,9 +296,9 @@ class CampaignResult:
         return {
             "version": 4,
             "scope_results": self.scope_results,
-            "selected_keys": [asdict(entry.key) for entry in self.cases if entry.key],
+            "selected_keys": [entry.key.to_data() for entry in self.cases if entry.key],
             "executed_keys": [
-                asdict(entry.key) for entry in self.cases if entry.key and _executed(entry)
+                entry.key.to_data() for entry in self.cases if entry.key and _executed(entry)
             ],
             "passed": self.passed,
             "status": self.status,
@@ -341,6 +346,13 @@ class CampaignResult:
 
 
 def _campaign_fields(fields: list[tuple[str, object]]) -> dict[str, object]:
+    values = dict(fields)
+    if (
+        set(values) == {"tool", "scope", "operation", "effect_id", "member", "prepare", "remove"}
+        and not values["prepare"]
+        and not values["remove"]
+    ):
+        fields = [(key, value) for key, value in fields if key not in {"prepare", "remove"}]
     return {
         key: value for key, value in fields if key != "dependency_preparation" or value is not None
     }

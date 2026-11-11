@@ -5,7 +5,7 @@ from typing import Literal, cast
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
-from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
@@ -23,10 +23,11 @@ from tools.install_sandbox.host.evidence_reader import (
 from tools.install_sandbox.host.initial_preparation_reader import replay_initial
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
 from tools.install_sandbox.host.step_artifacts import inventory
-from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.comparison import json_equal
 from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
 )
+from tools.install_sandbox.rules.ordered_step import command_intent, expectation_path, verify_step
 from tools.install_sandbox.rules.repair_protocol import RepairInputs
 from tools.install_sandbox.rules.step_lifecycle import Artifact, RetainedFacts, inspect
 
@@ -47,24 +48,8 @@ def _snapshot(output: Path, relative: str) -> FilesystemSnapshot:
     return snapshot
 
 
-def _same_observation(first: FilesystemSnapshot, second: FilesystemSnapshot) -> bool:
-    def inventory(snapshot: FilesystemSnapshot) -> list[dict[str, object]]:
-        return [
-            {key: value for key, value in entry.items() if key not in {"content_file", "sha256"}}
-            for entry in sorted(snapshot.entries, key=lambda e: (e["root"], e["path"]))
-        ]
-
-    return (
-        inventory(first) == inventory(second)
-        and first.contents == second.contents
-        and first.obstacles == second.obstacles
-    )
-
-
-def _expectations(output: Path, expected: ExpectationSet) -> None:
-    stored = ExpectationSet.from_data(
-        read_json_evidence(output, f"expectations/{expected.phase}.json")
-    )
+def _expectations(output: Path, reference: str, expected: ExpectationSet) -> None:
+    stored = ExpectationSet.from_data(read_json_evidence(output, reference))
     if stored != expected:
         raise ValueError(f"Stored {expected.phase} expectations contradict retained inputs")
 
@@ -73,6 +58,8 @@ def check_effect_result(
     result: InstallTestResult, case: EffectInstallCase, output: Path
 ) -> RepairProgress | None:
     _check_steps_directory(result, output)
+    for index, step in enumerate(result.steps):
+        _check_intent(step, case, index)
     retained = EffectInstallCase.from_json(
         safe_evidence_path(output, "case.json").read_text(encoding="utf-8")
     )
@@ -84,7 +71,7 @@ def check_effect_result(
     if initial is None:
         _absent(output, ("expectations/reinstall.json",))
         for index in range(len(result.steps)):
-            loaded, staged = inventory(output, index, _snapshot)
+            loaded, staged = inventory(output, index, _snapshot, grouped=case.group is not None)
             # Installation expectations belong to initial preparation, never an idle step.
             own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
             if own or staged:
@@ -137,13 +124,14 @@ def _steps(
     previous_verdict: VerificationResult | None = None
     progress: RepairProgress | None = None
     installed = expected
+    initial = previous
     for index, step in enumerate(result.steps):
-        if index:
+        if index and case.group is None:
             expected, previous, progress = _transition(
                 result, case, output, sources, installed, expected, previous, previous_verdict
             )
         after, verdict = _inspect_step(
-            step, case, output, index, roots, first_command, previous, expected
+            step, case, output, index, roots, first_command, initial, previous, expected
         )
         if step.command is not None:
             first_command = step.command["args"], step.command["cwd"]
@@ -198,10 +186,11 @@ def _inspect_step(
     index: int,
     roots: dict[str, str],
     first_command: tuple[list[str], str] | None,
+    initial: FilesystemSnapshot,
     previous: FilesystemSnapshot,
     expected: ExpectationSet,
 ) -> tuple[FilesystemSnapshot | None, VerificationResult | None]:
-    loaded, staged = inventory(output, index, _snapshot)
+    loaded, staged = inventory(output, index, _snapshot, grouped=case.group is not None)
     prefix = f"steps/{index}"
     failure = loaded.get(f"{prefix}/failure.json")
     stopped = None if failure is None else StepState.from_data(failure)
@@ -215,16 +204,13 @@ def _inspect_step(
             or (claim.stop is not None and claim.stop.phase == "preparation")
         )
     )
-    phase = "install" if index == 0 else "reinstall"
-    expectation_reference = f"expectations/{phase}.json"
+    expectation_reference = expectation_path(case, index)
     has_expectations = safe_evidence_path(output, expectation_reference).exists()
-    if has_expectations:
-        _expectations(output, expected)
+    if has_expectations and not repair_owns_expectations:
+        _expectations(output, expectation_reference, expected)
     before = loaded.get(f"{prefix}/before.json")
     after = loaded.get(f"{prefix}/after.json")
-    before_usable = isinstance(before, FilesystemSnapshot) and _same_observation(previous, before)
-    if isinstance(before, FilesystemSnapshot) and before.obstacles:
-        before_usable = False
+    before_usable = isinstance(before, FilesystemSnapshot) and same_observation(previous, before)
     if index == 0:
         before, before_usable = previous, not previous.obstacles
     for name, reference in claim.observations.items():
@@ -237,42 +223,23 @@ def _inspect_step(
             raise ValueError("Evidence references must belong to their own step")
         if reference not in loaded and not (index == 0 and name == "before"):
             raise ValueError("Missing referenced observation")
-    command = claim.command
-    if command is not None:
-        _partial_command_binding(command, case, roots, first_command)
-        outputs: tuple[tuple[Literal["stdout_file", "stderr_file"], str], ...] = (
-            ("stdout_file", "stdout.txt"),
-            ("stderr_file", "stderr.txt"),
-        )
-        for key, filename in outputs:
-            reference = command[key]
-            if reference is not None and (
-                reference != f"{prefix}/{filename}" or reference not in loaded
-            ):
-                raise ValueError("Command requires its own retained output")
-    if f"{prefix}/environment.json" in loaded:
-        binding = command or {
-            "args": ["retained", *case.subject.invocation],
-            "cwd": roots["project"],
-            "state": "not_started",
-            "exit_code": None,
-            "reason": None,
-            "stdout_file": None,
-            "stderr_file": None,
-        }
-        check_environment(binding, output, index)
-    saved = loaded.get(f"{prefix}/verification.json")
-    verdict = None if saved is None else VerificationResult.from_data(saved)
-    if verdict is not None and (
-        not isinstance(after, FilesystemSnapshot)
-        or EffectVerifier().verify(expected, after) != verdict
+    _check_command(claim, case, index, roots, first_command, output, loaded)
+    verdict = _replay_verification(
+        case,
+        index,
+        expected,
+        initial,
+        previous,
+        after,
+        claim,
+        loaded.get(f"{prefix}/verification.json"),
+    )
+    if stopped is not None:
+        _check_intent(stopped, case, index)
+    if step.intent is None and any(
+        f"{prefix}/{name}" in loaded for name in ("environment.json", "stdout.txt", "stderr.txt")
     ):
-        raise ValueError("Verification contradicts retained explicit expectations")
-    if claim.verification is not None and (
-        not isinstance(after, FilesystemSnapshot)
-        or EffectVerifier().verify(expected, after) != claim.verification
-    ):
-        raise ValueError("Verification contradicts retained explicit expectations")
+        raise ValueError("Command evidence without an authorized intent")
     stop = stopped.stop if stopped is not None else None
     kinds = {
         f"{prefix}/before.json": "before",
@@ -318,13 +285,86 @@ def _inspect_step(
     return after if isinstance(after, FilesystemSnapshot) else None, verdict
 
 
+def _replay_verification(
+    case: EffectInstallCase,
+    index: int,
+    expected: ExpectationSet,
+    initial: FilesystemSnapshot,
+    previous: FilesystemSnapshot,
+    after: object,
+    claim: StepState,
+    saved: object,
+) -> VerificationResult | None:
+    verdict = None if saved is None else VerificationResult.from_data(saved)
+    if verdict is not None or claim.verification is not None or claim.assessment is not None:
+        if not isinstance(after, FilesystemSnapshot):
+            raise ValueError("Verification requires a retained observation")
+        assessment, computed = verify_step(case, index, expected, initial, previous, after)
+        for published in (verdict, claim.verification):
+            if published is not None and published != computed:
+                raise ValueError("Verification contradicts retained explicit expectations")
+        if claim.phase == "terminal" and not json_equal(claim.assessment, assessment):
+            raise ValueError("Participant assessment contradicts retained observation")
+    return verdict
+
+
+def _check_command(
+    claim: StepState,
+    case: EffectInstallCase,
+    index: int,
+    roots: dict[str, str],
+    first_command: tuple[list[str], str] | None,
+    output: Path,
+    loaded: dict[str, object],
+) -> None:
+    prefix = f"steps/{index}"
+    command = claim.command
+    if command is not None:
+        _partial_command_binding(command, case, index, roots, first_command)
+        outputs: tuple[tuple[Literal["stdout_file", "stderr_file"], str], ...] = (
+            ("stdout_file", "stdout.txt"),
+            ("stderr_file", "stderr.txt"),
+        )
+        for key, filename in outputs:
+            reference = command[key]
+            if reference is not None and (
+                reference != f"{prefix}/{filename}" or reference not in loaded
+            ):
+                raise ValueError("Command requires its own retained output")
+    if f"{prefix}/environment.json" in loaded:
+        binding = command or {
+            "args": ["retained", *case.steps[index].argv],
+            "cwd": roots["project"],
+            "state": "not_started",
+            "exit_code": None,
+            "reason": None,
+            "stdout_file": None,
+            "stderr_file": None,
+        }
+        check_environment(binding, output, index)
+
+
+def _check_intent(step: StepState, case: EffectInstallCase, index: int) -> None:
+    phase = step.stop.phase if step.stop else step.phase
+    expected = (
+        None if phase in {"idle", "preparation", "expectations"} else command_intent(case, index)
+    )
+    if step.intent != expected or (
+        step.intent is not None and type(step.intent.get("index")) is not int
+    ):
+        raise ValueError("Published intent contradicts case plan")
+    if step.phase != "terminal" and step.assessment is not None:
+        raise ValueError("Only a completed receipt can publish participant states")
+
+
 def _partial_command_binding(
     command: CommandEvidence,
     case: EffectInstallCase,
+    index: int,
     roots: dict[str, str],
     first_command: tuple[list[str], str] | None,
 ) -> None:
-    if command["args"][1:] != list(case.subject.invocation) or command["cwd"] != roots["project"]:
+    if command["args"][1:] != list(case.steps[index].argv) or command["cwd"] != roots["project"]:
         raise ValueError("Partial command facts contradict invocation or retained roots")
-    if first_command is not None and (command["args"], command["cwd"]) != first_command:
-        raise ValueError("Partial reinstallation must repeat the same command")
+    if first_command is not None and command["args"][0] != first_command[0][0]:
+        raise ValueError("Each step must use the same prepared executable")

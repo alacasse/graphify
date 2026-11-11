@@ -139,7 +139,7 @@ def _verify_dependencies(root: Path, preparation: object) -> None:
     saved = _object(preparation).get("dependency_preparation")
     directory = root / "preparation/dependencies"
     if saved is None:
-        if directory.is_dir() and _object(preparation)["state"] == "completed":
+        if _object(preparation)["state"] == "completed":
             raise ValueError("Completed verification has no dependency receipt")
         return
     replayed = read_dependency_preparation(directory)
@@ -237,6 +237,14 @@ def replay_directory(root: Path) -> dict[str, Any]:
     return report
 
 
+def _count_paths(path: PurePosixPath, allocated: set[PurePosixPath], limit: int) -> None:
+    while path.parts and path not in allocated:
+        allocated.add(path)
+        if len(allocated) > limit:
+            raise ValueError("Archive exceeds the campaign replay path budget")
+        path = path.parent
+
+
 def replay_campaign(
     archive: Path, *, max_bytes: int = 1024**3, max_entries: int = 100_000
 ) -> dict[str, Any]:
@@ -250,6 +258,7 @@ def replay_campaign(
             raise ValueError("Archive exceeds the campaign replay extraction budget")
         root = Path(temporary)
         seen: set[PurePosixPath] = set()
+        allocated: set[PurePosixPath] = set()
         for info in infos:
             path = PurePosixPath(info.filename)
             if (
@@ -260,6 +269,7 @@ def replay_campaign(
                 or path in seen
             ):
                 raise ValueError("Duplicate or unsafe campaign ZIP entry")
+            _count_paths(path, allocated, max_entries)
             seen.add(path)
             destination = root / path
             if info.is_dir():

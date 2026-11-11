@@ -4,7 +4,7 @@ import hashlib
 import json
 import shutil
 from collections.abc import Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -14,6 +14,7 @@ from tools.install_sandbox.container.installer import InstallerCommandResult, In
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import EffectRules, SubjectContext
 from tools.install_sandbox.contracts.effects import EffectSpec
+from tools.install_sandbox.host.build_context import DependencyPreparation
 from tools.install_sandbox.host.docker_runtime import ContainerRunResult
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
@@ -251,8 +252,14 @@ class ControlledTransport:
 
     def prepare(self, subject: Path, output: Path) -> ContainerRunResult:
         shutil.copytree(subject, self.subject)
-        output.mkdir(parents=True)
-        return completed()
+        directory = output / "dependencies"
+        directory.mkdir(parents=True)
+        (directory / "dependencies.json").write_text(
+            json.dumps({"mode": "locked", "warning": None, "diagnostic": None})
+        )
+        return replace(
+            completed(), dependency_preparation=DependencyPreparation("locked", None, None)
+        )
 
     def run_case(self, *, case_file: Path, output_directory: Path) -> ContainerRunResult:
         InstallTestRunner(InstallerDriver(self.installer.execute)).run_case(

@@ -116,12 +116,32 @@ def test_prepare_cli_retains_replay_without_case_or_install(
     assert (proof / "expected/package.md").read_text() == "# Synthetic package\n"
     assert (proof / "expected/METADATA").read_text() == "Version: 1.2.3\n"
     assert not (proof.parent / "cases").exists()
+    _challenge_preparation_archive(output, proof)
+
+
+def _challenge_preparation_archive(output: Path, proof: Path) -> None:
     assert replay_directory(proof.parent)["status"] == "prepared"
     with pytest.raises(ValueError, match="budget"):
         replay_campaign(output / "evidence.zip", max_bytes=16)
     (proof / "dependencies/dependencies.json").unlink()
     with pytest.raises((ValueError, OSError)):
         replay_directory(proof.parent)
+    shutil.rmtree(proof / "dependencies")
+    for name in ("campaign.json", "host-receipts.json"):
+        path = proof.parent / name
+        data = json.loads(path.read_text())
+        del data["preparation"]["dependency_preparation"]
+        path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="no dependency receipt"):
+        replay_directory(proof.parent)
+
+
+def test_zip_replay_bounds_implicit_parent_directories(tmp_path: Path) -> None:
+    path = tmp_path / "deep.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("evidence/one/two/three/input.json", "{}")
+    with pytest.raises(ValueError, match="path budget"):
+        replay_campaign(path, max_entries=4)
 
 
 @pytest.mark.parametrize(

@@ -26,13 +26,18 @@ EXPECTED_REPAIRS = {
 }
 
 
+def isolated_git_environment() -> dict[str, str]:
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return {**environment, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+
+
 def git(subject: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(subject), *args],
         check=True,
         text=True,
         capture_output=True,
-        env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull},
+        env=isolated_git_environment(),
     ).stdout.strip()
 
 
@@ -138,6 +143,7 @@ def cli(
             *arguments,
         ],
         cwd=ROOT,
+        env=isolated_git_environment(),
         capture_output=True,
         text=True,
         timeout=600,

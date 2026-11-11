@@ -54,7 +54,7 @@ def capture(tmp_path: Path) -> Path:
         )
     )
     output = tmp_path / "proof"
-    capture_preparation(subject, output, effects, context)
+    capture_preparation(subject, output, (effects,), context)
     return output
 
 

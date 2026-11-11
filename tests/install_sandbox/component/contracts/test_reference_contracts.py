@@ -142,6 +142,7 @@ def test_altered_reference_case_rejects_tampered_definition(change: str):
     case = replace(
         reference_case(),
         name="altered-reference",
+        key=replace(reference_case().key, operation="altered-reference"),
         intermediate_preparation=AlteredReferencePreparation(Destination("project", "skill")),
     )
     assert EffectInstallCase.from_json(case.to_json()) == case
@@ -162,6 +163,7 @@ def test_altered_reference_shares_selection_and_source_preconditions():
     case = replace(
         reference_case(),
         name="altered-reference",
+        key=replace(reference_case().key, operation="altered-reference"),
         intermediate_preparation=AlteredReferencePreparation(Destination("project", "skill")),
     )
     sources = reference_sources()

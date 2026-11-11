@@ -64,18 +64,19 @@ def context() -> SubjectContext:
     )
 
 
-@pytest.mark.parametrize("timeout", [11, True, None])
+@pytest.mark.parametrize("timeout", [11.5, True, None])
 def test_transported_hook_must_match_subject_timeout_rule(timeout: object) -> None:
     case = build_reinstall_case(structured_spec(), context())
     payload = json.loads(case.to_json())
     payload["effects"]["effects"][2]["hooks"][0]["content"]["timeout"] = timeout
-    with pytest.raises(ValueError, match="Hook timeout contradicts"):
+    with pytest.raises(ValueError, match="Hook timeout must be"):
         EffectInstallCase.from_json(json.dumps(payload))
 
 
 def test_exact_yaml_and_rename(tmp_path: Path) -> None:
     reader = EffectSpecReader()
-    spec = reader.read(FIXTURE)
+    spec = reader.read(FIXTURE).scopes[0].effects
+    assert spec is not None
     skill, markdown, hooks = spec.effects
     assert isinstance(skill, SkillEffect)
     assert skill.destination == Destination("home", ".synthetic/skills/package")
@@ -91,7 +92,7 @@ def test_exact_yaml_and_rename(tmp_path: Path) -> None:
     ]
     renamed = tmp_path / "independent-name.yaml"
     renamed.write_text(FIXTURE.read_text())
-    assert reader.read(renamed) == spec
+    assert reader.read(renamed).scopes[0].effects == spec
 
 
 def test_markdown_only_case_and_strict_roundtrip() -> None:
@@ -117,10 +118,10 @@ def test_auxiliary_collision(path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "fragment", ["kind: shell-script", "kind: markdown-section\n    unknown: true"]
+    "fragment", ["family: shell-script", "family: markdown-section\n    unknown: true"]
 )
 def test_unknown_effect_and_fields(fragment: str) -> None:
-    payload = FIXTURE.read_text().replace("kind: markdown-section", fragment)
+    payload = FIXTURE.read_text().replace("family: markdown-section", fragment)
     with pytest.raises(ValueError):
         EffectSpecReader().from_yaml(payload)
 
@@ -132,7 +133,7 @@ def test_missing_rule_and_duplicate_field_rejected() -> None:
     with pytest.raises(ValueError, match="Expected fields"):
         EffectInstallCase.from_json(json.dumps(raw))
     with pytest.raises(ValueError, match="Duplicate"):
-        EffectSpecReader().from_yaml(FIXTURE.read_text() + "scope: project\n")
+        EffectSpecReader().from_yaml(FIXTURE.read_text() + "tool: duplicate\n")
 
 
 def test_unsupported_rule_and_path_rejected() -> None:
@@ -141,7 +142,7 @@ def test_unsupported_rule_and_path_rejected() -> None:
         "controlled",
         ("install",),
         "METADATA",
-        EffectRules(11, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules(10, "persistent", ".unsupported", ".bak", False),
     )
     with pytest.raises(ValueError, match="JSON hooks reinstall rule"):
         build_reinstall_case(spec, subject)
@@ -224,7 +225,9 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
     skill = SkillEffect(
         "skill.md", "skills/claude/references", Destination("home", ".synthetic/skills/package")
     )
-    second = SkillEffect("skill.md", "skills/claude/references", Destination("project", "skill"))
+    second = SkillEffect(
+        "skill.md", "skills/claude/references", Destination("project", "skill"), effect_id="second"
+    )
     effects = (skill, second) if home_first else (second, skill)
     spec = EffectSpec(effects)
     with pytest.raises(ValueError, match="Multiple skill effects"):
@@ -245,13 +248,16 @@ def test_twelve_cases_have_strict_independent_preparations() -> None:
         "stale-reference",
         "stale-references-tmp",
         "missing-json-hook",
+        "missing-json-hook",
         "altered-json-hook",
+        "altered-json-hook",
+        "duplicate-json-hook",
         "duplicate-json-hook",
     ]
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(next(case for case in cases if case.name == "altered-section").to_json())
-    assert raw["format"] == "explicit-expectations-v9"
+    assert raw["format"] == "explicit-expectations-v10"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
@@ -309,7 +315,9 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
     spec = EffectSpec(
         (
             MarkdownSectionEffect("first.md", Destination("project", "FIRST.md")),
-            MarkdownSectionEffect("second.md", Destination("project", "SECOND.md")),
+            MarkdownSectionEffect(
+                "second.md", Destination("project", "SECOND.md"), effect_id="second"
+            ),
         )
     )
     built = build_effect_cases(spec, context())
@@ -357,7 +365,11 @@ def test_backup_preservation_case_follows_skill_across_effect_combinations(
 ) -> None:
     skill = SkillEffect("package.md", "refs", Destination(root, "package"))
     markdown = tuple(
-        MarkdownSectionEffect(f"source-{index}.md", Destination("project", f"GUIDE-{index}.md"))
+        MarkdownSectionEffect(
+            f"source-{index}.md",
+            Destination("project", f"GUIDE-{index}.md"),
+            effect_id=f"markdown-{index}",
+        )
         for index in range(markdown_count)
     )
     spec = EffectSpec((skill, *markdown))
@@ -390,8 +402,15 @@ def test_backup_preservation_retains_multiskill_construction_limit() -> None:
     spec = EffectSpec(
         (
             SkillEffect("first.md", "first-refs", Destination("home", "first")),
-            SkillEffect("second.md", "second-refs", Destination("project", "second")),
+            SkillEffect(
+                "second.md", "second-refs", Destination("project", "second"), effect_id="second"
+            ),
         )
     )
-    with pytest.raises(ValueError, match="Multiple skill effects"):
-        build_effect_cases(spec, context())
+    built = build_effect_cases(spec, context())
+    assert not built.cases
+    assert any(
+        "Multiple skill effects" in d.reason
+        for d in built.decisions
+        if d.classification == "unconstructible"
+    )

@@ -8,12 +8,15 @@ from typing import Any, cast
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+)
 from tools.install_sandbox.container import evidence_writer, intermediate_execution
 from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import MalformedEvidence, read_evidence
 
 
@@ -105,7 +108,8 @@ def _run_interrupted(
 ) -> Path:
     subject, spec, context = arrange(root)
     cases = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec),
+        SubjectContext.from_data(json.loads(context.read_text())),
     ).cases
     next(case for case in cases if case.name == scenario).write(root / "case.json")
     installer = LiteralInstaller()

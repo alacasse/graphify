@@ -38,7 +38,7 @@ def conduct(
 ):
     subject, spec, context = arrange(root)
     built = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in built.cases if case.name == "altered-section")
     case_file = root / "case.json"

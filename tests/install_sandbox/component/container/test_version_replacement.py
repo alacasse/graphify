@@ -6,13 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import arrange
+from tests.install_sandbox.component.host.native_support import arrange, read_project_effects
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.file_mutation import apply_mutation
 from tools.install_sandbox.contracts.bound_mutation import BoundFileRemoval, BoundFileReplacement
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.effects import Destination
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
 
 @pytest.mark.parametrize("fault", [None, "operation", "destination", "original", "witness"])
@@ -22,7 +21,8 @@ def test_version_replacement_checks_binding_and_handles_witness_collision(
     subject, spec, context = arrange(tmp_path, markdown=False, hooks=False)
     (subject / "METADATA").write_bytes(b"Version: 0.0.0-stale\n")
     cases = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec),
+        SubjectContext.from_data(json.loads(context.read_text())),
     )
     case = next(case for case in cases.cases if case.name == "stale-version")
     environment = EffectEnvironment(case, tmp_path / "work")

@@ -12,7 +12,11 @@ from tests.install_sandbox.component.host.native_support import (
     arrange,
     completed,
 )
-from tools.install_sandbox.contracts.effect_case import CaseNonConstruction, EffectCaseBuild
+from tools.install_sandbox.contracts.effect_case import (
+    CaseKey,
+    CaseNonConstruction,
+    EffectCaseBuild,
+)
 from tools.install_sandbox.host import coordinator
 from tools.install_sandbox.host.campaign_definition import load_campaign_definition
 from tools.install_sandbox.host.coordinator import CampaignCase, CampaignResult
@@ -65,7 +69,7 @@ def test_coordinated_result_failures_block_success(
     else:
         entry.result = replace(result, output_directory=Path("unrelated"))
     assert not passed_campaign.successful
-    assert passed_campaign.payload()["status"] == "incomplete"
+    assert passed_campaign.payload()["status"] == ("failed" if fault == "failed" else "incomplete")
 
 
 @pytest.mark.parametrize("fault", ["interrupted", "error", "preparation", "cleanup", "entry-error"])
@@ -90,6 +94,7 @@ def nonconstructed(
         state=None,
         construction=classification,
         construction_reason="Controlled non-construction reason",
+        key=CaseKey("synthetic", "project", "missing-section"),
     )
 
 
@@ -177,7 +182,7 @@ def test_build_rejects_duplicate_or_overlapping_names(tmp_path: Path) -> None:
     case = definition.built.cases[0]
     with pytest.raises(ValueError, match="Duplicate"):
         EffectCaseBuild((case, case))
-    decision = CaseNonConstruction(case.name, "not_applicable", "Controlled reason")
+    decision = CaseNonConstruction(case.key, "not_applicable", "Controlled reason")
     with pytest.raises(ValueError, match="Duplicate"):
         EffectCaseBuild((case, decision))
     with pytest.raises(ValueError, match="Duplicate"):

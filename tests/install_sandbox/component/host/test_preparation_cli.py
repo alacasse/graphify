@@ -154,8 +154,10 @@ def test_bound_sources_feed_normal_engine_only_through_controlled_transport(
     assert result.passed
     assert result.preparation_result is not None
     assert result.preparation_result.status == "prepared"
-    reread = read_evidence(tmp_path / "proof/cases/reinstall")
+    proof = result.cases[0].output_directory
+    assert proof is not None
+    reread = read_evidence(proof)
     assert reread.status == "passed"
-    saved = json.loads((tmp_path / "proof/cases/reinstall/result.json").read_text())
+    saved = json.loads((proof / "result.json").read_text())
     assert asdict(reread)["status"] == saved["status"]
     assert all(step.command is not None for step in reread.steps)

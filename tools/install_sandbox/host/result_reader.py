@@ -62,7 +62,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
         "case preparation steps status evidence intermediate_preparation",
     )
     identity = fields(data["case"], "name target scope key")
-    expected = {
+    expected: dict[str, object] = {
         "name": case.name,
         "target": case.target,
         "scope": case.scope,

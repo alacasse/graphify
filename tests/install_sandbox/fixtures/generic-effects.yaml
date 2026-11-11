@@ -1,20 +1,34 @@
-scope: project
-directory: .synthetic
-effects:
-  - kind: skill
+tool: synthetic
+scopes:
+  project:
+  - effect_id: skill
+    family: skill
+    root: HOME
+    path: .synthetic/skills/package
     source: package.md
     references: reference-data
-    destination: {root: home, path: skills/package}
-  - kind: markdown-section
+  - effect_id: markdown-section
+    family: markdown-section
+    root: PROJECT
+    path: GUIDE.md
     source: instructions.md
-    destination: {directory: ., path: GUIDE.md}
-  - kind: json-hooks
-    family: pretooluse-context
-    destination: {path: config.json}
-    events:
-      PreToolUse:
-        tools:
-          shell: Bash
-          search-content: Grep
-          read-file: Read
-          find-files: Glob
+    marker: '## graphify'
+  - effect_id: json-hooks
+    family: json-hooks
+    root: PROJECT
+    path: .synthetic/config.json
+    hooks:
+    - id: PreToolUse-search
+      event: PreToolUse
+      matcher: Bash|Grep
+      content:
+        type: command
+        command: graphify hook-guard search
+        timeout: 10
+    - id: PreToolUse-read
+      event: PreToolUse
+      matcher: Read|Glob
+      content:
+        type: command
+        command: graphify hook-guard read
+        timeout: 10

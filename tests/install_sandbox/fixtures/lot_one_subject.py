@@ -24,8 +24,8 @@ def main() -> int:
         hooks = data.setdefault("hooks", {})
         entries = hooks.setdefault("SessionStart", [])
         command = {"type": "command", "command": "birch run", "timeout": 10}
-        broken = (
-            fault == scope or fault == "second-project" and destination.name == "assistant.json"
+        broken = fault == scope or (
+            fault == "second-project" and destination.name == "assistant.json"
         )
         matching = [entry for entry in entries if entry.get("matcher") == "*"]
         occurrences = [
@@ -41,9 +41,7 @@ def main() -> int:
                     member
                     for index, member in enumerate(entry.get("hooks", []))
                     if member.get("command") != "birch run"
-                    or survivor is not None
-                    and entry is survivor[0]
-                    and index == survivor[1]
+                    or (survivor is not None and entry is survivor[0] and index == survivor[1])
                 ]
             if survivor is None:
                 if matching:

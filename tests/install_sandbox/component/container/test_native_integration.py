@@ -17,7 +17,7 @@ from tools.install_sandbox.host.result_reader import read_evidence
 def prepared(root: Path) -> Path:
     subject, spec, context = arrange(root)
     case = build_reinstall_case(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
     )
     case.write(root / "case.json")
     return subject

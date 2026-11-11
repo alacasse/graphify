@@ -9,6 +9,7 @@ import pytest
 
 from tests.install_sandbox.component.host.native_support import arrange
 from tests.install_sandbox.component.host.output_support import RUNTIME, arrange_output
+from tools.install_sandbox.contracts.effect_case import CaseKey
 from tools.install_sandbox.host.output_lifecycle import CampaignOutput
 from tools.install_sandbox.host.result_reader import read_evidence
 
@@ -47,14 +48,25 @@ def test_archive_is_readable_after_move_and_extraction(
         "stale-reference",
         "stale-references-tmp",
         "missing-json-hook",
+        "missing-json-hook",
+        "altered-json-hook",
         "altered-json-hook",
         "duplicate-json-hook",
+        "duplicate-json-hook",
     )
-    for name in case_names:
-        assert read_evidence(evidence / "cases" / name).status == "passed"
     payload = json.loads((output / "campaign.json").read_text())
+    assert tuple(case["name"] for case in payload["cases"]) == case_names
+    for case in payload["cases"]:
+        assert (
+            read_evidence(evidence / "cases" / CaseKey.from_data(case["key"]).storage_id).status
+            == "passed"
+        )
     reinstall = next(case for case in payload["cases"] if case["name"] == "reinstall")
-    assert payload["passed"] and reinstall["output_directory"] == "evidence/cases/reinstall"
+    assert (
+        payload["passed"]
+        and reinstall["output_directory"]
+        == "evidence/cases/" + CaseKey.from_data(reinstall["key"]).storage_id
+    )
     timings = {item["phase"]: item for item in payload["timings"]}
     assert timings["construction"]["state"] == "measured"
     assert timings["materialization"]["state"] == "measured"
@@ -122,7 +134,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 14  # One verification and thirteen constructed cases.
+        == 17  # One verification and thirteen constructed cases.
     )
 
 

@@ -7,6 +7,7 @@ import pytest
 from tools.install_sandbox.container import runner
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.contracts.effect_case import (
+    CaseKey,
     EffectInstallCase,
     EffectRules,
     SubjectContext,
@@ -18,7 +19,8 @@ from tools.install_sandbox.contracts.expectations import Expectation, Expectatio
 def explicit_case() -> EffectInstallCase:
     return EffectInstallCase(
         "reinstall",
-        "component",
+        CaseKey("component", "project", "reinstall"),
+        "fake",
         "project",
         EffectSpec((MarkdownSectionEffect("section.md", Destination("project", "GUIDE.md")),)),
         SubjectContext(

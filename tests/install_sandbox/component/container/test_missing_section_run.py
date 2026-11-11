@@ -34,7 +34,7 @@ def conduct(
 ):
     subject, spec, context = arrange(root)
     built = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in built.cases if case.name == "missing-section")
     case_file = root / "case.json"
@@ -218,7 +218,7 @@ def test_unpersisted_preparation_intent_prevents_mutation(
 
     subject, spec, context = arrange(tmp_path)
     case = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
     ).cases[1]
     case.write(tmp_path / "case.json")
     write_result = TestResultWriter.write_result

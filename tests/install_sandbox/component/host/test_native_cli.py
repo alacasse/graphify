@@ -12,6 +12,7 @@ import pytest
 
 from tests.install_sandbox.component.host.native_support import ControlledTransport, arrange
 from tools.install_sandbox.__main__ import main
+from tools.install_sandbox.contracts.effect_case import CaseKey
 from tools.install_sandbox.host import coordinator
 from tools.install_sandbox.host.result_reader import read_evidence
 
@@ -19,7 +20,7 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, 26, id="all-effects-home"),
+        pytest.param(False, True, "home", "home", True, 32, id="all-effects-home"),
         pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
         pytest.param(False, False, "project", "project", True, 20, id="skill-project-markdown"),
         pytest.param(False, False, "project", "home", False, 10, id="wrong-skill-root"),
@@ -71,12 +72,18 @@ def test_cli_real_engine_and_autonomous_reread(
         "stale-version",
         "stale-reference",
         "stale-references-tmp",
-        "missing-json-hook",
-        "altered-json-hook",
-        "duplicate-json-hook",
+        *(
+            [
+                name
+                for name in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
+                for _ in range(2)
+            ]
+            if hooks
+            else ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+        ),
     ]
     saved = {
-        case["name"]: case["result"]["test"]
+        CaseKey.from_data(case["key"]).storage_id: case["result"]["test"]
         for case in report["cases"]
         if case["construction"] == "constructed"
     }
@@ -152,7 +159,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=8 if wrong_skill else 22 if hooks else 16,
+        calls=8 if wrong_skill else 28 if hooks else 16,
     )
 
 
@@ -165,10 +172,11 @@ def test_multiple_markdown_campaign_runs_reinstall_and_reports_builder_limit(
 
     subject, spec, context = arrange(tmp_path, markdown_only=True)
     data = yaml.safe_load(spec.read_text())
-    second = copy.deepcopy(data["effects"][0])
-    second["destination"]["path"] = "SECOND.md"
+    second = copy.deepcopy(data["scopes"]["project"][0])
+    second["path"] = "SECOND.md"
     second["source"] = "second-instructions.md"
-    data["effects"].append(second)
+    second["effect_id"] = "second-markdown"
+    data["scopes"]["project"].append(second)
     spec.write_text(yaml.safe_dump(data))
     (subject / "second-instructions.md").write_text("## graphify\nSecond synthetic map.\n")
     transport = ControlledTransport(tmp_path, markdown_only=True)
@@ -237,7 +245,7 @@ def _assert_partial_campaign(
     assert len(transport.installer.calls) == calls
     report = json.loads((output / "campaign.json").read_text())
     external_text = (output / "campaign.txt").read_text()
-    assert report["version"] == 3
+    assert report["version"] == 4
     assert report["passed"] is passed
     first = next(case for case in report["cases"] if case["name"] == "reinstall")
     repairs = [case for case in report["cases"] if case["construction"] != "constructed"]
@@ -301,7 +309,7 @@ def _assert_archived_partial_campaign(
         archive.extractall(restored)
         names = archive.namelist()
     archived = json.loads((restored / "evidence/campaign.json").read_text())
-    assert archived["version"] == 3
+    assert archived["version"] == 4
     assert [case for case in archived["cases"] if case["construction"] != "constructed"] == repairs
     archived_text = (restored / "evidence/campaign.txt").read_text()
     label = (
@@ -310,15 +318,17 @@ def _assert_archived_partial_campaign(
     for text in (external_text, archived_text):
         assert label in text and reason in text
     assert not any(
-        name.startswith(f"evidence/cases/{case['name']}")
-        or name == f"evidence/inputs/{case['name']}.json"
+        name.startswith(f"evidence/cases/{CaseKey.from_data(case['key']).storage_id}")
+        or name == f"evidence/inputs/{CaseKey.from_data(case['key']).storage_id}.json"
         for case in repairs
         for name in names
     )
     for case in report["cases"]:
         if case["construction"] != "constructed":
             continue
-        reread = read_evidence(restored / "evidence/cases" / case["name"])
+        reread = read_evidence(
+            restored / "evidence/cases" / CaseKey.from_data(case["key"]).storage_id
+        )
         decoded = asdict(reread)
         decoded["preparation"] = reread.preparation.to_data()
         decoded["steps"] = [step.to_data() for step in reread.steps]

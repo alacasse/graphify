@@ -26,10 +26,11 @@ def _arrange_decisions(root: Path, markdown_count: int) -> tuple[Path, Path, Pat
     subject, spec, context = arrange(root, markdown=markdown_count > 0)
     if markdown_count == 2:
         data = cast(dict[str, Any], yaml.safe_load(spec.read_text()))
-        second = copy.deepcopy(data["effects"][1])
+        second = copy.deepcopy(data["scopes"]["project"][1])
         second["source"] = "second-instructions.md"
-        second["destination"]["path"] = "SECOND.md"
-        data["effects"].append(second)
+        second["effect_id"] = "second-markdown"
+        second["path"] = "SECOND.md"
+        data["scopes"]["project"].append(second)
         spec.write_text(yaml.safe_dump(data))
         (subject / "second-instructions.md").write_text("## graphify\nSecond synthetic map.\n")
     return subject, spec, context
@@ -68,7 +69,7 @@ def _assert_decisions(result: CampaignResult, markdown_count: int) -> None:
         else "The case builder currently supports only one Markdown effect"
     )
     saved = json.loads((result.output_directory / "campaign.json").read_text())
-    assert saved["version"] == 3
+    assert saved["version"] == 4
     text = (result.output_directory / "campaign.txt").read_text()
     label = "not applicable" if markdown_count == 0 else "applicable but not constructible"
     assert label in text and reason in text
@@ -126,7 +127,7 @@ def test_decisions_survive_coordinator_failure_paths(
     saved = json.loads((result.output_directory / "campaign.json").read_text())
     assert saved["status"] == "incomplete" and saved["passed"] is False
     assert result.interrupted is ("interruption" in fault)
-    assert len(transport.installer.calls) == (22 if fault == "cleanup" else 0)
+    assert len(transport.installer.calls) == (28 if fault == "cleanup" else 0)
     first = result.cases[0]
     if fault == "cleanup":
         assert first.state == "finished" and first.result is not None and first.result.passed
@@ -154,7 +155,7 @@ def test_two_markdown_definition_retains_decisions_after_inputs_disappear(
         definition=definition, output_directory=tmp_path / "proof"
     )
     assert not result.passed
-    assert len(transport.installer.calls) == 22
+    assert len(transport.installer.calls) == 28
     first = result.cases[0]
     assert first.result is not None and first.result.passed
     assert [
@@ -163,5 +164,5 @@ def test_two_markdown_definition_retains_decisions_after_inputs_disappear(
         if entry.construction != "constructed"
     ] == [(decision.classification, decision.reason) for decision in definition.built.decisions]
     for case, serialized in zip(definition.built.cases, definition.transports, strict=True):
-        assert (tmp_path / "proof/inputs" / f"{case.name}.json").read_text() == serialized
+        assert (tmp_path / "proof/inputs" / f"{case.key.storage_id}.json").read_text() == serialized
     _assert_decisions(result, 2)

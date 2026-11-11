@@ -15,11 +15,18 @@ from tools.install_sandbox.contracts.intermediate import JsonHookPreparation
 def test_hook_selection_ignores_markdown_and_skill_cardinality(kind: str) -> None:
     original = structured_spec().effects[-1]
     assert isinstance(original, JsonHooksEffect)
-    first = replace(original, destination=Destination("home", "first.json"))
-    second = replace(original, destination=Destination("project", "second.json"))
+    first = replace(original, destination=Destination("home", "first.json"), effect_id="first")
+    second = replace(
+        original, destination=Destination("project", "second.json"), effect_id="second"
+    )
     built = build_effect_cases(EffectSpec((first, second)), context())
     case = next(case for case in built.cases if case.name == kind)
-    assert case.intermediate_preparation == JsonHookPreparation(first.destination, kind)
+    assert case.intermediate_preparation == JsonHookPreparation(
+        first.destination, kind, "first", first.hooks[0].id
+    )
+    assert {(item.key.effect_id, item.key.member) for item in built.cases if item.name == kind} == {
+        (effect.effect_id, hook.id) for effect in (first, second) for hook in effect.hooks
+    }
     assert EffectInstallCase.from_json(case.to_json()) == case
     initial = next(item for item in case.initial_files if item["path"] == "first.json")
     groups = json.loads(initial["content"])["hooks"][first.hooks[0].event]

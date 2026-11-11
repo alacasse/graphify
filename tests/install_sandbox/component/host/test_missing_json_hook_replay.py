@@ -13,10 +13,15 @@ import pytest
 from tests.install_sandbox.component.host.native_support import ControlledTransport, arrange
 from tools.install_sandbox.__main__ import main
 from tools.install_sandbox.container.installer import InstallerCommandResult
+from tools.install_sandbox.contracts.effect_case import CaseKey
 from tools.install_sandbox.host import coordinator
 from tools.install_sandbox.host.result_reader import read_evidence
 
 SEARCH = {"type": "command", "command": "graphify hook-guard search", "timeout": 10}
+
+
+def _key(operation: str) -> CaseKey:
+    return CaseKey("synthetic", "project", operation, "json-hooks", "PreToolUse-search")
 
 
 def _fault(data: dict[str, Any], fault: str) -> None:
@@ -93,7 +98,7 @@ def conduct_hooks(
         args: list[str], project: Path, environment: dict[str, str], timeout: float
     ) -> InstallerCommandResult:
         result = execute(args, project, environment, timeout)
-        if case_name not in project.parts:
+        if _key(case_name).storage_id not in project.parts:
             return result
         calls[project] = calls.get(project, 0) + 1
         path = project / ".synthetic/config.json"
@@ -118,8 +123,23 @@ def conduct_hooks(
 
     monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     output = root / "published"
+    request = root / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "operation": case_name,
+                "target": {
+                    "participant": "synthetic:project",
+                    "effect_id": "json-hooks",
+                    "member": "PreToolUse-search",
+                },
+            }
+        )
+    )
     exit_code = main(
         [
+            "--request",
+            str(request),
             "--spec",
             str(spec),
             "--subject-context",
@@ -140,7 +160,7 @@ def conduct_hooks(
 
 def _selected_result(output: Path, case_name: str) -> dict[str, Any]:
     campaign = json.loads((output / "campaign.json").read_text())
-    selected = next(case for case in campaign["cases"] if case["name"] == case_name)
+    selected = next(case for case in campaign["cases"] if case["key"] == _key(case_name).to_data())
     assert selected["construction"] == "constructed"
     return selected["result"]["test"]
 
@@ -163,7 +183,7 @@ def _replay_after_cleanup(
     proof = root / "restored"
     with zipfile.ZipFile(output / "evidence.zip") as archive:
         archive.extractall(proof)
-    proof = proof / "evidence/cases" / case_name
+    proof = proof / "evidence/cases" / _key(case_name).storage_id
     replayed = read_evidence(proof)
     decoded = asdict(replayed)
     decoded["preparation"] = replayed.preparation.to_data()
@@ -314,7 +334,10 @@ def test_partial_hook_preparation_blocks_second_command(
     def interrupted(
         writer: TestResultWriter, artifact: JsonArtifact | SnapshotArtifact
     ) -> ArtifactReceipt:
-        if writer.output_directory.name == "missing-json-hook" and artifact.reference == reference:
+        if (
+            writer.output_directory.name == _key("missing-json-hook").storage_id
+            and artifact.reference == reference
+        ):
             raise OSError("Controlled hook preparation publication failure")
         return original(writer, artifact)
 
@@ -338,7 +361,7 @@ def test_unobservable_hook_preparation_blocks_second_command(
 
     def incomplete(environment: EffectEnvironment, phase: str) -> FilesystemSnapshot:
         snapshot = original(environment, phase)
-        if case_name in environment.project.parts and phase == "after":
+        if _key(case_name).storage_id in environment.project.parts and phase == "after":
             snapshot.contents.pop(("project", ".synthetic/config.json"))
             snapshot.obstacles.append(
                 {

@@ -62,12 +62,13 @@ def _prepare_reference_sources(
         import yaml
 
         raw = yaml.safe_load(spec.read_text())
-        markdown = next(effect for effect in raw["effects"] if effect["kind"] == "markdown-section")
+        markdown = next(effect for effect in raw["scopes"]["project"] if effect["family"] == "markdown-section")
         from copy import deepcopy
 
         second = deepcopy(markdown)
-        second["destination"]["path"] = "OTHER.md"
-        raw["effects"].append(second)
+        second["path"] = "OTHER.md"
+        second["effect_id"] = "other-instructions"
+        raw["scopes"]["project"].append(second)
         spec.write_text(yaml.safe_dump(raw))
 
 
@@ -119,7 +120,7 @@ def conduct_altered_skill(
     )
     _prepare_reference_sources(subject, spec, empty, multiple, content, markdown_count)
     cases = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in cases.cases if case.name == "altered-skill")
     case_file = root / "case.json"

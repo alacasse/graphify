@@ -72,7 +72,7 @@ class EffectSpecReader:
         raw = yaml.load(payload, Loader=EffectLoader)
         if isinstance(raw, dict) and "tool" not in raw:
             raise ValueError("Historical spec has not been converted to tool/scopes declarations")
-        data = fields(raw, "tool scopes")
+        data = fields(cast(object, raw), "tool scopes")
         if not isinstance(data["scopes"], dict) or not data["scopes"]:
             raise ValueError("Expected non-empty declared scopes")
         scopes: list[ScopeDeclaration] = []

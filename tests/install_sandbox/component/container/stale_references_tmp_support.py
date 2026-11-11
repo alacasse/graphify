@@ -8,12 +8,15 @@ from unittest.mock import patch
 from tests.install_sandbox.component.container.stale_reference_support import (
     run_retained_reference_case,
 )
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+)
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.installer import InstallerCommandResult
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.results import InstallTestResult
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
 
 def _damage_reinstall(skill: Path, project: Path, repair_fault: str | None) -> None:
@@ -42,7 +45,8 @@ def conduct_stale_references_tmp(
     if packaged_stale:
         (subject / "reference-data/stale.md").write_bytes(b"Packaged stale reference.\n")
     cases = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec),
+        SubjectContext.from_data(json.loads(context.read_text())),
     )
     case = next(case for case in cases.cases if case.name == "stale-references-tmp")
     case_file = root / "case.json"

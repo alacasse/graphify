@@ -113,7 +113,7 @@ def test_definition_retains_case_transports_after_inputs_disappear(
         if case.construction != "constructed"
     ] == [(item.name, item.classification, item.reason) for item in definition.built.decisions]
     for case, serialized in zip(definition.built.cases, definition.transports, strict=True):
-        assert (proof / "inputs" / f"{case.name}.json").read_text() == serialized
+        assert (proof / "inputs" / f"{case.key.storage_id}.json").read_text() == serialized
     phases = {timing.phase: timing for timing in result.timings}
     assert "construction" not in phases
     assert phases["materialization"].state == "measured"

@@ -13,9 +13,18 @@ import yaml
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import EffectRules, SubjectContext
+from tools.install_sandbox.contracts.effects import EffectSpec
 from tools.install_sandbox.host.docker_runtime import ContainerRunResult
+from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures/generic-effects.yaml"
+
+
+def read_project_effects(path: Path) -> EffectSpec:
+    declaration = EffectSpecReader().read(path)
+    project = next(scope for scope in declaration.scopes if scope.scope == "project")
+    assert project.effects is not None
+    return project.effects
 
 
 def write(path: Path, content: str) -> None:
@@ -56,10 +65,12 @@ def arrange(
         "markdown-section": markdown,
         "json-hooks": hooks and not markdown_only,
     }
-    raw["effects"] = [effect for effect in raw["effects"] if enabled[effect["kind"]]]
-    for effect in raw["effects"]:
-        if effect["kind"] == "skill":
-            effect["destination"]["root"] = skill_root
+    raw["scopes"]["project"] = [
+        effect for effect in raw["scopes"]["project"] if enabled[effect["family"]]
+    ]
+    for effect in raw["scopes"]["project"]:
+        if effect["family"] == "skill":
+            effect["root"] = skill_root.upper()
     payload = yaml.safe_dump(raw)
     spec_file.write_text(payload)
     return subject, spec_file, context_file
@@ -192,7 +203,7 @@ class LiteralInstaller:
         ]
         if not occurrences:
             return False
-        if hook is search and self.duplicate_hook_survivor != "all":
+        if self.duplicate_hook_survivor != "all":
             survivor = occurrences[-1 if self.duplicate_hook_survivor == "last" else 0]
             for group in groups:
                 group["hooks"] = [

@@ -88,7 +88,7 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
         assert test.preparation.stop is not None
         assert test.preparation.stop.category == "validation"
         assert all(step.facts.command is None for step in test.steps)
-    assert len(transport.installer.calls) == (22 if fault == "empty" else 18)
+    assert len(transport.installer.calls) == (28 if fault == "empty" else 24)
     assert set(cases) == {
         "reinstall",
         "missing-section",
@@ -100,8 +100,9 @@ def test_unavailable_reference_bundle_leaves_campaign_incomplete(
         "altered-json-hook",
         "duplicate-json-hook",
     } | ({"stale-reference", "stale-references-tmp"} if fault == "empty" else set())
-    for case in cases.values():
-        assert case.result is not None and case.result.passed
+    for case in result.cases:
+        if case.name not in blocked:
+            assert case.result is not None and case.result.passed
 
 
 @pytest.mark.parametrize("kind", ["file", "directory"])

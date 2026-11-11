@@ -15,6 +15,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
 )
 from tools.install_sandbox.contracts.effect_case import (
+    CaseKey,
     EffectInstallCase,
     EffectRules,
     SubjectContext,
@@ -48,6 +49,7 @@ def _snapshot(
 def _case() -> EffectInstallCase:
     return EffectInstallCase(
         "reinstall",
+        CaseKey("synthetic", "project", "reinstall"),
         "synthetic",
         "project",
         EffectSpec(

@@ -55,7 +55,7 @@ def conduct_reference(
         write(subject / "reference-data/a/first.md", "First lexical reference.\n")
         write(subject / "reference-data/z-last.md", "Last lexical reference.\n")
     cases = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        EffectSpecReader().read(spec).scopes[0].effects, SubjectContext.from_data(json.loads(context.read_text()))
     )
     case = next(case for case in cases.cases if case.name == "missing-reference")
     case_file = root / "case.json"

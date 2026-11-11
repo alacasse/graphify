@@ -78,27 +78,30 @@ def effect_from_data(value: object) -> Effect:
             effect_id=text(data["effect_id"]),
         )
     if kind == "json-hooks":
-        data = fields(incoming, "kind destination hooks effect_id")
-        hooks = data["hooks"]
-        if not isinstance(hooks, list) or not hooks:
-            raise ValueError("Expected non-empty hooks")
-        resolved = tuple(HookExpectation.from_data(item) for item in cast(list[object], hooks))
-        if len({h.id for h in resolved}) != len(resolved):
-            raise ValueError("Duplicate hook member ID")
-        if any(
-            not isinstance(h.content.get("type"), str)
-            or not isinstance(h.content.get("command"), str)
-            for h in resolved
-        ):
-            raise ValueError("Hook disk identity requires type and command")
-        if len(
-            {(h.event, h.matcher, h.content["type"], h.content["command"]) for h in resolved}
-        ) != len(resolved):
-            raise ValueError("Duplicate hook destination")
-        return JsonHooksEffect(
-            Destination.from_data(data["destination"]), resolved, effect_id=text(data["effect_id"])
-        )
+        return _json_hooks_from_data(incoming)
     raise ValueError(f"Unsupported effect kind: {kind}")
+
+
+def _json_hooks_from_data(incoming: dict[str, object]) -> JsonHooksEffect:
+    data = fields(incoming, "kind destination hooks effect_id")
+    hooks = data["hooks"]
+    if not isinstance(hooks, list) or not hooks:
+        raise ValueError("Expected non-empty hooks")
+    resolved = tuple(HookExpectation.from_data(item) for item in cast(list[object], hooks))
+    if len({h.id for h in resolved}) != len(resolved):
+        raise ValueError("Duplicate hook member ID")
+    if any(
+        not isinstance(h.content.get("type"), str) or not isinstance(h.content.get("command"), str)
+        for h in resolved
+    ):
+        raise ValueError("Hook disk identity requires type and command")
+    if len(
+        {(h.event, h.matcher, h.content["type"], h.content["command"]) for h in resolved}
+    ) != len(resolved):
+        raise ValueError("Duplicate hook destination")
+    return JsonHooksEffect(
+        Destination.from_data(data["destination"]), resolved, effect_id=text(data["effect_id"])
+    )
 
 
 def physical_destinations(effect: Effect) -> tuple[Destination, ...]:
@@ -185,8 +188,10 @@ class ScopeDeclaration:
                 or self.reason is not None
             ):
                 raise ValueError("Inconsistent executable scope")
-        elif self.classification not in {"unconstructible", "not_applicable"} or not self.reason:
-            raise ValueError("Unresolved scope requires a classification and reason")
+        else:
+            if self.classification not in {"unconstructible", "not_applicable"}:
+                raise ValueError("Unresolved scope requires a classification and reason")
+            text(self.reason)
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -202,8 +207,8 @@ class ScopeDeclaration:
         return cls(
             text(data["scope"]),
             None if data["effects"] is None else EffectSpec.from_data(data["effects"]),
-            cast(str | None, data["classification"]),
-            cast(str | None, data["reason"]),
+            None if data["classification"] is None else text(data["classification"]),
+            None if data["reason"] is None else text(data["reason"]),
         )
 
 

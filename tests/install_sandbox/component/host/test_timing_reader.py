@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tools.install_sandbox.contracts.effect_case import (
+    CaseKey,
     EffectInstallCase,
     EffectRules,
     SubjectContext,
@@ -18,6 +19,7 @@ from tools.install_sandbox.host.timing_report import format_duration
 def case() -> EffectInstallCase:
     return EffectInstallCase(
         "reinstall",
+        CaseKey("fixture", "project", "reinstall"),
         "synthetic",
         "project",
         EffectSpec((MarkdownSectionEffect("instructions.md", Destination("project", "GUIDE.md")),)),

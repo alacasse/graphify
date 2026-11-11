@@ -40,7 +40,7 @@ def test_backup_case_round_trip_and_fixed_witness(root: str) -> None:
         Destination(root, "skill")
     )
     assert PRESERVE_SKILL_BACKUP_SUFFIX == b"\nSandbox previous backup witness.\n"
-    assert json.loads(case.to_json())["format"] == "explicit-expectations-v9"
+    assert json.loads(case.to_json())["format"] == "explicit-expectations-v10"
     assert EffectInstallCase.from_json(case.to_json()) == case
 
 
@@ -77,7 +77,7 @@ def absent_snapshot() -> FilesystemSnapshot:
 def test_creation_binds_exact_case_bytes_and_round_trips_binary_content() -> None:
     operation = creation()
     assert mutation_from_data(operation.to_data()) == operation
-    assert operation.to_data()["format"] == "prepared-mutation-v3"
+    assert operation.to_data()["format"] == "prepared-mutation-v4"
     assert operation.verify_binding(b"exact case", absent_snapshot()) == operation.content
     with pytest.raises(ValueError, match="case digest"):
         operation.verify_binding(b"exact case\n", absent_snapshot())
@@ -136,10 +136,15 @@ def test_no_skill_is_not_applicable_and_multiskill_stays_construction_restrictio
     assert all(case.name != "preserve-skill-backup" for case in build.cases)
     skills = (
         SkillEffect("skill.md", "refs", Destination("project", "first")),
-        SkillEffect("skill.md", "refs", Destination("home", "second")),
+        SkillEffect("skill.md", "refs", Destination("home", "second"), effect_id="second"),
     )
-    with pytest.raises(ValueError, match="Multiple skill effects"):
-        build_effect_cases(EffectSpec(skills), subject)
+    built = build_effect_cases(EffectSpec(skills), subject)
+    assert not built.cases
+    assert all(
+        "Multiple skill effects" in d.reason
+        for d in built.decisions
+        if d.classification == "unconstructible"
+    )
 
 
 def test_multiple_markdown_effects_do_not_block_backup_case() -> None:
@@ -148,7 +153,7 @@ def test_multiple_markdown_effects_do_not_block_backup_case() -> None:
         (
             *case.effects.effects,
             MarkdownSectionEffect("one.md", Destination("project", "ONE.md")),
-            MarkdownSectionEffect("two.md", Destination("project", "TWO.md")),
+            MarkdownSectionEffect("two.md", Destination("project", "TWO.md"), effect_id="two"),
         )
     )
     build = build_effect_cases(spec, case.subject)

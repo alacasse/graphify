@@ -53,11 +53,12 @@ def test_selected_cli_executes_only_requested_cases_and_replays_archive(
     )
     catalogue = [entry.name for entry in definition.built.entries]
     if requested is None:
-        requested = list(reversed(catalogue))
+        requested = list(reversed(dict.fromkeys(catalogue)))
     elif len(requested) == 3:
         assert [name for name in catalogue if name in requested] == [
             "missing-section",
             "stale-version",
+            "duplicate-json-hook",
             "duplicate-json-hook",
         ]
     transport = ControlledTransport(tmp_path)
@@ -70,7 +71,9 @@ def test_selected_cli_executes_only_requested_cases_and_replays_archive(
         args.extend(["--case", name])
     assert main(args) == 0
     expected = [name for name in catalogue if name in requested]
-    assert [call.kwargs["case_file"].stem for call in run_case.call_args_list] == expected
+    assert [call.kwargs["case_file"].stem for call in run_case.call_args_list] == [
+        entry.key.storage_id for entry in definition.built.cases if entry.name in requested
+    ]
     assert len(transport.installer.calls) == 2 * len(expected)
     report = json.loads((output / "campaign.json").read_text())
     assert report["scope"] == "partial"
@@ -112,9 +115,9 @@ def assert_archived_selection(
         Path(name).stem
         for name in names
         if name.startswith("evidence/inputs/") and name.endswith(".json")
-    ) == sorted(expected)
+    ) == sorted(Path(case["output_directory"]).name for case in report["cases"])
     for case in report["cases"]:
-        reread = read_evidence(restored / "evidence/cases" / case["name"])
+        reread = read_evidence(restored / case["output_directory"])
         decoded = asdict(reread)
         decoded["preparation"] = reread.preparation.to_data()
         decoded["steps"] = [step.to_data() for step in reread.steps]
@@ -181,9 +184,10 @@ def test_selected_unconstructible_case_retains_reason_and_cannot_succeed(
 ) -> None:
     subject, spec, context = arrange(tmp_path, markdown_only=True)
     raw = yaml.safe_load(spec.read_text())
-    second = copy.deepcopy(raw["effects"][0])
-    second["destination"]["path"] = "SECOND.md"
-    raw["effects"].append(second)
+    second = copy.deepcopy(raw["scopes"]["project"][0])
+    second["path"] = "SECOND.md"
+    second["effect_id"] = "second-section"
+    raw["scopes"]["project"].append(second)
     spec.write_text(yaml.safe_dump(raw))
     transport = ControlledTransport(tmp_path, markdown_only=True)
     monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
@@ -251,3 +255,86 @@ def test_interruption_before_first_progress_retains_explicit_selection(
     assert "Requested cases: " + ", ".join(requested) in text
     assert "Omitted cases (not selected): " + ", ".join(omitted) in text
     assert "Executed cases: none" in text
+
+
+@pytest.mark.parametrize("state", ["unconstructible", "not_applicable"])
+@pytest.mark.parametrize("project_only", [False, True])
+def test_declared_scope_states_survive_archive_relocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, project_only: bool
+) -> None:
+    from tools.install_sandbox.host.campaign_replay import replay_campaign
+
+    subject, spec, context = arrange(tmp_path, markdown_only=True)
+    declaration = yaml.safe_load(spec.read_text())
+    declaration["scopes"]["user"] = {"state": state, "reason": "Independent fixture reason"}
+    spec.write_text(yaml.safe_dump(declaration))
+    transport = ControlledTransport(tmp_path, markdown_only=True)
+    monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
+    output = tmp_path / "published"
+    args = arguments(subject, spec, context, output)
+    if project_only:
+        request = tmp_path / "project.json"
+        request.write_text('{"scopes":["project"]}')
+        args.extend(["--request", str(request)])
+    succeeds = project_only or state == "not_applicable"
+    assert main(args) == (0 if succeeds else 1)
+    archive = (output / "evidence.zip").rename(tmp_path / "moved.zip")
+    spec.unlink()
+    context.unlink()
+    report = replay_campaign(archive)
+    assert report["scope_results"]["project"] == {"coverage": "full", "status": "passed"}
+    assert report["scope_results"]["user"]["status"] == ("omitted" if project_only else state)
+    assert report["passed"] is (succeeds and not project_only)
+    if not project_only:
+        assert report["cases"][-1]["construction_reason"] == "Independent fixture reason"
+
+
+@pytest.mark.parametrize(
+    "body,extra",
+    [
+        ("{", []),
+        ("null", []),
+        ('{"scopes":["project","project"]}', []),
+        ('{"scopes":["project"]}', ["--prepare-only"]),
+        ('{"scopes":["project"]}', ["--case", "reinstall"]),
+    ],
+)
+def test_refuse_invalid_request_before_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str, extra: list[str]
+) -> None:
+    subject, spec, context = arrange(tmp_path)
+    request = tmp_path / "request.json"
+    request.write_text(body)
+    harness = Mock(side_effect=AssertionError("Unexpected runtime"))
+    monkeypatch.setattr(coordinator, "ContainerHarness", harness)
+    output = tmp_path / "proof"
+    assert (
+        main([*arguments(subject, spec, context, output), "--request", str(request), *extra]) == 2
+    )
+    assert not output.exists()
+    harness.assert_not_called()
+
+
+def test_unknown_explicit_member_replays_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tools.install_sandbox.host.campaign_replay import replay_campaign
+
+    subject, spec, context = arrange(tmp_path)
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "operation": "duplicate",
+                "target": {"participant": "birch:project", "effect_id": "missing", "member": "run"},
+            }
+        )
+    )
+    harness = Mock(side_effect=AssertionError("Unexpected runtime"))
+    monkeypatch.setattr(coordinator, "ContainerHarness", harness)
+    output = tmp_path / "proof"
+    assert main([*arguments(subject, spec, context, output), "--request", str(request)]) == 1
+    harness.assert_not_called()
+    report = replay_campaign(output / "evidence.zip")
+    assert [entry["construction"] for entry in report["cases"]] == ["unconstructible"]
+    assert report["executed_keys"] == []

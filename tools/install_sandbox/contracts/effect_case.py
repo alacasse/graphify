@@ -115,7 +115,7 @@ class SubjectContext:
     rules: EffectRules
     package_root: str | None = None
     revision: str | None = None
-    invocations: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    invocations: dict[str, tuple[str, ...]] = field(default_factory=lambda: dict[str, tuple[str, ...]]())
 
     def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
         argv = self.invocations.get(f"{tool}:{scope}")
@@ -528,29 +528,7 @@ def build_effect_cases(
                     CaseKey(target, spec.scope, name), "not_applicable", "No skill effect declared"
                 )
             )
-    hooks = [e for e in spec.effects if isinstance(e, JsonHooksEffect)]
-    for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
-        if hooks:
-            for effect in hooks:
-                for hook in effect.hooks:
-                    if kind == "altered-json-hook" and "timeout" not in hook.content:
-                        entries.append(
-                            CaseNonConstruction(
-                                CaseKey(target, spec.scope, kind, effect.effect_id, hook.id),
-                                "not_applicable",
-                                "Hook declares no timeout to alter",
-                            )
-                        )
-                    else:
-                        entries.append(_json_hook_case(reinstall, effect, kind, hook))
-        else:
-            entries.append(
-                CaseNonConstruction(
-                    CaseKey(target, spec.scope, kind),
-                    "not_applicable",
-                    "No JSON hooks effect declared",
-                )
-            )
+    entries.extend(_json_cases(reinstall))
     reason = missing or (
         "Multiple skill effects require unavailable lock observation capability"
         if multi_skill
@@ -564,6 +542,42 @@ def build_effect_cases(
             for e in entries
         ]
     return EffectCaseBuild(tuple(entries))
+
+
+def _json_cases(
+    reinstall: EffectInstallCase,
+) -> tuple[EffectInstallCase | CaseNonConstruction, ...]:
+    entries: list[EffectInstallCase | CaseNonConstruction] = []
+    hooks = [e for e in reinstall.effects.effects if isinstance(e, JsonHooksEffect)]
+    for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
+        if hooks:
+            for effect in hooks:
+                for hook in effect.hooks:
+                    if kind == "altered-json-hook" and "timeout" not in hook.content:
+                        entries.append(
+                            CaseNonConstruction(
+                                CaseKey(
+                                    reinstall.key.tool,
+                                    reinstall.scope,
+                                    kind,
+                                    effect.effect_id,
+                                    hook.id,
+                                ),
+                                "not_applicable",
+                                "Hook declares no timeout to alter",
+                            )
+                        )
+                    else:
+                        entries.append(_json_hook_case(reinstall, effect, kind, hook))
+        else:
+            entries.append(
+                CaseNonConstruction(
+                    CaseKey(reinstall.key.tool, reinstall.scope, kind),
+                    "not_applicable",
+                    "No JSON hooks effect declared",
+                )
+            )
+    return tuple(entries)
 
 
 def _markdown_cases(

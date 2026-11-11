@@ -8,14 +8,17 @@ from typing import Any, cast
 
 import pytest
 
-from tests.install_sandbox.component.host.native_support import LiteralInstaller, arrange
+from tests.install_sandbox.component.host.native_support import (
+    LiteralInstaller,
+    arrange,
+    read_project_effects,
+)
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.evidence_writer import TestResultWriter as Writer
 from tools.install_sandbox.container.installer import InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.contracts.results import CheckpointReceipt
-from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import MalformedEvidence, read_evidence
 from tools.install_sandbox.rules.repair_protocol import RepairSession
 
@@ -84,7 +87,8 @@ def assert_no_dependent_effects(proof: Path, window: str) -> None:
 def failed_archive(root: Path, monkeypatch: pytest.MonkeyPatch, scenario: str, window: str) -> Path:
     subject, spec, context = arrange(root)
     cases = build_effect_cases(
-        EffectSpecReader().read(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        read_project_effects(spec),
+        SubjectContext.from_data(json.loads(context.read_text())),
     ).cases
     case_file = root / "case.json"
     next(case for case in cases if case.name == scenario).write(case_file)

@@ -16,6 +16,7 @@ def test_altered_skill_case_rejects_tampered_definition(change: str) -> None:
     case = replace(
         reference_case(),
         name="altered-skill",
+        key=replace(reference_case().key, operation="altered-skill"),
         intermediate_preparation=AlteredSkillPreparation(Destination("project", "skill")),
     )
     assert EffectInstallCase.from_json(case.to_json()) == case

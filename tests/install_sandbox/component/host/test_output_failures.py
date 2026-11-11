@@ -8,9 +8,14 @@ from pathlib import Path
 import pytest
 
 from tests.install_sandbox.component.host.output_support import refused, valid
+from tools.install_sandbox.contracts.effect_case import CaseKey
 from tools.install_sandbox.host import output_archive, output_lifecycle, output_report
 from tools.install_sandbox.host.docker_runtime import SignalCapture
 from tools.install_sandbox.host.output_report import OutputReport
+
+_REINSTALL = (
+    "evidence/cases/" + CaseKey("synthetic", "project", "reinstall").storage_id + "/result.json"
+)
 
 
 @pytest.mark.parametrize("failure", ["read", "write", "verify"])
@@ -29,7 +34,7 @@ def test_archive_failure_preserves_raw_pass_and_reports_real_location(
     assert (
         result.output_directory is not None and result.output_directory.parent.name == "in-progress"
     )
-    assert (result.output_directory / "evidence/cases/reinstall/result.json").is_file()
+    assert (result.output_directory / _REINSTALL).is_file()
     assert not (result.output_directory / "evidence.zip").exists()
     assert f"controlled archive {failure} failure" in result.report.render()
 
@@ -57,7 +62,7 @@ def test_raw_removal_failure_keeps_verified_archive_and_success(
     assert result.report.archive == "verified" and result.report.raw_evidence
     with zipfile.ZipFile(result.output_directory / "evidence.zip") as archive:
         assert archive.testzip() is None
-        assert archive.read("evidence/cases/reinstall/result.json")
+        assert archive.read(_REINSTALL)
     assert "raw removal failure" in result.report.render()
 
 
@@ -110,7 +115,7 @@ def test_signal_preserves_recoverable_evidence_and_original_verdict(
     assert (
         result.output_directory is not None and result.output_directory.parent.name == "in-progress"
     )
-    raw = result.output_directory / "evidence/cases/reinstall/result.json"
+    raw = result.output_directory / _REINSTALL
     assert raw.is_file()
     assert (result.output_directory / "evidence.zip").exists() == (phase == "after")
 

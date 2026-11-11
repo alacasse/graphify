@@ -56,7 +56,10 @@ def test_verified_image_binds_expected_sources_and_subject(
     with ContainerHarness(runtime_executable=_FAKE) as harness:
         try:
             prepared = harness.prepare(
-                tmp_path / "subject", tmp_path / "proof", effects=effects, subject_context=context
+                tmp_path / "subject",
+                tmp_path / "proof",
+                effects=(effects,),
+                subject_context=context,
             )
             assert prepared.state == "completed"
             assert harness.preparation_result is not None
@@ -82,7 +85,10 @@ def test_unverified_package_never_becomes_available(
     with ContainerHarness(runtime_executable=_FAKE) as harness:
         try:
             prepared = harness.prepare(
-                tmp_path / "subject", tmp_path / "proof", effects=effects, subject_context=context
+                tmp_path / "subject",
+                tmp_path / "proof",
+                effects=(effects,),
+                subject_context=context,
             )
             assert prepared.state == "incomplete"
             assert not harness.ready
@@ -109,7 +115,10 @@ def test_case_binding_mismatch_prevents_launch(
     with ContainerHarness(runtime_executable=_FAKE) as harness:
         try:
             harness.prepare(
-                tmp_path / "subject", tmp_path / "proof", effects=effects, subject_context=context
+                tmp_path / "subject",
+                tmp_path / "proof",
+                effects=(effects,),
+                subject_context=context,
             )
             if mismatch == "image_id":
                 harness.image_id = "sha256:" + "f" * 64
@@ -144,7 +153,10 @@ def test_infrastructure_failure_is_retained_as_incomplete(
     with ContainerHarness(runtime_executable=_FAKE) as harness:
         try:
             harness.prepare(
-                tmp_path / "subject", tmp_path / "proof", effects=effects, subject_context=context
+                tmp_path / "subject",
+                tmp_path / "proof",
+                effects=(effects,),
+                subject_context=context,
             )
             assert harness.preparation_result is not None
             assert harness.preparation_result.status == "incomplete"

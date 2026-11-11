@@ -6,10 +6,10 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from typing import Any
 
-import yaml
 import pytest
-
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/lot_one_subject.py"
@@ -79,7 +79,7 @@ def arrange(root: Path, fault: str = "user") -> tuple[Path, Path, Path]:
         )
     )
 
-    def effect(identifier: str, root: str, path: str) -> dict:
+    def effect(identifier: str, root: str, path: str) -> dict[str, Any]:
         return {
             "effect_id": identifier,
             "family": "json-hooks",
@@ -116,7 +116,7 @@ def arrange(root: Path, fault: str = "user") -> tuple[Path, Path, Path]:
 
 def cli(
     subject: Path, spec: Path, context: Path, output: Path, *arguments: str
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -175,6 +175,25 @@ def test_same_user_defect_is_partial_project_success_and_complete_failure(tmp_pa
         assert case["result"]["test"]["status"] == (
             "failed" if case["key"]["scope"] == "user" else "passed"
         )
+    assert [
+        case["key"]
+        for case in full["cases"]
+        if case["result"] is not None and case["result"]["test"]["status"] == "failed"
+    ] == [
+        {
+            "tool": "birch",
+            "scope": "user",
+            "operation": "duplicate-json-hook",
+            "effect_id": "user-hooks",
+            "member": "run",
+        }
+    ]
+    assert_moved_replay(tmp_path, subject, spec, context, request, full)
+
+
+def assert_moved_replay(
+    tmp_path: Path, subject: Path, spec: Path, context: Path, request: Path, full: dict[str, Any]
+) -> None:
     moved = tmp_path / "moved.zip"
     shutil.copyfile(tmp_path / "complete/evidence.zip", moved)
     selected_moved = tmp_path / "selected-moved.zip"
@@ -195,7 +214,7 @@ def test_same_user_defect_is_partial_project_success_and_complete_failure(tmp_pa
     }
 
 
-def duplicate_keys(report: dict) -> set[tuple]:
+def duplicate_keys(report: dict[str, Any]) -> set[tuple[str, ...]]:
     return {
         tuple(case["key"][field] for field in ("tool", "scope", "operation", "effect_id", "member"))
         for case in report["cases"]
@@ -203,7 +222,7 @@ def duplicate_keys(report: dict) -> set[tuple]:
     }
 
 
-def repair_keys(report: dict) -> set[tuple]:
+def repair_keys(report: dict[str, Any]) -> set[tuple[str, ...]]:
     return {
         tuple(case["key"][field] for field in ("tool", "scope", "operation", "effect_id", "member"))
         for case in report["cases"]
@@ -212,7 +231,7 @@ def repair_keys(report: dict) -> set[tuple]:
     }
 
 
-def assert_targeted_mutation(archive_path: Path, report: dict) -> None:
+def assert_targeted_mutation(archive_path: Path, report: dict[str, Any]) -> None:
     """Read literal files, without the sandbox expectation or mutation helpers."""
     cases = [case for case in report["cases"] if case.get("construction") == "constructed"]
     assert len(cases) == 1
@@ -228,7 +247,7 @@ def assert_targeted_mutation(archive_path: Path, report: dict) -> None:
         before = json.loads(blob(f"steps/0/after/{target}"))
         prepared = json.loads(blob(f"intermediate/after/{target}"))
 
-        def count(document: dict) -> int:
+        def count(document: dict[str, Any]) -> int:
             return sum(
                 hook.get("command") == "birch run"
                 for entry in document["hooks"]["SessionStart"]
@@ -273,10 +292,11 @@ def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: 
 
 
 def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
-    archive_path: Path, report: dict, root: Path
+    archive_path: Path, report: dict[str, Any], root: Path
 ) -> None:
     from tools.install_sandbox.host.campaign_replay import replay_campaign
 
+    assert replay_campaign(archive_path)["status"] == "passed"
     targets = {
         case["key"]["effect_id"]: case
         for case in report["cases"]
@@ -322,7 +342,7 @@ def test_second_project_file_defect_fails_full_campaign(tmp_path: Path) -> None:
     failing = [
         case["key"]
         for case in report["cases"]
-        if (case.get("result") or {}).get("test", {}).get("status") == "failed"
+        if case["result"] is not None and case["result"]["test"]["status"] == "failed"
     ]
     assert failing == [
         {

@@ -329,3 +329,40 @@ def test_group_replay_rejects_non_file_with_retained_json(tmp_path: Path) -> Non
         match=r"project/\.birch/hooks\.json kind other forbids fields: content_file, sha256$",
     ):
         replay_campaign(tampered)
+
+
+def test_unreadable_birch_backup_keeps_known_group_removal_and_replays(tmp_path: Path) -> None:
+    subject, spec, context, request, _ = arrange_group(tmp_path, "unreadable-birch-backup")
+    output = tmp_path / "output"
+    result = cli(subject, spec, context, output, "--request", str(request))
+    assert result.returncode == 1, result.stdout + result.stderr
+    case_result = terminal_result(output)
+    assert case_result["status"] == "incomplete"
+    terminal = case_result["steps"][-1]
+    assert terminal["facts"]["command"]["exit_code"] == 0
+    assessment = terminal["assessment"]
+    birch = assessment["birch:project"]
+    assert birch["summary"] == "all_removed"
+    assert birch["preservation"] == "indeterminate" and not birch["complete"]
+    backup = ".birch/hooks.json.graphify-bak"
+    verification = terminal["facts"]["verification"]
+    assert not verification["complete"]
+    permission_error = next(
+        o for o in verification["obstacles"] if o["path"] == backup and "Errno 13" in o["reason"]
+    )
+    assert any(
+        d["path"] == backup and d["reason"] == permission_error["reason"]
+        for d in birch["diagnostics"]
+    )
+    assert assessment["cedar:project"]["summary"] == "all_removed"
+    assert assessment["cedar:project"]["preservation"] == "preserved"
+    assert assessment["cedar:project"]["complete"]
+    assert assessment["cedar:user"]["summary"] == "none_removed"
+    assert assessment["cedar:user"]["preservation"] == "preserved"
+    assert assessment["cedar:user"]["complete"]
+    observed = [line["disk_oracle"] for line in evidence_lines(output) if "disk_oracle" in line]
+    assert observed[-1]["birch:project:backup"] == {"error": 13}
+    replay = replay_without_subject(tmp_path, subject, spec, context, request, output)
+    replayed = replay["cases"][0]["result"]["test"]
+    assert replayed["status"] == "incomplete"
+    assert replayed["steps"][-1]["assessment"] == assessment

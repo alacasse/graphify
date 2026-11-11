@@ -354,6 +354,7 @@ def _verify_json_auxiliaries(
     effects: tuple[Effect, ...],
     before: FilesystemSnapshot,
     after: FilesystemSnapshot,
+    after_obstacles: list[ObservationObstacle],
     result: VerificationResult,
 ) -> None:
     from tools.install_sandbox.rules.effect_verifier import verify_constraints
@@ -380,6 +381,12 @@ def _verify_json_auxiliaries(
         verdict = verify_constraints(constraints, after)
         result.mismatches.extend(verdict.mismatches)
         result.obstacles.extend(verdict.obstacles)
+        auxiliary_paths = {(item.root, item.path) for item in constraints}
+        result.obstacles.extend(
+            obstacle
+            for obstacle in after_obstacles
+            if (obstacle["root"], obstacle["path"]) in auxiliary_paths
+        )
 
 
 def _apply_auxiliaries(
@@ -388,14 +395,23 @@ def _apply_auxiliaries(
     active: tuple[str, ...],
     before: FilesystemSnapshot,
     after: FilesystemSnapshot,
+    after_obstacles: list[ObservationObstacle],
     result: VerificationResult,
 ) -> None:
     for key in active:
         verdict = VerificationResult()
-        _verify_json_auxiliaries(participants[key].effects, before, after, verdict)
+        _verify_json_auxiliaries(participants[key].effects, before, after, after_obstacles, verdict)
         prior = assessments[key]
-        diagnostics = tuple(Diagnostic(m.root, m.path, "*", m.type) for m in verdict.mismatches)
-        preservation = "violated" if verdict.mismatches else prior.preservation
+        diagnostics = (
+            *(Diagnostic(m.root, m.path, "*", m.type) for m in verdict.mismatches),
+            *(Diagnostic(o["root"], o["path"], "*", o["reason"]) for o in verdict.obstacles),
+        )
+        auxiliary_preservation = "not_applicable"
+        if verdict.mismatches:
+            auxiliary_preservation = "violated"
+        elif verdict.obstacles:
+            auxiliary_preservation = "indeterminate"
+        preservation = _aggregate([prior.preservation, auxiliary_preservation])
         assessments[key] = replace(
             prior,
             preservation=preservation,
@@ -416,6 +432,8 @@ def assess_group_step(
     after: FilesystemSnapshot,
 ) -> tuple[dict[str, object], VerificationResult]:
     """Project one preparation or removal independently of the process status."""
+    from tools.install_sandbox.rules.effect_verifier import observation_obstacles
+
     selected = {key: participants[key] for key in dict.fromkeys((*prepared, *active))}
     assessments = {
         key: assess_participant(
@@ -428,7 +446,8 @@ def assess_group_step(
         for key, spec in selected.items()
     }
     result = VerificationResult()
-    _apply_auxiliaries(assessments, participants, active, before, after, result)
+    after_obstacles = observation_obstacles(after)
+    _apply_auxiliaries(assessments, participants, active, before, after, after_obstacles, result)
     for key, assessment in assessments.items():
         if key not in active:
             valid = assessment.preservation == "preserved"
@@ -455,10 +474,8 @@ def assess_group_step(
         removing,
         result,
     )
-    from tools.install_sandbox.rules.effect_verifier import observation_obstacles
-
     # Completeness obstacles do not discard the facts that could be read elsewhere.
-    collected = (*result.obstacles, *observation_obstacles(before), *observation_obstacles(after))
+    collected = (*result.obstacles, *observation_obstacles(before), *after_obstacles)
     result.obstacles = []
     for obstacle in collected:
         if obstacle not in result.obstacles:

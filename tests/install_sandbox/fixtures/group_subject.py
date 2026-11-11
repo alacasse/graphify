@@ -122,6 +122,10 @@ def main():
         return 0
     for participant in argv[1:]:
         uninstall(participant, fault)
+    if fault == "unreadable-birch-backup":
+        destination = paths()["birch:project"]
+        destination.with_name(destination.name + ".graphify-bak").chmod(0)
+        oracle()
     return 0
 
 

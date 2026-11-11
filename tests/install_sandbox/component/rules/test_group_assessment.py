@@ -3,6 +3,8 @@
 import json
 from typing import Any, cast
 
+import pytest
+
 from tools.install_sandbox.contracts.effects import (
     Destination,
     EffectSpec,
@@ -374,3 +376,47 @@ def test_hook_inspection_does_not_trust_bytes_for_non_file() -> None:
     facts = inspect(hook_effect(), initial, observed)
     assert all(item.presence == "indeterminate" for item in facts.items)
     assert facts.preservation == "indeterminate"
+
+
+@pytest.mark.parametrize(
+    "lose_personal,unknown_kind", [(False, False), (True, False), (False, True)]
+)
+def test_unreadable_active_backup_keeps_known_removal_and_prior_violation(
+    lose_personal: bool, unknown_kind: bool
+) -> None:
+    effects = EffectSpec((hook_effect(),))
+    initial = snapshot((("project", "settings.json", document(("personal", 7))),))
+    before = snapshot(
+        (
+            ("project", "settings.json", document(("one", 5), ("two", 5), ("personal", 7))),
+            ("project", "settings.json.graphify-bak", b"{}"),
+        )
+    )
+    after = snapshot(
+        (
+            ("project", "settings.json", b"{}" if lose_personal else document(("personal", 7))),
+            ("project", "settings.json.graphify-bak", None),
+        )
+    )
+    if unknown_kind:
+        after.entries[-1]["kind"] = "unknown"
+    report, verdict = assess_group_step(
+        {"target": effects}, ("target",), ("target",), True, initial, before, after
+    )
+    state = report["target"]
+    assert state["summary"] == "all_removed"
+    assert state["preservation"] == ("violated" if lose_personal else "indeterminate")
+    assert not state["complete"] and not verdict.complete
+    assert any(o["path"] == "settings.json.graphify-bak" for o in verdict.obstacles)
+    assert any(d["path"] == "settings.json.graphify-bak" for d in state["diagnostics"])
+    if lose_personal:
+        assert any(d["path"] == "settings.json" for d in state["diagnostics"])
+
+
+def test_file_only_auxiliaries_keep_not_applicable_preservation() -> None:
+    effects = EffectSpec((FileEffect("expected", Destination("project", "literal")),))
+    report, verdict = assess_group_step(
+        {"target": effects}, ("target",), ("target",), True, snapshot(), snapshot(), snapshot()
+    )
+    assert report["target"]["preservation"] == "not_applicable"
+    assert verdict.complete and not verdict.mismatches

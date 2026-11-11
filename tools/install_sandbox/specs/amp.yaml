@@ -1,11 +1,18 @@
-scope: project
-directory: .agents
-effects:
-  - kind: skill
+tool: amp
+scopes:
+  project:
+  - effect_id: skill
+    family: skill
+    root: PROJECT
+    path: .agents/skills/graphify
     source: skill-amp.md
     references: skills/amp/references
-    destination: {root: project, path: skills/graphify}
-  - kind: markdown-section
+  - effect_id: markdown-section
+    family: markdown-section
+    root: PROJECT
+    path: AGENTS.md
     source: always_on/agents-md.md
-    marker: "## graphify"
-    destination: {directory: ., path: AGENTS.md}
+    marker: '## graphify'
+  user:
+    state: unconstructible
+    reason: User-scope expected effects have not been converted.

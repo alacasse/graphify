@@ -1,7 +1,12 @@
-scope: project
-directory: .agents
-effects:
-  - kind: skill
+tool: agents
+scopes:
+  project:
+  - effect_id: skill
+    family: skill
+    root: PROJECT
+    path: .agents/skills/graphify
     source: skill-agents.md
     references: skills/agents/references
-    destination: {root: project, path: skills/graphify}
+  user:
+    state: unconstructible
+    reason: User-scope expected effects have not been converted.

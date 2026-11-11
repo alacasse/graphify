@@ -26,13 +26,18 @@ _OBSERVATION_FIELDS = (
 )
 
 
-def retained_inputs(output: Path) -> tuple[dict[str, object], EffectSpec, SubjectContext]:
+def retained_inputs(
+    output: Path,
+) -> tuple[dict[str, object], tuple[EffectSpec, ...], SubjectContext]:
     incoming = load_json(output / "inputs.json")
     if not isinstance(incoming, dict):
         raise ValueError("Expected preparation inputs")
     data = cast(dict[str, object], incoming)
     context = SubjectContext.from_data(data.get("context"))
-    effects = EffectSpec.from_data(data.get("effects"))
+    raw = data.get("effects")
+    if not isinstance(raw, list):
+        raise ValueError("Expected selected participant effects")
+    effects = tuple(EffectSpec.from_data(item) for item in cast(list[object], raw))
     calculated = preparation_inputs(output / "subject", effects, context)
     if calculated != data:
         raise ValueError("Retained subject or preparation inputs changed")
@@ -155,7 +160,10 @@ def _identity_diagnostics(inputs: dict[str, object], observed: dict[str, object]
 
 
 def _resource_diagnostics(
-    output: Path, inputs: dict[str, object], effects: EffectSpec, observed: dict[str, object]
+    output: Path,
+    inputs: dict[str, object],
+    effects: tuple[EffectSpec, ...],
+    observed: dict[str, object],
 ) -> list[str]:
     files, directories = _resources(observed)
     diagnostics: list[str] = []
@@ -165,7 +173,7 @@ def _resource_diagnostics(
     expected_dirs = set(cast(list[str], inputs["directories"]))
     if not expected_dirs <= directories:
         diagnostics.append("Installed references directories are incomplete")
-    for effect in effects.effects:
+    for effect in (item for scope in effects for item in scope.effects):
         if isinstance(effect, SkillEffect):
             prefix = effect.references + "/"
             expected = {p for p in cast(list[str], inputs["resources"]) if p.startswith(prefix)}

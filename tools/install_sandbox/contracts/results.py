@@ -346,7 +346,7 @@ class CheckpointReceipt:
 
 @dataclass
 class InstallTestResult:
-    case: dict[str, str]
+    case: dict[str, object]
     preparation: InitialPreparationState
     steps: list[StepState]
     status: Literal["passed", "failed", "not_run", "incomplete"]

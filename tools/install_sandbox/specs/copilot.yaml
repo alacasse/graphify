@@ -1,7 +1,12 @@
-scope: project
-directory: .copilot
-effects:
-  - kind: skill
+tool: copilot
+scopes:
+  project:
+  - effect_id: skill
+    family: skill
+    root: PROJECT
+    path: .copilot/skills/graphify
     source: skill-copilot.md
     references: skills/copilot/references
-    destination: {root: project, path: skills/graphify}
+  user:
+    state: unconstructible
+    reason: User-scope expected effects have not been converted.

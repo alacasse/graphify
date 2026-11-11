@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from typing import cast
 
 from tools.install_sandbox.contracts.effects import Destination
+from tools.install_sandbox.contracts.effect_case import CaseKey, EffectInstallCase
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
 
@@ -54,7 +55,7 @@ class BoundMarkdownMutation:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v3",
+            "format": "prepared-mutation-v4",
             "kind": "markdown",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
@@ -72,7 +73,7 @@ class BoundMarkdownMutation:
             "format kind case_sha256 observation_ref destination document_sha256 "
             "start end replacement",
         )
-        if data["format"] != "prepared-mutation-v3" or data["kind"] != "markdown":
+        if data["format"] != "prepared-mutation-v4" or data["kind"] != "markdown":
             raise ValueError("Unsupported prepared operation")
         if type(data["start"]) is not int or type(data["end"]) is not int:
             raise ValueError("Expected integer byte bounds")
@@ -140,7 +141,7 @@ class _BoundExistingFile:
 class BoundFileRemoval(_BoundExistingFile):
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v3",
+            "format": "prepared-mutation-v4",
             "kind": "file-removal",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
@@ -151,7 +152,7 @@ class BoundFileRemoval(_BoundExistingFile):
     @classmethod
     def from_data(cls, value: object) -> "BoundFileRemoval":
         data = fields(value, "format kind case_sha256 observation_ref destination document_sha256")
-        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-removal":
+        if data["format"] != "prepared-mutation-v4" or data["kind"] != "file-removal":
             raise ValueError("Unsupported prepared operation")
         return cls(
             text(data["case_sha256"]),
@@ -164,18 +165,30 @@ class BoundFileRemoval(_BoundExistingFile):
 @dataclass(frozen=True)
 class BoundFileReplacement(_BoundExistingFile):
     content: bytes
+    target: CaseKey | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.target is not None:
+            self.target.to_data()
         if type(self.content) is not bytes:
             raise ValueError("Replacement requires content bytes")
         if self.observation_ref != "steps/0/after.json":
             raise ValueError("Replacement requires validated first observation")
 
+    def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
+        content = super().verify_binding(case_bytes, first_after)
+        if self.target is not None:
+            case = EffectInstallCase.from_json(case_bytes.decode("utf-8"))
+            if self.target != case.key:
+                raise ValueError("Operation target differs from retained case key")
+        return content
+
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v3",
+            "format": "prepared-mutation-v4",
             "kind": "file-replacement",
+            "target": None if self.target is None else self.target.to_data(),
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
             "destination": {"root": self.destination.root, "path": self.destination.path},
@@ -186,9 +199,10 @@ class BoundFileReplacement(_BoundExistingFile):
     @classmethod
     def from_data(cls, value: object) -> "BoundFileReplacement":
         data = fields(
-            value, "format kind case_sha256 observation_ref destination document_sha256 content"
+            value,
+            "format kind case_sha256 observation_ref destination document_sha256 content target",
         )
-        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-replacement":
+        if data["format"] != "prepared-mutation-v4" or data["kind"] != "file-replacement":
             raise ValueError("Unsupported prepared operation")
         return cls(
             text(data["case_sha256"]),
@@ -196,6 +210,7 @@ class BoundFileReplacement(_BoundExistingFile):
             Destination.from_data(data["destination"]),
             text(data["document_sha256"]),
             _replacement(data["content"]),
+            None if data["target"] is None else CaseKey.from_data(data["target"]),
         )
 
 
@@ -212,7 +227,7 @@ class BoundFileAppend(_BoundExistingFile):
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v3",
+            "format": "prepared-mutation-v4",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
             "destination": {"root": self.destination.root, "path": self.destination.path},
@@ -226,7 +241,7 @@ class BoundFileAppend(_BoundExistingFile):
         data = fields(
             value, "format kind case_sha256 observation_ref destination document_sha256 suffix"
         )
-        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-append":
+        if data["format"] != "prepared-mutation-v4" or data["kind"] != "file-append":
             raise ValueError("Unsupported prepared operation")
         return cls(
             text(data["case_sha256"]),
@@ -274,7 +289,7 @@ class BoundFileCreation:
 
     def to_data(self) -> dict[str, object]:
         return {
-            "format": "prepared-mutation-v3",
+            "format": "prepared-mutation-v4",
             "kind": "file-creation",
             "case_sha256": self.case_sha256,
             "observation_ref": self.observation_ref,
@@ -285,7 +300,7 @@ class BoundFileCreation:
     @classmethod
     def from_data(cls, value: object) -> "BoundFileCreation":
         data = fields(value, "format kind case_sha256 observation_ref destination content")
-        if data["format"] != "prepared-mutation-v3" or data["kind"] != "file-creation":
+        if data["format"] != "prepared-mutation-v4" or data["kind"] != "file-creation":
             raise ValueError("Unsupported prepared operation")
         return cls(
             text(data["case_sha256"]),
@@ -325,7 +340,7 @@ class BoundStaleReferencesTmpCreation(BoundFileCreation):
     def from_data(cls, value: object) -> "BoundStaleReferencesTmpCreation":
         data = fields(value, "format kind case_sha256 observation_ref destination content")
         if (
-            data["format"] != "prepared-mutation-v3"
+            data["format"] != "prepared-mutation-v4"
             or data["kind"] != "stale-references-tmp-creation"
         ):
             raise ValueError("Unsupported prepared operation")

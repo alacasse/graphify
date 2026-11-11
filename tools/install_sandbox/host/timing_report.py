@@ -52,6 +52,23 @@ def _line(record: Timing) -> str:
     return f"  {label}: {value}{detail}"
 
 
+def _coverage_lines(result: CampaignResult) -> list[str]:
+    lines: list[str] = []
+    if result.scope == "partial":
+        lines[0:0] = [
+            "Scope: partial campaign (does not establish full campaign coverage)",
+            f"Selection result: {result.status}; successful: {result.successful}",
+            "Requested cases: " + ", ".join(result.requested_cases or ()),
+            "Executed cases: " + (", ".join(result.executed_cases) or "none"),
+            "Omitted cases (not selected): " + (", ".join(result.omitted_cases) or "none"),
+        ]
+    if result.request is not None:
+        lines.append(f"Request: {result.request}")
+    for scope, summary in result.scope_results.items():
+        lines.append(f"Scope {scope}: {summary['status']} ({summary['coverage']} coverage)")
+    return lines
+
+
 def render_campaign(result: CampaignResult) -> str:
     preparation = result.preparation
     cleanup = result.cleanup
@@ -73,14 +90,7 @@ def render_campaign(result: CampaignResult) -> str:
         "Common phases (counted once):",
         *[_line(record) for record in result.timings],
     ]
-    if result.scope == "partial":
-        lines[0:0] = [
-            "Scope: partial campaign (does not establish full campaign coverage)",
-            f"Selection result: {result.status}; successful: {result.successful}",
-            "Requested cases: " + ", ".join(result.requested_cases or ()),
-            "Executed cases: " + (", ".join(result.executed_cases) or "none"),
-            "Omitted cases (not selected): " + (", ".join(result.omitted_cases) or "none"),
-        ]
+    lines = _coverage_lines(result) + lines
     dependencies = preparation.dependency_preparation if preparation else None
     lines.append(f"Dependency mode: {dependencies.mode if dependencies else 'unavailable'}")
     if dependencies is not None and dependencies.warning is not None:
@@ -94,6 +104,16 @@ def render_campaign(result: CampaignResult) -> str:
         lines.append(result.error)
     for entry in result.cases:
         lines.append(f"\nCase: {entry.name}")
+        if entry.key:
+            key = entry.key
+            lines.append(
+                "  Target: "
+                + " / ".join(
+                    v
+                    for v in (f"{key.tool}:{key.scope}", key.effect_id, key.member)
+                    if v is not None
+                )
+            )
         if entry.construction != "constructed":
             label = (
                 "not applicable"

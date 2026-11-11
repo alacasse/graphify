@@ -14,6 +14,7 @@ from tools.install_sandbox.host.campaign_definition import (
     CampaignDefinition,
     load_campaign_definition,
 )
+from tools.install_sandbox.host.campaign_replay import replay_directory
 from tools.install_sandbox.host.coordinator import CampaignResult, InstallTestCoordinator
 from tools.install_sandbox.host.docker_runtime import SignalCapture
 from tools.install_sandbox.host.output_archive import archive_evidence, check_interrupt
@@ -60,6 +61,7 @@ class CampaignOutput:
         runtime_executable: str | Path = "docker",
         prepare_only: bool = False,
         requested_cases: tuple[str, ...] | None = None,
+        request_file: Path | None = None,
     ) -> CampaignCommandResult:
         report = OutputReport(
             self.now().astimezone(UTC).isoformat(),
@@ -79,6 +81,7 @@ class CampaignOutput:
                         subject_checkout=subject_checkout,
                         prepare_only=prepare_only,
                         requested_cases=requested_cases,
+                        request_file=request_file,
                     )
             except (Exception, KeyboardInterrupt) as error:
                 report.exit_code = 130 if isinstance(error, KeyboardInterrupt) else 2
@@ -104,7 +107,7 @@ class _Session:
         self.definition, self.construction = definition, construction
         self.directory: Path | None = None
         self.lock: FileLock | None = None
-        if definition.requested_cases is not None:
+        if definition.partial:
             report.observe(CampaignResult.from_definition(definition, Path("evidence")))
 
     def run(
@@ -129,7 +132,7 @@ class _Session:
 
     def _record_error(self, error: BaseException) -> None:
         if (
-            self.definition.requested_cases is not None
+            self.definition.partial
             and self.report.phase == "allocated"
             and isinstance(error, (KeyboardInterrupt, InterruptedError))
         ):
@@ -240,13 +243,15 @@ class _Session:
                 "Writer termination uncertain; raw evidence retained for manual inspection"
             )
         evidence = self.directory / "evidence"
-        if self.definition.requested_cases is not None and not evidence.exists():
+        if self.definition.partial and not evidence.exists():
             return
         evidence.mkdir(exist_ok=True)
         self.report.raw_evidence = True
         self.report.phase, self.report.archive = "archiving", "pending"
         self._save()
         archive_evidence(self.directory, interrupts)
+        if self.report.exit_code == 0:
+            replay_directory(evidence)
         self.report.archive = "verified"
         self._save()
         if self._remove_raw(interrupts):

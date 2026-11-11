@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from tools.install_sandbox.contracts.effect_case import (
+    CaseKey,
     EffectInstallCase,
     SubjectContext,
 )
@@ -78,6 +79,7 @@ class CampaignCase:
     error: str | None = None
     construction: Literal["constructed", "not_applicable", "unconstructible"] = "constructed"
     construction_reason: str | None = None
+    key: CaseKey | None = None
 
     def __post_init__(self) -> None:
         self.validate()
@@ -106,13 +108,14 @@ class CampaignCase:
             raise ValueError("Non-constructed case cannot carry execution or evidence")
 
 
-def _case_entries(cases: list[CampaignCase]) -> dict[str, CampaignCase]:
-    entries: dict[str, CampaignCase] = {}
+def _case_entries(cases: list[CampaignCase]) -> dict[CaseKey | str, CampaignCase]:
+    entries: dict[CaseKey | str, CampaignCase] = {}
     for entry in cases:
         entry.validate()
-        if entry.name in entries:
+        identity = entry.key or entry.name
+        if identity in entries:
             raise ValueError("Duplicate campaign case name")
-        entries[entry.name] = entry
+        entries[identity] = entry
     return entries
 
 
@@ -134,6 +137,38 @@ def _cases_passed(cases: list[CampaignCase]) -> bool:
     )
 
 
+def _executed(entry: CampaignCase) -> bool:
+    return (
+        entry.result is not None
+        and entry.result.test is not None
+        and entry.result.result_error is None
+        and any(
+            step.command is not None and step.command["state"] != "not_started"
+            for step in entry.result.test.steps
+        )
+    )
+
+
+def _failed_test(entry: CampaignCase) -> bool:
+    return (
+        entry.result is not None
+        and entry.result.test is not None
+        and entry.result.test.status == "failed"
+    )
+
+
+def _scope_status(entries: list[CampaignCase]) -> str:
+    if not entries:
+        return "omitted"
+    if any(_failed_test(entry) for entry in entries):
+        return "failed"
+    if any(entry.construction == "unconstructible" for entry in entries):
+        return "unconstructible"
+    if all(entry.construction == "not_applicable" for entry in entries):
+        return "not_applicable"
+    return "passed" if _cases_passed(entries) else "incomplete"
+
+
 @dataclass
 class CampaignResult:
     output_directory: Path
@@ -148,6 +183,9 @@ class CampaignResult:
     preparation_result: PreparationResult | None = None
     requested_cases: tuple[str, ...] | None = None
     omitted_cases: tuple[str, ...] = ()
+    omitted_keys: tuple[CaseKey, ...] = ()
+    declared_scopes: tuple[str, ...] = ()
+    request: object = None
 
     @classmethod
     def from_definition(
@@ -157,7 +195,7 @@ class CampaignResult:
         return cls(
             output,
             [
-                CampaignCase(entry.name, output / "cases" / entry.name)
+                CampaignCase(entry.name, output / "cases" / entry.key.storage_id, key=entry.key)
                 if isinstance(entry, EffectInstallCase)
                 else CampaignCase(
                     entry.name,
@@ -165,35 +203,38 @@ class CampaignResult:
                     state=None,
                     construction=entry.classification,
                     construction_reason=entry.reason,
+                    key=entry.key,
                 )
                 for entry in definition.built.entries
             ],
             timings=timings or [],
             prepare_only=definition.prepare_only,
             requested_cases=definition.requested_cases,
-            omitted_cases=definition.omitted_cases,
+            omitted_cases=tuple(key.operation for key in definition.omitted),
+            omitted_keys=definition.omitted,
+            declared_scopes=tuple(scope.scope for scope in definition.declaration.scopes),
+            request=definition.manifest["request"],
         )
 
     @property
     def scope(self) -> str:
         if self.prepare_only:
             return "preparation_only"
-        return "partial" if self.requested_cases is not None else "full"
+        return "partial" if self.requested_cases is not None or self.request is not None else "full"
 
     @property
     def executed_cases(self) -> list[str]:
         """Cases with retained evidence of at least one started installer command."""
-        return [
-            entry.name
-            for entry in self.cases
-            if entry.result is not None
-            and entry.result.test is not None
-            and entry.result.result_error is None
-            and any(
-                step.facts.command is not None and step.facts.command.state != "not_started"
-                for step in entry.result.test.steps
-            )
-        ]
+        return [entry.name for entry in self.cases if _executed(entry)]
+
+    @property
+    def scope_results(self) -> dict[str, dict[str, str]]:
+        results: dict[str, dict[str, str]] = {}
+        for scope in self.declared_scopes:
+            entries = [entry for entry in self.cases if entry.key and entry.key.scope == scope]
+            coverage = "partial" if any(key.scope == scope for key in self.omitted_keys) else "full"
+            results[scope] = {"status": _scope_status(entries), "coverage": coverage}
+        return results
 
     @property
     def prepared(self) -> bool:
@@ -219,7 +260,9 @@ class CampaignResult:
         if not self.prepare_only:
             if self.scope == "partial":
                 return "partial_passed" if self.successful else "partial_incomplete"
-            return "passed" if self.passed else "incomplete"
+            if self.passed:
+                return "passed"
+            return "failed" if any(_failed_test(entry) for entry in self.cases) else "incomplete"
         if self.prepared:
             return "prepared"
         if self.preparation_result and self.preparation_result.status == "nonconformant":
@@ -246,7 +289,12 @@ class CampaignResult:
 
     def payload(self) -> dict[str, object]:
         return {
-            "version": 3,
+            "version": 4,
+            "scope_results": self.scope_results,
+            "selected_keys": [asdict(entry.key) for entry in self.cases if entry.key],
+            "executed_keys": [
+                asdict(entry.key) for entry in self.cases if entry.key and _executed(entry)
+            ],
             "passed": self.passed,
             "status": self.status,
             "scope": self.scope,
@@ -259,7 +307,27 @@ class CampaignResult:
         from tools.install_sandbox.host.timing_report import render_campaign
 
         payload = self.payload()
+        receipts = {
+            "interrupted": self.interrupted,
+            "error": self.error,
+            "preparation": payload["preparation"],
+            "cleanup": payload["cleanup"],
+            "cases": {
+                e.key.storage_id: {
+                    "state": e.state,
+                    "error": e.error,
+                    "not_run_reason": e.not_run_reason,
+                    "container": asdict(e.result.container, dict_factory=_campaign_fields)
+                    if e.result
+                    else None,
+                    "result_error": e.result.result_error if e.result else None,
+                }
+                for e in self.cases
+                if e.key and e.construction == "constructed"
+            },
+        }
         documents = {
+            "host-receipts.json": json.dumps(receipts, indent=2, default=str) + "\n",
             "campaign.json": json.dumps(payload, indent=2, default=str) + "\n",
             "campaign.txt": render_campaign(self),
         }
@@ -307,8 +375,8 @@ class InstallTestCoordinator:
             timings=([construction_timing] if construction_timing is not None else [])
             + [materialization],
         )
-        if definition.requested_cases is not None and not built.cases:
-            output.mkdir(parents=True, exist_ok=True)
+        if not built.cases and not definition.prepare_only:
+            self._materialize(definition, output)
             result.error, result.duration_seconds = (
                 "Selected cases contain no executable case",
                 elapsed(started),
@@ -366,7 +434,7 @@ class InstallTestCoordinator:
     def _prepare_image(
         harness: ContainerHarness,
         subject: Path,
-        effects: EffectSpec,
+        effects: tuple[EffectSpec, ...],
         context: SubjectContext,
         result: CampaignResult,
     ) -> None:
@@ -387,12 +455,13 @@ class InstallTestCoordinator:
     @staticmethod
     def _materialize(definition: CampaignDefinition, output: Path) -> None:
         output.mkdir(parents=True, exist_ok=True)
+        (output / "definition.json").write_text(json.dumps(definition.manifest, indent=2) + "\n")
         (output / "inputs").mkdir()
         if definition.built.cases:
             (output / "cases").mkdir()
         for case, transport in zip(definition.built.cases, definition.transports, strict=True):
-            (output / "cases" / case.name).mkdir()
-            (output / "inputs" / f"{case.name}.json").write_text(
+            (output / "cases" / case.key.storage_id).mkdir()
+            (output / "inputs" / f"{case.key.storage_id}.json").write_text(
                 transport, encoding="utf-8", newline="\n"
             )
 
@@ -412,7 +481,7 @@ class InstallTestCoordinator:
             _save_progress(result, progress)
             return
         for case in cases:
-            entry = entries[case.name]
+            entry = entries[case.key]
             assert entry.output_directory is not None
             if harness.interrupted:
                 self._skip_remaining(result, "Campaign interrupted")
@@ -445,7 +514,7 @@ class InstallTestCoordinator:
     ) -> CoordinatedResult:
         started = time.monotonic_ns()
         container = harness.run_case(
-            case_file=campaign.output_directory / "inputs" / f"{case.name}.json",
+            case_file=campaign.output_directory / "inputs" / f"{case.key.storage_id}.json",
             output_directory=output,
         )
         reading = Timing("read")
@@ -472,9 +541,9 @@ class InstallTestCoordinator:
 
 def _associate_cases(
     cases: list[EffectInstallCase], entries: list[CampaignCase]
-) -> dict[str, CampaignCase]:
+) -> dict[CaseKey | str, CampaignCase]:
     indexed = _case_entries(entries)
-    names = [case.name for case in cases]
+    names = [case.key for case in cases]
     if len(names) != len(set(names)):
         raise ValueError("Duplicate constructed case name")
     constructed = {name for name, entry in indexed.items() if entry.construction == "constructed"}

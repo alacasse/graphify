@@ -23,6 +23,13 @@ def export_summary(evidence: Path) -> None:
     if machine.exists():
         payload = cast(dict[str, object], json.loads(machine.read_text()))
         atomic_text(machine, json.dumps(relative_values(payload, evidence, "."), indent=2) + "\n")
+    receipts = evidence / "host-receipts.json"
+    if receipts.exists():
+        atomic_text(
+            receipts,
+            json.dumps(relative_values(json.loads(receipts.read_text()), evidence, "."), indent=2)
+            + "\n",
+        )
     human = evidence / "campaign.txt"
     if human.exists():
         atomic_text(human, human.read_text().replace(str(evidence), "."))

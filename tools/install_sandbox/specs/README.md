@@ -1,6 +1,6 @@
 # Install sandbox effect specifications
 
-The active project-scope specifications are:
+The following six tool specifications declare executable project effects. Each also records the status of its user scope.
 
 | Spec | Skill | Markdown | Hooks |
 | --- | --- | --- | --- |
@@ -33,34 +33,35 @@ remain available in the immutable
 [original YAML](https://github.com/alacasse/graphify/tree/e181166ae11bda165e23bbd83d6357fe4872db49/tools/install_sandbox/specs);
 conversion does not qualify or retire those capabilities.
 
-Other YAML files
-retain historical target facts and are outside the current execution interface.
-User scope, uninstall, other platforms and other effects are outside this scope.
+Selecting one of the other 18 historical YAML files produces an explicit conversion diagnostic.
 
 ## Data and responsibilities
 
-The YAML declares effects, source paths, destinations and host hook names. It
-contains no scenarios, execution defaults or test expectations. Shared conventions
-remain in code; no target-name dispatch or parallel catalog selects behavior.
+Each YAML declares one tool. Under `scopes`, a list gives the effects for
+that participant. Each effect has a local `effect_id`, `family`, physical
+`root` (HOME or PROJECT) and a relative `path`. The root is independent of
+the scope. Skill and Markdown sources are package-relative. JSON effects
+declare every hook's local ID, event, matcher and expected content. Changing
+a destination preserves the effect's identity.
 
-`EffectSpecReader` reads one explicit YAML file and validates structured effects.
-The default destination root is PROJECT and the common `directory` applies unless
-an effect overrides it with a different directory (including `.`). The skill
-source and reference tree, and the Markdown section source, are relative to the
-retained subject source directory supplied to the engine. A section defaults to
-`## graphify`. The supported hook family is `pretooluse-context`.
+A scope whose effects await conversion carries `state: unconstructible` and a
+reason. A scope the product explicitly does not support carries
+`state: not_applicable` and a reason. The six catalog specs currently declare
+unconverted user effects. An unfiltered run exercises project and reports the
+outstanding user obligation. A project-only request can establish full project
+coverage within a partial campaign.
 
 The subject context is a separate JSON object with these required fields:
 
 - `identity`: declared subject identity.
 - `revision` and `package_root`: exact Git commit and package-relative source
   directory for a packaged subject; `package_root` is `graphify` for this product.
-- `invocation`: argument words following the prepared executable.
+- `invocations`: a map from participant (such as `birch:user`) to the argument words following the prepared executable. A single `invocation` remains supported for project contexts.
 - `version_source`: relative source path containing distribution metadata with
   one `Version` header, required by a skill effect.
 - `rules`: explicit `hook_timeout`, `skill_lock`, `json_backup`, `skill_backup`
   and `json_registry` values. The supported reinstall rules currently require
-  timeout `10`, persistent skill lock, `.graphify-bak` JSON backup, `.bak` skill
+  the declared JSON hook facts, persistent skill lock, `.graphify-bak` JSON backup, `.bak` skill
   backup convention and no JSON registry. JSON and hook fields remain required by the context,
   but produce no expectations when no JSON hook effect is declared.
 
@@ -75,11 +76,23 @@ The first two select the effect YAML and subject context JSON. `--repo` selects
 the subject checkout. `--output` selects a fresh result location; omitting it uses
 the managed output directory and its retention policy.
 
-Repeat `--case NAME` to execute only named cases, for example
+Without a filter, the CLI enumerates every applicable operation across the
+declared scopes. For development, supply `--request FILE` containing a scope
+projection or a member selection. Both use the same executor and replay.
+
+```json
+{"scopes":["project"]}
+```
+
+```json
+{"operation":"duplicate","target":{"participant":"birch:project","effect_id":"assistant-hooks","member":"run"}}
+```
+
+Repeat `--case NAME` to execute every occurrence of the named operations, for example
 `--case reinstall --case stale-version`. The complete catalogue is constructed
 and classified first, then selected entries retain their canonical campaign order
 regardless of argument order. Unknown or duplicate names and combining `--case`
-with `--prepare-only` are input errors before output allocation or Docker access.
+with `--request` or `--prepare-only` are input errors before output allocation or Docker access.
 Only selected executable cases are materialized and run; a selected
 `not_applicable` or `unconstructible` entry retains its classification and reason.
 A selection with no executable case fails without preparing an image.
@@ -111,10 +124,9 @@ A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
 `preserve-skill-backup`, `stale-version`, `stale-reference` and `stale-references-tmp` available
 in that order, independently of the Markdown count. Without a skill, the campaign
 reports those cases as `not_applicable`.
-The hook cases, `missing-json-hook`, `altered-json-hook` and
-`duplicate-json-hook`, select the first hook of the first `json-hooks` effect.
+The hook cases enumerate each effect and member for missing, altered and duplicate repairs.
 A spec without that effect yields `not_applicable` for all three. Each case has two dependent
-installation steps. A successful CodeBuddy project campaign runs 13 cases (26 installer
+installation steps. A successful CodeBuddy project campaign runs 16 cases (32 installer
 calls). Amp project runs 10 (20 installer calls). Each of Agents, Copilot, Kimi
 and Pi project runs 8 cases (16 installer calls): reinstall and the seven skill
 cases. Its two Markdown and three hook cases are `not_applicable`, with no
@@ -241,11 +253,12 @@ For the Amp project campaign, use a separate subject context with:
 ```
 
 From the sandbox checkout, with the selected product commit available in
-`/path/to/product-checkout` and a fresh output location:
+`/path/to/product-checkout` and a fresh output location, use a request file containing `{"scopes":["project"]}`:
 
 ```sh
 python -m tools.install_sandbox \
   --spec tools/install_sandbox/specs/amp.yaml \
+  --request /path/to/project-only.json \
   --subject-context /path/to/subject-context.json \
   --repo /path/to/product-checkout \
   --output /path/to/fresh-campaign
@@ -270,18 +283,22 @@ The second step runs only after the first command and verification succeed.
 Reinstall preservation uses that independently validated first observation;
 managed content still comes from the original retained sources.
 
-After extracting `evidence.zip`, call
-`tools.install_sandbox.host.result_reader.read_evidence(case_directory)` on the
-retained `evidence/cases/<case-name>` directory for each constructed case. It needs no original YAML, subject
+Use `tools.install_sandbox.host.campaign_replay.replay_campaign(path_to_zip)` to
+verify the complete or partial report. This re-enumerates the archived spec and
+selection, checks the host receipts and replays every finished case. Each
+selected key includes tool, scope, operation, effect ID and member. The
+directory name is a SHA-256 digest of that key. To inspect one extracted case,
+call `tools.install_sandbox.host.result_reader.read_evidence(case_directory)`
+using the case's reported evidence path. It needs no original YAML, subject
 context, subject checkout, executable or work directory. It reconstructs the
 expectations from retained inputs, checks their equality with stored expectations,
 validates phase continuity and recalculates verdicts. Partial failures retain the
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
 
-The current formats are case `explicit-expectations-v9`, expectations
-`explicit-expectations-v4`, prepared operation `prepared-mutation-v3`, performed
-result `performed-mutation-v3`, and case evidence `explicit-expectations-v11`.
+The current formats are case `explicit-expectations-v10`, expectations
+`explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
+result `performed-mutation-v3`, and case evidence `explicit-expectations-v12`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,
 `file-append`, `file-creation`, `stale-references-tmp-creation`, or `file-replacement`. The
 `preserve-skill-backup` and `stale-reference` cases use `file-creation` to
@@ -289,7 +306,7 @@ create their respective witnesses. The `stale-references-tmp-creation` operation
 records creation of the directory and its witness as a single preparation.
 All three JSON hook repair cases use `file-replacement` for the settings.
 `stale-version` uses the same operation for the version file.
-Campaign format v3, snapshots, timings and lifecycle checkpoints are unchanged. Replay
+Campaign format v4 includes the coverage and outcome of each declared scope. Replay
 independently reconstructs the target selection, operation and expectations,
 including both repaired skill bytes and altered backup bytes from retained sources.
 

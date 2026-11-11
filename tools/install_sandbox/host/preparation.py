@@ -68,11 +68,13 @@ def package_metadata(subject: Path, context: SubjectContext) -> dict[str, str]:
     }
 
 
-def resource_paths(subject: Path, effects: EffectSpec, package: str) -> tuple[list[str], list[str]]:
+def resource_paths(
+    subject: Path, effects: tuple[EffectSpec, ...], package: str
+) -> tuple[list[str], list[str]]:
     files: set[str] = set()
     directories: set[str] = set()
     root = subject / package
-    for effect in effects.effects:
+    for effect in (item for scope in effects for item in scope.effects):
         if isinstance(effect, (SkillEffect, MarkdownSectionEffect)):
             files.add(relative_path(effect.source))
         if isinstance(effect, SkillEffect):
@@ -90,7 +92,7 @@ def resource_paths(subject: Path, effects: EffectSpec, package: str) -> tuple[li
 
 
 def preparation_inputs(
-    subject: Path, effects: EffectSpec, context: SubjectContext
+    subject: Path, effects: tuple[EffectSpec, ...], context: SubjectContext
 ) -> dict[str, object]:
     metadata = package_metadata(subject, context)
     files, directories = resource_paths(subject, effects, metadata["package_root"])
@@ -99,9 +101,9 @@ def preparation_inputs(
     if len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision):
         raise ValueError("Expected a full subject revision")
     return {
-        "format": "preparation-inputs-v1",
+        "format": "preparation-inputs-v2",
         "context": json.loads(json.dumps(asdict(context))),
-        "effects": effects.to_data(),
+        "effects": [scope.to_data() for scope in effects],
         **metadata,
         "revision": revision,
         "subject_manifest": manifest,
@@ -126,7 +128,7 @@ def expected_contents(
 
 
 def capture_preparation(
-    subject: Path, output: Path, effects: EffectSpec, context: SubjectContext
+    subject: Path, output: Path, effects: tuple[EffectSpec, ...], context: SubjectContext
 ) -> None:
     """Retain the full bounded build subject and independently selected expected bytes."""
     if output.resolve().is_relative_to(subject.resolve()):

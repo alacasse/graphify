@@ -196,7 +196,7 @@ class ContainerHarness:
         self.dependency_preparation: DependencyPreparation | None = None
         self.preparation_result: PreparationResult | None = None
         self.binding: dict[str, str] | None = None
-        self._effects: EffectSpec | None = None
+        self._effects: tuple[EffectSpec, ...] | None = None
         self._subject_context: SubjectContext | None = None
 
     def __enter__(self) -> ContainerHarness:
@@ -217,7 +217,7 @@ class ContainerHarness:
         subject_checkout: Path,
         output_directory: Path,
         *,
-        effects: EffectSpec | None = None,
+        effects: tuple[EffectSpec, ...] | None = None,
         subject_context: SubjectContext | None = None,
     ) -> ContainerRunResult:
         if (effects is None) != (subject_context is None):
@@ -369,9 +369,11 @@ class ContainerHarness:
             parsed = EffectInstallCase.from_json(case.read_text(encoding="utf-8"))
             assert self.logs is not None
             retained = read_preparation(self.logs)
+            assert self._subject_context is not None and self._effects is not None
             if (
-                parsed.subject != self._subject_context
-                or parsed.effects != self._effects
+                parsed.subject
+                != self._subject_context.bind_participant(parsed.key.tool, parsed.scope)
+                or parsed.effects not in self._effects
                 or self.binding.get("image_id") != self.image_id
                 or retained.status != "prepared"
                 or retained.binding != self.binding

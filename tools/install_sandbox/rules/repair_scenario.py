@@ -602,18 +602,31 @@ class JsonHookRepairScenario:
             preparation = self.case.intermediate_preparation
             if not isinstance(preparation, JsonHookPreparation):
                 raise ValueError("Case has no JSON hook preparation")
-            effect = next(e for e in self.case.effects.effects if isinstance(e, JsonHooksEffect))
+            effect = next(
+                e
+                for e in self.case.effects.effects
+                if isinstance(e, JsonHooksEffect) and e.effect_id == preparation.effect_id
+            )
+            target = next(hook for hook in effect.hooks if hook.id == preparation.member)
             if preparation.destination != effect.destination:
-                raise ValueError("Preparation must target the first JSON effect")
+                raise ValueError("Preparation destination differs from its declared effect")
+            if (
+                self.case.key.effect_id != effect.effect_id
+                or self.case.key.member != target.id
+                or self.case.key.operation != preparation.kind
+            ):
+                raise ValueError("Preparation target differs from the bound case key")
             destination = effect.destination
             document = retained_bytes(first_after, destination.root, destination.path)
             parsed = read_json(document)
             seeded: dict[str, object] = {
-                "hooks": {effect.hooks[0].event: [seeded_json_hook_group(effect)]}
+                "hooks": {target.event: [seeded_json_hook_group(effect, target)]}
             }
-            if not target_group_preserved(seeded, parsed, effect.hooks[0]):
+            if not target_group_preserved(seeded, parsed, target):
                 raise ValueError("Target hook must remain in its intact seeded personal group")
-            prepared = prepared_hook_settings(effect, document, preparation.kind)
+            prepared = prepared_hook_settings(
+                replace(effect, hooks=(target,)), document, preparation.kind
+            )
             if preparation.kind == "missing-json-hook":
                 kind, provenance = "json-hook-removed", "observation:remove-declared-hook"
             elif preparation.kind == "altered-json-hook":
@@ -629,7 +642,7 @@ class JsonHookRepairScenario:
                 "intermediate",
                 provenance,
                 baseline=document,
-                hooks=(effect.hooks[0],),
+                hooks=(target,),
             )
             repaired = Expectation(
                 "json-hook-repair",
@@ -638,7 +651,7 @@ class JsonHookRepairScenario:
                 "reinstall",
                 "observation:prepared-json+declared-hook",
                 baseline=document,
-                hooks=(effect.hooks[0],),
+                hooks=(target,),
             )
             operation = BoundFileReplacement(
                 hashlib.sha256(case_bytes).hexdigest(),
@@ -646,6 +659,7 @@ class JsonHookRepairScenario:
                 destination,
                 hashlib.sha256(document).hexdigest(),
                 prepared,
+                target=self.case.key,
             )
             operation.verify_binding(case_bytes, first_after)
             return PreparationPlan(

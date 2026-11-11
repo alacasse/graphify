@@ -6,6 +6,7 @@ import secrets
 import stat
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
+from dataclasses import replace
 from pathlib import Path
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
@@ -202,10 +203,19 @@ def _validate_replacement(
         return
     if not isinstance(preparation, JsonHookPreparation):
         raise ValueError("File replacement requires a version or hook preparation")
-    effect = next(e for e in environment.case.effects.effects if isinstance(e, JsonHooksEffect))
+    effect = next(
+        e
+        for e in environment.case.effects.effects
+        if isinstance(e, JsonHooksEffect) and e.effect_id == preparation.effect_id
+    )
+    target = next(hook for hook in effect.hooks if hook.id == preparation.member)
+    if operation.target != environment.case.key:
+        raise ValueError("Hook preparation target differs from bound case key")
     if operation.destination != effect.destination or preparation.destination != effect.destination:
         raise ValueError("Hook preparation destination differs from selected settings")
-    if operation.content != prepared_hook_settings(effect, retained, preparation.kind):
+    if operation.content != prepared_hook_settings(
+        replace(effect, hooks=(target,)), retained, preparation.kind
+    ):
         raise ValueError("Replacement differs from the selected hook preparation")
 
 

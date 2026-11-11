@@ -42,7 +42,12 @@ class CasePublisher:
             else None,
         )
         self.result = InstallTestResult(
-            {"name": case.name, "target": case.target, "scope": case.scope},
+            {
+                "name": case.name,
+                "target": case.target,
+                "scope": case.scope,
+                "key": case.key.to_data(),
+            },
             self.facts.initial,
             list(self.facts.steps),
             self.decision.status,

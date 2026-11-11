@@ -30,6 +30,7 @@ class SkillEffect:
     references: str
     destination: Destination
     kind: str = "skill"
+    effect_id: str = "skill"
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class MarkdownSectionEffect:
     destination: Destination
     marker: str = "## graphify"
     kind: str = "markdown-section"
+    effect_id: str = "markdown-section"
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class JsonHooksEffect:
     destination: Destination
     hooks: tuple[HookExpectation, ...]
     kind: str = "json-hooks"
+    effect_id: str = "json-hooks"
 
 
 Effect = SkillEffect | MarkdownSectionEffect | JsonHooksEffect
@@ -56,29 +59,45 @@ def effect_from_data(value: object) -> Effect:
     incoming = cast(dict[str, object], value)
     kind = incoming.get("kind")
     if kind == "skill":
-        data = fields(incoming, "kind source references destination")
+        data = fields(incoming, "kind source references destination effect_id")
         return SkillEffect(
             relative_path(data["source"]),
             relative_path(data["references"]),
             Destination.from_data(data["destination"]),
+            effect_id=text(data["effect_id"]),
         )
     if kind == "markdown-section":
-        data = fields(incoming, "kind source marker destination")
+        data = fields(incoming, "kind source marker destination effect_id")
         marker = text(data["marker"])
         if not marker.startswith("## ") or "\n" in marker:
             raise ValueError("Expected a level-two Markdown marker")
         return MarkdownSectionEffect(
-            relative_path(data["source"]), Destination.from_data(data["destination"]), marker
+            relative_path(data["source"]),
+            Destination.from_data(data["destination"]),
+            marker,
+            effect_id=text(data["effect_id"]),
         )
     if kind == "json-hooks":
-        data = fields(incoming, "kind destination hooks")
+        data = fields(incoming, "kind destination hooks effect_id")
         hooks = data["hooks"]
         if not isinstance(hooks, list) or not hooks:
             raise ValueError("Expected non-empty hooks")
         resolved = tuple(HookExpectation.from_data(item) for item in cast(list[object], hooks))
-        if len({(h.event, h.matcher) for h in resolved}) != len(resolved):
+        if len({h.id for h in resolved}) != len(resolved):
+            raise ValueError("Duplicate hook member ID")
+        if any(
+            not isinstance(h.content.get("type"), str)
+            or not isinstance(h.content.get("command"), str)
+            for h in resolved
+        ):
+            raise ValueError("Hook disk identity requires type and command")
+        if len(
+            {(h.event, h.matcher, h.content["type"], h.content["command"]) for h in resolved}
+        ) != len(resolved):
             raise ValueError("Duplicate hook destination")
-        return JsonHooksEffect(Destination.from_data(data["destination"]), resolved)
+        return JsonHooksEffect(
+            Destination.from_data(data["destination"]), resolved, effect_id=text(data["effect_id"])
+        )
     raise ValueError(f"Unsupported effect kind: {kind}")
 
 
@@ -105,6 +124,8 @@ def physical_destinations(effect: Effect) -> tuple[Destination, ...]:
 def validate_effects(effects: tuple[Effect, ...]) -> None:
     if not effects:
         raise ValueError("Expected at least one effect")
+    if len({text(e.effect_id) for e in effects}) != len(effects):
+        raise ValueError("Duplicate effect ID")
     owned: dict[Destination, bool] = {}
     for effect in effects:
         for destination in physical_destinations(effect):
@@ -128,8 +149,7 @@ class EffectSpec:
     scope: str = "project"
 
     def __post_init__(self) -> None:
-        if self.scope != "project":
-            raise ValueError("Only project scope is supported")
+        text(self.scope)
         validate_effects(self.effects)
 
     def to_data(self) -> dict[str, object]:
@@ -146,4 +166,66 @@ class EffectSpec:
             raise ValueError("Expected effects list")
         return cls(
             tuple(effect_from_data(item) for item in cast(list[object], raw)), text(data["scope"])
+        )
+
+
+@dataclass(frozen=True)
+class ScopeDeclaration:
+    scope: str
+    effects: EffectSpec | None = None
+    classification: str | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        text(self.scope)
+        if self.effects is not None:
+            if (
+                self.effects.scope != self.scope
+                or self.classification is not None
+                or self.reason is not None
+            ):
+                raise ValueError("Inconsistent executable scope")
+        elif self.classification not in {"unconstructible", "not_applicable"} or not self.reason:
+            raise ValueError("Unresolved scope requires a classification and reason")
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "scope": self.scope,
+            "effects": None if self.effects is None else self.effects.to_data(),
+            "classification": self.classification,
+            "reason": self.reason,
+        }
+
+    @classmethod
+    def from_data(cls, value: object) -> "ScopeDeclaration":
+        data = fields(value, "scope effects classification reason")
+        return cls(
+            text(data["scope"]),
+            None if data["effects"] is None else EffectSpec.from_data(data["effects"]),
+            cast(str | None, data["classification"]),
+            cast(str | None, data["reason"]),
+        )
+
+
+@dataclass(frozen=True)
+class ToolDeclaration:
+    tool: str
+    scopes: tuple[ScopeDeclaration, ...]
+
+    def __post_init__(self) -> None:
+        text(self.tool)
+        if not self.scopes or len({s.scope for s in self.scopes}) != len(self.scopes):
+            raise ValueError("Expected distinct declared scopes")
+
+    def to_data(self) -> dict[str, object]:
+        return {"tool": self.tool, "scopes": [s.to_data() for s in self.scopes]}
+
+    @classmethod
+    def from_data(cls, value: object) -> "ToolDeclaration":
+        data = fields(value, "tool scopes")
+        if not isinstance(data["scopes"], list):
+            raise ValueError("Expected declared scopes")
+        return cls(
+            text(data["tool"]),
+            tuple(ScopeDeclaration.from_data(s) for s in cast(list[object], data["scopes"])),
         )

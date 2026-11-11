@@ -1,7 +1,12 @@
-scope: project
-directory: .pi/agent
-effects:
-  - kind: skill
+tool: pi
+scopes:
+  project:
+  - effect_id: skill
+    family: skill
+    root: PROJECT
+    path: .pi/agent/skills/graphify
     source: skill-pi.md
     references: skills/pi/references
-    destination: {root: project, path: skills/graphify}
+  user:
+    state: unconstructible
+    reason: User-scope expected effects have not been converted.

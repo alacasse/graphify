@@ -93,20 +93,29 @@ class MissingReferencePreparation:
 @dataclass(frozen=True)
 class JsonHookPreparation:
     destination: Destination
-    kind: str = "missing-json-hook"
+    kind: str
+    effect_id: str
+    member: str
 
     def to_data(self) -> dict[str, object]:
         if self.kind not in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
             raise ValueError("Unsupported JSON hook preparation")
         return {
             "kind": self.kind,
+            "effect_id": text(self.effect_id),
+            "member": text(self.member),
             "destination": {"root": self.destination.root, "path": self.destination.path},
         }
 
     @classmethod
     def from_data(cls, value: object) -> "JsonHookPreparation":
-        data = fields(value, "kind destination")
-        result = cls(Destination.from_data(data["destination"]), text(data["kind"]))
+        data = fields(value, "kind destination effect_id member")
+        result = cls(
+            Destination.from_data(data["destination"]),
+            text(data["kind"]),
+            text(data["effect_id"]),
+            text(data["member"]),
+        )
         result.to_data()
         return result
 

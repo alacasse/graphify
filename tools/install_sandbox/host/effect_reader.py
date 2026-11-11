@@ -1,15 +1,16 @@
 """Resolve the host effect YAML without a target-name registry."""
 
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import cast
 
 import yaml
 
 from tools.install_sandbox.contracts.effects import (
-    Destination,
     Effect,
     EffectSpec,
+    ScopeDeclaration,
+    ToolDeclaration,
     effect_from_data,
 )
 from tools.install_sandbox.contracts.spec import fields, relative_path, text
@@ -33,89 +34,61 @@ class EffectLoader(yaml.SafeLoader):
 EffectLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, unique_mapping)
 
 
-def _destination(value: object, directory: str) -> Destination:
-    if not isinstance(value, dict):
-        raise ValueError("Expected destination")
-    incoming = cast(dict[str, object], value)
-    data = fields(incoming, "path " + " ".join(sorted({"root", "directory"} & incoming.keys())))
-    folder = text(data.get("directory", directory))
-    if folder != ".":
-        relative_path(folder)
-    path = str(PurePosixPath(folder) / relative_path(data["path"]))
-    return Destination(text(data.get("root", "project")), path)
-
-
-def _hooks(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, dict) or not value:
-        raise ValueError("Expected non-empty hook events")
-    result: list[dict[str, object]] = []
-    groups = (("search", ("shell", "search-content")), ("read", ("read-file", "find-files")))
-    for event, raw in cast(dict[str, object], value).items():
-        if event != "PreToolUse":
-            raise ValueError(f"Unsupported hook event: {event}")
-        tools = fields(raw, "tools")["tools"]
-        tool_data = fields(tools, "shell search-content read-file find-files")
-        for operation, names in groups:
-            result.append(
-                {
-                    "id": f"{event}-{operation}",
-                    "event": event,
-                    "matcher": "|".join(text(tool_data[name]) for name in names),
-                    "content": {
-                        "type": "command",
-                        "command": f"graphify hook-guard {operation}",
-                        "timeout": 10,
-                    },
-                }
-            )
-    return result
-
-
-def _effect(value: object, directory: str) -> Effect:
+def _effect(value: object) -> Effect:
     if not isinstance(value, dict):
         raise ValueError("Expected effect")
     incoming = cast(dict[str, object], value)
-    kind = incoming.get("kind")
-    expected = {
-        "skill": "kind source references destination",
-        "markdown-section": "kind source destination",
-        "json-hooks": "kind family destination events",
-    }
-    if kind not in expected:
-        raise ValueError(f"Unsupported effect kind: {kind}")
-    key = cast(str, kind)
-    optional = " marker" if key == "markdown-section" and "marker" in incoming else ""
-    data = fields(incoming, expected[key] + optional)
-    destination = _destination(data["destination"], directory)
+    family = incoming.get("family")
+    extra = {"skill": "source references", "markdown-section": "source", "json-hooks": "hooks"}
+    if family not in extra:
+        raise ValueError(f"Unsupported effect family: {family}")
+    optional = " marker" if "marker" in incoming and family == "markdown-section" else ""
+    data = fields(incoming, "effect_id family root path " + extra[cast(str, family)] + optional)
+    roots = {"HOME": "home", "PROJECT": "project"}
+    root = text(data["root"])
+    if root not in roots:
+        raise ValueError("Expected HOME or PROJECT destination root")
     resolved: dict[str, object] = {
-        "kind": kind,
-        "destination": {"root": destination.root, "path": destination.path},
+        "effect_id": text(data["effect_id"]),
+        "kind": family,
+        "destination": {"root": roots[root], "path": relative_path(data["path"])},
     }
-    if key == "json-hooks":
-        if data["family"] != "pretooluse-context":
-            raise ValueError("Unsupported hook family")
-        resolved["hooks"] = _hooks(data["events"])
+    if family == "json-hooks":
+        resolved["hooks"] = data["hooks"]
     else:
-        resolved["source"] = relative_path(data["source"])
-        if key == "skill":
-            resolved["references"] = relative_path(data["references"])
+        resolved["source"] = data["source"]
+        if family == "skill":
+            resolved["references"] = data["references"]
         else:
             resolved["marker"] = data.get("marker", "## graphify")
     return effect_from_data(resolved)
 
 
 class EffectSpecReader:
-    def read(self, path: Path) -> EffectSpec:
+    def read(self, path: Path) -> ToolDeclaration:
         return self.from_yaml(path.read_text(encoding="utf-8"))
 
-    def from_yaml(self, payload: str) -> EffectSpec:
-        data = fields(yaml.load(payload, Loader=EffectLoader), "scope directory effects")
-        directory = text(data["directory"])
-        if directory != ".":
-            relative_path(directory)
-        raw = data["effects"]
-        if not isinstance(raw, list):
-            raise ValueError("Expected effects list")
-        return EffectSpec(
-            tuple(_effect(item, directory) for item in cast(list[object], raw)), text(data["scope"])
-        )
+    def from_yaml(self, payload: str) -> ToolDeclaration:
+        raw = yaml.load(payload, Loader=EffectLoader)
+        if isinstance(raw, dict) and "tool" not in raw:
+            raise ValueError("Historical spec has not been converted to tool/scopes declarations")
+        data = fields(raw, "tool scopes")
+        if not isinstance(data["scopes"], dict) or not data["scopes"]:
+            raise ValueError("Expected non-empty declared scopes")
+        scopes: list[ScopeDeclaration] = []
+        for scope, value in cast(dict[str, object], data["scopes"]).items():
+            if isinstance(value, list):
+                scopes.append(
+                    ScopeDeclaration(
+                        scope,
+                        EffectSpec(tuple(_effect(e) for e in cast(list[object], value)), scope),
+                    )
+                )
+            else:
+                state = fields(value, "state reason")
+                scopes.append(
+                    ScopeDeclaration(
+                        scope, classification=text(state["state"]), reason=text(state["reason"])
+                    )
+                )
+        return ToolDeclaration(text(data["tool"]), tuple(scopes))

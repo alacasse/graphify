@@ -213,6 +213,11 @@ def preservation_baseline(snapshot: FilesystemSnapshot, phase: str) -> tuple[Exp
 def _json_constraints(
     case: EffectInstallCase, effect: JsonHooksEffect, before: FilesystemSnapshot
 ) -> tuple[Expectation, ...]:
+    hooks = effect.hooks
+    preparation = case.intermediate_preparation
+    if isinstance(preparation, JsonHookPreparation) and effect.effect_id == preparation.effect_id:
+        selected = next(hook for hook in hooks if hook.id == preparation.member)
+        hooks = (selected, *(hook for hook in hooks if hook.id != selected.id))
     root, path = effect.destination.root, effect.destination.path
     backup = path + case.subject.rules.json_backup
     origin = backup if before.entry(root, backup) is not None else path
@@ -227,7 +232,7 @@ def _json_constraints(
             "install",
             "effect:json-hooks",
             baseline=retained_bytes(before, root, path),
-            hooks=effect.hooks,
+            hooks=hooks,
         ),
         Expectation(
             "file",

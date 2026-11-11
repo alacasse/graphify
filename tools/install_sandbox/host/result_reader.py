@@ -61,8 +61,13 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
         json.loads(payload, object_pairs_hook=_json_object),
         "case preparation steps status evidence intermediate_preparation",
     )
-    identity = fields(data["case"], "name target scope")
-    expected = {"name": case.name, "target": case.target, "scope": case.scope}
+    identity = fields(data["case"], "name target scope key")
+    expected = {
+        "name": case.name,
+        "target": case.target,
+        "scope": case.scope,
+        "key": case.key.to_data(),
+    }
     if identity != expected:
         raise ValueError("Result case identity does not match the requested case")
     status = text(data["status"])
@@ -97,7 +102,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
 def _read_evidence(output_directory: Path) -> InstallTestResult:
     """Rebuild and validate verdicts entirely from retained native evidence."""
     if _read_json_evidence(output_directory, "evidence-format.json") != {
-        "format": "explicit-expectations-v11"
+        "format": "explicit-expectations-v12"
     }:
         raise ValueError("Unsupported evidence format; use its identified historical reader")
     case = EffectInstallCase.from_json(

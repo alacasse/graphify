@@ -1,8 +1,9 @@
 """Construct a reinstall case directly from effects and explicit subject rules."""
 
+import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict, cast
 
@@ -25,7 +26,48 @@ from tools.install_sandbox.contracts.intermediate import (
     StaleVersionPreparation,
     preparation_from_data,
 )
-from tools.install_sandbox.contracts.spec import fields, relative_path, text
+from tools.install_sandbox.contracts.spec import HookExpectation, fields, relative_path, text
+
+
+@dataclass(frozen=True)
+class CaseKey:
+    tool: str
+    scope: str
+    operation: str
+    effect_id: str | None = None
+    member: str | None = None
+
+    def __post_init__(self) -> None:
+        for value in (self.tool, self.scope, self.operation):
+            text(value)
+        if self.effect_id is not None:
+            text(self.effect_id)
+        if self.member is not None:
+            text(self.member)
+            if self.effect_id is None:
+                raise ValueError("Case member requires an effect ID")
+
+    def to_data(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_data(cls, value: object) -> "CaseKey":
+        data = fields(value, "tool scope operation effect_id member")
+        return cls(
+            text(data["tool"]),
+            text(data["scope"]),
+            text(data["operation"]),
+            cast(str | None, data["effect_id"]),
+            cast(str | None, data["member"]),
+        )
+
+    @property
+    def storage_id(self) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                self.to_data(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()
+        ).hexdigest()
 
 
 class InitialFile(TypedDict):
@@ -73,12 +115,21 @@ class SubjectContext:
     rules: EffectRules
     package_root: str | None = None
     revision: str | None = None
+    invocations: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
+        argv = self.invocations.get(f"{tool}:{scope}")
+        if argv is None and scope == "project":
+            argv = self.invocation
+        if not argv:
+            raise ValueError(f"Missing installation invocation for {tool}:{scope}")
+        return replace(self, invocation=argv)
 
     @classmethod
     def from_data(cls, value: object) -> "SubjectContext":
         data = _context_fields(value)
         raw = data["invocation"]
-        if not isinstance(raw, list) or not raw:
+        if not isinstance(raw, list):
             raise ValueError("Expected explicit subject invocation arguments")
         arguments = tuple(text(item) for item in cast(list[object], raw))
         if any("\x00" in arg for arg in arguments):
@@ -90,7 +141,22 @@ class SubjectContext:
             EffectRules.from_data(data["rules"]),
             cast(str | None, data["package_root"]),
             cast(str | None, data["revision"]),
+            _invocations(data["invocations"]),
         )
+
+
+def _invocations(value: object) -> dict[str, tuple[str, ...]]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected participant invocations")
+    result: dict[str, tuple[str, ...]] = {}
+    for key, raw in cast(dict[str, object], value).items():
+        if ":" not in key or not isinstance(raw, list) or not raw:
+            raise ValueError("Expected participant invocation arguments")
+        args = tuple(text(arg) for arg in cast(list[object], raw))
+        if any("\x00" in arg for arg in args):
+            raise ValueError("Invalid invocation argument")
+        result[text(key)] = args
+    return result
 
 
 def _context_fields(value: object) -> dict[str, object]:
@@ -98,8 +164,8 @@ def _context_fields(value: object) -> dict[str, object]:
         raise ValueError("Expected a subject context object")
     incoming = cast(dict[str, object], value)
     data = fields(
-        {"package_root": None, "revision": None, **incoming},
-        "identity invocation version_source rules package_root revision",
+        {"package_root": None, "revision": None, "invocation": [], "invocations": {}, **incoming},
+        "identity invocation version_source rules package_root revision invocations",
     )
     root, revision = data["package_root"], data["revision"]
     if root is not None:
@@ -112,19 +178,13 @@ def _context_fields(value: object) -> dict[str, object]:
 
 
 def _validate_hook_rules(effect: JsonHooksEffect, rules: EffectRules) -> None:
-    if (
-        type(rules.hook_timeout) is not int
-        or rules.hook_timeout != 10
-        or rules.json_backup != ".graphify-bak"
-        or rules.json_registry is not False
-    ):
+    if rules.json_backup != ".graphify-bak" or rules.json_registry is not False:
         raise ValueError("Unsupported or missing JSON hooks reinstall rule")
     if any(
-        type(hook.content.get("timeout")) is not int
-        or hook.content["timeout"] != rules.hook_timeout
+        "timeout" in hook.content and type(hook.content["timeout"]) is not int
         for hook in effect.hooks
     ):
-        raise ValueError("Hook timeout contradicts explicit subject rule")
+        raise ValueError("Hook timeout must be an integer when declared")
 
 
 def _validate_rules(spec: EffectSpec, subject: SubjectContext) -> None:
@@ -228,31 +288,34 @@ def effect_initial_files(spec: EffectSpec) -> list[InitialFile]:
     return files
 
 
-def seeded_json_hook_group(effect: JsonHooksEffect) -> dict[str, object]:
-    """Independent cohabitation witness for the first declared hook."""
+def seeded_json_hook_group(effect: JsonHooksEffect, member: HookExpectation) -> dict[str, object]:
+    """Independent cohabitation witness for the selected declared hook."""
+    if member not in effect.hooks:
+        raise ValueError("Selected hook does not belong to the effect")
+    hook = member
     return {
-        "matcher": effect.hooks[0].matcher,
+        "matcher": hook.matcher,
         "sandbox_personal": "preserve",
         "hooks": [
-            dict(effect.hooks[0].content),
+            dict(hook.content),
             {"type": "command", "command": "python personal_graphify_audit.py", "timeout": 17},
         ],
     }
 
 
 def _json_hook_case(
-    reinstall: "EffectInstallCase", effect: JsonHooksEffect, kind: str
+    reinstall: "EffectInstallCase", effect: JsonHooksEffect, kind: str, hook: HookExpectation
 ) -> "EffectInstallCase":
     neighbor: dict[str, object] = {
         "matcher": "SandboxPersonalNeighbor",
         "sandbox_neighbor": True,
         "hooks": [{"type": "command", "command": "python personal_neighbor.py", "timeout": 23}],
     }
-    groups = [seeded_json_hook_group(effect)]
+    groups = [seeded_json_hook_group(effect, hook)]
     if kind == "duplicate-json-hook":
         groups.append(
             {
-                "matcher": effect.hooks[0].matcher,
+                "matcher": hook.matcher,
                 "sandbox_personal": "duplicate-destination",
                 "hooks": [
                     {"type": "command", "command": "python personal_duplicate_a.py", "timeout": 19},
@@ -264,7 +327,7 @@ def _json_hook_case(
     settings = {
         "theme": "dark",
         "metadata": {"owner": "personal"},
-        "hooks": {effect.hooks[0].event: groups},
+        "hooks": {hook.event: groups},
     }
     initial = [dict(item) for item in reinstall.initial_files]
     for item in initial:
@@ -273,14 +336,18 @@ def _json_hook_case(
     return replace(
         reinstall,
         name=kind,
+        key=CaseKey(reinstall.key.tool, reinstall.scope, kind, effect.effect_id, hook.id),
         initial_files=initial,
-        intermediate_preparation=JsonHookPreparation(effect.destination, kind),
+        intermediate_preparation=JsonHookPreparation(
+            effect.destination, kind, effect.effect_id, hook.id
+        ),
     )
 
 
 @dataclass(frozen=True)
 class EffectInstallCase:
     name: str
+    key: CaseKey
     target: str
     scope: str
     effects: EffectSpec
@@ -302,7 +369,7 @@ class EffectInstallCase:
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["format"] = "explicit-expectations-v9"
+        data["format"] = "explicit-expectations-v10"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -320,17 +387,21 @@ class EffectInstallCase:
     def from_json(cls, payload: str) -> "EffectInstallCase":
         data = fields(
             json.loads(payload, object_pairs_hook=unique_object),
-            "format name target scope effects subject initial_files operations "
+            "format name key target scope effects subject initial_files operations "
             "intermediate_preparation",
         )
-        if data["format"] != "explicit-expectations-v9":
+        if data["format"] != "explicit-expectations-v10":
             raise ValueError("Unsupported effects case format or operation")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
             SubjectContext.from_data(data["subject"]),
-            text(data["target"]),
+            CaseKey.from_data(data["key"]).tool,
         )
-        matches = [case for case in builds.cases if case.name == data["name"]]
+        matches = [
+            case
+            for case in builds.cases
+            if case.key == CaseKey.from_data(data["key"]) and case.name == data["name"]
+        ]
         if not matches:
             raise ValueError("Unsupported effects case")
         case = matches[0]
@@ -338,6 +409,8 @@ class EffectInstallCase:
         parsed = None if preparation is None else preparation_from_data(preparation)
         if (
             parsed != case.intermediate_preparation
+            or data["target"] != case.target
+            or SubjectContext.from_data(data["subject"]) != case.subject
             or data["scope"] != case.scope
             or data["operations"] != case.operations
             or data["initial_files"] != case.initial_files
@@ -352,11 +425,13 @@ def build_reinstall_case(
     # Round-trip both boundaries even for Python callers; invalid dataclasses are not trusted.
     spec = EffectSpec.from_data(spec.to_data())
     subject = SubjectContext.from_data(json.loads(json.dumps(asdict(subject))))
+    subject = subject.bind_participant(target, spec.scope)
     _validate_rules(spec, subject)
     return EffectInstallCase(
         "reinstall",
-        text(target),
-        "project",
+        CaseKey(text(target), spec.scope, "reinstall"),
+        subject.identity,
+        spec.scope,
         spec,
         subject,
         effect_initial_files(spec),
@@ -366,12 +441,15 @@ def build_reinstall_case(
 
 @dataclass(frozen=True)
 class CaseNonConstruction:
-    name: str
+    key: CaseKey
     classification: Literal["not_applicable", "unconstructible"]
     reason: str
 
+    @property
+    def name(self) -> str:
+        return self.key.operation
+
     def __post_init__(self) -> None:
-        text(self.name)
         text(self.reason)
         if self.classification not in {"not_applicable", "unconstructible"}:
             raise ValueError("Invalid case non-construction classification")
@@ -382,9 +460,9 @@ class EffectCaseBuild:
     entries: tuple[EffectInstallCase | CaseNonConstruction, ...]
 
     def __post_init__(self) -> None:
-        names = [entry.name for entry in self.entries]
-        if len(names) != len(set(names)):
-            raise ValueError("Duplicate campaign case name")
+        keys = [entry.key for entry in self.entries]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Duplicate campaign case key")
 
     @property
     def cases(self) -> tuple[EffectInstallCase, ...]:
@@ -398,13 +476,33 @@ class EffectCaseBuild:
 def build_effect_cases(
     spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
 ) -> EffectCaseBuild:
-    """Derive cases and construction decisions in campaign order."""
-    reinstall = build_reinstall_case(spec, subject, target)
+    """Enumerate participant obligations before binding executable commands."""
+    spec = EffectSpec.from_data(spec.to_data())
+    entries: list[EffectInstallCase | CaseNonConstruction] = []
+    missing: str | None = None
+    try:
+        bound = subject.bind_participant(target, spec.scope)
+    except ValueError as error:
+        missing = str(error)
+        bound = subject
+    executable_subject = bound
+    multi_skill = sum(isinstance(e, SkillEffect) for e in spec.effects) > 1
+    for effect in spec.effects:
+        _validate_rules(EffectSpec((effect,), spec.scope), executable_subject)
+    reinstall = EffectInstallCase(
+        "reinstall",
+        CaseKey(target, spec.scope, "reinstall"),
+        subject.identity,
+        spec.scope,
+        spec,
+        executable_subject,
+        effect_initial_files(spec),
+        ["install", "install"],
+    )
+    entries.append(reinstall)
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
-    skills = [e for e in spec.effects if isinstance(e, SkillEffect)]
-    hooks = [e for e in spec.effects if isinstance(e, JsonHooksEffect)]
-    entries: list[EffectInstallCase | CaseNonConstruction] = [reinstall]
     entries.extend(_markdown_cases(reinstall, markdown))
+    skills = [e for e in spec.effects if isinstance(e, SkillEffect)]
     for name, preparation in (
         ("missing-reference", MissingReferencePreparation),
         ("altered-reference", AlteredReferencePreparation),
@@ -414,21 +512,57 @@ def build_effect_cases(
         ("stale-reference", StaleReferencePreparation),
         (StaleReferencesTmpPreparation.kind, StaleReferencesTmpPreparation),
     ):
-        entries.append(
-            replace(
-                reinstall,
-                name=name,
-                intermediate_preparation=preparation(skills[0].destination),
+        if skills:
+            entries.extend(
+                replace(
+                    reinstall,
+                    name=name,
+                    key=CaseKey(target, spec.scope, name, e.effect_id),
+                    intermediate_preparation=preparation(e.destination),
+                )
+                for e in skills
             )
-            if skills
-            else CaseNonConstruction(name, "not_applicable", "No skill effect declared")
-        )
+        else:
+            entries.append(
+                CaseNonConstruction(
+                    CaseKey(target, spec.scope, name), "not_applicable", "No skill effect declared"
+                )
+            )
+    hooks = [e for e in spec.effects if isinstance(e, JsonHooksEffect)]
     for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
-        entries.append(
-            _json_hook_case(reinstall, hooks[0], kind)
-            if hooks
-            else CaseNonConstruction(kind, "not_applicable", "No JSON hooks effect declared")
-        )
+        if hooks:
+            for effect in hooks:
+                for hook in effect.hooks:
+                    if kind == "altered-json-hook" and "timeout" not in hook.content:
+                        entries.append(
+                            CaseNonConstruction(
+                                CaseKey(target, spec.scope, kind, effect.effect_id, hook.id),
+                                "not_applicable",
+                                "Hook declares no timeout to alter",
+                            )
+                        )
+                    else:
+                        entries.append(_json_hook_case(reinstall, effect, kind, hook))
+        else:
+            entries.append(
+                CaseNonConstruction(
+                    CaseKey(target, spec.scope, kind),
+                    "not_applicable",
+                    "No JSON hooks effect declared",
+                )
+            )
+    reason = missing or (
+        "Multiple skill effects require unavailable lock observation capability"
+        if multi_skill
+        else None
+    )
+    if reason:
+        entries = [
+            CaseNonConstruction(e.key, "unconstructible", reason)
+            if isinstance(e, EffectInstallCase)
+            else e
+            for e in entries
+        ]
     return EffectCaseBuild(tuple(entries))
 
 
@@ -442,7 +576,7 @@ def _markdown_cases(
     if len(markdown) != 1:
         return tuple(
             CaseNonConstruction(
-                name,
+                CaseKey(reinstall.key.tool, reinstall.scope, name),
                 "not_applicable" if not markdown else "unconstructible",
                 "No Markdown effect declared"
                 if not markdown
@@ -470,6 +604,7 @@ def _markdown_cases(
         replace(
             reinstall,
             name=name,
+            key=CaseKey(reinstall.key.tool, reinstall.scope, name, effect.effect_id),
             initial_files=initial,
             intermediate_preparation=replace(preparation, kind=kind, body=body),
         )

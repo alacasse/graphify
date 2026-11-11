@@ -1,4 +1,4 @@
-"""Run a native two-step reinstall from effect YAML and explicit subject context."""
+"""Exercise every applicable installation case in all declared scopes of one tool spec."""
 
 import argparse
 import sys
@@ -15,6 +15,9 @@ def main(arguments: list[str] | None = None) -> int:
         dest="requested_cases",
         metavar="NAME",
         help="Run only this case; repeat to select more (always a partial campaign)",
+    )
+    parser.add_argument(
+        "--request", type=Path, help="JSON scope or hook selection (partial campaign)"
     )
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--spec", type=Path, required=True)
@@ -40,6 +43,7 @@ def main(arguments: list[str] | None = None) -> int:
         subject_checkout=args.repo,
         output_directory=args.output,
         prepare_only=args.prepare_only,
+        request_file=args.request,
         requested_cases=tuple(args.requested_cases) if args.requested_cases else None,
     )
     report = result.report.render()

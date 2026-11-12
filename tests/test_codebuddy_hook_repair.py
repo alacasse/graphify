@@ -1,4 +1,4 @@
-"""Synthetic regressions for bounded CodeBuddy search-hook repairs."""
+"""Synthetic regressions for bounded CodeBuddy hook repairs."""
 
 import copy
 import json
@@ -166,13 +166,23 @@ def test_search_repair_refuses_enriched_ambiguity_without_writes(tmp_path, capsy
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
 
-def test_altered_read_hook_repaired_in_place(tmp_path):
+@pytest.mark.parametrize("repair", ["altered", "same-group-duplicate", "other-group-duplicate"])
+def test_read_hook_repair_preserves_personal_state(tmp_path, repair):
     settings, initial, installed = _seed(tmp_path)
     group = installed["hooks"]["PreToolUse"][3]
     group["personal_group"] = True
     group["hooks"].append({**READ, "timeout": 11, "personal": True})
+    neighbor = {"type": "command", "command": "echo personal"}
+    installed["hooks"]["PreToolUse"].append(
+        {"matcher": "Read|Glob", "personal_group": "other", "hooks": [neighbor]}
+    )
     prepared = copy.deepcopy(installed)
-    prepared["hooks"]["PreToolUse"][3]["hooks"][0]["timeout"] = 11
+    groups = prepared["hooks"]["PreToolUse"]
+    if repair == "altered":
+        groups[3]["hooks"][0]["timeout"] = 11
+    else:
+        target = groups[3] if repair == "same-group-duplicate" else groups[4]
+        target["hooks"].append(dict(READ))
     _write_prepared(settings, prepared)
 
     codebuddy_install(tmp_path)
@@ -185,7 +195,7 @@ def test_read_ambiguity_does_not_persist_search_repair(tmp_path):
     settings, _, installed = _seed(tmp_path)
     prepared = copy.deepcopy(installed)
     prepared["hooks"]["PreToolUse"][2]["hooks"][0]["timeout"] = 11
-    prepared["hooks"]["PreToolUse"][3]["hooks"].append(dict(READ))
+    prepared["hooks"]["PreToolUse"][3]["hooks"].append({**READ, "personal": True})
     _write_prepared(settings, prepared)
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 

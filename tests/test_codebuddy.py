@@ -76,11 +76,9 @@ def test_codebuddy_skill_file_references_graphify_query(tmp_path):
     ("graphify hook-guard read", "Read|Glob"),
 ])
 def test_codebuddy_install_refuses_ambiguous_hooks(tmp_path, capsys, same_group, command, matcher):
-    """Extended search hooks and read duplicates refuse without any writes."""
+    """Duplicate hooks with personal fields refuse without any writes."""
     from graphify.__main__ import codebuddy_install
-    hook = {"type": "command", "command": command, "timeout": 10}
-    if command == "graphify hook-guard search":
-        hook["personal"] = True
+    hook = {"type": "command", "command": command, "timeout": 10, "personal": True}
     groups = [{"matcher": matcher, "hooks": [hook, hook], "personal": True}] if same_group else [
         {"matcher": matcher, "hooks": [hook], "personal": index} for index in range(2)
     ]

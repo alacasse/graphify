@@ -2456,7 +2456,7 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
     print()
     print("CodeBuddy will now check the knowledge graph before answering")
     print("codebase questions and rebuild it after code changes.")
-def _repair_codebuddy_hooks(pre_tool: list, expected_group: dict, *, deduplicate: bool) -> bool:
+def _repair_codebuddy_hooks(pre_tool: list, expected_group: dict) -> bool:
     """Repair the exact portable hook shape with integer timeout 10/11.
 
     This is content recognition, not an ownership record. Extended objects and
@@ -2484,7 +2484,7 @@ def _repair_codebuddy_hooks(pre_tool: list, expected_group: dict, *, deduplicate
             if not repairable:
                 retained.append(hook)
                 continue
-            if seen and deduplicate:
+            if seen:
                 changed = True
                 continue
             changed = changed or hook["timeout"] != expected["timeout"]
@@ -2512,7 +2512,7 @@ def _install_codebuddy_hook(project_dir: Path) -> None:
     missing = []
     for expected_group in _claude_pretooluse_hooks(project=True):
         expected_hook = expected_group["hooks"][0]
-        if _repair_codebuddy_hooks(pre_tool, expected_group, deduplicate=expected_hook["command"] == "graphify hook-guard search"):
+        if _repair_codebuddy_hooks(pre_tool, expected_group):
             repaired = True
         occurrences = 0
         for group in pre_tool:

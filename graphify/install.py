@@ -2456,19 +2456,19 @@ def codebuddy_install(project_dir: Path | None = None) -> None:
     print()
     print("CodeBuddy will now check the knowledge graph before answering")
     print("codebase questions and rebuild it after code changes.")
-def _repair_codebuddy_search_hooks(pre_tool: list) -> bool:
-    """Repair only the exact portable search shape with integer timeout 10/11.
+def _repair_codebuddy_hooks(pre_tool: list, expected_group: dict, *, deduplicate: bool) -> bool:
+    """Repair the exact portable hook shape with integer timeout 10/11.
 
     This is content recognition, not an ownership record. Extended objects and
     other commands/timeouts remain personal content. Keep all groups, even when
     removing a duplicate leaves one empty. The caller checks ambiguity before
     writing, including conflicts with extended conforming objects.
     """
-    expected = {"type": "command", "command": "graphify hook-guard search", "timeout": 10}
+    expected = expected_group["hooks"][0]
     seen = False
     changed = False
     for group in pre_tool:
-        if not isinstance(group, dict) or group.get("matcher") != "Bash|Grep":
+        if not isinstance(group, dict) or group.get("matcher") != expected_group["matcher"]:
             continue
         group_hooks = group.get("hooks")
         if not isinstance(group_hooks, list):
@@ -2484,9 +2484,11 @@ def _repair_codebuddy_search_hooks(pre_tool: list) -> bool:
             if not repairable:
                 retained.append(hook)
                 continue
-            changed = changed or seen or hook["timeout"] != 10
-            if not seen:
-                retained.append(dict(expected))
+            if seen and deduplicate:
+                changed = True
+                continue
+            changed = changed or hook["timeout"] != expected["timeout"]
+            retained.append(dict(expected))
             seen = True
         group_hooks[:] = retained
     return changed
@@ -2506,10 +2508,12 @@ def _install_codebuddy_hook(project_dir: Path) -> None:
     if not isinstance(pre_tool, list):
         _refuse_to_modify(settings_path)
 
-    repaired = _repair_codebuddy_search_hooks(pre_tool)
+    repaired = False
     missing = []
     for expected_group in _claude_pretooluse_hooks(project=True):
         expected_hook = expected_group["hooks"][0]
+        if _repair_codebuddy_hooks(pre_tool, expected_group, deduplicate=expected_hook["command"] == "graphify hook-guard search"):
+            repaired = True
         occurrences = 0
         for group in pre_tool:
             if not isinstance(group, dict) or group.get("matcher") != expected_group["matcher"]:

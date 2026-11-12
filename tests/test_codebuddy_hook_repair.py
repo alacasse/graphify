@@ -166,6 +166,21 @@ def test_search_repair_refuses_enriched_ambiguity_without_writes(tmp_path, capsy
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
 
+def test_altered_read_hook_repaired_in_place(tmp_path):
+    settings, initial, installed = _seed(tmp_path)
+    group = installed["hooks"]["PreToolUse"][3]
+    group["personal_group"] = True
+    group["hooks"].append({**READ, "timeout": 11, "personal": True})
+    prepared = copy.deepcopy(installed)
+    prepared["hooks"]["PreToolUse"][3]["hooks"][0]["timeout"] = 11
+    _write_prepared(settings, prepared)
+
+    codebuddy_install(tmp_path)
+
+    assert json.loads(settings.read_bytes()) == installed
+    assert settings.with_name("settings.json.graphify-bak").read_bytes() == initial
+
+
 def test_read_ambiguity_does_not_persist_search_repair(tmp_path):
     settings, _, installed = _seed(tmp_path)
     prepared = copy.deepcopy(installed)

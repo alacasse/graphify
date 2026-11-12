@@ -369,6 +369,56 @@ def test_removal_preserves_previously_verified_backup_bytes() -> None:
     assert any(m.path == "settings.json.graphify-bak" for m in verdict.mismatches)
 
 
+@pytest.mark.parametrize(
+    "lock_kind,preservation",
+    [("unknown", "indeterminate"), ("file", "violated"), (None, "preserved")],
+)
+def test_removal_distinguishes_uncertain_present_and_absent_lock(
+    lock_kind: str | None, preservation: str
+) -> None:
+    lock = "settings.json.graphify.lock"
+    backup = ("project", "settings.json.graphify-bak", b"{}")
+    settings = ("project", "settings.json", b"{}")
+    initial = snapshot((settings,))
+    before = snapshot((("project", "settings.json", document(("one", 5), ("two", 5))), backup))
+    after = snapshot((settings, backup))
+    if lock_kind is not None:
+        after.entries.append(SnapshotEntry(root="project", path=lock, kind=lock_kind))
+    if lock_kind == "file":
+        after.contents["project", lock] = b""
+    elif lock_kind == "unknown":
+        after.obstacles.append(
+            {"operation": "stat", "root": "project", "path": lock, "reason": "Permission denied"}
+        )
+
+    report, verdict = assess_group_step(
+        {"target": EffectSpec((hook_effect(),))},
+        ("target",),
+        ("target",),
+        True,
+        initial,
+        before,
+        after,
+    )
+    state = report["target"]
+    assert [item["presence"] for item in state["items"]] == ["absent", "absent"]
+    assert state["summary"] == "all_removed"
+    assert state["preservation"] == preservation
+    assert state["complete"] == verdict.complete == (lock_kind != "unknown")
+    if lock_kind == "file":
+        assert any(m.type == "unexpected_entry" and m.path == lock for m in verdict.mismatches)
+    else:
+        assert not verdict.mismatches
+    if lock_kind == "unknown":
+        assert after.obstacles[0] in verdict.obstacles
+        assert any(
+            o["operation"] == "verify_absence" and o["path"] == lock for o in verdict.obstacles
+        )
+        assert any(
+            d["path"] == lock and d["reason"] == "Permission denied" for d in state["diagnostics"]
+        )
+
+
 def test_hook_inspection_does_not_trust_bytes_for_non_file() -> None:
     initial = snapshot((("project", "settings.json", document(("personal", 7))),))
     observed = snapshot((("project", "settings.json", document(("personal", 7))),))

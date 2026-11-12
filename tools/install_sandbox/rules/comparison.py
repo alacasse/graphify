@@ -207,7 +207,7 @@ def require_absent(
     snapshot: FilesystemSnapshot, path: str, result: VerificationResult, root: str = "project"
 ) -> None:
     entry = snapshot.entry(root, path)
-    if entry is not None:
+    if entry is not None and entry["kind"] in {"file", "directory", "other"}:
         mismatch(result, "unexpected_entry", root, path, "absent", entry["kind"])
     elif not snapshot.absent(root, path):
         result.obstacles.append(

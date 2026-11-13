@@ -12,7 +12,6 @@ from tools.install_sandbox.contracts.effect_case import (
     EffectRules,
     SubjectContext,
     build_effect_cases,
-    build_reinstall_case,
 )
 from tools.install_sandbox.contracts.effects import (
     Destination,
@@ -60,13 +59,19 @@ def context() -> SubjectContext:
         "controlled-fixture",
         ("controlled", "install"),
         "METADATA",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
+    )
+
+
+def reinstall_case(spec: EffectSpec, subject: SubjectContext) -> EffectInstallCase:
+    return next(
+        case for case in build_effect_cases(spec, subject).cases if case.name == "reinstall"
     )
 
 
 @pytest.mark.parametrize("timeout", [11.5, True, None])
-def test_transported_hook_must_match_subject_timeout_rule(timeout: object) -> None:
-    case = build_reinstall_case(structured_spec(), context())
+def test_transported_hook_timeout_must_be_an_integer(timeout: object) -> None:
+    case = reinstall_case(structured_spec(), context())
     payload = json.loads(case.to_json())
     payload["effects"]["effects"][2]["hooks"][0]["content"]["timeout"] = timeout
     with pytest.raises(ValueError, match="Hook timeout must be"):
@@ -98,7 +103,7 @@ def test_exact_yaml_and_rename(tmp_path: Path) -> None:
 def test_markdown_only_case_and_strict_roundtrip() -> None:
     effect = MarkdownSectionEffect("always_on/claude-md.md", Destination("project", "DOC.md"))
     spec = EffectSpec((effect,))
-    case = build_reinstall_case(spec, context())
+    case = reinstall_case(spec, context())
     assert case.operations == ["install", "install"]
     assert all("config.json" not in file["path"] for file in case.initial_files)
     assert EffectInstallCase.from_json(case.to_json()) == case
@@ -127,7 +132,7 @@ def test_unknown_effect_and_fields(fragment: str) -> None:
 
 
 def test_missing_rule_and_duplicate_field_rejected() -> None:
-    case = build_reinstall_case(structured_spec(), context())
+    case = reinstall_case(structured_spec(), context())
     raw = json.loads(case.to_json())
     del raw["subject"]["rules"]["json_backup"]
     with pytest.raises(ValueError, match="Expected fields"):
@@ -142,10 +147,10 @@ def test_unsupported_rule_and_path_rejected() -> None:
         "controlled",
         ("install",),
         "METADATA",
-        EffectRules(10, "persistent", ".unsupported", ".bak", False),
+        EffectRules("persistent", ".unsupported", ".bak", False),
     )
     with pytest.raises(ValueError, match="JSON hooks reinstall rule"):
-        build_reinstall_case(spec, subject)
+        build_effect_cases(spec, subject)
     with pytest.raises(ValueError, match="relative path"):
         Destination("project", "../escape")
 
@@ -157,7 +162,7 @@ def test_personal_witnesses_cannot_collide_with_effects() -> None:
     markdown = MarkdownSectionEffect(
         "always_on/claude-md.md", Destination("home", ".synthetic/skills/personal-effect-0.txt")
     )
-    case = build_reinstall_case(EffectSpec((skill, markdown)), context())
+    case = reinstall_case(EffectSpec((skill, markdown)), context())
     paths = [(file["root"], file["path"]) for file in case.initial_files]
     assert len(paths) == len(set(paths))
     assert any(path.startswith("sandbox-personal-0-") for _, path in paths)
@@ -175,7 +180,7 @@ def test_skill_lock_directory_cannot_be_a_markdown_file(section_first: bool, pat
     markdown = MarkdownSectionEffect("always_on/claude-md.md", Destination("home", path))
     effects = (markdown, skill) if section_first else (skill, markdown)
     with pytest.raises(ValueError, match="overlap"):
-        build_reinstall_case(EffectSpec(effects), context())
+        build_effect_cases(EffectSpec(effects), context())
 
 
 @pytest.mark.parametrize("section_first", [True, False])
@@ -195,7 +200,7 @@ def test_disjoint_skill_and_markdown_destinations_accept_either_order(
     )
     markdown = MarkdownSectionEffect("always_on/claude-md.md", destination)
     effects = (markdown, skill) if section_first else (skill, markdown)
-    case = build_reinstall_case(EffectSpec(effects), context())
+    case = reinstall_case(EffectSpec(effects), context())
     assert case.operations == ["install", "install"]
     assert EffectInstallCase.from_json(case.to_json()) == case
 
@@ -208,7 +213,7 @@ def test_skill_lock_directory_cannot_be_a_json_file(hooks_first: bool) -> None:
     collision = JsonHooksEffect(Destination("home", ".cache/graphify/skill-locks"), hooks.hooks)
     effects = (collision, skill) if hooks_first else (skill, collision)
     with pytest.raises(ValueError, match="overlap"):
-        build_reinstall_case(EffectSpec(effects), context())
+        build_effect_cases(EffectSpec(effects), context())
 
 
 @pytest.mark.parametrize(
@@ -217,7 +222,7 @@ def test_skill_lock_directory_cannot_be_a_json_file(hooks_first: bool) -> None:
 def test_skill_destination_cannot_overlap_its_own_lock_directory(path: str) -> None:
     skill = SkillEffect("skill.md", "skills/claude/references", Destination("home", path))
     with pytest.raises(ValueError, match="overlap"):
-        build_reinstall_case(EffectSpec((skill,)), context())
+        build_effect_cases(EffectSpec((skill,)), context())
 
 
 @pytest.mark.parametrize("home_first", [True, False])
@@ -230,8 +235,18 @@ def test_shared_lock_reservations_preserve_multiple_skills_diagnostic(home_first
     )
     effects = (skill, second) if home_first else (second, skill)
     spec = EffectSpec(effects)
-    with pytest.raises(ValueError, match="Multiple skill effects"):
-        build_reinstall_case(spec, context())
+    built = build_effect_cases(spec, context())
+    assert not built.cases
+    assert all(
+        decision.reason == "Multiple skill effects require unavailable lock observation capability"
+        for decision in built.decisions
+        if decision.classification == "unconstructible"
+    )
+    reinstall = next(decision for decision in built.decisions if decision.name == "reinstall")
+    assert reinstall.classification == "unconstructible"
+    assert (
+        reinstall.reason == "Multiple skill effects require unavailable lock observation capability"
+    )
 
 
 def test_catalogue_has_strict_independent_preparations() -> None:
@@ -252,7 +267,7 @@ def test_catalogue_has_strict_independent_preparations() -> None:
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
     raw = json.loads(next(case for case in cases if case.name == "altered-section").to_json())
-    assert raw["format"] == "explicit-expectations-v11"
+    assert raw["format"] == "explicit-expectations-v12"
     assert (
         raw["intermediate_preparation"]["body"]
         == "ClNhbmRib3ggYWx0ZXJlZCBNYXJrZG93biBzZWN0aW9uLgoK"
@@ -272,10 +287,13 @@ def test_catalogue_has_strict_independent_preparations() -> None:
         "explicit-expectations-v6",
         "explicit-expectations-v7",
         "explicit-expectations-v8",
+        "explicit-expectations-v9",
+        "explicit-expectations-v10",
+        "explicit-expectations-v11",
     ],
 )
 def test_old_case_formats_are_rejected(version: str) -> None:
-    raw = json.loads(build_reinstall_case(structured_spec(), context()).to_json())
+    raw = json.loads(reinstall_case(structured_spec(), context()).to_json())
     raw["format"] = version
     with pytest.raises(ValueError, match="Unsupported effects case format"):
         EffectInstallCase.from_json(json.dumps(raw))
@@ -402,3 +420,23 @@ def test_backup_preservation_retains_multiskill_construction_limit() -> None:
         for d in built.decisions
         if d.classification == "unconstructible"
     )
+
+
+def test_removed_hook_timeout_rule_is_rejected() -> None:
+    case = reinstall_case(structured_spec(), context())
+    raw = json.loads(case.to_json())
+    assert "hook_timeout" not in raw["subject"]["rules"]
+    raw["subject"]["rules"]["hook_timeout"] = 10
+    with pytest.raises(ValueError, match="Expected fields"):
+        EffectInstallCase.from_json(json.dumps(raw))
+
+
+def test_registry_rule_requires_boolean() -> None:
+    rules = {
+        "skill_lock": "persistent",
+        "json_backup": ".graphify-bak",
+        "skill_backup": ".bak",
+        "json_registry": 0,
+    }
+    with pytest.raises(ValueError, match="registry rule"):
+        EffectRules.from_data(rules)

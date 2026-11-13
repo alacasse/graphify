@@ -120,7 +120,6 @@ def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class EffectRules:
-    hook_timeout: int
     skill_lock: str
     json_backup: str
     skill_backup: str
@@ -128,11 +127,10 @@ class EffectRules:
 
     @classmethod
     def from_data(cls, value: object) -> "EffectRules":
-        data = fields(value, "hook_timeout skill_lock json_backup skill_backup json_registry")
-        if type(data["hook_timeout"]) is not int or type(data["json_registry"]) is not bool:
-            raise ValueError("Expected explicit hook timeout and registry rules")
+        data = fields(value, "skill_lock json_backup skill_backup json_registry")
+        if type(data["json_registry"]) is not bool:
+            raise ValueError("Expected explicit registry rule")
         return cls(
-            data["hook_timeout"],
             text(data["skill_lock"]),
             text(data["json_backup"]),
             text(data["skill_backup"]),
@@ -478,7 +476,7 @@ class EffectInstallCase:
     def to_json(self) -> str:
         data = asdict(self)
         data["key"] = self.key.to_data()
-        data["format"] = "explicit-expectations-v11"
+        data["format"] = "explicit-expectations-v12"
         data["participants"] = [
             {"participant": name, "effects": spec.to_data()} for name, spec in self.participants
         ]
@@ -503,7 +501,7 @@ class EffectInstallCase:
             "format name key target scope effects subject initial_files operations "
             "intermediate_preparation participants plan",
         )
-        if data["format"] != "explicit-expectations-v11":
+        if data["format"] != "explicit-expectations-v12":
             raise ValueError("Unsupported effects case format or operation")
         if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
             raise ValueError("Expected participant and ordered step arrays")
@@ -538,26 +536,6 @@ class EffectInstallCase:
         ):
             raise ValueError("Effects case preparation or operations do not match definition")
         return case
-
-
-def build_reinstall_case(
-    spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
-) -> EffectInstallCase:
-    # Round-trip both boundaries even for Python callers; invalid dataclasses are not trusted.
-    spec = EffectSpec.from_data(spec.to_data())
-    subject = SubjectContext.from_data(json.loads(json.dumps(asdict(subject))))
-    subject = subject.bind_participant(target, spec.scope)
-    validate_effect_rules(spec, subject)
-    return EffectInstallCase(
-        "reinstall",
-        CaseKey(text(target), spec.scope, "reinstall"),
-        subject.identity,
-        spec.scope,
-        spec,
-        subject,
-        effect_initial_files(spec),
-        ["install", "install"],
-    )
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ import pytest
 from tools.install_sandbox.contracts.effect_case import (
     EffectRules,
     SubjectContext,
-    build_reinstall_case,
+    build_effect_cases,
 )
 from tools.install_sandbox.contracts.effects import Destination, EffectSpec, SkillEffect
 from tools.install_sandbox.host.docker_runtime import ContainerHarness
@@ -32,7 +32,7 @@ def arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[EffectSpec
         "candidate",
         ("/opt/install-sandbox/venv/bin/graphify",),
         "package-metadata",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
         package_root="graphify",
         revision="b" * 40,
     )
@@ -45,7 +45,9 @@ def arrange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[EffectSpec
             ),
         )
     )
-    build_reinstall_case(effects, context).write(tmp_path / "case.json")
+    next(
+        case for case in build_effect_cases(effects, context).cases if case.name == "reinstall"
+    ).write(tmp_path / "case.json")
     return effects, context
 
 
@@ -133,7 +135,11 @@ def test_case_binding_mismatch_prevents_launch(
                     "invocation": ("different",),
                 }
                 altered = replace(context, **{mismatch: values[mismatch]})
-                build_reinstall_case(effects, altered).write(tmp_path / "case.json")
+                next(
+                    case
+                    for case in build_effect_cases(effects, altered).cases
+                    if case.name == "reinstall"
+                ).write(tmp_path / "case.json")
             before = len(list((tmp_path / "runtime").glob("command-*")))
             with pytest.raises(ValueError, match="does not match"):
                 harness.run_case(

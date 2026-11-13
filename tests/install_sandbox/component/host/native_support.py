@@ -54,7 +54,7 @@ def arrange(
         "synthetic-subject",
         ("install",),
         "METADATA",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
     )
     context_file = root / "context.json"
     context_file.write_text(json.dumps(asdict(context)))

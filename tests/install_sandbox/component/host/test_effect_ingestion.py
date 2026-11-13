@@ -13,7 +13,7 @@ from tools.install_sandbox.contracts.effect_case import (
     EffectInstallCase,
     build_effect_cases,
 )
-from tools.install_sandbox.contracts.effects import ToolDeclaration
+from tools.install_sandbox.contracts.effects import JsonHooksEffect, ToolDeclaration
 from tools.install_sandbox.contracts.intermediate import JsonHookPreparation
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
@@ -155,7 +155,13 @@ def test_missing_scope_invocation_retains_applicable_keys_as_unconstructible() -
     assert spec is not None
     built = build_effect_cases(spec, context(), "birch")
     assert not built.cases
-    assert len([d for d in built.decisions if d.classification == "unconstructible"]) == 3
+    unavailable = [d for d in built.decisions if d.classification == "unconstructible"]
+    assert len(unavailable) == 3
+    assert {d.reason for d in unavailable} == {"Missing installation invocation for birch:user"}
+    reinstall = next(d for d in built.decisions if d.name == "reinstall")
+    assert reinstall.key.tool == "birch"
+    assert reinstall.key.scope == "user"
+    assert reinstall.classification == "unconstructible"
     bound = replace(context(), invocations={"birch:user": ("install", "--user")})
     assert all(
         c.subject.invocation == ("install", "--user")
@@ -215,11 +221,28 @@ def test_contract_example_without_timeout_retains_missing_repairs() -> None:
         "missing-json-hook",
     ]
     for case in built.cases:
-        assert EffectInstallCase.from_json(case.to_json()) == case
+        transported = EffectInstallCase.from_json(case.to_json())
+        assert transported == case
+        assert all(
+            "timeout" not in hook.content
+            for effect in transported.effects.effects
+            if isinstance(effect, JsonHooksEffect)
+            for hook in effect.hooks
+        )
 
 
 def test_explicit_timeout_is_owned_by_the_declaration() -> None:
     declaration = EffectSpecReader().from_yaml(two_hooks().replace("timeout: 10", "timeout: 37"))
     spec = declaration.scopes[0].effects
     assert spec is not None
-    assert len(build_effect_cases(spec, context(), "birch").cases) == 3
+    cases = build_effect_cases(spec, context(), "birch").cases
+    assert len(cases) == 3
+    for case in cases:
+        transported = EffectInstallCase.from_json(case.to_json())
+        assert transported.effects == spec
+        assert all(
+            hook.content["timeout"] == 37
+            for effect in transported.effects.effects
+            if isinstance(effect, JsonHooksEffect)
+            for hook in effect.hooks
+        )

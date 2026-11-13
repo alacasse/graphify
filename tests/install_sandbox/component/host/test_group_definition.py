@@ -45,7 +45,7 @@ def composition() -> tuple[dict[str, EffectSpec], tuple[str, ...], tuple[str, ..
         "fixture",
         (),
         "METADATA",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
         invocations={p: ("install", p) for p in prepare},
         removals=(StepInvocation("uninstall", remove, ("uninstall", *remove)),),
     )

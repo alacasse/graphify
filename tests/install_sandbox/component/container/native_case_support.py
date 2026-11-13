@@ -8,7 +8,7 @@ from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import (
     EffectRules,
     SubjectContext,
-    build_reinstall_case,
+    build_effect_cases,
 )
 from tools.install_sandbox.contracts.effects import Destination, EffectSpec, MarkdownSectionEffect
 from tools.install_sandbox.contracts.results import InstallTestResult
@@ -20,16 +20,20 @@ class NativeCase:
         subject = root / "subject"
         subject.mkdir(parents=True)
         (subject / "instructions.md").write_text("## graphify\nConsult the synthetic map.\n")
-        self.case = build_reinstall_case(
-            EffectSpec(
-                (MarkdownSectionEffect("instructions.md", Destination("project", "GUIDE.md")),)
-            ),
-            SubjectContext(
-                "entry-test",
-                ("install",),
-                "METADATA",
-                EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
-            ),
+        self.case = next(
+            case
+            for case in build_effect_cases(
+                EffectSpec(
+                    (MarkdownSectionEffect("instructions.md", Destination("project", "GUIDE.md")),)
+                ),
+                SubjectContext(
+                    "entry-test",
+                    ("install",),
+                    "METADATA",
+                    EffectRules("persistent", ".graphify-bak", ".bak", False),
+                ),
+            ).cases
+            if case.name == "reinstall"
         )
         self.case.write(root / "case.json")
 

@@ -63,7 +63,7 @@ def _case() -> EffectInstallCase:
             "synthetic",
             ("python", "installer.py"),
             "VERSION",
-            EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+            EffectRules("persistent", ".graphify-bak", ".bak", False),
         ),
         [
             {"root": "project", "path": "AGENTS.md", "content": "# Personal\n"},

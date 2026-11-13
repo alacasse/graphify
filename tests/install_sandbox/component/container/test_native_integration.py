@@ -14,14 +14,18 @@ from tests.install_sandbox.component.host.native_support import (
 )
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
-from tools.install_sandbox.contracts.effect_case import SubjectContext, build_reinstall_case
+from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
 def prepared(root: Path) -> Path:
     subject, spec, context = arrange(root)
-    case = build_reinstall_case(
-        read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
+    case = next(
+        case
+        for case in build_effect_cases(
+            read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
+        ).cases
+        if case.name == "reinstall"
     )
     case.write(root / "case.json")
     return subject

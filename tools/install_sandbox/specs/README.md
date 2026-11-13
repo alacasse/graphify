@@ -59,11 +59,12 @@ The subject context is a separate JSON object with these required fields:
 - `invocations`: a map from participant (such as `birch:user`) to the argument words following the prepared executable. A single `invocation` remains supported for project contexts.
 - `version_source`: relative source path containing distribution metadata with
   one `Version` header, required by a skill effect.
-- `rules`: explicit `hook_timeout`, `skill_lock`, `json_backup`, `skill_backup`
+- `rules`: explicit `skill_lock`, `json_backup`, `skill_backup`
   and `json_registry` values. The supported reinstall rules currently require
   the declared JSON hook facts, persistent skill lock, `.graphify-bak` JSON backup, `.bak` skill
-  backup convention and no JSON registry. JSON and hook fields remain required by the context,
-  but produce no expectations when no JSON hook effect is declared.
+  backup convention and no JSON registry. JSON fields remain required by the context,
+  but produce no expectations when no JSON hook effect is declared. Each hook
+  may declare its own integer `timeout` in `content`.
 
 These rules describe the subject being tested. They must be established
 independently of its installation output. The context has no scenario selection
@@ -225,7 +226,6 @@ For the Amp project campaign, use a separate subject context with:
   "package_root": "graphify",
   "version_source": "METADATA",
   "rules": {
-    "hook_timeout": 10,
     "skill_lock": "persistent",
     "json_backup": ".graphify-bak",
     "skill_backup": ".bak",
@@ -279,12 +279,13 @@ expectations from retained inputs, checks their equality with stored expectation
 validates phase continuity and recalculates verdicts. Partial failures retain the
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
-Replay also reconstructs the case inventory. Use reader `4ba40355` for archives
+Replay also reconstructs the case inventory. Use reader `534af187` for archives
+from that revision with v11 cases and a timeout in the subject rules. Use reader `4ba40355` for archives
 from that revision, which included timeout and duplicate hook repair cases. Use
 reader `7a956f79` for archives from that revision, which also included the legacy
 reference staging scenario. Earlier archives retain their historical readers.
 
-The current formats are case `explicit-expectations-v11`, expectations
+The current formats are case `explicit-expectations-v12`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
 result `performed-mutation-v3`, and case evidence `explicit-expectations-v13`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,
@@ -339,4 +340,4 @@ one exact ordered removal in `removals`, for example:
 Every argv includes its operation and is copied verbatim. No CLI syntax or scope
 option is inferred. Duplicate participants and overlapping physical destinations,
 including auxiliary paths and parent/child paths, are rejected before execution.
-Case transport v11 includes immutable ordered command steps and participant specs.
+Case transport v12 includes immutable ordered command steps and participant specs.

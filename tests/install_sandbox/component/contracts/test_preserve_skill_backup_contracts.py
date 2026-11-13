@@ -40,7 +40,7 @@ def test_backup_case_round_trip_and_fixed_witness(root: str) -> None:
         Destination(root, "skill")
     )
     assert PRESERVE_SKILL_BACKUP_SUFFIX == b"\nSandbox previous backup witness.\n"
-    assert json.loads(case.to_json())["format"] == "explicit-expectations-v11"
+    assert json.loads(case.to_json())["format"] == "explicit-expectations-v12"
     assert EffectInstallCase.from_json(case.to_json()) == case
 
 

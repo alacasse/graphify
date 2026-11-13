@@ -27,7 +27,7 @@ def test_bad_second_prepare_stops_third_command(tmp_path: Path, fault: str) -> N
         "fixture",
         (),
         "METADATA",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
         invocations={p: ("install", p) for p in participants},
         removals=(StepInvocation("uninstall", participants, ("uninstall", *participants)),),
     )

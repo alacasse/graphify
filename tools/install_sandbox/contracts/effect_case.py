@@ -38,6 +38,8 @@ class CaseKey:
     member: str | None = None
 
     def __post_init__(self) -> None:
+        if self.operation == "group-uninstall":
+            raise ValueError("group-uninstall has been retired")
         for value in (self.tool, self.scope, self.operation):
             text(value)
         if self.effect_id is not None:
@@ -55,9 +57,7 @@ class CaseKey:
         if not isinstance(value, dict):
             raise ValueError("Expected case key object")
         incoming = cast(dict[str, object], value)
-        grouped = "prepare" in incoming or "remove" in incoming
-        names = "tool scope operation effect_id member" + (" prepare remove" if grouped else "")
-        data = fields(incoming, names)
+        data = fields(incoming, "tool scope operation effect_id member")
         key = (
             text(data["tool"]),
             text(data["scope"]),
@@ -65,10 +65,6 @@ class CaseKey:
             cast(str | None, data["effect_id"]),
             cast(str | None, data["member"]),
         )
-        if grouped:
-            return GroupCaseKey(
-                *key, prepare=_participants(data["prepare"]), remove=_participants(data["remove"])
-            )
         return CaseKey(*key)
 
     @property
@@ -78,29 +74,6 @@ class CaseKey:
                 self.to_data(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
             ).encode()
         ).hexdigest()
-
-
-def _participants(value: object) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ValueError("Expected ordered participant arrays")
-    return tuple(text(item) for item in cast(list[object], value))
-
-
-@dataclass(frozen=True, kw_only=True)
-class GroupCaseKey(CaseKey):
-    prepare: tuple[str, ...]
-    remove: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.operation != "group-uninstall" or not self.prepare or not self.remove:
-            raise ValueError("Ordered participants require a group-uninstall key")
-        if len(set(self.prepare)) != len(self.prepare) or len(set(self.remove)) != len(self.remove):
-            raise ValueError("Duplicate ordered group participants")
-        if not set(self.remove) <= set(self.prepare):
-            raise ValueError("Removed participants must have been prepared")
-        if any(len(p.split(":")) != 2 or not all(p.split(":")) for p in self.prepare):
-            raise ValueError("Expected participant tool:scope")
 
 
 class InitialFile(TypedDict):
@@ -143,35 +116,22 @@ class EffectRules:
 @dataclass(frozen=True)
 class StepInvocation:
     action: str
-    participants: tuple[str, ...]
+    participant: str
     argv: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if self.action not in {"install", "uninstall"} or not self.participants or not self.argv:
+        if self.action != "install" or not self.argv:
             raise ValueError("Expected an explicit step invocation")
-        if len(set(self.participants)) != len(self.participants):
-            raise ValueError("Duplicate step participant")
-        for item in (*self.participants, *self.argv):
+        for item in (self.participant, *self.argv):
             if "\x00" in text(item):
                 raise ValueError("Invalid step argument")
 
     def to_data(self) -> dict[str, object]:
         return {
             "action": self.action,
-            "participants": list(self.participants),
+            "participants": [self.participant],
             "argv": list(self.argv),
         }
-
-    @classmethod
-    def from_data(cls, value: object) -> "StepInvocation":
-        data = fields(value, "action participants argv")
-        if not isinstance(data["participants"], list) or not isinstance(data["argv"], list):
-            raise ValueError("Expected step argument lists")
-        return cls(
-            text(data["action"]),
-            tuple(text(x) for x in cast(list[object], data["participants"])),
-            tuple(text(x) for x in cast(list[object], data["argv"])),
-        )
 
 
 @dataclass(frozen=True)
@@ -186,8 +146,6 @@ class SubjectContext:
         default_factory=lambda: dict[str, tuple[str, ...]]()
     )
 
-    removals: tuple["StepInvocation", ...] = ()
-
     def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
         argv = self.invocations.get(f"{tool}:{scope}")
         if argv is None and scope == "project":
@@ -199,8 +157,8 @@ class SubjectContext:
     @classmethod
     def from_data(cls, value: object) -> "SubjectContext":
         data = _context_fields(value)
-        if not isinstance(data["removals"], list):
-            raise ValueError("Expected grouped removal invocations")
+        if data["removals"] != []:
+            raise ValueError("Removal invocations have been retired")
         raw = data["invocation"]
         if not isinstance(raw, list):
             raise ValueError("Expected explicit subject invocation arguments")
@@ -215,7 +173,6 @@ class SubjectContext:
             cast(str | None, data["package_root"]),
             cast(str | None, data["revision"]),
             _invocations(data["invocations"]),
-            tuple(StepInvocation.from_data(item) for item in cast(list[object], data["removals"])),
         )
 
 
@@ -455,33 +412,20 @@ class EffectInstallCase:
         | None
     ) = None
 
-    participants: tuple[tuple[str, EffectSpec], ...] = ()
-    plan: tuple[StepInvocation, ...] = ()
-
-    @property
-    def group(self):
-        if not self.participants:
-            return None
-        from tools.install_sandbox.contracts.group_case import GroupPlan
-
-        if not isinstance(self.key, GroupCaseKey):
-            raise ValueError("Group participants require a grouped key")
-        return GroupPlan(dict(self.participants), self.key.prepare, self.key.remove)
-
     @property
     def steps(self) -> tuple[StepInvocation, ...]:
-        return self.plan or tuple(
-            StepInvocation(op, (f"{self.key.tool}:{self.scope}",), self.subject.invocation)
+        return tuple(
+            StepInvocation(op, f"{self.key.tool}:{self.scope}", self.subject.invocation)
             for op in self.operations
         )
 
     def to_json(self) -> str:
         data = asdict(self)
+        # Preserve the ordinary v11 wire shape without a grouped execution model.
+        data["subject"]["removals"] = []
         data["key"] = self.key.to_data()
         data["format"] = "explicit-expectations-v11"
-        data["participants"] = [
-            {"participant": name, "effects": spec.to_data()} for name, spec in self.participants
-        ]
+        data["participants"] = []
         data["plan"] = [step.to_data() for step in self.steps]
         data["intermediate_preparation"] = (
             None
@@ -508,9 +452,7 @@ class EffectInstallCase:
         if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
             raise ValueError("Expected participant and ordered step arrays")
         if data["participants"]:
-            from tools.install_sandbox.contracts.group_case import group_from_data
-
-            return group_from_data(data)
+            raise ValueError("Grouped case transports have been retired")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
             SubjectContext.from_data(data["subject"]),
@@ -527,8 +469,7 @@ class EffectInstallCase:
         preparation = data["intermediate_preparation"]
         parsed = None if preparation is None else preparation_from_data(preparation)
         if (
-            tuple(StepInvocation.from_data(step) for step in cast(list[object], data["plan"]))
-            != case.steps
+            data["plan"] != [step.to_data() for step in case.steps]
             or parsed != case.intermediate_preparation
             or data["target"] != case.target
             or SubjectContext.from_data(data["subject"]) != case.subject

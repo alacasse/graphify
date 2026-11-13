@@ -1,7 +1,5 @@
 """Plain-language duration report; container details are never added to host totals."""
 
-from typing import cast
-
 from tools.install_sandbox.contracts.results import InstallTestResult
 from tools.install_sandbox.contracts.timings import Timing
 from tools.install_sandbox.host.coordinator import CampaignResult
@@ -168,13 +166,6 @@ def _test_diagnostics(test: InstallTestResult | None) -> list[str]:
             lines.append(f"  Step {index + 1}: {reason}")
         if step.intent is not None and step.phase != "terminal":
             lines.append(f"  Step {index + 1}: in flight; current installation state indeterminate")
-        if step.assessment is not None:
-            for participant, value in step.assessment.items():
-                assessment = cast(dict[str, object], value)
-                lines.append(
-                    f"  Step {index + 1} ({step.operation}), {participant}: "
-                    f"{assessment['summary']}, preservation {assessment['preservation']}"
-                )
         verification = step.verification
         if verification is not None:
             lines.extend(

@@ -23,11 +23,8 @@ from tools.install_sandbox.host.evidence_reader import (
 from tools.install_sandbox.host.initial_preparation_reader import replay_initial
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
 from tools.install_sandbox.host.step_artifacts import inventory
-from tools.install_sandbox.rules.comparison import json_equal
-from tools.install_sandbox.rules.expectation_builder import (
-    build_reinstall_expectations,
-)
-from tools.install_sandbox.rules.ordered_step import command_intent, expectation_path, verify_step
+from tools.install_sandbox.rules.effect_verifier import EffectVerifier
+from tools.install_sandbox.rules.expectation_builder import build_reinstall_expectations
 from tools.install_sandbox.rules.repair_protocol import RepairInputs
 from tools.install_sandbox.rules.step_lifecycle import Artifact, RetainedFacts, inspect
 
@@ -71,7 +68,7 @@ def check_effect_result(
     if initial is None:
         _absent(output, ("expectations/reinstall.json",))
         for index in range(len(result.steps)):
-            loaded, staged = inventory(output, index, _snapshot, grouped=case.group is not None)
+            loaded, staged = inventory(output, index, _snapshot)
             # Installation expectations belong to initial preparation, never an idle step.
             own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
             if own or staged:
@@ -124,14 +121,13 @@ def _steps(
     previous_verdict: VerificationResult | None = None
     progress: RepairProgress | None = None
     installed = expected
-    initial = previous
     for index, step in enumerate(result.steps):
-        if index and case.group is None:
+        if index:
             expected, previous, progress = _transition(
                 result, case, output, sources, installed, expected, previous, previous_verdict
             )
         after, verdict = _inspect_step(
-            step, case, output, index, roots, first_command, initial, previous, expected
+            step, case, output, index, roots, first_command, previous, expected
         )
         if step.command is not None:
             first_command = step.command["args"], step.command["cwd"]
@@ -186,11 +182,10 @@ def _inspect_step(
     index: int,
     roots: dict[str, str],
     first_command: tuple[list[str], str] | None,
-    initial: FilesystemSnapshot,
     previous: FilesystemSnapshot,
     expected: ExpectationSet,
 ) -> tuple[FilesystemSnapshot | None, VerificationResult | None]:
-    loaded, staged = inventory(output, index, _snapshot, grouped=case.group is not None)
+    loaded, staged = inventory(output, index, _snapshot)
     prefix = f"steps/{index}"
     failure = loaded.get(f"{prefix}/failure.json")
     stopped = None if failure is None else StepState.from_data(failure)
@@ -204,7 +199,9 @@ def _inspect_step(
             or (claim.stop is not None and claim.stop.phase == "preparation")
         )
     )
-    expectation_reference = expectation_path(case, index)
+    expectation_reference = (
+        "expectations/install.json" if index == 0 else "expectations/reinstall.json"
+    )
     has_expectations = safe_evidence_path(output, expectation_reference).exists()
     if has_expectations and not repair_owns_expectations:
         _expectations(output, expectation_reference, expected)
@@ -225,11 +222,7 @@ def _inspect_step(
             raise ValueError("Missing referenced observation")
     _check_command(claim, case, index, roots, first_command, output, loaded)
     verdict = _replay_verification(
-        case,
-        index,
         expected,
-        initial,
-        previous,
         after,
         claim,
         loaded.get(f"{prefix}/verification.json"),
@@ -286,25 +279,19 @@ def _inspect_step(
 
 
 def _replay_verification(
-    case: EffectInstallCase,
-    index: int,
     expected: ExpectationSet,
-    initial: FilesystemSnapshot,
-    previous: FilesystemSnapshot,
     after: object,
     claim: StepState,
     saved: object,
 ) -> VerificationResult | None:
     verdict = None if saved is None else VerificationResult.from_data(saved)
-    if verdict is not None or claim.verification is not None or claim.assessment is not None:
+    if verdict is not None or claim.verification is not None:
         if not isinstance(after, FilesystemSnapshot):
             raise ValueError("Verification requires a retained observation")
-        assessment, computed = verify_step(case, index, expected, initial, previous, after)
+        computed = EffectVerifier().verify(expected, after)
         for published in (verdict, claim.verification):
             if published is not None and published != computed:
                 raise ValueError("Verification contradicts retained explicit expectations")
-        if claim.phase == "terminal" and not json_equal(claim.assessment, assessment):
-            raise ValueError("Participant assessment contradicts retained observation")
     return verdict
 
 
@@ -347,14 +334,14 @@ def _check_command(
 def _check_intent(step: StepState, case: EffectInstallCase, index: int) -> None:
     phase = step.stop.phase if step.stop else step.phase
     expected = (
-        None if phase in {"idle", "preparation", "expectations"} else command_intent(case, index)
+        None
+        if phase in {"idle", "preparation", "expectations"}
+        else {"index": index, **case.steps[index].to_data()}
     )
     if step.intent != expected or (
         step.intent is not None and type(step.intent.get("index")) is not int
     ):
         raise ValueError("Published intent contradicts case plan")
-    if step.phase != "terminal" and step.assessment is not None:
-        raise ValueError("Only a completed receipt can publish participant states")
 
 
 def _partial_command_binding(

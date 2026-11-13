@@ -135,48 +135,10 @@ def _source_constraints(case: EffectInstallCase, sources: FilesystemSnapshot) ->
                 raise ValueError("Retained Markdown source has duplicate markers")
 
 
-def _group_initial_expectations(case: EffectInstallCase) -> ExpectationSet:
-    initial = [
-        Expectation(
-            "file",
-            f["root"],
-            f["path"],
-            "initial",
-            "case:initial_files",
-            f["content"].encode("utf-8"),
-        )
-        for f in case.initial_files
-    ]
-    for effect in case.effects.effects:
-        if isinstance(effect, FileEffect):
-            initial.append(
-                Expectation(
-                    "absent",
-                    effect.destination.root,
-                    effect.destination.path,
-                    "initial",
-                    "effect:file",
-                )
-            )
-        elif isinstance(effect, JsonHooksEffect):
-            initial.append(
-                Expectation(
-                    "absent",
-                    effect.destination.root,
-                    effect.destination.path + case.subject.rules.json_backup,
-                    "initial",
-                    "rule:json_backup",
-                )
-            )
-    return ExpectationSet("initial", tuple(initial))
-
-
 def build_initial_expectations(
     case: EffectInstallCase, sources: FilesystemSnapshot
 ) -> ExpectationSet:
     """Validate source construction and describe the prepared, uninstalled state."""
-    if case.participants:
-        return _group_initial_expectations(case)
     _source_constraints(case, sources)
     if isinstance(
         case.intermediate_preparation, (MissingReferencePreparation, AlteredReferencePreparation)
@@ -342,8 +304,6 @@ def build_install_expectations(
     before: FilesystemSnapshot,
     roots: dict[str, str],
 ) -> ExpectationSet:
-    if case.participants:
-        return ExpectationSet("install", (), roots=dict(roots))
     _source_constraints(case, sources)
     baseline = preservation_baseline(before, "install")
     constraints: list[Expectation] = []

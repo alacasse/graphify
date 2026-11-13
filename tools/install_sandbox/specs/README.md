@@ -281,8 +281,10 @@ stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
 Replay also reconstructs the case inventory. Use reader `4ba40355` for archives
 from that revision, which included timeout and duplicate hook repair cases. Use
-reader `7a956f79` for archives from that revision, which also included the legacy
-reference staging scenario. Earlier archives retain their historical readers.
+reader `7a956f79` for historical ordered `group-uninstall` campaigns, including
+per-participant results after interruption, and for archives from that revision
+that include the legacy reference staging scenario. Earlier archives retain
+their historical readers.
 
 The current formats are case `explicit-expectations-v11`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
@@ -317,26 +319,3 @@ separate from synthetic engine data. Simulated proofs do not qualify a real inst
 
 Run the dedicated synthetic Docker acceptance lane with
 `python -m pytest tests/install_sandbox/docker/test_lot_one_cli.py`.
-
-### Ordered group requests
-
-A partial campaign can prepare explicit participants and remove an ordered subset:
-
-```json
-{"operation":"group-uninstall","prepare":["cedar:user","cedar:project","birch:project"],"remove":["birch:project","cedar:project"]}
-```
-
-The chosen `--spec` tool must participate. Other tools resolve by canonical filename
-in that spec's directory; only requested tools are read, and declared identities
-must match. Campaign definition v2 archives their source once for autonomous replay.
-The subject context binds install argv in `invocations` by `tool:scope`, and binds
-one exact ordered removal in `removals`, for example:
-
-```json
-{"removals":[{"action":"uninstall","participants":["birch:project","cedar:project"],"argv":["uninstall","birch","cedar"]}]}
-```
-
-Every argv includes its operation and is copied verbatim. No CLI syntax or scope
-option is inferred. Duplicate participants and overlapping physical destinations,
-including auxiliary paths and parent/child paths, are rejected before execution.
-Case transport v11 includes immutable ordered command steps and participant specs.

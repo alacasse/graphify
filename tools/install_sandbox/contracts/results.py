@@ -214,7 +214,6 @@ class StepState:
     stop: StepStop | None = None
 
     intent: dict[str, object] | None = None
-    assessment: dict[str, object] | None = None
 
     @classmethod
     def idle(cls, operation: str) -> "StepState":
@@ -240,7 +239,7 @@ class StepState:
             "operation": self.operation,
             "phase": self.phase,
             "intent": self.intent,
-            "assessment": self.assessment,
+            "assessment": None,
             "facts": {
                 "prepared": self.facts.prepared,
                 "command": self.command,
@@ -253,6 +252,8 @@ class StepState:
     @classmethod
     def from_data(cls, value: object) -> "StepState":
         data = fields(value, "operation phase facts retained stop intent assessment")
+        if data["assessment"] is not None:
+            raise ValueError("Ordinary steps cannot carry grouped assessments")
         fact = fields(data["facts"], "prepared command verification")
         retained = fields(
             data["retained"], "before before_usable expectations command after verification"
@@ -301,7 +302,6 @@ class StepState:
             ),
             stop,
             _optional_object(data["intent"]),
-            _optional_object(data["assessment"]),
         )
 
 

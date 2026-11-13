@@ -26,7 +26,6 @@ from tools.install_sandbox.rules.expectation_builder import (
     build_reinstall_expectations,
 )
 from tools.install_sandbox.rules.initial_preparation import InitialPreparationLifecycle
-from tools.install_sandbox.rules.ordered_step import command_intent, expectation_path, verify_step
 from tools.install_sandbox.rules.step_lifecycle import (
     CommandRetained,
     CommandReturned,
@@ -149,7 +148,6 @@ class InstallTestRunner:
         writer: TestResultWriter,
         publisher: CasePublisher,
     ) -> None:
-        initial = before
         while True:
             decision = publisher.decision
             segment = decision.segment
@@ -171,7 +169,6 @@ class InstallTestRunner:
                 executable,
                 environment,
                 expectations,
-                initial,
                 before,
                 writer,
                 publisher,
@@ -210,7 +207,6 @@ class InstallTestRunner:
         executable: Path,
         environment: EffectEnvironment,
         expectations: ExpectationSet,
-        initial: FilesystemSnapshot,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
         publisher: CasePublisher,
@@ -223,7 +219,7 @@ class InstallTestRunner:
                 with writer.measure("step_preparation", index):
                     previous = publisher.facts.steps[index - 1].verification
                     assert previous is not None
-                    if case.intermediate_preparation is None and case.group is None:
+                    if case.intermediate_preparation is None:
                         expectations = build_reinstall_expectations(expectations, before, previous)
                     observed = environment.observe(writer, "before", step_index=index)
                     usable = not observed.obstacles and same_observation(before, observed)
@@ -237,13 +233,13 @@ class InstallTestRunner:
             else:
                 state = advance(state, PreparationObserved(REFERENCES["before"]))
             state = advance(state, Prepared())
-            reference = expectation_path(case, index)
+            reference = "expectations/install.json" if index == 0 else "expectations/reinstall.json"
             if index and case.intermediate_preparation is None:
                 writer.write_metadata(reference, expectations.to_data())
             state = advance(state, ExpectationsRetained(reference))
             assert state.retained.before is not None
             writer.verify_inputs(reference, expectations.to_data(), state.retained.before, observed)
-            state = replace(state, intent=command_intent(case, index))
+            state = replace(state, intent={"index": index, **case.steps[index].to_data()})
             publisher.publish_step(index, state)
             command = self._command(case, index, executable, environment, writer)
             state = advance(state, CommandReturned(command.evidence()))
@@ -257,12 +253,12 @@ class InstallTestRunner:
             with writer.measure("checks", index):
                 after = environment.observe(writer, "after", step_index=index)
                 state = advance(state, ObservationRetained(f"steps/{index}/after.json"))
-                assessment, verdict = verify_step(case, index, expectations, initial, before, after)
+                verdict = self.verifier.verify(expectations, after)
                 state = advance(state, VerificationComputed(verdict))
                 writer.write_verification(verdict, step_index=index)
                 writer.verify_receipt(index, command, after, verdict)
                 state = advance(state, VerificationRetained(f"steps/{index}/verification.json"))
-            state = replace(advance(state, Terminate()), assessment=assessment)
+            state = advance(state, Terminate())
         except EvidenceWriteError:
             # Authority was not retained. Keep the previous declaration and stop all effects.
             writer.halted = True

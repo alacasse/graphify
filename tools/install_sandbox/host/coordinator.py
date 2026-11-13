@@ -212,12 +212,7 @@ class CampaignResult:
             requested_cases=definition.requested_cases,
             omitted_cases=tuple(key.operation for key in definition.omitted),
             omitted_keys=definition.omitted,
-            declared_scopes=tuple(scope.scope for scope in definition.declaration.scopes)
-            + (
-                ("group",)
-                if any(entry.key.scope == "group" for entry in definition.built.entries)
-                else ()
-            ),
+            declared_scopes=tuple(scope.scope for scope in definition.declaration.scopes),
             request=definition.manifest["request"],
         )
 

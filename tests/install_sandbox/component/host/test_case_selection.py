@@ -327,6 +327,11 @@ def test_declared_scope_states_survive_archive_relocation(
         ("null", []),
         ('{"scopes":["unknown"]}', []),
         (
+            '{"operation":"group-uninstall","prepare":["synthetic:project"],'
+            '"remove":["synthetic:project"]}',
+            [],
+        ),
+        (
             json.dumps(
                 {
                     "operation": "duplicate",

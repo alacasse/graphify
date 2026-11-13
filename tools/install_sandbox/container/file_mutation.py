@@ -6,7 +6,6 @@ import secrets
 import stat
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from dataclasses import replace
 from pathlib import Path
 
 from tools.install_sandbox.container.effect_environment import EffectEnvironment
@@ -38,7 +37,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     selected_stale_reference,
     selected_version,
 )
-from tools.install_sandbox.rules.json_hook_repair import prepared_hook_settings
+from tools.install_sandbox.rules.json_hook_repair import missing_hook_settings
 
 
 def _path(operation: BoundMutation, environment: EffectEnvironment) -> Path:
@@ -175,9 +174,9 @@ def _validate_replacement(
         raise ValueError("Hook preparation target differs from bound case key")
     if operation.destination != effect.destination or preparation.destination != effect.destination:
         raise ValueError("Hook preparation destination differs from selected settings")
-    if operation.content != prepared_hook_settings(
-        replace(effect, hooks=(target,)), retained, preparation.kind
-    ):
+    if preparation.kind != "missing-json-hook":
+        raise ValueError("Unsupported JSON hook preparation")
+    if operation.content != missing_hook_settings(target, retained):
         raise ValueError("Replacement differs from the selected hook preparation")
 
 

@@ -20,7 +20,7 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, 30, id="all-effects-home"),
+        pytest.param(False, True, "home", "home", True, 22, id="all-effects-home"),
         pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
         pytest.param(False, False, "project", "project", True, 18, id="skill-project-markdown"),
         pytest.param(False, False, "project", "home", False, 9, id="wrong-skill-root"),
@@ -71,15 +71,7 @@ def test_cli_real_engine_and_autonomous_reread(
         "preserve-skill-backup",
         "stale-version",
         "stale-reference",
-        *(
-            [
-                name
-                for name in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
-                for _ in range(2)
-            ]
-            if hooks
-            else ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
-        ),
+        *(["missing-json-hook", "missing-json-hook"] if hooks else ["missing-json-hook"]),
     ]
     saved = {
         CaseKey.from_data(case["key"]).storage_id: case["result"]["test"]
@@ -158,7 +150,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=7 if wrong_skill else 26 if hooks else 14,
+        calls=7 if wrong_skill else 18 if hooks else 14,
     )
 
 
@@ -267,7 +259,7 @@ def _assert_construction_decisions(
     construction: str,
     reason: str,
 ) -> None:
-    hook_cases = ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
+    hook_cases = ["missing-json-hook"]
     skill_cases = [
         "missing-reference",
         "altered-reference",

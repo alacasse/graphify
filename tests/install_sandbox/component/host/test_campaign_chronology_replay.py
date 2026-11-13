@@ -161,10 +161,10 @@ def test_product_failure_with_successful_cleanup_allows_next_case(
         spec_file=spec,
         subject_context_file=context,
         subject_checkout=subject,
-        requested_cases=("duplicate-json-hook",),
+        requested_cases=("missing-json-hook",),
     )
     transport = ControlledTransport(tmp_path)
-    transport.installer.duplicate_hook_survivor = "all"
+    transport.installer.hooks = False
     monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     result = coordinator.InstallTestCoordinator().run_campaign(
         definition=definition, output_directory=tmp_path / "proof"

@@ -8,11 +8,8 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import ObservationObstacle, VerificationResult
 from tools.install_sandbox.rules import comparison as checks
 from tools.install_sandbox.rules.json_hook_repair import (
-    altered_target_preserved,
-    duplicated_target_preserved,
     removed_target_preserved,
     repaired_json_preserved,
-    target_group_preserved,
     without_target,
 )
 
@@ -64,29 +61,14 @@ def _json(item: Expectation, current: bytes, result: VerificationResult) -> None
     assert item.baseline is not None
     try:
         before, after = checks.read_json(item.baseline), checks.read_json(current)
-        counts: list[int] = []
         for hook in item.hooks:
             count = len(
                 checks.hook_positions(after, hook.event, hook.matcher, hook.content, exact=False)
             )
-            counts.append(count)
             if count != 1:
                 checks.mismatch(
                     result, "hook_count", item.root, item.path, "one conforming hook", str(count)
                 )
-        if (
-            item.kind == "json-hooks-seeded"
-            and counts[0] == 1
-            and not target_group_preserved(before, after, item.hooks[0], item.hooks)
-        ):
-            checks.mismatch(
-                result,
-                "target_group_changed",
-                item.root,
-                item.path,
-                "target retained in seeded personal group",
-                "target group changed",
-            )
         if not checks.json_equal(
             checks.personal_json(item.hooks, before), checks.personal_json(item.hooks, after)
         ):
@@ -111,6 +93,8 @@ def _constraint(
         checks.require_absent(observed, item.path, result, item.root)
     elif item.kind == "directory":
         _directory(item, observed, result)
+    elif item.kind == "regular-file":
+        checks.file(observed, item.path, result, item.root)
     elif item.kind == "file":
         assert item.content is not None
         checks.compare_bytes(observed, item.path, item.content, result, item.root)
@@ -143,14 +127,9 @@ def _semantic(item: Expectation, current: bytes, result: VerificationResult) -> 
             path=item.path,
             marker=item.marker,
         )
-    elif item.kind in {"json-hooks", "json-hooks-seeded"}:
+    elif item.kind == "json-hooks":
         _json(item, current, result)
-    elif item.kind in {
-        "json-hook-removed",
-        "json-hook-altered",
-        "json-hook-duplicated",
-        "json-hook-repair",
-    }:
+    elif item.kind in {"json-hook-removed", "json-hook-repair"}:
         _json_transition(item, current, result)
     else:
         raise ValueError("Unsupported expectation kind")
@@ -163,30 +142,23 @@ def _json_transition(item: Expectation, current: bytes, result: VerificationResu
         target = item.hooks[0]
         if item.kind == "json-hook-removed":
             valid = removed_target_preserved(before, after, target)
-        elif item.kind == "json-hook-altered":
-            valid = altered_target_preserved(before, after, target)
         else:
-            expected_count = 2 if item.kind == "json-hook-duplicated" else 1
             count = len(
                 checks.hook_positions(
                     after, target.event, target.matcher, target.content, exact=False
                 )
             )
-            if count != expected_count:
+            if count != 1:
                 checks.mismatch(
                     result,
                     "hook_count",
                     item.root,
                     item.path,
-                    "two conforming hooks" if expected_count == 2 else "one conforming hook",
+                    "one conforming hook",
                     str(count),
                 )
                 return
-            valid = (
-                duplicated_target_preserved(before, after, target)
-                if item.kind == "json-hook-duplicated"
-                else repaired_json_preserved(without_target(before, target), after, target)
-            )
+            valid = repaired_json_preserved(without_target(before, target), after, target)
         if not valid:
             checks.mismatch(
                 result,

@@ -7,40 +7,29 @@ from pathlib import Path
 
 
 def install_hook(entries, matcher, command, *, broken=False, prepend=False, move_after=False):
-    """Keep one exact hook in its original group and preserve personal members."""
+    """Install an absent exact hook; optionally relocate it beside its seeded group."""
     matching = [entry for entry in entries if entry.get("matcher") == matcher]
-    occurrences = [
-        (entry, index)
-        for entry in matching
-        for index, member in enumerate(entry.get("hooks", []))
-        if member == command
-    ]
-    if broken and len(occurrences) > 1:
-        return
-    survivor = occurrences[0] if occurrences else None
-    for entry in matching:
-        entry["hooks"] = [
-            member
-            for index, member in enumerate(entry.get("hooks", []))
-            if member.get("command") != command["command"]
-            or (survivor is not None and entry is survivor[0] and index == survivor[1])
-        ]
-    if survivor is None:
+    source = next((entry for entry in matching if command in entry.get("hooks", [])), None)
+    if source is None:
+        if broken:
+            return
         if matching:
-            matching[0]["hooks"].append(command)
+            source = matching[0]
+            source["hooks"].append(command)
         else:
-            group = {"matcher": matcher, "hooks": [command]}
+            source = {"matcher": matcher, "hooks": [command]}
             if prepend:
-                entries.insert(0, group)
+                entries.insert(0, source)
             else:
-                entries.append(group)
-    if move_after:
-        # Move an existing seeded target after its personal neighbor.
-        for entry in matching:
-            members = entry["hooks"]
-            entry["hooks"] = [m for m in members if m != command] + [
-                m for m in members if m == command
-            ]
+                entries.append(source)
+    if move_after and any(member != command for member in source["hooks"]):
+        # Keep personal neighbors in place and relocate only the managed member.
+        source["hooks"].remove(command)
+        destination = next((entry for entry in matching if not entry["hooks"]), None)
+        if destination is None:
+            entries.append({"matcher": matcher, "hooks": [command]})
+        else:
+            destination["hooks"].append(command)
 
 
 def main() -> int:
@@ -64,9 +53,20 @@ def main() -> int:
         broken = fault == scope or (
             fault == "second-project" and destination.name == "assistant.json"
         )
-        has_layout = fault in ("layout", "permuted") and destination.name == "assistant.json"
+        original = json.loads(backup.read_text()) if backup.exists() else {}
+        original_commands = {
+            member.get("command")
+            for groups in original.get("hooks", {}).values()
+            for group in groups
+            for member in group.get("hooks", [])
+        }
+        has_layout = destination.name in ("assistant.json", "moved-assistant.json")
         install_hook(
-            entries, "*", command, broken=broken, move_after=has_layout and fault == "permuted"
+            entries,
+            "*",
+            command,
+            broken=broken and scope == "user" and "birch run" in original_commands,
+            move_after=has_layout and fault == "permuted",
         )
         if has_layout:
             # An existing seeded layout group stays in place with its witnesses.
@@ -75,6 +75,7 @@ def main() -> int:
                 "FixtureLayout",
                 {"type": "command", "command": "birch layout", "timeout": 10},
                 prepend=fault == "permuted",
+                broken=broken and scope == "project" and "birch layout" in original_commands,
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(data) + "\n")

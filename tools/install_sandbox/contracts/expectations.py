@@ -11,15 +11,13 @@ from tools.install_sandbox.contracts.spec import HookExpectation, fields, text
 _PHASES = {"initial", "install", "intermediate", "reinstall"}
 _KINDS = {
     "file",
+    "regular-file",
     "directory",
     "absent",
     "markdown",
     "markdown-composed",
     "json-hooks",
-    "json-hooks-seeded",
     "json-hook-removed",
-    "json-hook-altered",
-    "json-hook-duplicated",
     "json-hook-repair",
 }
 
@@ -77,29 +75,18 @@ class Expectation:
         present = {key for key, value in semantic.items() if value is not None}
         required: dict[str, set[str]] = {
             "file": {"content"},
+            "regular-file": set(),
             "directory": set(),
             "absent": set(),
             "markdown": {"content", "baseline", "marker"},
             "markdown-composed": {"content", "baseline", "marker"},
             "json-hooks": {"baseline", "hooks"},
-            "json-hooks-seeded": {"baseline", "hooks"},
             "json-hook-removed": {"baseline", "hooks"},
-            "json-hook-altered": {"baseline", "hooks"},
-            "json-hook-duplicated": {"baseline", "hooks"},
             "json-hook-repair": {"baseline", "hooks"},
         }
         if present != required[self.kind]:
             raise ValueError("Expectation fields do not match its kind")
-        if (
-            self.kind
-            in {
-                "json-hook-repair",
-                "json-hook-removed",
-                "json-hook-altered",
-                "json-hook-duplicated",
-            }
-            and len(self.hooks) != 1
-        ):
+        if self.kind in {"json-hook-repair", "json-hook-removed"} and len(self.hooks) != 1:
             raise ValueError("JSON hook repair requires exactly one declared target")
 
     def to_data(self) -> dict[str, object]:

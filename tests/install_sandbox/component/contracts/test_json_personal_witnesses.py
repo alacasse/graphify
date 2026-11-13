@@ -5,8 +5,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-import pytest
-
 from tests.install_sandbox.component.contracts.test_effect_contracts import context
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
@@ -24,8 +22,8 @@ def collision_spec() -> EffectSpec:
         COMMAND + ".sandbox-1",
         "python personal_after_read.py",
         "python personal_neighbor.py",
-        "python personal_duplicate_a.py",
-        "python personal_duplicate_b.py",
+        "python personal_before.py",
+        "python personal_after.py",
     )
     return EffectSpec(
         (
@@ -90,17 +88,15 @@ def test_all_seed_variants_avoid_every_declared_member_and_reconstruct_identical
             assert seeded["hooks"][1]["command"] == COMMAND + ".sandbox-2"
 
 
-@pytest.mark.parametrize(
-    "operation", ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
-)
 def test_collision_member_repairs_and_replays_without_consuming_personal_hook(
     tmp_path: Path,
-    operation: str,
 ) -> None:
     effect = collision_spec().effects[0]
     assert isinstance(effect, JsonHooksEffect)
     spec = EffectSpec((replace(effect, hooks=(effect.hooks[0],)),))
-    case = next(c for c in build_effect_cases(spec, context()).cases if c.name == operation)
+    case = next(
+        c for c in build_effect_cases(spec, context()).cases if c.name == "missing-json-hook"
+    )
     case.write(tmp_path / "case.json")
     sources = tmp_path / "sources"
     sources.mkdir()

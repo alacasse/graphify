@@ -48,10 +48,6 @@ def test_archive_is_readable_after_move_and_extraction(
         "stale-reference",
         "missing-json-hook",
         "missing-json-hook",
-        "altered-json-hook",
-        "altered-json-hook",
-        "duplicate-json-hook",
-        "duplicate-json-hook",
     )
     payload = json.loads((output / "campaign.json").read_text())
     assert tuple(case["name"] for case in payload["cases"]) == case_names
@@ -138,7 +134,7 @@ def test_writer_identity_is_persisted_before_verification_and_case_launch(
                 if json.loads(p.read_text())[0] == "run"
             ]
         )
-        == 16  # One verification and fifteen constructed cases.
+        == 12  # One verification and eleven constructed cases.
     )
 
 

@@ -395,26 +395,22 @@ def seeded_json_hook_group(
 
 
 def _json_hook_case(
-    reinstall: "EffectInstallCase", effect: JsonHooksEffect, kind: str, hook: HookExpectation
+    reinstall: "EffectInstallCase", effect: JsonHooksEffect, hook: HookExpectation
 ) -> "EffectInstallCase":
     neighbor: dict[str, object] = {
         "matcher": "SandboxPersonalNeighbor",
         "sandbox_neighbor": True,
         "hooks": [_json_witness(reinstall.effects, "python personal_neighbor.py", 23)],
     }
-    groups = [seeded_json_hook_group(effect, hook, reinstall.effects)]
-    if kind == "duplicate-json-hook":
-        groups.append(
-            {
-                "matcher": hook.matcher,
-                "sandbox_personal": "duplicate-destination",
-                "hooks": [
-                    _json_witness(reinstall.effects, "python personal_duplicate_a.py", 19),
-                    _json_witness(reinstall.effects, "python personal_duplicate_b.py", 29),
-                ],
-            }
-        )
-    groups.append(neighbor)
+    same_matcher = {
+        "matcher": hook.matcher,
+        "sandbox_personal": "ordered",
+        "hooks": [
+            _json_witness(reinstall.effects, "python personal_before.py", 19),
+            _json_witness(reinstall.effects, "python personal_after.py", 29),
+        ],
+    }
+    groups = [seeded_json_hook_group(effect, hook, reinstall.effects), same_matcher, neighbor]
     settings = {
         "theme": "dark",
         "metadata": {"owner": "personal"},
@@ -426,11 +422,13 @@ def _json_hook_case(
             item["content"] = json.dumps(settings, indent=2) + "\n"
     return replace(
         reinstall,
-        name=kind,
-        key=CaseKey(reinstall.key.tool, reinstall.scope, kind, effect.effect_id, hook.id),
+        name="missing-json-hook",
+        key=CaseKey(
+            reinstall.key.tool, reinstall.scope, "missing-json-hook", effect.effect_id, hook.id
+        ),
         initial_files=initial,
         intermediate_preparation=JsonHookPreparation(
-            effect.destination, kind, effect.effect_id, hook.id
+            effect.destination, "missing-json-hook", effect.effect_id, hook.id
         ),
     )
 
@@ -670,37 +668,19 @@ def build_effect_cases(
 def _json_cases(
     reinstall: EffectInstallCase,
 ) -> tuple[EffectInstallCase | CaseNonConstruction, ...]:
-    entries: list[EffectInstallCase | CaseNonConstruction] = []
-    hooks = [e for e in reinstall.effects.effects if isinstance(e, JsonHooksEffect)]
-    for kind in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
-        if hooks:
-            for effect in hooks:
-                for hook in effect.hooks:
-                    if kind == "altered-json-hook" and "timeout" not in hook.content:
-                        entries.append(
-                            CaseNonConstruction(
-                                CaseKey(
-                                    reinstall.key.tool,
-                                    reinstall.scope,
-                                    kind,
-                                    effect.effect_id,
-                                    hook.id,
-                                ),
-                                "not_applicable",
-                                "Hook declares no timeout to alter",
-                            )
-                        )
-                    else:
-                        entries.append(_json_hook_case(reinstall, effect, kind, hook))
-        else:
-            entries.append(
-                CaseNonConstruction(
-                    CaseKey(reinstall.key.tool, reinstall.scope, kind),
-                    "not_applicable",
-                    "No JSON hooks effect declared",
-                )
-            )
-    return tuple(entries)
+    cases = tuple(
+        _json_hook_case(reinstall, effect, hook)
+        for effect in reinstall.effects.effects
+        if isinstance(effect, JsonHooksEffect)
+        for hook in effect.hooks
+    )
+    return cases or (
+        CaseNonConstruction(
+            CaseKey(reinstall.key.tool, reinstall.scope, "missing-json-hook"),
+            "not_applicable",
+            "No JSON hooks effect declared",
+        ),
+    )
 
 
 def _markdown_cases(

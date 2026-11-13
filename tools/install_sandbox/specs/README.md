@@ -85,7 +85,7 @@ projection or a member selection. Both use the same executor and replay.
 ```
 
 ```json
-{"operation":"duplicate","target":{"participant":"birch:project","effect_id":"assistant-hooks","member":"run"}}
+{"operation":"missing-json-hook","target":{"participant":"birch:project","effect_id":"assistant-hooks","member":"run"}}
 ```
 
 Repeat `--case NAME` to execute every occurrence of the named operations, for example
@@ -124,38 +124,29 @@ A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
 `preserve-skill-backup`, `stale-version` and `stale-reference` available
 in that order, independently of the Markdown count. Without a skill, the campaign
 reports those cases as `not_applicable`.
-The hook cases enumerate each effect and member for missing, altered and duplicate repairs.
-A spec without that effect yields `not_applicable` for all three. Each case has two dependent
-installation steps. A successful CodeBuddy project campaign runs 15 cases (30 installer
-calls). Amp project runs 9 (18 installer calls). Each of Agents, Copilot, Kimi
-and Pi project runs 7 cases (14 installer calls): reinstall and the six skill
-cases. Its two Markdown and three hook cases are `not_applicable`, with no
-installer commands or case evidence. These classifications describe the declared
-effects; a passed campaign qualifies only its represented paths.
+Each declared JSON hook adds one `missing-json-hook` case keyed by effect and
+member. Without a JSON hook effect this operation is `not_applicable`. Each
+executable case has two dependent installer calls. CodeBuddy has 11 project
+cases (22 calls), Amp has 9 (18 calls), and Agents, Copilot, Kimi and Pi each
+have 7 (14 calls). This gives 48 executable project cases across the six specs.
 
-Each hook repair case seeds the selected conforming hook beside the personal
-`python personal_graphify_audit.py` command (timeout 17), with an explicit group
-attribute and a neighboring personal group under the same event. Other declared
-hooks are absent initially and must be installed by the first command. The first
-installation must preserve the selected hook in its original mixed group.
+The hook repair fixture seeds the selected member beside a personal command,
+with an explicit group attribute. A second group with the same matcher holds
+two ordered personal commands. A third group uses another matcher. The first
+install must leave exactly one conforming occurrence of each declared hook
+under its event and matcher. The selected member may move to another matching
+group. Personal groups, their attributes, their relative order and their commands
+must survive. Installation must back up the preexisting settings byte for byte.
 
-`missing-json-hook` then removes only the selected hook. `altered-json-hook`
-changes only its timeout from 10 to 11. `duplicate-json-hook` starts with a
-second personal group under the same event and matcher. Preparation inserts
-a copy of the entire observed hook between that group's two personal hooks.
-The verifier requires exactly two conforming occurrences, checks every field
-of the copy, and removes it from the observed settings for comparison with the
-first installation. In all three cases, a mismatch in the settings or another
-observed file, or an incomplete observation, blocks the second command.
-
-Reinstallation must leave exactly one conforming occurrence under the declared
-event and matcher, in either an existing or a new group. Leaving the altered
-occurrence beside a conforming one fails verification even when the command
-exits successfully. For a duplicated hook, either copy may survive. Both
-personal groups must survive with their personal hooks in order.
-All other hooks, group attributes, personal ordering and
-settings must match the first installation. The backup must match the original
-settings byte for byte, and all other observed files must retain their bytes.
+Preparation removes the selected member at its observed position. The sandbox
+checks this edit against the first installation, including the backup and every
+other observed file. An incomplete observation or any additional change blocks
+the second command. Repair must restore exactly one conforming occurrence and
+preserve the surrounding document, including the other hooks. The repaired
+settings' backup must be a readable regular file. Its generation after that
+write is product-specific. All other observed files retain their bytes. In the
+ordinary `reinstall` case, the sandbox checks each hook count and requires the
+original settings backup to remain byte-identical.
 
 `missing-reference` removes one representative reference: the first regular file
 in lexical order of relative source paths, including subdirectories. A complete
@@ -288,9 +279,10 @@ expectations from retained inputs, checks their equality with stored expectation
 validates phase continuity and recalculates verdicts. Partial failures retain the
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
-Replay also reconstructs the case inventory. For campaigns produced by sandbox
-revision `7a956f79`, use that revision to replay the legacy reference staging
-scenario. Earlier archives retain their own historical reader revisions.
+Replay also reconstructs the case inventory. Use reader `4ba40355` for archives
+from that revision, which included timeout and duplicate hook repair cases. Use
+reader `7a956f79` for archives from that revision, which also included the legacy
+reference staging scenario. Earlier archives retain their historical readers.
 
 The current formats are case `explicit-expectations-v11`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
@@ -299,7 +291,7 @@ The `kind` field identifies the operation as `markdown`, `file-removal`,
 `file-append`, `file-creation`, or `file-replacement`. The
 `preserve-skill-backup` and `stale-reference` cases use `file-creation` to
 create their respective witnesses.
-All three JSON hook repair cases use `file-replacement` for the settings.
+`missing-json-hook` uses `file-replacement` for the selected settings file.
 `stale-version` uses the same operation for the version file.
 Campaign format v4 includes the coverage and outcome of each declared scope. Replay
 independently reconstructs the target selection, operation and expectations,

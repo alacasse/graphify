@@ -98,9 +98,8 @@ def _scope_projection(declaration: ToolDeclaration, request: object) -> set[str]
 def _target_key(request: object) -> CaseKey:
     data = fields(request, "operation target")
     operation = text(data["operation"])
-    operation = "duplicate-json-hook" if operation == "duplicate" else operation
-    if operation not in {"duplicate-json-hook", "missing-json-hook", "altered-json-hook"}:
-        raise ValueError("Unknown target operation: " + text(data["operation"]))
+    if operation != "missing-json-hook":
+        raise ValueError("Unknown target operation: " + operation)
     target = fields(data["target"], "participant effect_id member")
     participant = text(target["participant"]).rsplit(":", 1)
     if len(participant) != 2 or not all(participant):

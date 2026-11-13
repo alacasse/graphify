@@ -14,15 +14,11 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/lot_one_subject.py"
-EXPECTED_DUPLICATES = {
-    ("birch", "project", "duplicate-json-hook", "editor-hooks", "run"),
-    ("birch", "project", "duplicate-json-hook", "assistant-hooks", "run"),
-    ("birch", "user", "duplicate-json-hook", "user-hooks", "run"),
-}
-EXPECTED_REPAIRS = {
-    (tool, scope, operation, effect, member)
-    for tool, scope, _, effect, member in EXPECTED_DUPLICATES
-    for operation in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
+EXPECTED_MISSING = {
+    ("birch", "project", "missing-json-hook", "editor-hooks", "run"),
+    ("birch", "project", "missing-json-hook", "assistant-hooks", "run"),
+    ("birch", "user", "missing-json-hook", "user-hooks", "run"),
+    ("birch", "project", "missing-json-hook", "assistant-hooks", "layout"),
 }
 
 
@@ -105,16 +101,22 @@ def arrange(root: Path, fault: str = "user") -> tuple[Path, Path, Path]:
             ],
         }
 
+    assistant = effect("assistant-hooks", "HOME", ".birch/assistant.json")
+    assistant["hooks"].append(
+        {
+            "id": "layout",
+            "event": "SessionStart",
+            "matcher": "FixtureLayout",
+            "content": {"type": "command", "command": "birch layout", "timeout": 10},
+        }
+    )
     spec = root / "birch.yaml"
     spec.write_text(
         yaml.safe_dump(
             {
                 "tool": "birch",
                 "scopes": {
-                    "project": [
-                        effect("editor-hooks", "PROJECT", ".birch/editor.json"),
-                        effect("assistant-hooks", "HOME", ".birch/assistant.json"),
-                    ],
+                    "project": [effect("editor-hooks", "PROJECT", ".birch/editor.json"), assistant],
                     "user": [effect("user-hooks", "HOME", ".birch/user.json")],
                 },
             },
@@ -156,7 +158,7 @@ def test_same_user_defect_is_partial_project_success_and_complete_failure(tmp_pa
     request.write_text(
         json.dumps(
             {
-                "operation": "duplicate",
+                "operation": "missing-json-hook",
                 "target": {
                     "participant": "birch:project",
                     "effect_id": "assistant-hooks",
@@ -176,13 +178,10 @@ def test_same_user_defect_is_partial_project_success_and_complete_failure(tmp_pa
     assert full["status"] == "failed" and full["passed"] is False
     assert full["scope_results"]["project"]["status"] == "passed"
     assert full["scope_results"]["user"]["status"] == "failed"
-    assert duplicate_keys(full) == EXPECTED_DUPLICATES
-    assert repair_keys(full) == EXPECTED_REPAIRS
-    duplicates = [
-        case for case in full["cases"] if case["key"]["operation"] == "duplicate-json-hook"
-    ]
-    assert len({case["output_directory"] for case in duplicates}) == 3
-    for case in duplicates:
+    assert missing_keys(full) == EXPECTED_MISSING
+    missing = [case for case in full["cases"] if case["key"]["operation"] == "missing-json-hook"]
+    assert len({case["output_directory"] for case in missing}) == 4
+    for case in missing:
         assert case["result"]["test"]["status"] == (
             "failed" if case["key"]["scope"] == "user" else "passed"
         )
@@ -194,11 +193,14 @@ def test_same_user_defect_is_partial_project_success_and_complete_failure(tmp_pa
         {
             "tool": "birch",
             "scope": "user",
-            "operation": "duplicate-json-hook",
+            "operation": "missing-json-hook",
             "effect_id": "user-hooks",
             "member": "run",
         }
     ]
+    assert_failed_repair_first_install(
+        tmp_path / "complete/evidence.zip", full, "user", "user-hooks", "run"
+    )
     assert_moved_replay(tmp_path, subject, spec, context, request, full)
 
 
@@ -217,28 +219,19 @@ def assert_moved_replay(
 
     replayed = replay_campaign(moved)
     assert replayed["scope_results"] == full["scope_results"]
-    assert duplicate_keys(replayed) == EXPECTED_DUPLICATES
+    assert missing_keys(replayed) == EXPECTED_MISSING
     projected = replay_campaign(selected_moved)
     assert projected["status"] == "partial_passed" and projected["passed"] is False
-    assert duplicate_keys(projected) == {
-        ("birch", "project", "duplicate-json-hook", "assistant-hooks", "run")
+    assert missing_keys(projected) == {
+        ("birch", "project", "missing-json-hook", "assistant-hooks", "run")
     }
 
 
-def duplicate_keys(report: dict[str, Any]) -> set[tuple[str, ...]]:
+def missing_keys(report: dict[str, Any]) -> set[tuple[str, ...]]:
     return {
         tuple(case["key"][field] for field in ("tool", "scope", "operation", "effect_id", "member"))
         for case in report["cases"]
-        if case["key"]["operation"] == "duplicate-json-hook"
-    }
-
-
-def repair_keys(report: dict[str, Any]) -> set[tuple[str, ...]]:
-    return {
-        tuple(case["key"][field] for field in ("tool", "scope", "operation", "effect_id", "member"))
-        for case in report["cases"]
-        if case["key"]["operation"]
-        in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
+        if case["key"]["operation"] == "missing-json-hook"
     }
 
 
@@ -265,7 +258,8 @@ def assert_targeted_mutation(archive_path: Path, report: dict[str, Any]) -> None
                 for hook in entry["hooks"]
             )
 
-        assert count(before) == 1 and count(prepared) == 2
+        repaired = json.loads(blob(f"steps/1/after/{target}"))
+        assert (count(before), count(prepared), count(repaired)) == (1, 0, 1)
         for step in (0, 1):
             assert json.loads(blob(f"steps/{step}/stdout.txt")) == {
                 "fixture_invocation": ["install", "--scope", "project"]
@@ -287,15 +281,8 @@ def assert_targeted_mutation(archive_path: Path, report: dict[str, Any]) -> None
 def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: bool) -> None:
     subject, spec, context = arrange(tmp_path, fault="permuted" if permuted else "layout")
     data = yaml.safe_load(spec.read_text())
-    data["scopes"]["project"][1]["hooks"].append(
-        {
-            "id": "layout",
-            "event": "SessionStart",
-            "matcher": "FixtureLayout",
-            "content": {"type": "command", "command": "birch layout", "timeout": 10},
-        }
-    )
     if permuted:
+        data["scopes"]["project"][1]["hooks"].reverse()
         data["scopes"]["project"].reverse()
     spec.write_text(yaml.safe_dump(data))
     result = cli(subject, spec, context, tmp_path / "complete")
@@ -309,14 +296,8 @@ def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: 
     )
     assert verdict in result.stdout
     assert verdict in (tmp_path / "complete/campaign.txt").read_text()
-    assert duplicate_keys(report) == EXPECTED_DUPLICATES | {
-        ("birch", "project", "duplicate-json-hook", "assistant-hooks", "layout")
-    }
-    assert repair_keys(report) == EXPECTED_REPAIRS | {
-        ("birch", "project", operation, "assistant-hooks", "layout")
-        for operation in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
-    }
-    assert len([case for case in report["cases"] if case["construction"] == "constructed"]) == 14
+    assert missing_keys(report) == EXPECTED_MISSING
+    assert len([case for case in report["cases"] if case["construction"] == "constructed"]) == 6
     archive_path = tmp_path / "complete/evidence.zip"
     assert_permuted_target_archive(archive_path, report, permuted)
     from tools.install_sandbox.host.campaign_replay import replay_campaign
@@ -333,7 +314,7 @@ def test_conformant_subject_and_permuted_declarations(tmp_path: Path, permuted: 
 def assert_permuted_target_archive(
     archive_path: Path, report: dict[str, Any], permuted: bool
 ) -> None:
-    """Undo the literal archived duplicate without sandbox mutation helpers."""
+    """Restore the literal missing member and verify all other bytes semantically."""
     case = next(
         case
         for case in report["cases"]
@@ -341,7 +322,7 @@ def assert_permuted_target_archive(
         == {
             "tool": "birch",
             "scope": "project",
-            "operation": "duplicate-json-hook",
+            "operation": "missing-json-hook",
             "effect_id": "assistant-hooks",
             "member": "run",
         }
@@ -357,21 +338,27 @@ def assert_permuted_target_archive(
         for member_index, member in enumerate(group["hooks"])
         if member.get("command") == "birch run"
     ]
-    assert locations == ([(1, 1)] if permuted else [(0, 0)])
+    assert len(locations) == 1
     group_index, member_index = locations[0]
+    if permuted:
+        # Seeded group is retained with only its personal witness; managed member moved.
+        seeded = next(
+            group
+            for group in before["hooks"]["SessionStart"]
+            if group.get("sandbox_personal") == "preserve"
+        )
+        assert all(member.get("command") != "birch run" for member in seeded["hooks"])
+        assert before["hooks"]["SessionStart"][group_index] is not seeded
+    else:
+        assert locations == [(0, 0)]
     observed = before["hooks"]["SessionStart"][group_index]["hooks"][member_index]
-    destinations = [
-        group
+    assert not any(
+        member.get("command") == "birch run"
         for group in prepared["hooks"]["SessionStart"]
-        if group.get("sandbox_personal") == "duplicate-destination"
-    ]
-    assert len(destinations) == 1
-    members = destinations[0]["hooks"]
-    assert len(members) == 3
-    assert members[0]["command"] == "python personal_duplicate_a.py"
-    assert members[2]["command"] == "python personal_duplicate_b.py"
-    assert json.dumps(members.pop(1), sort_keys=True) == json.dumps(observed, sort_keys=True)
-    assert json.dumps(prepared, sort_keys=True) == json.dumps(before, sort_keys=True)
+        for member in group["hooks"]
+    )
+    prepared["hooks"]["SessionStart"][group_index]["hooks"].insert(member_index, observed)
+    assert prepared == before
 
 
 def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
@@ -382,7 +369,7 @@ def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
     targets = {
         case["key"]["effect_id"]: case
         for case in report["cases"]
-        if case["key"]["operation"] == "duplicate-json-hook"
+        if case["key"]["operation"] == "missing-json-hook"
         and case["key"]["scope"] == "project"
         and case["key"]["member"] == "run"
     }
@@ -391,7 +378,7 @@ def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
     with zipfile.ZipFile(archive_path) as archive:
         original = {name: archive.read(name) for name in archive.namelist()}
     assert any(name.startswith(victim) for name in original)
-    for fault in ("missing", "substituted", "retargeted"):
+    for fault in ("missing", "substituted", "retargeted", "tampered"):
         entries = dict(original)
         if fault in ("missing", "substituted"):
             entries = {name: data for name, data in entries.items() if not name.startswith(victim)}
@@ -403,6 +390,11 @@ def assert_campaign_rejects_missing_substituted_and_retargeted_proof(
                     if name.startswith(donor)
                 }
             )
+        if fault == "tampered":
+            snapshot = victim + "intermediate/after/home/.birch/assistant.json"
+            document = json.loads(entries[snapshot])
+            document["theme"] = "tampered"
+            entries[snapshot] = json.dumps(document).encode()
         if fault == "retargeted":
             operation_file = victim + "intermediate/operation.json"
             operation = json.loads(entries[operation_file])
@@ -432,11 +424,59 @@ def test_second_project_file_defect_fails_full_campaign(tmp_path: Path) -> None:
         {
             "tool": "birch",
             "scope": "project",
-            "operation": "duplicate-json-hook",
+            "operation": "missing-json-hook",
             "effect_id": "assistant-hooks",
-            "member": "run",
+            "member": "layout",
         }
     ]
+
+    assert_failed_repair_first_install(
+        tmp_path / "complete/evidence.zip", report, "project", "assistant-hooks", "layout"
+    )
+
+
+def assert_failed_repair_first_install(
+    archive_path: Path, report: dict[str, Any], scope: str, effect: str, member: str
+) -> None:
+    case = next(
+        case
+        for case in report["cases"]
+        if case["key"]
+        == {
+            "tool": "birch",
+            "scope": scope,
+            "operation": "missing-json-hook",
+            "effect_id": effect,
+            "member": member,
+        }
+    )
+    prefix = case["output_directory"].rstrip("/") + "/"
+    target = "home/.birch/" + ("user.json" if scope == "user" else "assistant.json")
+    command = "birch " + member
+    with zipfile.ZipFile(archive_path) as archive:
+        documents = [
+            json.loads(archive.read(prefix + suffix + target))
+            for suffix in ("steps/0/after/", "intermediate/after/", "steps/1/after/")
+        ]
+    counts = [
+        sum(
+            hook.get("command") == command
+            for group in document["hooks"]["SessionStart"]
+            for hook in group["hooks"]
+        )
+        for document in documents
+    ]
+    assert counts == [1, 0, 0]
+    if scope == "project":
+        assert all(
+            sum(
+                hook.get("command") == "birch run"
+                for group in document["hooks"]["SessionStart"]
+                for hook in group["hooks"]
+            )
+            == 1
+            for document in documents
+        )
 
 
 def test_moved_destination_keeps_key_and_requires_corrected_subject(tmp_path: Path) -> None:
@@ -448,7 +488,7 @@ def test_moved_destination_keeps_key_and_requires_corrected_subject(tmp_path: Pa
     request.write_text(
         json.dumps(
             {
-                "operation": "duplicate",
+                "operation": "missing-json-hook",
                 "target": {
                     "participant": "birch:project",
                     "effect_id": "assistant-hooks",
@@ -484,7 +524,7 @@ def test_moved_destination_keeps_key_and_requires_corrected_subject(tmp_path: Pa
     assert corrected.returncode == 0, corrected.stdout + corrected.stderr
     after = json.loads((tmp_path / "new-path/campaign.json").read_text())
     assert (
-        duplicate_keys(before)
-        == duplicate_keys(after)
-        == {("birch", "project", "duplicate-json-hook", "assistant-hooks", "run")}
+        missing_keys(before)
+        == missing_keys(after)
+        == {("birch", "project", "missing-json-hook", "assistant-hooks", "run")}
     )

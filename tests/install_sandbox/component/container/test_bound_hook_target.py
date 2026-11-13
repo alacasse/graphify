@@ -15,12 +15,9 @@ from tools.install_sandbox.host.effect_reader import EffectSpecReader
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
-@pytest.mark.parametrize(
-    "operation", ["missing-json-hook", "altered-json-hook", "duplicate-json-hook"]
-)
 @pytest.mark.parametrize("neighbor_changed", [False, True])
 def test_second_effect_second_member_binds_through_mutation_and_replay(
-    tmp_path: Path, operation: str, neighbor_changed: bool
+    tmp_path: Path, neighbor_changed: bool
 ) -> None:
     subject, spec_path, context_path = arrange(tmp_path, skill=False, markdown=False)
     original = EffectSpecReader().read(spec_path).scopes[0].effects
@@ -36,7 +33,7 @@ def test_second_effect_second_member_binds_through_mutation_and_replay(
     case = next(
         case
         for case in build_effect_cases(EffectSpec((first, second)), context).cases
-        if case.key.operation == operation
+        if case.key.operation == "missing-json-hook"
         and case.key.effect_id == "secondary"
         and case.key.member == "PreToolUse-read"
     )
@@ -74,22 +71,25 @@ def test_second_effect_second_member_binds_through_mutation_and_replay(
         "path": ".secondary/.synthetic/config.json",
     }
     assert read_evidence(proof) == result
-    _assert_member_counts(proof, operation)
+    _assert_member_counts(proof)
     _reject_wrong_mutation_target(proof)
     _reject_wrong_argv(proof)
 
 
-def _assert_member_counts(proof: Path, operation: str) -> None:
-    # The mutation removes/changes/copies read, even though search was declared first.
+def _assert_member_counts(proof: Path) -> None:
+    # The mutation removes read, even though search was declared first.
     prepared = json.loads(
         (proof / "intermediate/after/project/.secondary/.synthetic/config.json").read_text()
     )
     hooks = [hook for group in prepared["hooks"]["PreToolUse"] for hook in group["hooks"]]
     assert sum(hook.get("command") == "graphify hook-guard search" for hook in hooks) == 1
-    assert sum(
-        hook.get("command") == "graphify hook-guard read" and hook.get("timeout") == 10
-        for hook in hooks
-    ) == (2 if operation == "duplicate-json-hook" else 0)
+    assert (
+        sum(
+            hook.get("command") == "graphify hook-guard read" and hook.get("timeout") == 10
+            for hook in hooks
+        )
+        == 0
+    )
 
 
 def _reject_wrong_mutation_target(proof: Path) -> None:

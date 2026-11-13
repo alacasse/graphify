@@ -20,7 +20,6 @@ from tools.install_sandbox.contracts.intermediate import (
     AlteredReferencePreparation,
     AlteredSkillPreparation,
     IntermediatePreparation,
-    JsonHookPreparation,
     MissingReferencePreparation,
     PreserveSkillBackupPreparation,
     StaleReferencePreparation,
@@ -287,30 +286,21 @@ def json_auxiliary_expectations(
 
 
 def _json_constraints(
-    case: EffectInstallCase, effect: JsonHooksEffect, before: FilesystemSnapshot
+    effect: JsonHooksEffect, before: FilesystemSnapshot
 ) -> tuple[Expectation, ...]:
-    hooks = effect.hooks
-    preparation = case.intermediate_preparation
-    if isinstance(preparation, JsonHookPreparation) and effect.effect_id == preparation.effect_id:
-        selected = next(hook for hook in hooks if hook.id == preparation.member)
-        hooks = (selected, *(hook for hook in hooks if hook.id != selected.id))
     root, path = effect.destination.root, effect.destination.path
-    result = [
+    return (
         Expectation(
-            "json-hooks-seeded"
-            if isinstance(case.intermediate_preparation, JsonHookPreparation)
-            and effect.destination == case.intermediate_preparation.destination
-            else "json-hooks",
+            "json-hooks",
             root,
             path,
             "install",
             "effect:json-hooks",
             baseline=retained_bytes(before, root, path),
-            hooks=hooks,
+            hooks=effect.hooks,
         ),
         *json_auxiliary_expectations(effect, before),
-    ]
-    return tuple(result)
+    )
 
 
 def _markdown_install_constraint(
@@ -372,7 +362,7 @@ def build_install_expectations(
         elif isinstance(effect, MarkdownSectionEffect):
             constraints.append(_markdown_install_constraint(case, effect, sources, before))
         else:
-            constraints.extend(_json_constraints(case, effect, before))
+            constraints.extend(_json_constraints(effect, before))
     if isinstance(case.intermediate_preparation, StaleReferencePreparation):
         destination, source_path = selected_stale_reference(case, sources)
         constraints.append(

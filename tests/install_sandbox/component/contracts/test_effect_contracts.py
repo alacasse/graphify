@@ -248,10 +248,6 @@ def test_catalogue_has_strict_independent_preparations() -> None:
         "stale-reference",
         "missing-json-hook",
         "missing-json-hook",
-        "altered-json-hook",
-        "altered-json-hook",
-        "duplicate-json-hook",
-        "duplicate-json-hook",
     ]
     for case in cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
@@ -334,10 +330,7 @@ def test_multiple_markdown_effects_retain_both_nonconstruction_reasons() -> None
             "stale-version",
             "stale-reference",
         )
-    ] + [
-        (name, "not_applicable", "No JSON hooks effect declared")
-        for name in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
-    ]
+    ] + [("missing-json-hook", "not_applicable", "No JSON hooks effect declared")]
 
 
 @pytest.mark.parametrize("change", ["kind", "missing-body", "invalid-body", "extra"])
@@ -390,8 +383,6 @@ def test_backup_preservation_case_follows_skill_across_effect_combinations(
             ("missing-section", "unconstructible"),
             ("altered-section", "unconstructible"),
             ("missing-json-hook", "not_applicable"),
-            ("altered-json-hook", "not_applicable"),
-            ("duplicate-json-hook", "not_applicable"),
         ]
 
 

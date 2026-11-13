@@ -28,7 +28,7 @@ SKILL_OPERATIONS = (
     "stale-reference",
 )
 MARKDOWN_OPERATIONS = ("missing-section", "altered-section")
-HOOK_OPERATIONS = ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")
+HOOK_OPERATIONS = ("missing-json-hook",)
 
 
 @pytest.mark.parametrize(
@@ -60,9 +60,7 @@ def test_synthetic_compositions_build_operations_for_their_declared_targets(
         "skill": tuple((operation, None) for operation in SKILL_OPERATIONS),
         "markdown-section": tuple((operation, None) for operation in MARKDOWN_OPERATIONS),
         "json-hooks": tuple(
-            (operation, member)
-            for operation in HOOK_OPERATIONS
-            for member in ("PreToolUse-search", "PreToolUse-read")
+            ("missing-json-hook", member) for member in ("PreToolUse-search", "PreToolUse-read")
         ),
     }
     expected = {
@@ -121,18 +119,18 @@ def test_each_member_has_a_distinct_key_and_path_independent_storage_identity() 
     spec = declaration.scopes[0].effects
     assert spec is not None
     cases = build_effect_cases(spec, context(), declaration.tool).cases
-    duplicates = [case for case in cases if case.name == "duplicate-json-hook"]
-    assert [case.key for case in duplicates] == [
-        CaseKey("birch", "project", "duplicate-json-hook", "editor-hooks", "run"),
-        CaseKey("birch", "project", "duplicate-json-hook", "assistant-hooks", "run"),
+    members = [case for case in cases if case.name == "missing-json-hook"]
+    assert [case.key for case in members] == [
+        CaseKey("birch", "project", "missing-json-hook", "editor-hooks", "run"),
+        CaseKey("birch", "project", "missing-json-hook", "assistant-hooks", "run"),
     ]
-    assert len({case.key.storage_id for case in duplicates}) == 2
+    assert len({case.key.storage_id for case in members}) == 2
     moved = reader.from_yaml(two_hooks().replace(".assistant/settings.json", "elsewhere.json"))
     assert moved.scopes[0].effects is not None
     assert [
         c.key for c in build_effect_cases(moved.scopes[0].effects, context(), "birch").cases
     ] == [c.key for c in cases]
-    for case in duplicates:
+    for case in members:
         assert EffectInstallCase.from_json(case.to_json()) == case
 
 
@@ -157,7 +155,7 @@ def test_missing_scope_invocation_retains_applicable_keys_as_unconstructible() -
     assert spec is not None
     built = build_effect_cases(spec, context(), "birch")
     assert not built.cases
-    assert len([d for d in built.decisions if d.classification == "unconstructible"]) == 7
+    assert len([d for d in built.decisions if d.classification == "unconstructible"]) == 3
     bound = replace(context(), invocations={"birch:user": ("install", "--user")})
     assert all(
         c.subject.invocation == ("install", "--user")
@@ -178,9 +176,7 @@ def test_transport_rejects_substituted_participant_invocation_and_member() -> No
         context(), invocation=(), invocations={"birch:project": ("install", "project")}
     )
     case = next(
-        c
-        for c in build_effect_cases(spec, subject, "birch").cases
-        if c.name == "duplicate-json-hook"
+        c for c in build_effect_cases(spec, subject, "birch").cases if c.name == "missing-json-hook"
     )
     data = json.loads(case.to_json())
     data["subject"]["invocation"] = ["install", "other-participant"]
@@ -208,7 +204,7 @@ def test_hook_disk_identity_ignores_timeout_and_allows_different_commands() -> N
     assert ToolDeclaration.from_data(data).tool == "birch"
 
 
-def test_contract_example_without_timeout_retains_missing_and_duplicate_repairs() -> None:
+def test_contract_example_without_timeout_retains_missing_repairs() -> None:
     declaration = EffectSpecReader().from_yaml(two_hooks().replace(", timeout: 10", ""))
     spec = declaration.scopes[0].effects
     assert spec is not None
@@ -217,15 +213,7 @@ def test_contract_example_without_timeout_retains_missing_and_duplicate_repairs(
         "reinstall",
         "missing-json-hook",
         "missing-json-hook",
-        "duplicate-json-hook",
-        "duplicate-json-hook",
     ]
-    altered = [d for d in built.decisions if d.name == "altered-json-hook"]
-    assert [d.key for d in altered] == [
-        CaseKey("birch", "project", "altered-json-hook", "editor-hooks", "run"),
-        CaseKey("birch", "project", "altered-json-hook", "assistant-hooks", "run"),
-    ]
-    assert all(d.classification == "not_applicable" for d in altered)
     for case in built.cases:
         assert EffectInstallCase.from_json(case.to_json()) == case
 
@@ -234,4 +222,4 @@ def test_explicit_timeout_is_owned_by_the_declaration() -> None:
     declaration = EffectSpecReader().from_yaml(two_hooks().replace("timeout: 10", "timeout: 37"))
     spec = declaration.scopes[0].effects
     assert spec is not None
-    assert len(build_effect_cases(spec, context(), "birch").cases) == 7
+    assert len(build_effect_cases(spec, context(), "birch").cases) == 3

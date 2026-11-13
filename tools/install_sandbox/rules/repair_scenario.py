@@ -13,7 +13,7 @@ from tools.install_sandbox.contracts.bound_mutation import (
     BoundMarkdownMutation,
     BoundMutation,
 )
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase, seeded_json_hook_group
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.effects import (
     Destination,
     JsonHooksEffect,
@@ -38,7 +38,7 @@ from tools.install_sandbox.contracts.intermediate import (
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
 from tools.install_sandbox.contracts.spec import HookExpectation
-from tools.install_sandbox.rules.comparison import markdown_byte_parts, read_json
+from tools.install_sandbox.rules.comparison import markdown_byte_parts
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     preservation_baseline,
@@ -48,10 +48,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     selected_stale_reference,
     selected_version,
 )
-from tools.install_sandbox.rules.json_hook_repair import (
-    prepared_hook_settings,
-    target_group_preserved,
-)
+from tools.install_sandbox.rules.json_hook_repair import missing_hook_settings
 
 
 @dataclass(frozen=True)
@@ -559,7 +556,7 @@ class JsonHookRepairScenario:
     case: EffectInstallCase
     sources: FilesystemSnapshot
 
-    def _target(self) -> tuple[JsonHookPreparation, JsonHooksEffect, HookExpectation]:
+    def _target(self) -> tuple[Destination, HookExpectation]:
         preparation = self.case.intermediate_preparation
         if not isinstance(preparation, JsonHookPreparation):
             raise ValueError("Case has no JSON hook preparation")
@@ -577,7 +574,7 @@ class JsonHookRepairScenario:
             or self.case.key.operation != preparation.kind
         ):
             raise ValueError("Preparation target differs from the bound case key")
-        return preparation, effect, target
+        return effect.destination, target
 
     def bind(
         self,
@@ -589,32 +586,15 @@ class JsonHookRepairScenario:
     ) -> PreparationPlan | PreparationBlocked:
         try:
             _validate_first_install(self.case, case_bytes, installed, first_after, validation)
-            preparation, effect, target = self._target()
-            destination = effect.destination
+            destination, target = self._target()
             document = retained_bytes(first_after, destination.root, destination.path)
-            parsed = read_json(document)
-            seeded: dict[str, object] = {
-                "hooks": {target.event: [seeded_json_hook_group(effect, target, self.case.effects)]}
-            }
-            if not target_group_preserved(seeded, parsed, target, effect.hooks):
-                raise ValueError("Target hook must remain in its intact seeded personal group")
-            prepared = prepared_hook_settings(
-                replace(effect, hooks=(target,)), document, preparation.kind
-            )
-            if preparation.kind == "missing-json-hook":
-                kind, provenance = "json-hook-removed", "observation:remove-declared-hook"
-            elif preparation.kind == "altered-json-hook":
-                kind, provenance = "json-hook-altered", "observation:alter-declared-hook-timeout"
-            elif preparation.kind == "duplicate-json-hook":
-                kind, provenance = "json-hook-duplicated", "observation:duplicate-declared-hook"
-            else:
-                raise ValueError("Unsupported JSON hook preparation")
+            prepared = missing_hook_settings(target, document)
             intermediate = Expectation(
-                kind,
+                "json-hook-removed",
                 destination.root,
                 destination.path,
                 "intermediate",
-                provenance,
+                "observation:remove-declared-hook",
                 baseline=document,
                 hooks=(target,),
             )
@@ -636,10 +616,17 @@ class JsonHookRepairScenario:
                 target=self.case.key,
             )
             operation.verify_binding(case_bytes, first_after)
+            backup = Expectation(
+                "regular-file",
+                destination.root,
+                destination.path + self.case.subject.rules.json_backup,
+                "reinstall",
+                "rule:repair-json-backup",
+            )
             return PreparationPlan(
                 operation,
                 _transition(installed, first_after, (intermediate,), "intermediate"),
-                _transition(installed, first_after, (repaired,), "reinstall"),
+                _transition(installed, first_after, (repaired, backup), "reinstall"),
             )
         except (ValueError, UnicodeError, StopIteration) as exc:
             return PreparationBlocked(str(exc))

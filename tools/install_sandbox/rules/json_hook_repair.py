@@ -2,9 +2,8 @@
 
 from typing import cast
 
-from tools.install_sandbox.contracts.effects import JsonHooksEffect
 from tools.install_sandbox.contracts.spec import HookExpectation
-from tools.install_sandbox.rules.comparison import group_hooks, json_equal, managed_hook, read_json
+from tools.install_sandbox.rules.comparison import group_hooks, json_equal, read_json
 from tools.install_sandbox.rules.lossless_json import encode_json
 
 
@@ -72,66 +71,10 @@ def without_target(
     return result
 
 
-def missing_hook_settings(effect: JsonHooksEffect, installed: bytes) -> bytes:
-    """Remove only the first declared hook's unique observed object."""
-    if not effect.hooks:
-        raise ValueError("JSON repair requires a declared hook")
-    prepared = without_target(read_json(installed), effect.hooks[0])
+def missing_hook_settings(target: HookExpectation, installed: bytes) -> bytes:
+    """Remove the selected hook's unique observed object."""
+    prepared = without_target(read_json(installed), target)
     return (encode_json(prepared) + "\n").encode("utf-8")
-
-
-def _altered_timeout(target: HookExpectation) -> int:
-    timeout = target.content.get("timeout")
-    if type(timeout) is not int:
-        raise ValueError("JSON hook alteration requires a declared integer timeout")
-    return timeout + 1
-
-
-def altered_hook_settings(effect: JsonHooksEffect, installed: bytes) -> bytes:
-    """Change only the unique observed target's declared integer timeout by one."""
-    if not effect.hooks:
-        raise ValueError("JSON repair requires a declared hook")
-    target = effect.hooks[0]
-    timeout = _altered_timeout(target)
-    document = read_json(installed)
-    group_index, hook_index = target_location(document, target)
-    prepared, _, contents = _copy_hook_path(document, target.event, group_index)
-    hook = cast(dict[str, object], contents[hook_index]).copy()
-    hook["timeout"] = timeout
-    contents[hook_index] = hook
-    return (encode_json(prepared) + "\n").encode("utf-8")
-
-
-def prepared_hook_settings(effect: JsonHooksEffect, installed: bytes, kind: str) -> bytes:
-    """Dispatch only supported hook preparations."""
-    if kind == "missing-json-hook":
-        return missing_hook_settings(effect, installed)
-    if kind == "altered-json-hook":
-        return altered_hook_settings(effect, installed)
-    if kind == "duplicate-json-hook":
-        return duplicated_hook_settings(effect, installed)
-    raise ValueError("Unsupported JSON hook preparation")
-
-
-def altered_target_preserved(
-    original: dict[str, object], prepared: dict[str, object], target: HookExpectation
-) -> bool:
-    """Restore the timeout at its observed position and compare independently."""
-    timeout = _altered_timeout(target)
-    group_index, hook_index = target_location(original, target)
-    try:
-        restored, _, contents = _copy_hook_path(prepared, target.event, group_index)
-        candidate = contents[hook_index]
-        if not isinstance(candidate, dict):
-            return False
-        hook = cast(dict[str, object], candidate).copy()
-        if "timeout" not in hook or not json_equal(hook["timeout"], timeout):
-            return False
-        hook["timeout"] = target.content["timeout"]
-        contents[hook_index] = hook
-    except (KeyError, IndexError, TypeError, ValueError):
-        return False
-    return json_equal(original, restored)
 
 
 def repaired_json_preserved(
@@ -142,29 +85,6 @@ def repaired_json_preserved(
     if json_equal(prepared, removed):
         return True
     return json_equal(prepared, without_target(current, target, drop_empty_group=True))
-
-
-def target_group_preserved(
-    before: dict[str, object],
-    after: dict[str, object],
-    target: HookExpectation,
-    declared_hooks: tuple[HookExpectation, ...],
-) -> bool:
-    """Compare the selected group after excluding every declared effect member."""
-
-    def personal_group(document: dict[str, object]) -> dict[str, object]:
-        group_index, _ = target_location(document, target)
-        events = cast(dict[str, object], document["hooks"])
-        groups = cast(list[dict[str, object]], events[target.event])
-        group = dict(groups[group_index])
-        group["hooks"] = [
-            content
-            for _, content in group_hooks(group, target.event)
-            if not managed_hook(declared_hooks, target.event, group, content)
-        ]
-        return group
-
-    return json_equal(personal_group(before), personal_group(after))
 
 
 def removed_target_preserved(
@@ -180,54 +100,6 @@ def removed_target_preserved(
         if hook_index > len(contents):
             return False
         contents.insert(hook_index, observed_hook)
-    except (KeyError, IndexError, TypeError, ValueError):
-        return False
-    return json_equal(original, restored)
-
-
-def _duplicate_destination(document: dict[str, object], target: HookExpectation) -> int:
-    matches = [
-        index
-        for index, group in enumerate(event_groups(document, target.event))
-        if isinstance(group, dict)
-        and cast(dict[str, object], group).get("matcher") == target.matcher
-        and cast(dict[str, object], group).get("sandbox_personal") == "duplicate-destination"
-    ]
-    if len(matches) != 1:
-        raise ValueError("Expected unique marked duplicate destination group")
-    return matches[0]
-
-
-def duplicated_hook_settings(effect: JsonHooksEffect, installed: bytes) -> bytes:
-    """Insert the full unique observed hook between the destination witnesses."""
-    if not effect.hooks:
-        raise ValueError("JSON repair requires a declared hook")
-    target = effect.hooks[0]
-    document = read_json(installed)
-    group_index, hook_index = target_location(document, target)
-    source = cast(dict[str, object], event_groups(document, target.event)[group_index])
-    observed_hook = cast(list[object], source["hooks"])[hook_index]
-    destination = _duplicate_destination(document, target)
-    prepared, _, contents = _copy_hook_path(document, target.event, destination)
-    if len(contents) != 2 or destination == group_index:
-        raise ValueError("Expected two personal destination witnesses")
-    contents.insert(1, observed_hook)
-    return (encode_json(prepared) + "\n").encode("utf-8")
-
-
-def duplicated_target_preserved(
-    original: dict[str, object], prepared: dict[str, object], target: HookExpectation
-) -> bool:
-    """Undo only the observed copy, independently of preparation generation."""
-    group_index, hook_index = target_location(original, target)
-    source = cast(dict[str, object], event_groups(original, target.event)[group_index])
-    observed_hook = cast(list[object], source["hooks"])[hook_index]
-    try:
-        destination = _duplicate_destination(prepared, target)
-        restored, _, contents = _copy_hook_path(prepared, target.event, destination)
-        if len(contents) != 3 or not json_equal(contents[1], observed_hook):
-            return False
-        del contents[1]
     except (KeyError, IndexError, TypeError, ValueError):
         return False
     return json_equal(original, restored)

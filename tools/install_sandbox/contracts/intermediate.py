@@ -98,7 +98,7 @@ class JsonHookPreparation:
     member: str
 
     def to_data(self) -> dict[str, object]:
-        if self.kind not in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
+        if self.kind != "missing-json-hook":
             raise ValueError("Unsupported JSON hook preparation")
         return {
             "kind": self.kind,
@@ -277,9 +277,8 @@ def preparation_from_data(
     if not isinstance(value, dict):
         raise ValueError("Expected discriminated operation object")
     incoming = cast(dict[str, object], value)
-    if incoming.get("kind") in ("missing-json-hook", "altered-json-hook", "duplicate-json-hook"):
-        return JsonHookPreparation.from_data(incoming)
     parsers = {
+        "missing-json-hook": JsonHookPreparation.from_data,
         "stale-reference": StaleReferencePreparation.from_data,
         "stale-version": StaleVersionPreparation.from_data,
         "preserve-skill-backup": PreserveSkillBackupPreparation.from_data,

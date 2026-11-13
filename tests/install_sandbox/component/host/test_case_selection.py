@@ -37,7 +37,7 @@ def arguments(subject: Path, spec: Path, context: Path, output: Path) -> list[st
     "requested",
     [
         ["stale-version"],
-        ["duplicate-json-hook", "stale-version", "missing-section"],
+        ["missing-json-hook", "stale-version", "missing-section"],
         None,
     ],
 )
@@ -59,8 +59,8 @@ def test_selected_cli_executes_only_requested_cases_and_replays_archive(
         assert [name for name in catalogue if name in requested] == [
             "missing-section",
             "stale-version",
-            "duplicate-json-hook",
-            "duplicate-json-hook",
+            "missing-json-hook",
+            "missing-json-hook",
         ]
     transport = ControlledTransport(tmp_path)
     run_case = Mock(wraps=transport.run_case)
@@ -149,6 +149,9 @@ def test_replay_rejects_contradictory_cleanup_receipt(
     "extra,diagnostic",
     [
         (["--case", "unknown-case"], "unknown-case"),
+        (["--case", "altered-json-hook"], "altered-json-hook"),
+        (["--case", "duplicate-json-hook"], "duplicate-json-hook"),
+        (["--case", "duplicate"], "duplicate"),
         (["--case", "stale-references-tmp"], "Unknown case name(s): stale-references-tmp"),
         (["--case", "reinstall", "--case", "reinstall"], "reinstall"),
         (["--case", "reinstall", "--prepare-only"], "prepare"),
@@ -228,10 +231,10 @@ def test_selected_false_success_stays_failed(
 ) -> None:
     subject, spec, context = arrange(tmp_path)
     transport = ControlledTransport(tmp_path)
-    transport.installer.duplicate_hook_survivor = "all"
+    transport.installer.hooks = False
     monkeypatch.setattr(coordinator, "ContainerHarness", Mock(return_value=transport))
     output = tmp_path / "published"
-    assert main([*arguments(subject, spec, context, output), "--case", "duplicate-json-hook"]) == 1
+    assert main([*arguments(subject, spec, context, output), "--case", "missing-json-hook"]) == 1
     report = json.loads((output / "campaign.json").read_text())
     assert not report["passed"]
     assert report["status"] != "partial_passed"
@@ -322,6 +325,46 @@ def test_declared_scope_states_survive_archive_relocation(
     [
         ("{", []),
         ("null", []),
+        ('{"scopes":["unknown"]}', []),
+        (
+            json.dumps(
+                {
+                    "operation": "duplicate",
+                    "target": {
+                        "participant": "synthetic:project",
+                        "effect_id": "json-hooks",
+                        "member": "PreToolUse-search",
+                    },
+                }
+            ),
+            [],
+        ),
+        (
+            json.dumps(
+                {
+                    "operation": "altered-json-hook",
+                    "target": {
+                        "participant": "synthetic:project",
+                        "effect_id": "json-hooks",
+                        "member": "PreToolUse-search",
+                    },
+                }
+            ),
+            [],
+        ),
+        (
+            json.dumps(
+                {
+                    "operation": "duplicate-json-hook",
+                    "target": {
+                        "participant": "synthetic:project",
+                        "effect_id": "json-hooks",
+                        "member": "PreToolUse-search",
+                    },
+                }
+            ),
+            [],
+        ),
         ('{"scopes":["project","project"]}', []),
         ('{"scopes":["project"]}', ["--prepare-only"]),
         ('{"scopes":["project"]}', ["--case", "reinstall"]),
@@ -353,7 +396,7 @@ def test_unknown_explicit_member_replays_without_runtime(
     request.write_text(
         json.dumps(
             {
-                "operation": "duplicate",
+                "operation": "missing-json-hook",
                 "target": {"participant": "birch:project", "effect_id": "missing", "member": "run"},
             }
         )
@@ -375,7 +418,7 @@ def test_qualified_tool_name_selects_the_same_key_as_the_full_campaign(tmp_path:
     request.write_text(
         json.dumps(
             {
-                "operation": "duplicate",
+                "operation": "missing-json-hook",
                 "target": {
                     "participant": "acme:synthetic:project",
                     "effect_id": "json-hooks",

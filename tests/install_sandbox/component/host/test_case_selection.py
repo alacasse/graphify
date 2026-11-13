@@ -149,6 +149,7 @@ def test_replay_rejects_contradictory_cleanup_receipt(
     "extra,diagnostic",
     [
         (["--case", "unknown-case"], "unknown-case"),
+        (["--case", "stale-references-tmp"], "Unknown case name(s): stale-references-tmp"),
         (["--case", "reinstall", "--case", "reinstall"], "reinstall"),
         (["--case", "reinstall", "--prepare-only"], "prepare"),
     ],

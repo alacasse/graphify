@@ -17,7 +17,6 @@ from tools.install_sandbox.contracts.bound_mutation import (
     BoundFileReplacement,
     BoundMarkdownMutation,
     BoundMutation,
-    BoundStaleReferencesTmpCreation,
     PerformedMutation,
 )
 from tools.install_sandbox.contracts.effects import Destination, JsonHooksEffect, SkillEffect
@@ -29,7 +28,6 @@ from tools.install_sandbox.contracts.intermediate import (
     JsonHookPreparation,
     PreserveSkillBackupPreparation,
     StaleReferencePreparation,
-    StaleReferencesTmpPreparation,
     StaleVersionPreparation,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
@@ -74,11 +72,6 @@ def _validate_destination(
     operation: BoundMutation, environment: EffectEnvironment, sources: FilesystemSnapshot
 ) -> None:
     preparation = environment.case.intermediate_preparation
-    if isinstance(preparation, StaleReferencesTmpPreparation):
-        _validate_stale_references_tmp(operation, preparation)
-        return
-    if isinstance(operation, BoundStaleReferencesTmpCreation):
-        raise ValueError("Temporary references creation requires matching preparation")
     if isinstance(preparation, StaleReferencePreparation):
         destination, _ = selected_stale_reference(environment.case, sources)
         if (
@@ -100,17 +93,6 @@ def _validate_destination(
             raise ValueError("Operation destination differs from case and retained sources")
         return
     _validate_existing_destination(operation, environment, sources)
-
-
-def _validate_stale_references_tmp(
-    operation: BoundMutation, preparation: StaleReferencesTmpPreparation
-) -> None:
-    if (
-        type(operation) is not BoundStaleReferencesTmpCreation
-        or operation.destination != preparation.witness_destination
-        or operation.content != STALE_REFERENCE_CONTENT
-    ):
-        raise ValueError("Creation differs from selected temporary references preparation")
 
 
 def _validate_existing_destination(
@@ -150,26 +132,6 @@ def _create_file(operation: BoundFileCreation, environment: EffectEnvironment) -
         _create_exclusive_file(parent, parts[-1], operation.content)
     finally:
         os.close(parent)
-
-
-def _create_stale_references_tmp(
-    operation: BoundStaleReferencesTmpCreation, environment: EffectEnvironment
-) -> None:
-    """Retain partial results; never remove or overwrite another directory entry."""
-    root = environment.project if operation.destination.root == "project" else environment.home
-    path = root / operation.destination.path
-    with _pinned_parent(path.parent) as skill:
-        os.mkdir(path.parent.name, mode=0o700, dir_fd=skill)
-        created = os.stat(path.parent.name, dir_fd=skill, follow_symlinks=False)
-        directory = os.open(
-            path.parent.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=skill
-        )
-        try:
-            if not os.path.samestat(created, os.fstat(directory)):
-                raise ValueError("Created temporary directory changed")
-            _create_exclusive_file(directory, path.name, operation.content)
-        finally:
-            os.close(directory)
 
 
 def _create_exclusive_file(parent: int, name: str, content: bytes) -> None:
@@ -238,9 +200,6 @@ def apply_mutation(
         raise ValueError("Selected preparation requires a file replacement")
     _validate_destination(operation, environment, sources)
     path = _path(operation, environment)
-    if isinstance(operation, BoundStaleReferencesTmpCreation):
-        _create_stale_references_tmp(operation, environment)
-        return
     if isinstance(operation, BoundFileCreation):
         _create_file(operation, environment)
         return

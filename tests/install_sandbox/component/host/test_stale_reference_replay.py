@@ -15,6 +15,7 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     "field,value",
     [
+        ("kind", "stale-references-tmp-creation"),
         ("content", base64.b64encode(b"Another stale value").decode("ascii")),
         (
             "destination",

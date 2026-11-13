@@ -26,7 +26,6 @@ SKILL_OPERATIONS = (
     "preserve-skill-backup",
     "stale-version",
     "stale-reference",
-    "stale-references-tmp",
 )
 MARKDOWN_OPERATIONS = ("missing-section", "altered-section")
 HOOK_OPERATIONS = ("missing-json-hook", "altered-json-hook", "duplicate-json-hook")

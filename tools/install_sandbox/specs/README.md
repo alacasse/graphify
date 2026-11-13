@@ -121,14 +121,14 @@ The coordinator constructs the cases before allocating campaign output.
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
 A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
-`preserve-skill-backup`, `stale-version`, `stale-reference` and `stale-references-tmp` available
+`preserve-skill-backup`, `stale-version` and `stale-reference` available
 in that order, independently of the Markdown count. Without a skill, the campaign
 reports those cases as `not_applicable`.
 The hook cases enumerate each effect and member for missing, altered and duplicate repairs.
 A spec without that effect yields `not_applicable` for all three. Each case has two dependent
-installation steps. A successful CodeBuddy project campaign runs 16 cases (32 installer
-calls). Amp project runs 10 (20 installer calls). Each of Agents, Copilot, Kimi
-and Pi project runs 8 cases (16 installer calls): reinstall and the seven skill
+installation steps. A successful CodeBuddy project campaign runs 15 cases (30 installer
+calls). Amp project runs 9 (18 installer calls). Each of Agents, Copilot, Kimi
+and Pi project runs 7 cases (14 installer calls): reinstall and the six skill
 cases. Its two Markdown and three hook cases are `not_applicable`, with no
 installer commands or case evidence. These classifications describe the declared
 effects; a passed campaign qualifies only its represented paths.
@@ -206,16 +206,7 @@ conforming first install, preparation creates only `references/stale.md` in the
 installed skill, with the exact bytes `b"Stale reference.\n"`. The second install
 runs only after this addition is verified. It must remove that file, preserve
 the package references byte for byte, and preserve every other observed entry
-in HOME and PROJECT.
-
-`stale-references-tmp` exercises the legacy staging directory beside the installed
-`references/`. After verifying a conforming first install and the absence of
-`references.tmp/`, preparation exclusively creates that directory and its sole
-file, `stale.md`, containing exactly `b"Stale reference.\n"`. Reinstallation
-must remove both entries. Leaving the directory empty fails even on exit 0.
-Every other entry in HOME and PROJECT must be preserved, including empty
-directories and any packaged `references/stale.md`. A completely observed
-empty reference bundle is valid.
+in HOME and PROJECT, including empty personal directories.
 
 For `missing-reference`, the engine binds removal to the case, observed
 file bytes and exact destination selected from retained sources. Only that file
@@ -297,15 +288,17 @@ expectations from retained inputs, checks their equality with stored expectation
 validates phase continuity and recalculates verdicts. Partial failures retain the
 stage reached. Old transport formats are rejected; historical evidence requires
 its identified historical reader revision.
+Replay also reconstructs the case inventory. For campaigns produced by sandbox
+revision `7a956f79`, use that revision to replay the legacy reference staging
+scenario. Earlier archives retain their own historical reader revisions.
 
 The current formats are case `explicit-expectations-v11`, expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
 result `performed-mutation-v3`, and case evidence `explicit-expectations-v13`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,
-`file-append`, `file-creation`, `stale-references-tmp-creation`, or `file-replacement`. The
+`file-append`, `file-creation`, or `file-replacement`. The
 `preserve-skill-backup` and `stale-reference` cases use `file-creation` to
-create their respective witnesses. The `stale-references-tmp-creation` operation
-records creation of the directory and its witness as a single preparation.
+create their respective witnesses.
 All three JSON hook repair cases use `file-replacement` for the settings.
 `stale-version` uses the same operation for the version file.
 Campaign format v4 includes the coverage and outcome of each declared scope. Replay

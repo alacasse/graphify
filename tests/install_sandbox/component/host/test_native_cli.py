@@ -20,10 +20,10 @@ from tools.install_sandbox.host.result_reader import read_evidence
 @pytest.mark.parametrize(
     ("markdown_only", "hooks", "expected_root", "installed_root", "passed", "expected_calls"),
     [
-        pytest.param(False, True, "home", "home", True, 32, id="all-effects-home"),
+        pytest.param(False, True, "home", "home", True, 30, id="all-effects-home"),
         pytest.param(True, False, "home", "home", True, 6, id="markdown-only"),
-        pytest.param(False, False, "project", "project", True, 20, id="skill-project-markdown"),
-        pytest.param(False, False, "project", "home", False, 10, id="wrong-skill-root"),
+        pytest.param(False, False, "project", "project", True, 18, id="skill-project-markdown"),
+        pytest.param(False, False, "project", "home", False, 9, id="wrong-skill-root"),
     ],
 )
 def test_cli_real_engine_and_autonomous_reread(
@@ -71,7 +71,6 @@ def test_cli_real_engine_and_autonomous_reread(
         "preserve-skill-backup",
         "stale-version",
         "stale-reference",
-        "stale-references-tmp",
         *(
             [
                 name
@@ -159,7 +158,7 @@ def test_campaign_without_markdown_preserves_effects_and_replays(
         construction="not_applicable",
         reason="No Markdown effect declared",
         passed=not wrong_skill,
-        calls=8 if wrong_skill else 28 if hooks else 16,
+        calls=7 if wrong_skill else 26 if hooks else 14,
     )
 
 
@@ -276,7 +275,6 @@ def _assert_construction_decisions(
         "preserve-skill-backup",
         "stale-version",
         "stale-reference",
-        "stale-references-tmp",
     ]
     missing = ["missing-section", "altered-section"]
     if not transport.installer.skill:

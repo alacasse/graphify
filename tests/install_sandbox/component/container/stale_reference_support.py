@@ -5,12 +5,14 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
+from unittest.mock import patch
 
 from tests.install_sandbox.component.host.native_support import (
     LiteralInstaller,
     arrange,
     read_project_effects,
 )
+from tools.install_sandbox.container.effect_environment import EffectEnvironment
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext, build_effect_cases
@@ -50,9 +52,18 @@ def conduct_stale_reference(
                 (skill / "SKILL.md").write_bytes(b"Unexpected damage\n")
             elif repair_fault == "personal":
                 (project / "personal-effect-1.txt").unlink()
+            elif repair_fault == "empty-directory":
+                (project / "personal-empty").rmdir()
         return result
 
-    result = run_retained_reference_case(root, subject, spec, context, execute)
+    original_prepare = EffectEnvironment.prepare
+
+    def prepare(environment: EffectEnvironment) -> None:
+        original_prepare(environment)
+        (environment.project / "personal-empty").mkdir()
+
+    with patch.object(EffectEnvironment, "prepare", prepare):
+        result = run_retained_reference_case(root, subject, spec, context, execute)
     return result, installer
 
 

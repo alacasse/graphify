@@ -65,6 +65,26 @@ def test_success_exit_cannot_hide_stale_reference_or_collateral_damage(
     }
 
 
+def test_zero_exit_cannot_hide_removal_of_empty_personal_directory(tmp_path: Path) -> None:
+    result, installer = conduct_stale_reference(tmp_path, repair_fault="empty-directory")
+    assert len(installer.calls) == 2 and result.status == "failed"
+    reinstall = result.steps[1]
+    assert reinstall.command is not None and reinstall.command["exit_code"] == 0
+    assert reinstall.verification is not None and reinstall.verification.complete
+    (mismatch,) = reinstall.verification.mismatches
+    assert (mismatch.root, mismatch.path) == ("project", "personal-empty")
+
+    proof = tmp_path / "proof"
+    for phase in ("initial/before", "steps/1/before", "steps/1/after"):
+        entries = json.loads((proof / (phase + ".json")).read_text())["entries"]
+        observed = [
+            entry["kind"]
+            for entry in entries
+            if (entry["root"], entry["path"]) == ("project", "personal-empty")
+        ]
+        assert observed == ([] if phase == "steps/1/after" else ["directory"])
+
+
 @pytest.mark.parametrize("fault", ["unchanged", "collateral", "incomplete"])
 def test_invalid_stale_preparation_blocks_second_install(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str

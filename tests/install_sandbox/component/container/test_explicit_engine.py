@@ -27,7 +27,7 @@ def explicit_case() -> EffectInstallCase:
             "fake",
             ("install",),
             "version.py",
-            EffectRules("persistent", ".graphify-bak", ".bak", False),
+            EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
         ),
         [
             {
@@ -334,13 +334,10 @@ def test_initial_persistence_failure_stops_without_republishing(
             output_directory=output,
         )
     published = json.loads((output / "result.json").read_text())
-    assert (
-        published["preparation"]["checkpoint"]
-        == {
-            "expectations/initial.json": "sources_retained",
-            "initial/before.json": "expectations_retained",
-            "initial-verification.json": "observed",
-        }[failed_file]
-    )
+    assert published["preparation"]["checkpoint"] == {
+        "expectations/initial.json": "sources_retained",
+        "initial/before.json": "expectations_retained",
+        "initial-verification.json": "observed",
+    }[failed_file]
     assert not (output / "initial/failure.json").exists()
     assert not (output / "steps/0/environment.json").exists()

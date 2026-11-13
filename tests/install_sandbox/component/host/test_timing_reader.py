@@ -27,7 +27,7 @@ def case() -> EffectInstallCase:
             "synthetic",
             ("install",),
             "METADATA",
-            EffectRules("persistent", ".graphify-bak", ".bak", False),
+            EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
         ),
         [],
         ["install", "install"],

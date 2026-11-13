@@ -40,7 +40,7 @@ def capture(tmp_path: Path) -> Path:
         "graphify",
         ("codebuddy", "install"),
         "package-metadata",
-        EffectRules("persistent", ".graphify-bak", ".bak", False),
+        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
         package_root="graphify",
         revision="b" * 40,
     )

@@ -17,7 +17,7 @@ def reference_case(operation: str = "missing-reference") -> EffectInstallCase:
             "synthetic",
             ("python", "installer.py"),
             "VERSION",
-            EffectRules("persistent", ".graphify-bak", ".bak", False),
+            EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
         ),
     )
     return next(case for case in builds.cases if case.name == operation)

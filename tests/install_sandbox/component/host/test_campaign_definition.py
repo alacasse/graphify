@@ -80,6 +80,24 @@ def test_invalid_definition_never_allocates_or_runs_retention(
     run.assert_not_called()
 
 
+def test_ordinary_case_preserves_unused_v11_context_binding(tmp_path: Path) -> None:
+    subject, spec, context = arrange(tmp_path)
+    data = json.loads(context.read_text())
+    removal = {"action": "uninstall", "participants": ["synthetic:project"], "argv": ["uninstall"]}
+    data["removals"] = [removal]
+    context.write_text(json.dumps(data))
+    definition = load_campaign_definition(
+        spec_file=spec,
+        subject_context_file=context,
+        subject_checkout=subject,
+        requested_cases=("reinstall",),
+    )
+    [transport] = definition.transports
+    case = json.loads(transport)
+    assert case["subject"]["removals"] == [removal]
+    assert [step["argv"] for step in case["plan"]] == [data["invocation"]] * 2
+
+
 @pytest.mark.parametrize("markdown", [True, False])
 def test_definition_retains_case_transports_after_inputs_disappear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, markdown: bool

@@ -214,6 +214,8 @@ class StepState:
     stop: StepStop | None = None
 
     intent: dict[str, object] | None = None
+    # Campaign v4 serializes the dataclass fields as well as the step receipt.
+    assessment: None = field(default=None, init=False)
 
     @classmethod
     def idle(cls, operation: str) -> "StepState":

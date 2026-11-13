@@ -146,6 +146,9 @@ class SubjectContext:
         default_factory=lambda: dict[str, tuple[str, ...]]()
     )
 
+    # An ordinary v11 archive can retain unused removal metadata from a shared context.
+    removals: tuple[dict[str, object], ...] = ()
+
     def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
         argv = self.invocations.get(f"{tool}:{scope}")
         if argv is None and scope == "project":
@@ -157,8 +160,6 @@ class SubjectContext:
     @classmethod
     def from_data(cls, value: object) -> "SubjectContext":
         data = _context_fields(value)
-        if data["removals"] != []:
-            raise ValueError("Removal invocations have been retired")
         raw = data["invocation"]
         if not isinstance(raw, list):
             raise ValueError("Expected explicit subject invocation arguments")
@@ -173,7 +174,35 @@ class SubjectContext:
             cast(str | None, data["package_root"]),
             cast(str | None, data["revision"]),
             _invocations(data["invocations"]),
+            _archived_removals(data["removals"]),
         )
+
+
+def _archived_removals(value: object) -> tuple[dict[str, object], ...]:
+    """Retain v11 context data in its original wire order for ordinary campaign replay."""
+    if not isinstance(value, list):
+        raise ValueError("Expected removal metadata array")
+    records: list[dict[str, object]] = []
+    for record in cast(list[object], value):
+        data = fields(record, "action participants argv")
+        action, participants, argv = data["action"], data["participants"], data["argv"]
+        if (
+            action not in ("install", "uninstall")
+            or not isinstance(participants, list)
+            or not isinstance(argv, list)
+        ):
+            raise ValueError("Invalid removal metadata")
+        names = [text(name) for name in cast(list[object], participants)]
+        args = [text(arg) for arg in cast(list[object], argv)]
+        if (
+            not names
+            or not args
+            or len(set(names)) != len(names)
+            or any("\x00" in word for word in (*names, *args))
+        ):
+            raise ValueError("Invalid removal metadata")
+        records.append({"action": action, "participants": names, "argv": args})
+    return tuple(records)
 
 
 def _invocations(value: object) -> dict[str, tuple[str, ...]]:
@@ -421,12 +450,11 @@ class EffectInstallCase:
 
     def to_json(self) -> str:
         data = asdict(self)
-        # Preserve the ordinary v11 wire shape without a grouped execution model.
-        data["subject"]["removals"] = []
+        # Campaign replay checks the original v11 case bytes, including field order.
         data["key"] = self.key.to_data()
-        data["format"] = "explicit-expectations-v11"
         data["participants"] = []
         data["plan"] = [step.to_data() for step in self.steps]
+        data["format"] = "explicit-expectations-v11"
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None

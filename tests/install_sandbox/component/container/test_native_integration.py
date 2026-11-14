@@ -6,14 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.install_sandbox.case_support import reinstall_case
 from tests.install_sandbox.component.host.native_support import (
     LiteralInstaller,
     arrange,
     read_project_effects,
     write,
 )
-from tests.install_sandbox.case_support import reinstall_case
-
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import SubjectContext

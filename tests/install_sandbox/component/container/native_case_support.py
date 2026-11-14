@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 from tests.install_sandbox.case_support import reinstall_case
-
 from tools.install_sandbox.container.runner import InstallTestRunner
 from tools.install_sandbox.contracts.effect_case import (
     EffectRules,

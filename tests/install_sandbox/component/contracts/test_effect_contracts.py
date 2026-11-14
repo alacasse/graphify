@@ -7,7 +7,6 @@ from typing import Literal
 import pytest
 
 from tests.install_sandbox.case_support import reinstall_case
-
 from tools.install_sandbox.contracts.bound_mutation import BoundMarkdownMutation
 from tools.install_sandbox.contracts.effect_case import (
     CaseKey,

@@ -68,8 +68,9 @@ def _replay_case(
     location = f"cases/{case.key.storage_id}"
     output = root / location
     _require(record["output_directory"], "./" + location, location)
-    retained = (root / "inputs" / (case.key.storage_id + ".json")).read_text(encoding="utf-8")
-    if retained != transport:
+    expected_bytes = transport.encode("utf-8")
+    retained = root / "inputs" / (case.key.storage_id + ".json")
+    if retained.read_bytes() != expected_bytes:
         raise ValueError(f"Submitted case does not match declaration: {location}")
     for field in ("state", "not_run_reason", "error"):
         _require(record[field], receipt[field], field)
@@ -92,7 +93,7 @@ def _replay_case(
         raise ValueError(f"Unexpected container result: {location}")
     test = None
     if saved["result_error"] is None:
-        if (output / "case.json").read_text(encoding="utf-8") != transport:
+        if (output / "case.json").read_bytes() != expected_bytes:
             raise ValueError(f"Retained case does not match declaration: {location}")
         test = read_evidence(output)
     _require(saved["test"], asdict(test) if test else None, location)

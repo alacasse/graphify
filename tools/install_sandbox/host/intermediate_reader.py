@@ -4,6 +4,7 @@ import stat
 from collections.abc import Callable
 from pathlib import Path
 
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.evidence_layout import (
     ArtifactLocation,
     FilesystemEntry,
@@ -11,7 +12,6 @@ from tools.install_sandbox.contracts.evidence_layout import (
     classify_staging,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.results import InstallTestResult, RepairCheckpoint
 from tools.install_sandbox.host.evidence_reader import (
     check_snapshot,

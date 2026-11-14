@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.step_layout import case_expectation_references
 from tools.install_sandbox.contracts.evidence_layout import (
     ArtifactLocation,
     FilesystemEntry,
@@ -18,6 +17,7 @@ from tools.install_sandbox.contracts.initial_preparation import REFERENCES, Init
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
 from tools.install_sandbox.contracts.spec import fields, text
+from tools.install_sandbox.contracts.step_layout import case_expectation_references
 from tools.install_sandbox.host.evidence_reader import (
     check_snapshot,
     read_json_evidence,

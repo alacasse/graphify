@@ -6,7 +6,6 @@ from typing import Literal, cast
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
-from tools.install_sandbox.contracts.step_layout import step_expectation_reference
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
@@ -14,6 +13,7 @@ from tools.install_sandbox.contracts.results import (
     StepState,
     VerificationResult,
 )
+from tools.install_sandbox.contracts.step_layout import step_expectation_reference
 from tools.install_sandbox.host.evidence_reader import (
     check_environment,
     check_snapshot,

@@ -10,6 +10,7 @@ from tools.install_sandbox.contracts.effects import (
     JSON_BACKUP_SUFFIX,
     JSON_FORBIDDEN_SUFFIXES,
     Destination,
+    EffectSpec,
     FileEffect,
     JsonHooksEffect,
     MarkdownSectionEffect,
@@ -556,7 +557,17 @@ def build_step_expectations(
             for item in bundle.expectations
         )
         return replace(bundle, expectations=constraints)
-    if case.steps[index].action != "uninstall" or len(effects.effects) != 1:
+    return _build_uninstall_expectations(case.steps[index].action, effects, before, roots)
+
+
+def _build_uninstall_expectations(
+    action: str,
+    effects: EffectSpec,
+    before: FilesystemSnapshot,
+    roots: dict[str, str],
+) -> ExpectationSet:
+    """Describe only the declared skill removals against the retained inventory."""
+    if action != "uninstall" or len(effects.effects) != 1:
         raise ValueError("Only explicit single-skill uninstall is supported")
     effect = effects.effects[0]
     if not isinstance(effect, SkillEffect):

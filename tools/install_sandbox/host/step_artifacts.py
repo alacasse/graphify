@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.evidence_layout import (
     ArtifactLocation,
     FilesystemEntry,
@@ -12,7 +13,6 @@ from tools.install_sandbox.contracts.evidence_layout import (
     classify_staging,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
-from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.step_layout import (
     case_expectation_references,
     step_expectation_reference,
@@ -54,7 +54,6 @@ def inventory(
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     """Load final artifacts even when the last publication does not reference them."""
     prefix = f"steps/{index}"
-    expectation_reference = step_expectation_reference(case, index)
     descriptors = _locations(prefix, index, case)
     entries: list[FilesystemEntry] = []
 
@@ -93,15 +92,16 @@ def inventory(
         if safe_evidence_path(output, reference).exists():
             loaded[reference] = safe_evidence_path(output, reference).read_bytes()
     staged = classify_staging(tuple(entries), descriptors, referenced, known)
-    return loaded, tuple(item for item in staged if _step_owns(item, index, expectation_reference))
+    return loaded, tuple(item for item in staged if _step_owns(item, index, case))
 
 
-def _step_owns(item: StagedEvidence, index: int, expectation_reference: str) -> bool:
+def _step_owns(item: StagedEvidence, index: int, case: EffectInstallCase) -> bool:
     if item.form == "directory" and item.owners & {
         "expectations/initial.json",
         "expectations/install.json",
     }:
         return False
+    expectation_reference = step_expectation_reference(case, index)
     return any(
         owner.startswith(f"steps/{index}/") or (index != 0 and owner == expectation_reference)
         for owner in item.owners

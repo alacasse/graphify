@@ -10,7 +10,6 @@ from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
-from tools.install_sandbox.contracts.step_layout import step_expectation_reference
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.initial_preparation import REFERENCES
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
@@ -19,6 +18,7 @@ from tools.install_sandbox.contracts.results import (
     InstallTestResult,
     StepState,
 )
+from tools.install_sandbox.contracts.step_layout import step_expectation_reference
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
 from tools.install_sandbox.rules.expectation_builder import (
     bind_roots,

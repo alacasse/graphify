@@ -20,8 +20,8 @@ from tools.install_sandbox.contracts.effect_case import (
     build_effect_cases,
 )
 from tools.install_sandbox.contracts.effects import Destination, EffectSpec, SkillEffect
-from tools.install_sandbox.host.result_reader import read_evidence
 from tools.install_sandbox.host.evidence_reader import retained_snapshot
+from tools.install_sandbox.host.result_reader import read_evidence
 from tools.install_sandbox.rules.step_lifecycle import status
 
 
@@ -233,5 +233,5 @@ def test_scope_replay_rejects_expectations_from_another_sequence(
     assert read_evidence(output).status == "passed"
     name = f".{foreign}.json.foreign.tmp" if staging else f"{foreign}.json"
     (output / "expectations" / name).write_text("{}")
-    with pytest.raises(ValueError, match="Unknown|contradicts retained later evidence"):
+    with pytest.raises(ValueError, match=r"Unknown|contradicts retained later evidence"):
         read_evidence(output)

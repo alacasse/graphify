@@ -281,7 +281,8 @@ def _context_fields(value: object) -> dict[str, object]:
             "uninstall_invocations": {},
             **incoming,
         },
-        "identity invocation version_source rules package_root revision invocations removals prerequisites uninstall_invocations",
+        "identity invocation version_source rules package_root revision invocations removals "
+        "prerequisites uninstall_invocations",
     )
     root, revision = data["package_root"], data["revision"]
     if root is not None:
@@ -561,43 +562,8 @@ class EffectInstallCase:
 
     @classmethod
     def from_json(cls, payload: str) -> "EffectInstallCase":
-        incoming = json.loads(payload, object_pairs_hook=unique_object)
-        if not isinstance(incoming, dict):
-            raise ValueError("Expected effects case object")
-        raw = cast(dict[str, object], incoming)
-        version = raw.get("format")
-        if version not in (
-            "explicit-expectations-v11",
-            "explicit-expectations-v12",
-            "explicit-expectations-v13",
-        ):
-            raise ValueError("Unsupported effects case format or operation")
-        if version != "explicit-expectations-v13" and any(
-            name in raw for name in ("prerequisite_effects", "prerequisite_participant")
-        ):
-            raise ValueError("Historical case cannot declare prerequisites")
-        data = fields(
-            {"prerequisite_effects": None, "prerequisite_participant": None, **raw},
-            "prerequisite_effects prerequisite_participant format name key target scope effects subject initial_files operations intermediate_preparation participants plan",
-        )
-        if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
-            raise ValueError("Expected participant and ordered step arrays")
-        if data["participants"]:
-            raise ValueError("Grouped case transports have been retired")
-        reader = (
-            SubjectContext.from_archive_data
-            if data["format"] == "explicit-expectations-v11"
-            else SubjectContext.from_data
-        )
-        subject = reader(data["subject"])
-        if version != "explicit-expectations-v13" and (
-            subject.prerequisites or subject.uninstall_invocations
-        ):
-            raise ValueError("Historical case cannot declare execution prerequisites")
-        if data["format"] == "explicit-expectations-v11" and not isinstance(
-            subject, _ArchivedSubjectContext
-        ):
-            raise ValueError("Historical v11 case requires its explicit timeout rule")
+        data = _case_transport_data(payload)
+        subject = _case_subject(data)
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
             subject,
@@ -633,6 +599,53 @@ class EffectInstallCase:
         ):
             raise ValueError("Effects case preparation or operations do not match definition")
         return case
+
+
+def _case_transport_data(payload: str) -> dict[str, object]:
+    incoming = json.loads(payload, object_pairs_hook=unique_object)
+    if not isinstance(incoming, dict):
+        raise ValueError("Expected effects case object")
+    raw = cast(dict[str, object], incoming)
+    version = raw.get("format")
+    if version not in (
+        "explicit-expectations-v11",
+        "explicit-expectations-v12",
+        "explicit-expectations-v13",
+    ):
+        raise ValueError("Unsupported effects case format or operation")
+    if version != "explicit-expectations-v13" and any(
+        name in raw for name in ("prerequisite_effects", "prerequisite_participant")
+    ):
+        raise ValueError("Historical case cannot declare prerequisites")
+    data = fields(
+        {"prerequisite_effects": None, "prerequisite_participant": None, **raw},
+        "prerequisite_effects prerequisite_participant format name key target scope effects "
+        "subject initial_files operations intermediate_preparation participants plan",
+    )
+    if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
+        raise ValueError("Expected participant and ordered step arrays")
+    if data["participants"]:
+        raise ValueError("Grouped case transports have been retired")
+    return data
+
+
+def _case_subject(data: dict[str, object]) -> SubjectContext:
+    reader = (
+        SubjectContext.from_archive_data
+        if data["format"] == "explicit-expectations-v11"
+        else SubjectContext.from_data
+    )
+    subject = reader(data["subject"])
+    version = data["format"]
+    if version != "explicit-expectations-v13" and (
+        subject.prerequisites or subject.uninstall_invocations
+    ):
+        raise ValueError("Historical case cannot declare execution prerequisites")
+    if data["format"] == "explicit-expectations-v11" and not isinstance(
+        subject, _ArchivedSubjectContext
+    ):
+        raise ValueError("Historical v11 case requires its explicit timeout rule")
+    return subject
 
 
 @dataclass(frozen=True)
@@ -714,31 +727,7 @@ def build_effect_cases(
     entries.append(reinstall)
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
     entries.extend(_markdown_cases(reinstall, markdown))
-    skills = [e for e in spec.effects if isinstance(e, SkillEffect)]
-    for name, preparation in (
-        ("missing-reference", MissingReferencePreparation),
-        ("altered-reference", AlteredReferencePreparation),
-        ("altered-skill", AlteredSkillPreparation),
-        ("preserve-skill-backup", PreserveSkillBackupPreparation),
-        ("stale-version", StaleVersionPreparation),
-        ("stale-reference", StaleReferencePreparation),
-    ):
-        if skills:
-            entries.extend(
-                replace(
-                    reinstall,
-                    name=name,
-                    key=CaseKey(target, spec.scope, name, e.effect_id),
-                    intermediate_preparation=preparation(e.destination),
-                )
-                for e in skills
-            )
-        else:
-            entries.append(
-                CaseNonConstruction(
-                    CaseKey(target, spec.scope, name), "not_applicable", "No skill effect declared"
-                )
-            )
+    entries.extend(_skill_cases(reinstall))
     entries.extend(_json_cases(reinstall))
     reason = missing or (
         "Multiple skill effects require unavailable lock observation capability"
@@ -762,6 +751,40 @@ def build_effect_cases(
             )
         )
     return EffectCaseBuild(tuple(entries))
+
+
+def _skill_cases(
+    reinstall: EffectInstallCase,
+) -> tuple[EffectInstallCase | CaseNonConstruction, ...]:
+    entries: list[EffectInstallCase | CaseNonConstruction] = []
+    skills = [e for e in reinstall.effects.effects if isinstance(e, SkillEffect)]
+    for name, preparation in (
+        ("missing-reference", MissingReferencePreparation),
+        ("altered-reference", AlteredReferencePreparation),
+        ("altered-skill", AlteredSkillPreparation),
+        ("preserve-skill-backup", PreserveSkillBackupPreparation),
+        ("stale-version", StaleVersionPreparation),
+        ("stale-reference", StaleReferencePreparation),
+    ):
+        if skills:
+            entries.extend(
+                replace(
+                    reinstall,
+                    name=name,
+                    key=CaseKey(reinstall.key.tool, reinstall.scope, name, e.effect_id),
+                    intermediate_preparation=preparation(e.destination),
+                )
+                for e in skills
+            )
+        else:
+            entries.append(
+                CaseNonConstruction(
+                    CaseKey(reinstall.key.tool, reinstall.scope, name),
+                    "not_applicable",
+                    "No skill effect declared",
+                )
+            )
+    return tuple(entries)
 
 
 def _prerequisite_error(
@@ -790,15 +813,13 @@ def _prerequisite_error(
         or not isinstance(effects.effects[0], SkillEffect)
     ):
         return "Prerequisites require two single-skill scopes"
-    for effect in spec.effects:
-        for other in effects.effects:
-            left, right = effect.destination, other.destination
-            if left.root == right.root and (
-                PurePosixPath(left.path) == PurePosixPath(right.path)
-                or PurePosixPath(left.path) in PurePosixPath(right.path).parents
-                or PurePosixPath(right.path) in PurePosixPath(left.path).parents
-            ):
-                return "Prerequisite effects overlap target effects"
+    left, right = spec.effects[0].destination, effects.effects[0].destination
+    if left.root == right.root and (
+        PurePosixPath(left.path) == PurePosixPath(right.path)
+        or PurePosixPath(left.path) in PurePosixPath(right.path).parents
+        or PurePosixPath(right.path) in PurePosixPath(left.path).parents
+    ):
+        return "Prerequisite effects overlap target effects"
     return None
 
 

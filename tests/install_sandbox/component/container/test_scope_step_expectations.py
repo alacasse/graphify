@@ -169,7 +169,10 @@ def test_uninstall_removes_reference_tree_and_preserves_personal_witnesses() -> 
 def test_initial_lock_must_be_absent_and_aliases_are_rejected() -> None:
     with pytest.raises(ValueError, match="observably absent"):
         build_install_expectations(
-            case_definition(), sources(), snapshot({("home", lock_path("project")): b""}), ROOTS
+            case_definition(prerequisite=True),
+            sources(),
+            snapshot({("home", lock_path("project")): b""}),
+            ROOTS,
         )
     roots = {"home": "/same", "project": "/same"}
     with pytest.raises(ValueError, match="collide"):

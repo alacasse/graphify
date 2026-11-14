@@ -158,31 +158,12 @@ def _missing_target(declaration: ToolDeclaration, key: CaseKey) -> CaseNonConstr
     return CaseNonConstruction(key, "unconstructible", "Requested hook is unavailable")
 
 
-def define_campaign(
-    manifest: object, checkout: Path, *, archived: bool = False
-) -> CampaignDefinition:
-    if not isinstance(manifest, dict):
-        raise ValueError("Expected campaign definition object")
-    data = fields(
-        {"catalog": {}, **cast(dict[str, object], manifest)},
-        "format spec context prepare_only operations request catalog",
-    )
-    if (
-        data["format"] not in {"tool-campaign-v1", "tool-campaign-v2", "tool-campaign-v3"}
-        or type(data["prepare_only"]) is not bool
-    ):
-        raise ValueError("Unsupported campaign definition")
-    request = cast(dict[str, object] | None, data["request"])
-    if data["catalog"] != {}:
-        raise ValueError("Cross-tool campaign catalogs are unsupported")
-    if isinstance(request, dict) and request.get("operation") == "group-uninstall":
-        raise ValueError("group-uninstall has been retired")
-    prepare_only = data["prepare_only"]
-    declaration = EffectSpecReader().from_yaml(text(data["spec"]))
-    context = (SubjectContext.from_archive_data if archived else SubjectContext.from_data)(
-        data["context"]
-    )
-    if data["format"] == "tool-campaign-v3":
+def _campaign_context(
+    declaration: ToolDeclaration,
+    context: SubjectContext,
+    version: object,
+) -> SubjectContext:
+    if version == "tool-campaign-v3":
         if context.prerequisites:
             raise ValueError("Campaign prerequisites are derived from declared scopes")
         pair = {scope.scope: scope.effects for scope in declaration.scopes}
@@ -207,6 +188,34 @@ def define_campaign(
             )
     elif context.prerequisites or context.uninstall_invocations:
         raise ValueError("Historical campaign definitions do not support cross-scope operations")
+    return context
+
+
+def define_campaign(
+    manifest: object, checkout: Path, *, archived: bool = False
+) -> CampaignDefinition:
+    if not isinstance(manifest, dict):
+        raise ValueError("Expected campaign definition object")
+    data = fields(
+        {"catalog": {}, **cast(dict[str, object], manifest)},
+        "format spec context prepare_only operations request catalog",
+    )
+    if (
+        data["format"] not in {"tool-campaign-v1", "tool-campaign-v2", "tool-campaign-v3"}
+        or type(data["prepare_only"]) is not bool
+    ):
+        raise ValueError("Unsupported campaign definition")
+    request = cast(dict[str, object] | None, data["request"])
+    if data["catalog"] != {}:
+        raise ValueError("Cross-tool campaign catalogs are unsupported")
+    if isinstance(request, dict) and request.get("operation") == "group-uninstall":
+        raise ValueError("group-uninstall has been retired")
+    prepare_only = data["prepare_only"]
+    declaration = EffectSpecReader().from_yaml(text(data["spec"]))
+    context = (SubjectContext.from_archive_data if archived else SubjectContext.from_data)(
+        data["context"]
+    )
+    context = _campaign_context(declaration, context, data["format"])
     operations = None if data["operations"] is None else _operations(data["operations"])
     if operations is not None and request is not None:
         raise ValueError("--case and --request cannot be combined")

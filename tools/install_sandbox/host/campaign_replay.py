@@ -57,6 +57,18 @@ def _names(path: Path) -> set[str]:
     return {p.name for p in path.iterdir()} if path.is_dir() else set()
 
 
+def _verify_retained_case(output: Path, expected_bytes: bytes) -> None:
+    case_copy = output / "case.json"
+    if case_copy.exists():
+        if not case_copy.is_file() or case_copy.read_bytes() != expected_bytes:
+            raise ValueError(
+                f"Retained case does not match declaration: cases/{output.name}/case.json"
+            )
+    elif (output / "evidence-format.json").exists() or (output / "result.json").exists():
+        # The runner writes both files after case.json, even when the result is unreadable.
+        raise ValueError(f"Retained case missing: cases/{output.name}/case.json")
+
+
 def _replay_case(
     root: Path,
     case: EffectInstallCase,
@@ -72,6 +84,7 @@ def _replay_case(
     retained = root / "inputs" / (case.key.storage_id + ".json")
     if retained.read_bytes() != expected_bytes:
         raise ValueError(f"Submitted case does not match declaration: {location}")
+    _verify_retained_case(output, expected_bytes)
     for field in ("state", "not_run_reason", "error"):
         _require(record[field], receipt[field], field)
     entry.state, entry.not_run_reason, entry.error = (
@@ -93,8 +106,6 @@ def _replay_case(
         raise ValueError(f"Unexpected container result: {location}")
     test = None
     if saved["result_error"] is None:
-        if (output / "case.json").read_bytes() != expected_bytes:
-            raise ValueError(f"Retained case does not match declaration: {location}")
         test = read_evidence(output)
     _require(saved["test"], asdict(test) if test else None, location)
     entry.result = CoordinatedResult(container, test, saved["result_error"], output)

@@ -33,7 +33,7 @@ def retained_inputs(
     if not isinstance(incoming, dict):
         raise ValueError("Expected preparation inputs")
     data = cast(dict[str, object], incoming)
-    context = SubjectContext.from_data(data.get("context"))
+    context = SubjectContext.from_archive_data(data.get("context"))
     raw = data.get("effects")
     if not isinstance(raw, list):
         raise ValueError("Expected selected participant effects")

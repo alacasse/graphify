@@ -228,7 +228,7 @@ def _verify_chronology(definition: CampaignDefinition, result: CampaignResult) -
 
 
 def replay_directory(root: Path) -> dict[str, Any]:
-    definition = define_campaign(read_json_evidence(root, "definition.json"), root)
+    definition = define_campaign(read_json_evidence(root, "definition.json"), root, archived=True)
     result = CampaignResult.from_definition(definition, root)
     report = _object(read_json_evidence(root, "campaign.json"))
     receipts = fields(

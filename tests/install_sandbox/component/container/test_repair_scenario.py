@@ -51,7 +51,7 @@ def inputs(index: int = 1, source: bytes = SOURCE):
         "test",
         ("install",),
         "VERSION",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
     )
     case = build_effect_cases(spec, subject).cases[index]
     initial = snapshot({(f["root"], f["path"]): f["content"].encode() for f in case.initial_files})

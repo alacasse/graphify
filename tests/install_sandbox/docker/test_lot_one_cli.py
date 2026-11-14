@@ -73,7 +73,6 @@ def arrange(root: Path, fault: str = "user") -> tuple[Path, Path, Path]:
                 },
                 "version_source": "METADATA",
                 "rules": {
-                    "hook_timeout": 10,
                     "skill_lock": "persistent",
                     "json_backup": ".graphify-bak",
                     "skill_backup": ".bak",

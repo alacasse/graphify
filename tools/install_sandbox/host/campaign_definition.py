@@ -132,7 +132,9 @@ def _missing_target(declaration: ToolDeclaration, key: CaseKey) -> CaseNonConstr
     return CaseNonConstruction(key, "unconstructible", "Requested hook is unavailable")
 
 
-def define_campaign(manifest: object, checkout: Path) -> CampaignDefinition:
+def define_campaign(
+    manifest: object, checkout: Path, *, archived: bool = False
+) -> CampaignDefinition:
     if not isinstance(manifest, dict):
         raise ValueError("Expected campaign definition object")
     data = fields(
@@ -151,7 +153,9 @@ def define_campaign(manifest: object, checkout: Path) -> CampaignDefinition:
         raise ValueError("group-uninstall has been retired")
     prepare_only = data["prepare_only"]
     declaration = EffectSpecReader().from_yaml(text(data["spec"]))
-    context = SubjectContext.from_data(data["context"])
+    context = (SubjectContext.from_archive_data if archived else SubjectContext.from_data)(
+        data["context"]
+    )
     operations = None if data["operations"] is None else _operations(data["operations"])
     if operations is not None and request is not None:
         raise ValueError("--case and --request cannot be combined")

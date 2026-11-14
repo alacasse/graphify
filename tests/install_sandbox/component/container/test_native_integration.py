@@ -12,15 +12,17 @@ from tests.install_sandbox.component.host.native_support import (
     read_project_effects,
     write,
 )
+from tests.install_sandbox.case_support import reinstall_case
+
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.runner import InstallTestRunner
-from tools.install_sandbox.contracts.effect_case import SubjectContext, build_reinstall_case
+from tools.install_sandbox.contracts.effect_case import SubjectContext
 from tools.install_sandbox.host.result_reader import read_evidence
 
 
 def prepared(root: Path) -> Path:
     subject, spec, context = arrange(root)
-    case = build_reinstall_case(
+    case = reinstall_case(
         read_project_effects(spec), SubjectContext.from_data(json.loads(context.read_text()))
     )
     case.write(root / "case.json")

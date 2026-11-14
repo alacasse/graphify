@@ -93,7 +93,6 @@ def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class EffectRules:
-    hook_timeout: int
     skill_lock: str
     json_backup: str
     skill_backup: str
@@ -101,11 +100,10 @@ class EffectRules:
 
     @classmethod
     def from_data(cls, value: object) -> "EffectRules":
-        data = fields(value, "hook_timeout skill_lock json_backup skill_backup json_registry")
-        if type(data["hook_timeout"]) is not int or type(data["json_registry"]) is not bool:
-            raise ValueError("Expected explicit hook timeout and registry rules")
+        data = fields(value, "skill_lock json_backup skill_backup json_registry")
+        if type(data["json_registry"]) is not bool:
+            raise ValueError("Expected explicit registry rule")
         return cls(
-            data["hook_timeout"],
             text(data["skill_lock"]),
             text(data["json_backup"]),
             text(data["skill_backup"]),
@@ -149,6 +147,29 @@ class SubjectContext:
     # An ordinary v11 archive can retain unused removal metadata from a shared context.
     removals: tuple[dict[str, object], ...] = ()
 
+    def to_data(self) -> dict[str, object]:
+        data = asdict(self)
+        timeout = data.pop("_archived_timeout", None)
+        if timeout is not None:
+            data["rules"] = {"hook_timeout": timeout, **asdict(self.rules)}
+        return json.loads(json.dumps(data))
+
+    @classmethod
+    def from_archive_data(cls, value: object) -> "SubjectContext":
+        if not isinstance(value, dict):
+            raise ValueError("Expected a subject context object")
+        data = dict(cast(dict[str, object], value))
+        raw = data.get("rules")
+        if not isinstance(raw, dict) or "hook_timeout" not in raw:
+            return cls.from_data(data)
+        rules = dict(cast(dict[str, object], raw))
+        timeout = rules.pop("hook_timeout")
+        if type(timeout) is not int:
+            raise ValueError("Expected historical integer hook timeout")
+        data["rules"] = rules
+        context = _ArchivedSubjectContext.from_data(data)
+        return replace(cast(_ArchivedSubjectContext, context), _archived_timeout=timeout)
+
     def bind_participant(self, tool: str, scope: str) -> "SubjectContext":
         argv = self.invocations.get(f"{tool}:{scope}")
         if argv is None and scope == "project":
@@ -176,6 +197,13 @@ class SubjectContext:
             _invocations(data["invocations"]),
             _archived_removals(data["removals"]),
         )
+
+
+@dataclass(frozen=True)
+class _ArchivedSubjectContext(SubjectContext):
+    """Reader-only v11 wire metadata; absent from current subject contexts."""
+
+    _archived_timeout: int = field(default=0, repr=False)
 
 
 def _archived_removals(value: object) -> tuple[dict[str, object], ...]:
@@ -450,11 +478,16 @@ class EffectInstallCase:
 
     def to_json(self) -> str:
         data = asdict(self)
+        data["subject"] = self.subject.to_data()
         # Campaign replay checks the original v11 case bytes, including field order.
         data["key"] = self.key.to_data()
         data["participants"] = []
         data["plan"] = [step.to_data() for step in self.steps]
-        data["format"] = "explicit-expectations-v11"
+        data["format"] = (
+            "explicit-expectations-v11"
+            if isinstance(self.subject, _ArchivedSubjectContext)
+            else "explicit-expectations-v12"
+        )
         data["intermediate_preparation"] = (
             None
             if self.intermediate_preparation is None
@@ -475,15 +508,25 @@ class EffectInstallCase:
             "format name key target scope effects subject initial_files operations "
             "intermediate_preparation participants plan",
         )
-        if data["format"] != "explicit-expectations-v11":
+        if data["format"] not in ("explicit-expectations-v11", "explicit-expectations-v12"):
             raise ValueError("Unsupported effects case format or operation")
         if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
             raise ValueError("Expected participant and ordered step arrays")
         if data["participants"]:
             raise ValueError("Grouped case transports have been retired")
+        reader = (
+            SubjectContext.from_archive_data
+            if data["format"] == "explicit-expectations-v11"
+            else SubjectContext.from_data
+        )
+        subject = reader(data["subject"])
+        if data["format"] == "explicit-expectations-v11" and not isinstance(
+            subject, _ArchivedSubjectContext
+        ):
+            raise ValueError("Historical v11 case requires its explicit timeout rule")
         builds = build_effect_cases(
             EffectSpec.from_data(data["effects"]),
-            SubjectContext.from_data(data["subject"]),
+            subject,
             CaseKey.from_data(data["key"]).tool,
         )
         matches = [
@@ -500,33 +543,13 @@ class EffectInstallCase:
             data["plan"] != [step.to_data() for step in case.steps]
             or parsed != case.intermediate_preparation
             or data["target"] != case.target
-            or SubjectContext.from_data(data["subject"]) != case.subject
+            or subject != case.subject
             or data["scope"] != case.scope
             or data["operations"] != case.operations
             or data["initial_files"] != case.initial_files
         ):
             raise ValueError("Effects case preparation or operations do not match definition")
         return case
-
-
-def build_reinstall_case(
-    spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
-) -> EffectInstallCase:
-    # Round-trip both boundaries even for Python callers; invalid dataclasses are not trusted.
-    spec = EffectSpec.from_data(spec.to_data())
-    subject = SubjectContext.from_data(json.loads(json.dumps(asdict(subject))))
-    subject = subject.bind_participant(target, spec.scope)
-    validate_effect_rules(spec, subject)
-    return EffectInstallCase(
-        "reinstall",
-        CaseKey(text(target), spec.scope, "reinstall"),
-        subject.identity,
-        spec.scope,
-        spec,
-        subject,
-        effect_initial_files(spec),
-        ["install", "install"],
-    )
 
 
 @dataclass(frozen=True)
@@ -568,7 +591,7 @@ def build_effect_cases(
 ) -> EffectCaseBuild:
     """Enumerate participant obligations before binding executable commands."""
     spec = EffectSpec.from_data(spec.to_data())
-    subject = SubjectContext.from_data(json.loads(json.dumps(asdict(subject))))
+    subject = SubjectContext.from_archive_data(subject.to_data())
     entries: list[EffectInstallCase | CaseNonConstruction] = []
     missing: str | None = None
     try:

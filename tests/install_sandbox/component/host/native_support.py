@@ -4,7 +4,7 @@ import hashlib
 import json
 import shutil
 from collections.abc import Mapping
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -54,10 +54,10 @@ def arrange(
         "synthetic-subject",
         ("install",),
         "METADATA",
-        EffectRules(10, "persistent", ".graphify-bak", ".bak", False),
+        EffectRules("persistent", ".graphify-bak", ".bak", False),
     )
     context_file = root / "context.json"
-    context_file.write_text(json.dumps(asdict(context)))
+    context_file.write_text(json.dumps(context.to_data()))
     spec_file = root / "effects.yaml"
     payload = FIXTURE.read_text()
     raw = cast(dict[str, Any], yaml.safe_load(payload))

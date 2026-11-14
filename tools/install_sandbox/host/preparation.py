@@ -4,7 +4,6 @@ import hashlib
 import json
 import shutil
 import tomllib
-from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
@@ -102,7 +101,7 @@ def preparation_inputs(
         raise ValueError("Expected a full subject revision")
     return {
         "format": "preparation-inputs-v2",
-        "context": json.loads(json.dumps(asdict(context))),
+        "context": context.to_data(),
         "effects": [scope.to_data() for scope in effects],
         **metadata,
         "revision": revision,

@@ -27,8 +27,9 @@ These mappings and commands are established at product revision
 `7b9e3e80d25137d12e198cd1f6b87865821af491`. Kimi shares the Claude reference
 bundle without declaring Claude registration. A reference named `hooks.md`
 does not declare a hook. `agents install` is a different composition, and
-`pi guard install` is not the Pi skill command. Each target needs a separate
-subject context and campaign. Historical user-scope facts and uninstall metadata
+`pi guard install` is not the Pi skill command. Each campaign selects one spec and binds its installation arguments
+from the subject context. A shared context can map several participants to
+their respective arguments. Historical user-scope facts and uninstall metadata
 remain available in the immutable
 [original YAML](https://github.com/alacasse/graphify/tree/e181166ae11bda165e23bbd83d6357fe4872db49/tools/install_sandbox/specs);
 conversion does not qualify or retire those capabilities.
@@ -51,14 +52,15 @@ unconverted user effects. An unfiltered run exercises project and reports the
 outstanding user obligation. A project-only request can establish full project
 coverage within a partial campaign.
 
-The subject context is a separate JSON object with these required fields:
+The subject context is a separate JSON object. Its fields are described below.
 
 - `identity`: declared subject identity.
 - `revision` and `package_root`: exact Git commit and package-relative source
   directory for a packaged subject; `package_root` is `graphify` for this product.
 - `invocations`: a map from participant (such as `birch:user`) to the argument words following the prepared executable. A single `invocation` remains supported for project contexts.
 - `version_source`: relative source path containing distribution metadata with
-  one `Version` header, required by a skill effect.
+  one `Version` header. Every context supplies this path. A skill effect reads
+  the metadata to verify the installed version.
 - `rules`: explicit `skill_lock`, `json_backup`, `skill_backup`
   and `json_registry` values. The supported reinstall rules currently require
   the declared JSON hook facts, persistent skill lock, `.graphify-bak` JSON backup, `.bak` skill
@@ -112,12 +114,14 @@ A successful selection exits zero with `scope: partial`, `successful: true`,
 coverage. The selection declaration is retained even if execution stops before
 its first progress report; its status remains `partial_incomplete` with no
 executed cases. An interruption before raw evidence exists does not create an
-empty evidence archive. Other selections report `partial_incomplete` and exit nonzero, including
+empty evidence archive. Other execution selections report `partial_incomplete` and exit nonzero, including
 selected unconstructible entries or no executable case. Preparation-only reports
-`scope: preparation_only`. Omitting `--case` preserves full campaign execution.
+`scope: preparation_only`. Run without `--case`, `--request` or `--prepare-only` for a full campaign.
 
 The coordinator constructs the cases before allocating campaign output.
-`reinstall` is always constructed. Exactly one Markdown section also makes
+A scope with declared effects contributes a `reinstall` entry. It is
+`unconstructible` if the installation invocation is missing or the scope
+declares multiple skills. Exactly one Markdown section also makes
 `missing-section` and `altered-section` available; zero sections makes those cases
 not applicable, while multiple sections remains an explicit construction limit.
 A skill makes `missing-reference`, `altered-reference`, `altered-skill`,
@@ -268,8 +272,13 @@ Use `tools.install_sandbox.host.campaign_replay.replay_campaign(path_to_zip)` to
 verify the complete or partial report. The ZIP reader limits temporary extraction
 to 1 GiB and 100,000 entries by default. For larger archives, pass explicit
 `max_bytes` and `max_entries` budgets. Replay re-enumerates the archived spec and
-selection, checks the host receipts and replays every finished case. Each
-selected key includes tool, scope, operation, effect ID and member. The
+selection and checks the host receipts. It verifies each submitted case and
+every retained `cases/<id>/case.json` against the exact transport bytes,
+even when the host recorded a result error. An empty case directory can
+result from an early interruption. Either `evidence-format.json` or
+`result.json` establishes that the runner already wrote `case.json`.
+For a selected reinstall with an unreadable result, a faithful ZIP reproduces
+`partial_incomplete`. Each selected key includes tool, scope, operation, effect ID and member. The
 directory name is a SHA-256 digest of that key. To inspect one extracted case,
 call `tools.install_sandbox.host.result_reader.read_evidence(case_directory)`
 using the case's reported evidence path. It needs no original YAML, subject

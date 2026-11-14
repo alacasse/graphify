@@ -99,7 +99,7 @@ def test_append_codec_and_binding_accept_exact_regular_bytes(content: bytes):
         mutation_from_data,
     )
 
-    case_bytes = b"retained case"
+    case_bytes = reference_case().to_json().encode()
     snapshot = FilesystemSnapshot(
         entries=[{"root": "project", "path": "reference", "kind": "file"}],
         contents={("project", "reference"): content},
@@ -125,7 +125,9 @@ def test_append_codec_and_binding_accept_exact_regular_bytes(content: bytes):
     with pytest.raises(ValueError, match="suffix"):
         replace(operation, suffix=b"")
     with pytest.raises(ValueError, match="observation"):
-        replace(operation, observation_ref="steps/1/after.json")
+        replace(operation, observation_ref="steps/1/after.json").verify_binding(
+            case_bytes, snapshot
+        )
     snapshot.entries[0]["kind"] = "symlink"
     snapshot.contents[("project", "reference")] = content
     with pytest.raises(ValueError, match="regular"):

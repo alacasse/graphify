@@ -64,7 +64,7 @@ def _read(output: Path, case: EffectInstallCase) -> CaseTimingResult:
     if type(data["version"]) is not int or data["version"] != 2:
         raise ValueError("Unsupported timing version")
     raw = data["phases"]
-    expected = case_timings(case.name, len(case.operations))
+    expected = case_timings(case.name, len(case.steps))
     if not isinstance(raw, list):
         raise ValueError("Timing phases must be a list")
     raw = cast(list[object], raw)

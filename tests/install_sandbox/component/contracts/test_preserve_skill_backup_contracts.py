@@ -59,7 +59,7 @@ def test_backup_case_rejects_tampering(change: str) -> None:
 
 def creation() -> BoundFileCreation:
     return BoundFileCreation(
-        hashlib.sha256(b"exact case").hexdigest(),
+        hashlib.sha256(backup_case().to_json().encode()).hexdigest(),
         "steps/0/after.json",
         Destination("project", "skill/SKILL.md.bak"),
         b"\x00\xfforiginal" + PRESERVE_SKILL_BACKUP_SUFFIX,
@@ -78,13 +78,18 @@ def test_creation_binds_exact_case_bytes_and_round_trips_binary_content() -> Non
     operation = creation()
     assert mutation_from_data(operation.to_data()) == operation
     assert operation.to_data()["format"] == "prepared-mutation-v4"
-    assert operation.verify_binding(b"exact case", absent_snapshot()) == operation.content
+    assert (
+        operation.verify_binding(backup_case().to_json().encode(), absent_snapshot())
+        == operation.content
+    )
     with pytest.raises(ValueError, match="case digest"):
         operation.verify_binding(b"exact case\n", absent_snapshot())
     with pytest.raises(FrozenInstanceError):
         operation.content = b"changed"  # type: ignore[misc]
-    with pytest.raises(ValueError, match="validated first observation"):
-        replace(operation, observation_ref="steps/1/after.json")
+    with pytest.raises(ValueError, match="verified target installation observation"):
+        replace(operation, observation_ref="steps/1/after.json").verify_binding(
+            backup_case().to_json().encode(), absent_snapshot()
+        )
 
 
 @pytest.mark.parametrize(
@@ -108,7 +113,7 @@ def test_creation_rejects_unproven_absence(condition: str) -> None:
     else:
         observed.contents[("project", "skill/SKILL.md.bak")] = b"already exists"
     with pytest.raises(ValueError, match="positively observed absent"):
-        creation().verify_binding(b"exact case", observed)
+        creation().verify_binding(backup_case().to_json().encode(), observed)
 
 
 def test_performed_creation_records_actual_bytes_and_rejects_old_transport() -> None:

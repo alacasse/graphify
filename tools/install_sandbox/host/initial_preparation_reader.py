@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.step_layout import case_expectation_references
 from tools.install_sandbox.contracts.evidence_layout import (
     ArtifactLocation,
     FilesystemEntry,
@@ -50,7 +51,7 @@ def replay_initial(
     output: Path,
     snapshot: Callable[[Path, str], FilesystemSnapshot],
 ) -> InitialInputs | None:
-    loaded, staged = _inventory(output, snapshot)
+    loaded, staged = _inventory(output, snapshot, case)
     roots = _roots(loaded.get("environment"))
     sources, before = _observation(loaded.get("sources")), _observation(loaded.get("before"))
     initial, rejected = _initial_expectations(case, roots, sources)
@@ -234,13 +235,16 @@ def _require_blob_digests(output: Path, reference: str) -> None:
 
 
 def _inventory(
-    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
+    output: Path,
+    snapshot: Callable[[Path, str], FilesystemSnapshot],
+    case: EffectInstallCase,
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     entries = _physical_entries(output)
     loaded, referenced = _load_artifacts(output, snapshot)
     foreign = tuple(
-        ArtifactLocation(f"expectations/{phase}.json", "json")
-        for phase in ("intermediate", "reinstall")
+        ArtifactLocation(reference, "json")
+        for reference in case_expectation_references(case)
+        if reference not in {artifact.reference for artifact in ARTIFACTS.values()}
     )
     staged = classify_staging(
         tuple(entries), tuple(ARTIFACTS.values()) + foreign, referenced, set()

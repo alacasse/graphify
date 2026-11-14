@@ -27,7 +27,7 @@ from tools.install_sandbox.contracts.intermediate import (
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 from tools.install_sandbox.contracts.results import VerificationResult
-from tools.install_sandbox.rules.effect_verifier import PRESERVATION_CHECK_ROOTS
+from tools.install_sandbox.rules.effect_verifier import PRESERVATION_CHECK_ROOTS, EffectVerifier
 
 
 def retained_bytes(snapshot: FilesystemSnapshot, root: str, path: str) -> bytes:
@@ -158,24 +158,31 @@ def build_initial_expectations(
         for f in case.initial_files
     ]
     lock = None
-    for effect in case.effects.effects:
+    initial_paths = {(f["root"], f["path"]) for f in case.initial_files}
+    effects = {e.destination: e for bundle in case.step_effects for e in bundle.effects}
+    for effect in effects.values():
         root, path = effect.destination.root, effect.destination.path
         if isinstance(effect, FileEffect):
             constraints.append(Expectation("absent", root, path, "initial", "effect:file"))
         elif isinstance(effect, SkillEffect):
             lock = effect.destination
-            constraints.extend(
-                (
-                    Expectation("absent", root, path, "initial", "effect:skill"),
-                    Expectation(
-                        "absent",
-                        root,
-                        path + "/SKILL.md" + case.subject.rules.skill_backup,
-                        "initial",
-                        "rule:skill_backup",
-                    ),
+            occupied = any(r == root and p.startswith(path + "/") for r, p in initial_paths)
+            absent_paths = (
+                (path,)
+                if not occupied
+                else tuple(
+                    path + suffix for suffix in ("/SKILL.md", "/.graphify_version", "/references")
                 )
             )
+            constraints.extend(
+                Expectation("absent", root, target, "initial", "effect:skill")
+                for target in absent_paths
+            )
+            backup = path + "/SKILL.md" + case.subject.rules.skill_backup
+            if (root, backup) not in initial_paths:
+                constraints.append(
+                    Expectation("absent", root, backup, "initial", "rule:skill_backup")
+                )
         elif isinstance(effect, JsonHooksEffect):
             constraints.append(
                 Expectation(
@@ -298,7 +305,7 @@ def _markdown_install_constraint(
     )
 
 
-def build_install_expectations(
+def _build_install_expectations(
     case: EffectInstallCase,
     sources: FilesystemSnapshot,
     before: FilesystemSnapshot,
@@ -350,9 +357,7 @@ def bind_roots(expectations: ExpectationSet, roots: dict[str, str]) -> Expectati
     destination = expectations.lock_destination
     if destination is None:
         return bound
-    absolute = str(PurePosixPath(roots[destination.root]) / destination.path)
-    digest = hashlib.sha256(absolute.encode("utf-8")).hexdigest()[:16]
-    path = f".cache/graphify/skill-locks/{digest}.lock"
+    path = _skill_lock_path(destination, roots)
     kind = "absent" if bound.phase == "initial" else "file"
     constraint = Expectation(
         kind, "home", path, bound.phase, "rule:skill_lock", None if kind == "absent" else b""
@@ -480,3 +485,117 @@ def selected_stale_reference(
         Destination(effect.destination.root, effect.destination.path + "/references/stale.md"),
         effect.references + "/stale.md",
     )
+
+
+def build_install_expectations(
+    case: EffectInstallCase,
+    sources: FilesystemSnapshot,
+    before: FilesystemSnapshot,
+    roots: dict[str, str],
+) -> ExpectationSet:
+    """Construct the first declared invocation, including a prerequisite scope."""
+    return build_step_expectations(case, sources, before, roots, 0)
+
+
+def build_step_expectations(
+    case: EffectInstallCase,
+    sources: FilesystemSnapshot,
+    before: FilesystemSnapshot,
+    roots: dict[str, str],
+    index: int,
+    previous_expectations: ExpectationSet | None = None,
+    previous_verification: VerificationResult | None = None,
+) -> ExpectationSet:
+    """Advance only from a fully verified invocation, preserving its whole inventory."""
+    if not 0 <= index < len(case.steps):
+        raise ValueError("Step index outside the declared sequence")
+    if index:
+        if previous_expectations is None or previous_verification is None:
+            raise ValueError("Step requires the previous expectations and verdict")
+        actual = EffectVerifier().verify(previous_expectations, before)
+        if (
+            not actual.complete
+            or actual.mismatches
+            or actual.obstacles
+            or actual != previous_verification
+        ):
+            raise ValueError("Step requires a conforming previous observation")
+    if index == 0 and case.prerequisite_effects is not None:
+        _validate_initial_locks(case, roots, before)
+    if index > case.repair_after_index and case.steps[index].action == "install":
+        assert previous_expectations is not None and previous_verification is not None
+        return build_reinstall_expectations(previous_expectations, before, previous_verification)
+    effects = case.step_effects[index]
+    step_case = replace(
+        case,
+        effects=effects,
+        intermediate_preparation=(
+            case.intermediate_preparation if index == case.repair_after_index else None
+        ),
+    )
+    if case.steps[index].action == "install":
+        bundle = _build_install_expectations(step_case, sources, before, roots)
+        # A personal backup is never an installer-owned write permission.
+        backups = {
+            (
+                effect.destination.root,
+                effect.destination.path + "/SKILL.md" + case.subject.rules.skill_backup,
+            )
+            for effect in effects.effects
+            if isinstance(effect, SkillEffect)
+        }
+        constraints = tuple(
+            replace(
+                item,
+                kind="file",
+                content=retained_bytes(before, item.root, item.path),
+                provenance="observation:personal-skill-backup",
+            )
+            if (item.root, item.path) in backups and before.entry(item.root, item.path) is not None
+            else item
+            for item in bundle.expectations
+        )
+        return replace(bundle, expectations=constraints)
+    if case.steps[index].action != "uninstall" or len(effects.effects) != 1:
+        raise ValueError("Only explicit single-skill uninstall is supported")
+    effect = effects.effects[0]
+    if not isinstance(effect, SkillEffect):
+        raise ValueError("Uninstall requires a single skill effect")
+    root, path = effect.destination.root, effect.destination.path
+    removed_paths = {path + "/SKILL.md", path + "/.graphify_version", path + "/references"}
+    baseline = preservation_baseline(before, "uninstall")
+    removals = tuple(
+        (item.root, item.path)
+        for item in baseline
+        if item.root == root
+        and (item.path in removed_paths or item.path.startswith(path + "/references/"))
+    )
+    constraints = tuple(
+        Expectation("absent", root, target, "uninstall", "effect:skill-uninstall")
+        for target in sorted(removed_paths | {p for _, p in removals})
+    )
+    return ExpectationSet(
+        "uninstall", constraints, baseline=baseline, roots=dict(roots), allowed_removals=removals
+    )
+
+
+def _skill_lock_path(destination: Destination, roots: dict[str, str]) -> str:
+    absolute = str(PurePosixPath(roots[destination.root]) / destination.path)
+    digest = hashlib.sha256(absolute.encode("utf-8")).hexdigest()[:16]
+    return f".cache/graphify/skill-locks/{digest}.lock"
+
+
+def _validate_initial_locks(
+    case: EffectInstallCase, roots: dict[str, str], before: FilesystemSnapshot
+) -> None:
+    destinations = {
+        effect.destination
+        for bundle in case.step_effects
+        for effect in bundle.effects
+        if isinstance(effect, SkillEffect)
+    }
+    locks = {_skill_lock_path(destination, roots) for destination in destinations}
+    if len(locks) != len(destinations):
+        raise ValueError("Distinct skill destinations collide on a lock")
+    if any(not before.absent("home", lock) for lock in locks):
+        raise ValueError("Initial skill lock must be observably absent")

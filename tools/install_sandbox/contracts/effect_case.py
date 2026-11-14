@@ -118,7 +118,7 @@ class StepInvocation:
     argv: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if self.action != "install" or not self.argv:
+        if self.action not in ("install", "uninstall") or not self.argv:
             raise ValueError("Expected an explicit step invocation")
         for item in (self.participant, *self.argv):
             if "\x00" in text(item):
@@ -147,8 +147,16 @@ class SubjectContext:
     # An ordinary v11 archive can retain unused removal metadata from a shared context.
     removals: tuple[dict[str, object], ...] = ()
 
+    prerequisites: dict[str, str] = field(default_factory=lambda: dict[str, str]())
+    uninstall_invocations: dict[str, tuple[str, ...]] = field(
+        default_factory=lambda: dict[str, tuple[str, ...]]()
+    )
+
     def to_data(self) -> dict[str, object]:
         data = asdict(self)
+        for name in ("prerequisites", "uninstall_invocations"):
+            if not data[name]:
+                data.pop(name)
         timeout = data.pop("_archived_timeout", None)
         if timeout is not None:
             data["rules"] = {"hook_timeout": timeout, **asdict(self.rules)}
@@ -196,6 +204,8 @@ class SubjectContext:
             cast(str | None, data["revision"]),
             _invocations(data["invocations"]),
             _archived_removals(data["removals"]),
+            _prerequisites(data["prerequisites"]),
+            _invocations(data["uninstall_invocations"]),
         )
 
 
@@ -247,6 +257,15 @@ def _invocations(value: object) -> dict[str, tuple[str, ...]]:
     return result
 
 
+def _prerequisites(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected participant prerequisites")
+    result = {text(k): text(v) for k, v in cast(dict[str, object], value).items()}
+    if any(":" not in k or ":" not in v or k == v for k, v in result.items()):
+        raise ValueError("Expected distinct prerequisite participants")
+    return result
+
+
 def _context_fields(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Expected a subject context object")
@@ -258,9 +277,11 @@ def _context_fields(value: object) -> dict[str, object]:
             "invocation": [],
             "invocations": {},
             "removals": [],
+            "prerequisites": {},
+            "uninstall_invocations": {},
             **incoming,
         },
-        "identity invocation version_source rules package_root revision invocations removals",
+        "identity invocation version_source rules package_root revision invocations removals prerequisites uninstall_invocations",
     )
     root, revision = data["package_root"], data["revision"]
     if root is not None:
@@ -469,16 +490,49 @@ class EffectInstallCase:
         | None
     ) = None
 
+    prerequisite_effects: EffectSpec | None = None
+    prerequisite_participant: str | None = None
+
+    @property
+    def repair_after_index(self) -> int:
+        return int(self.prerequisite_effects is not None)
+
+    @property
+    def step_effects(self) -> tuple[EffectSpec, ...]:
+        prefix = () if self.prerequisite_effects is None else (self.prerequisite_effects,)
+        return prefix + tuple(self.effects for _ in self.operations)
+
     @property
     def steps(self) -> tuple[StepInvocation, ...]:
-        return tuple(
-            StepInvocation(op, f"{self.key.tool}:{self.scope}", self.subject.invocation)
+        prefix = ()
+        if self.prerequisite_participant is not None:
+            prefix = (
+                StepInvocation(
+                    "install",
+                    self.prerequisite_participant,
+                    self.subject.invocations[self.prerequisite_participant],
+                ),
+            )
+        participant = f"{self.key.tool}:{self.scope}"
+        return prefix + tuple(
+            StepInvocation(
+                op,
+                participant,
+                self.subject.invocation
+                if op == "install"
+                else self.subject.uninstall_invocations[participant],
+            )
             for op in self.operations
         )
 
     def to_json(self) -> str:
         data = asdict(self)
         data["subject"] = self.subject.to_data()
+        if self.prerequisite_effects is None:
+            data.pop("prerequisite_effects")
+            data.pop("prerequisite_participant")
+        else:
+            data["prerequisite_effects"] = self.prerequisite_effects.to_data()
         # Campaign replay checks the original v11 case bytes, including field order.
         data["key"] = self.key.to_data()
         data["participants"] = []
@@ -486,7 +540,11 @@ class EffectInstallCase:
         data["format"] = (
             "explicit-expectations-v11"
             if isinstance(self.subject, _ArchivedSubjectContext)
-            else "explicit-expectations-v12"
+            else (
+                "explicit-expectations-v13"
+                if self.subject.prerequisites or self.subject.uninstall_invocations
+                else "explicit-expectations-v12"
+            )
         )
         data["intermediate_preparation"] = (
             None
@@ -503,13 +561,25 @@ class EffectInstallCase:
 
     @classmethod
     def from_json(cls, payload: str) -> "EffectInstallCase":
-        data = fields(
-            json.loads(payload, object_pairs_hook=unique_object),
-            "format name key target scope effects subject initial_files operations "
-            "intermediate_preparation participants plan",
-        )
-        if data["format"] not in ("explicit-expectations-v11", "explicit-expectations-v12"):
+        incoming = json.loads(payload, object_pairs_hook=unique_object)
+        if not isinstance(incoming, dict):
+            raise ValueError("Expected effects case object")
+        raw = cast(dict[str, object], incoming)
+        version = raw.get("format")
+        if version not in (
+            "explicit-expectations-v11",
+            "explicit-expectations-v12",
+            "explicit-expectations-v13",
+        ):
             raise ValueError("Unsupported effects case format or operation")
+        if version != "explicit-expectations-v13" and any(
+            name in raw for name in ("prerequisite_effects", "prerequisite_participant")
+        ):
+            raise ValueError("Historical case cannot declare prerequisites")
+        data = fields(
+            {"prerequisite_effects": None, "prerequisite_participant": None, **raw},
+            "prerequisite_effects prerequisite_participant format name key target scope effects subject initial_files operations intermediate_preparation participants plan",
+        )
         if not isinstance(data["participants"], list) or not isinstance(data["plan"], list):
             raise ValueError("Expected participant and ordered step arrays")
         if data["participants"]:
@@ -520,6 +590,10 @@ class EffectInstallCase:
             else SubjectContext.from_data
         )
         subject = reader(data["subject"])
+        if version != "explicit-expectations-v13" and (
+            subject.prerequisites or subject.uninstall_invocations
+        ):
+            raise ValueError("Historical case cannot declare execution prerequisites")
         if data["format"] == "explicit-expectations-v11" and not isinstance(
             subject, _ArchivedSubjectContext
         ):
@@ -528,6 +602,12 @@ class EffectInstallCase:
             EffectSpec.from_data(data["effects"]),
             subject,
             CaseKey.from_data(data["key"]).tool,
+            prerequisite_effects=(
+                None
+                if data["prerequisite_effects"] is None
+                else EffectSpec.from_data(data["prerequisite_effects"])
+            ),
+            prerequisite_participant=cast(str | None, data["prerequisite_participant"]),
         )
         matches = [
             case
@@ -540,7 +620,10 @@ class EffectInstallCase:
         preparation = data["intermediate_preparation"]
         parsed = None if preparation is None else preparation_from_data(preparation)
         if (
-            data["plan"] != [step.to_data() for step in case.steps]
+            data["prerequisite_participant"] != case.prerequisite_participant
+            or data["prerequisite_effects"]
+            != (None if case.prerequisite_effects is None else case.prerequisite_effects.to_data())
+            or data["plan"] != [step.to_data() for step in case.steps]
             or parsed != case.intermediate_preparation
             or data["target"] != case.target
             or subject != case.subject
@@ -587,7 +670,12 @@ class EffectCaseBuild:
 
 
 def build_effect_cases(
-    spec: EffectSpec, subject: SubjectContext, target: str = "controlled"
+    spec: EffectSpec,
+    subject: SubjectContext,
+    target: str = "controlled",
+    *,
+    prerequisite_effects: EffectSpec | None = None,
+    prerequisite_participant: str | None = None,
 ) -> EffectCaseBuild:
     """Enumerate participant obligations before binding executable commands."""
     spec = EffectSpec.from_data(spec.to_data())
@@ -599,6 +687,14 @@ def build_effect_cases(
     except ValueError as error:
         missing = str(error)
         bound = subject
+    participant = f"{target}:{spec.scope}"
+    expected_prerequisite = subject.prerequisites.get(participant)
+    uninstall = participant in subject.uninstall_invocations
+    prerequisite_error = _prerequisite_error(
+        spec, subject, target, prerequisite_effects, prerequisite_participant
+    )
+    if expected_prerequisite:
+        missing = missing or prerequisite_error
     executable_subject = bound
     multi_skill = sum(isinstance(e, SkillEffect) for e in spec.effects) > 1
     for effect in spec.effects:
@@ -612,6 +708,8 @@ def build_effect_cases(
         executable_subject,
         effect_initial_files(spec),
         ["install", "install"],
+        prerequisite_effects=prerequisite_effects if expected_prerequisite else None,
+        prerequisite_participant=prerequisite_participant if expected_prerequisite else None,
     )
     entries.append(reinstall)
     markdown = [e for e in spec.effects if isinstance(e, MarkdownSectionEffect)]
@@ -654,7 +752,109 @@ def build_effect_cases(
             else e
             for e in entries
         ]
+    if uninstall:
+        entries.append(
+            _uninstall_case(
+                reinstall,
+                prerequisite_effects,
+                prerequisite_participant,
+                prerequisite_error or missing,
+            )
+        )
     return EffectCaseBuild(tuple(entries))
+
+
+def _prerequisite_error(
+    spec: EffectSpec,
+    subject: SubjectContext,
+    target: str,
+    effects: EffectSpec | None,
+    participant: str | None,
+) -> str | None:
+    primary = f"{target}:{spec.scope}"
+    expected = subject.prerequisites.get(primary)
+    if primary in subject.uninstall_invocations and expected is None:
+        expected = f"{target}:user"
+    if expected is None:
+        return None
+    if participant is None or participant != expected or expected.split(":")[0] != target:
+        return "Missing or inconsistent prerequisite participant"
+    if effects is None or effects.scope != participant.rsplit(":", 1)[-1]:
+        return "Prerequisite participant and effects disagree"
+    if participant not in subject.invocations:
+        return f"Missing installation invocation for {participant}"
+    if (
+        len(spec.effects) != 1
+        or not isinstance(spec.effects[0], SkillEffect)
+        or len(effects.effects) != 1
+        or not isinstance(effects.effects[0], SkillEffect)
+    ):
+        return "Prerequisites require two single-skill scopes"
+    for effect in spec.effects:
+        for other in effects.effects:
+            left, right = effect.destination, other.destination
+            if left.root == right.root and (
+                PurePosixPath(left.path) == PurePosixPath(right.path)
+                or PurePosixPath(left.path) in PurePosixPath(right.path).parents
+                or PurePosixPath(right.path) in PurePosixPath(left.path).parents
+            ):
+                return "Prerequisite effects overlap target effects"
+    return None
+
+
+def _uninstall_case(
+    reinstall: EffectInstallCase,
+    effects: EffectSpec | None,
+    participant: str | None,
+    error: str | None,
+) -> EffectInstallCase | CaseNonConstruction:
+    key = CaseKey(reinstall.key.tool, reinstall.scope, "uninstall")
+    if reinstall.scope != "project" or effects is None or effects.scope != "user":
+        error = error or "Uninstall requires project and user single-skill scopes"
+    if error or effects is None or participant is None:
+        return CaseNonConstruction(
+            key, "unconstructible", error or "Missing uninstall prerequisite"
+        )
+    witnesses: list[InitialFile] = [item.copy() for item in reinstall.initial_files]
+    for specification in (reinstall.effects, effects):
+        for effect in specification.effects:
+            destination = effect.destination
+            paths = (
+                destination.path + "/personal.txt",
+                str(PurePosixPath(destination.path).parent / "personal/SKILL.md"),
+            )
+            for path in paths:
+                witnesses.append(
+                    {
+                        "root": destination.root,
+                        "path": path,
+                        "content": "Personal document to preserve.\n",
+                    }
+                )
+    destination = reinstall.effects.effects[0].destination
+    witnesses.extend(
+        [
+            {
+                "root": "project",
+                "path": "graphify-out/personal.txt",
+                "content": "Personal document to preserve.\n",
+            },
+            {
+                "root": destination.root,
+                "path": destination.path + "/SKILL.md.bak",
+                "content": "Personal document to preserve.\n",
+            },
+        ]
+    )
+    return replace(
+        reinstall,
+        name="uninstall",
+        key=key,
+        initial_files=witnesses,
+        operations=["install", "uninstall"],
+        prerequisite_effects=effects,
+        prerequisite_participant=participant,
+    )
 
 
 def _json_cases(

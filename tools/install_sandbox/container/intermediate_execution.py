@@ -80,7 +80,9 @@ def conduct_intermediate(
     case_bytes = (writer.output_directory / "case.json").read_bytes()
     if EffectInstallCase.from_json(case_bytes.decode("utf-8")) != case:
         raise ValueError("Archived case differs from execution case")
-    inputs = RepairInputs(case_bytes, sources, installed, first_after, publisher.facts.steps[0])
+    inputs = RepairInputs(
+        case_bytes, sources, installed, first_after, publisher.facts.steps[case.repair_after_index]
+    )
     session = begin(inputs)
     try:
         outcome = _advance(session, inputs, environment, writer, publisher)

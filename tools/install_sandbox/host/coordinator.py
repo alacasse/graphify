@@ -1,4 +1,4 @@
-"""Conduct the native two-step reinstall from effects and explicit subject context."""
+"""Run the selected cases from declared effects and explicit command bindings."""
 
 import json
 import time

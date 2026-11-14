@@ -12,6 +12,11 @@ from tools.install_sandbox.contracts.evidence_layout import (
     classify_staging,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.step_layout import (
+    case_expectation_references,
+    step_expectation_reference,
+)
 from tools.install_sandbox.host.evidence_reader import (
     check_snapshot,
     read_json_evidence,
@@ -19,7 +24,11 @@ from tools.install_sandbox.host.evidence_reader import (
 )
 
 
-def _locations(prefix: str, index: int) -> tuple[ArtifactLocation, ...]:
+def _locations(
+    prefix: str,
+    index: int,
+    case: EffectInstallCase,
+) -> tuple[ArtifactLocation, ...]:
     transports: list[tuple[str, Literal["json", "snapshot"]]] = [
         ("before.json", "snapshot"),
         ("after.json", "snapshot"),
@@ -27,24 +36,26 @@ def _locations(prefix: str, index: int) -> tuple[ArtifactLocation, ...]:
         ("verification.json", "json"),
         ("failure.json", "json"),
     ]
-    return tuple(
+    locations = tuple(
         ArtifactLocation(f"{prefix}/{name}", transport)
         for name, transport in transports
         if index != 0 or name != "before.json"
     ) + tuple(
-        ArtifactLocation(f"expectations/{phase}.json", "json")
-        for phase in ("initial", "install", "intermediate", "reinstall")
+        ArtifactLocation(reference, "json") for reference in case_expectation_references(case)
     )
+    return locations
 
 
 def inventory(
     output: Path,
     index: int,
     snapshot: Callable[[Path, str], FilesystemSnapshot],
+    case: EffectInstallCase,
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     """Load final artifacts even when the last publication does not reference them."""
     prefix = f"steps/{index}"
-    descriptors = _locations(prefix, index)
+    expectation_reference = step_expectation_reference(case, index)
+    descriptors = _locations(prefix, index, case)
     entries: list[FilesystemEntry] = []
 
     def visit(relative: str) -> None:
@@ -82,17 +93,16 @@ def inventory(
         if safe_evidence_path(output, reference).exists():
             loaded[reference] = safe_evidence_path(output, reference).read_bytes()
     staged = classify_staging(tuple(entries), descriptors, referenced, known)
-    return loaded, tuple(item for item in staged if _step_owns(item, index))
+    return loaded, tuple(item for item in staged if _step_owns(item, index, expectation_reference))
 
 
-def _step_owns(item: StagedEvidence, index: int) -> bool:
+def _step_owns(item: StagedEvidence, index: int, expectation_reference: str) -> bool:
     if item.form == "directory" and item.owners & {
         "expectations/initial.json",
         "expectations/install.json",
     }:
         return False
-    expectation = f"expectations/{'install' if index == 0 else 'reinstall'}.json"
     return any(
-        owner.startswith(f"steps/{index}/") or (index != 0 and owner == expectation)
+        owner.startswith(f"steps/{index}/") or (index != 0 and owner == expectation_reference)
         for owner in item.owners
     )

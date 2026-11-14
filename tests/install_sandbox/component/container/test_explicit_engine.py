@@ -132,7 +132,7 @@ def test_expectations_precede_commands_and_failure_blocks_reinstall(
     monkeypatch.setattr(runner, "build_initial_expectations", initial)
     monkeypatch.setattr(runner, "bind_roots", bind)
     monkeypatch.setattr(runner, "build_install_expectations", install)
-    monkeypatch.setattr(runner, "build_reinstall_expectations", reinstall)
+    monkeypatch.setattr(runner, "build_step_expectations", reinstall)
 
     def execute(
         args: list[str], cwd: Path, environment: dict[str, str], timeout: float
@@ -222,7 +222,7 @@ def inject_phase_failure(monkeypatch: pytest.MonkeyPatch, failure_stage: str) ->
     monkeypatch.setattr(EffectEnvironment, "observe", observe)
     monkeypatch.setattr(TestResultWriter, "write_metadata", write)
     if failure_stage == "preparation":
-        monkeypatch.setattr(runner, "build_reinstall_expectations", prepare)
+        monkeypatch.setattr(runner, "build_step_expectations", prepare)
 
 
 @pytest.mark.parametrize(

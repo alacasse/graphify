@@ -6,6 +6,7 @@ from typing import Literal, cast
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
+from tools.install_sandbox.contracts.step_layout import step_expectation_reference
 from tools.install_sandbox.contracts.results import (
     CommandEvidence,
     InstallTestResult,
@@ -24,7 +25,7 @@ from tools.install_sandbox.host.initial_preparation_reader import replay_initial
 from tools.install_sandbox.host.intermediate_reader import replay_intermediate
 from tools.install_sandbox.host.step_artifacts import inventory
 from tools.install_sandbox.rules.effect_verifier import EffectVerifier
-from tools.install_sandbox.rules.expectation_builder import build_reinstall_expectations
+from tools.install_sandbox.rules.expectation_builder import build_step_expectations
 from tools.install_sandbox.rules.repair_protocol import RepairInputs
 from tools.install_sandbox.rules.step_lifecycle import Artifact, RetainedFacts, inspect
 
@@ -66,16 +67,19 @@ def check_effect_result(
         raise ValueError("Retained case contradicts requested case")
     initial = replay_initial(result.preparation, case, output, _snapshot)
     if initial is None:
-        _absent(output, ("expectations/reinstall.json",))
+        _absent(
+            output,
+            tuple(step_expectation_reference(case, index) for index in range(1, len(case.steps))),
+        )
         for index in range(len(result.steps)):
-            loaded, staged = inventory(output, index, _snapshot)
+            loaded, staged = inventory(output, index, _snapshot, case)
             # Installation expectations belong to initial preparation, never an idle step.
             own = {key: value for key, value in loaded.items() if key.startswith(f"steps/{index}/")}
             if own or staged:
                 raise ValueError(
                     "Incomplete initial preparation cannot own installation execution evidence"
                 )
-        return _unstarted_repair(result, output)
+        return _unstarted_repair(result, output, case)
     return _steps(
         result, case, output, initial.roots, initial.expectations, initial.before, initial.sources
     )
@@ -95,7 +99,9 @@ def _check_steps_directory(result: InstallTestResult, output: Path) -> None:
                 raise ValueError("Unknown step evidence directory")
 
 
-def _unstarted_repair(result: InstallTestResult, output: Path) -> RepairProgress | None:
+def _unstarted_repair(
+    result: InstallTestResult, output: Path, case: EffectInstallCase
+) -> RepairProgress | None:
     if result.intermediate_preparation is None:
         return None
     inputs = RepairInputs(
@@ -103,7 +109,7 @@ def _unstarted_repair(result: InstallTestResult, output: Path) -> RepairProgress
         FilesystemSnapshot(),
         ExpectationSet("install", ()),
         FilesystemSnapshot(),
-        result.steps[0],
+        result.steps[case.repair_after_index],
     )
     return replay_intermediate(result, output, inputs, _snapshot).progress
 
@@ -123,12 +129,25 @@ def _steps(
     installed = expected
     for index, step in enumerate(result.steps):
         if index:
-            expected, previous, progress = _transition(
-                result, case, output, sources, installed, expected, previous, previous_verdict
+            expected, previous, transition_progress = _transition(
+                result,
+                case,
+                output,
+                roots,
+                index,
+                sources,
+                installed,
+                expected,
+                previous,
+                previous_verdict,
             )
+            if transition_progress is not None:
+                progress = transition_progress
         after, verdict = _inspect_step(
             step, case, output, index, roots, first_command, previous, expected
         )
+        if index == case.repair_after_index:
+            installed = expected
         if step.command is not None:
             first_command = step.command["args"], step.command["cwd"]
         if after is not None:
@@ -141,13 +160,15 @@ def _transition(
     result: InstallTestResult,
     case: EffectInstallCase,
     output: Path,
+    roots: dict[str, str],
+    index: int,
     sources: FilesystemSnapshot,
     installed: ExpectationSet,
     expected: ExpectationSet,
     previous: FilesystemSnapshot,
     verdict: VerificationResult | None,
 ) -> tuple[ExpectationSet, FilesystemSnapshot, RepairProgress | None]:
-    if case.intermediate_preparation is not None:
+    if case.intermediate_preparation is not None and index == case.repair_after_index + 1:
         inspection = replay_intermediate(
             result,
             output,
@@ -156,15 +177,15 @@ def _transition(
                 sources,
                 installed,
                 previous,
-                result.steps[0],
+                result.steps[case.repair_after_index],
             ),
             _snapshot,
         )
         if inspection.ready is None:
             return expected, previous, inspection.progress
         return inspection.ready.expectations, inspection.ready.baseline, inspection.progress
-    if result.steps[1].phase != "idle" and verdict is not None:
-        expected = build_reinstall_expectations(expected, previous, verdict)
+    if result.steps[index].phase != "idle" and verdict is not None:
+        expected = build_step_expectations(case, sources, previous, roots, index, expected, verdict)
     return expected, previous, None
 
 
@@ -185,13 +206,13 @@ def _inspect_step(
     previous: FilesystemSnapshot,
     expected: ExpectationSet,
 ) -> tuple[FilesystemSnapshot | None, VerificationResult | None]:
-    loaded, staged = inventory(output, index, _snapshot)
+    loaded, staged = inventory(output, index, _snapshot, case)
     prefix = f"steps/{index}"
     failure = loaded.get(f"{prefix}/failure.json")
     stopped = None if failure is None else StepState.from_data(failure)
     claim = stopped or step
     repair_owns_expectations = bool(
-        index
+        index == case.repair_after_index + 1
         and case.intermediate_preparation is not None
         and (
             claim.phase == "idle"
@@ -199,9 +220,7 @@ def _inspect_step(
             or (claim.stop is not None and claim.stop.phase == "preparation")
         )
     )
-    expectation_reference = (
-        "expectations/install.json" if index == 0 else "expectations/reinstall.json"
-    )
+    expectation_reference = step_expectation_reference(case, index)
     has_expectations = safe_evidence_path(output, expectation_reference).exists()
     if has_expectations and not repair_owns_expectations:
         _expectations(output, expectation_reference, expected)

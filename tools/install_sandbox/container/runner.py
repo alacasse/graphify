@@ -10,6 +10,7 @@ from tools.install_sandbox.container.evidence_writer import TestResultWriter
 from tools.install_sandbox.container.installer import InstallerCommandResult, InstallerDriver
 from tools.install_sandbox.container.intermediate_execution import conduct_intermediate
 from tools.install_sandbox.contracts.effect_case import EffectInstallCase
+from tools.install_sandbox.contracts.step_layout import step_expectation_reference
 from tools.install_sandbox.contracts.expectations import ExpectationSet
 from tools.install_sandbox.contracts.initial_preparation import REFERENCES
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot, same_observation
@@ -23,7 +24,7 @@ from tools.install_sandbox.rules.expectation_builder import (
     bind_roots,
     build_initial_expectations,
     build_install_expectations,
-    build_reinstall_expectations,
+    build_step_expectations,
 )
 from tools.install_sandbox.rules.initial_preparation import InitialPreparationLifecycle
 from tools.install_sandbox.rules.step_lifecycle import (
@@ -77,7 +78,7 @@ class InstallTestRunner:
         writer = TestResultWriter(output)
         case.write(output / "case.json")
         writer.write_metadata("evidence-format.json", {"format": "explicit-expectations-v13"})
-        writer.initialize_timings(case.name, len(case.operations))
+        writer.initialize_timings(case.name, len(case.steps))
         publisher = CasePublisher(case, writer)
         lifecycle = InitialPreparationLifecycle()
         try:
@@ -162,12 +163,13 @@ class InstallTestRunner:
             if segment != "step" or decision.index is None:
                 return
             index = decision.index
-            state = start(case.operations[index])
+            state = start(case.steps[index].action)
             publisher.publish_step(index, state)
             completed = self._step(
                 case,
                 executable,
                 environment,
+                sources,
                 expectations,
                 before,
                 writer,
@@ -206,6 +208,7 @@ class InstallTestRunner:
         case: EffectInstallCase,
         executable: Path,
         environment: EffectEnvironment,
+        sources: FilesystemSnapshot,
         expectations: ExpectationSet,
         before: FilesystemSnapshot,
         writer: TestResultWriter,
@@ -219,8 +222,19 @@ class InstallTestRunner:
                 with writer.measure("step_preparation", index):
                     previous = publisher.facts.steps[index - 1].verification
                     assert previous is not None
-                    if case.intermediate_preparation is None:
-                        expectations = build_reinstall_expectations(expectations, before, previous)
+                    if (
+                        case.intermediate_preparation is None
+                        or index != case.repair_after_index + 1
+                    ):
+                        expectations = build_step_expectations(
+                            case,
+                            sources,
+                            before,
+                            {"home": str(environment.home), "project": str(environment.project)},
+                            index,
+                            expectations,
+                            previous,
+                        )
                     observed = environment.observe(writer, "before", step_index=index)
                     usable = not observed.obstacles and same_observation(before, observed)
                     state = advance(
@@ -233,8 +247,10 @@ class InstallTestRunner:
             else:
                 state = advance(state, PreparationObserved(REFERENCES["before"]))
             state = advance(state, Prepared())
-            reference = "expectations/install.json" if index == 0 else "expectations/reinstall.json"
-            if index and case.intermediate_preparation is None:
+            reference = step_expectation_reference(case, index)
+            if index and (
+                case.intermediate_preparation is None or index != case.repair_after_index + 1
+            ):
                 writer.write_metadata(reference, expectations.to_data())
             state = advance(state, ExpectationsRetained(reference))
             assert state.retained.before is not None

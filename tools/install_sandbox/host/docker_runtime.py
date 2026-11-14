@@ -373,7 +373,7 @@ class ContainerHarness:
             expected_context = self._subject_context.bind_participant(parsed.key.tool, parsed.scope)
             if (
                 parsed.subject != expected_context
-                or parsed.effects not in self._effects
+                or any(effects not in self._effects for effects in parsed.step_effects)
                 or self.binding.get("image_id") != self.image_id
                 or retained.status != "prepared"
                 or retained.binding != self.binding

@@ -16,10 +16,15 @@ Segment = Literal["initial_preparation", "step", "repair"]
 class CaseShape:
     operations: tuple[str, ...]
     requires_repair: bool
+    repair_after_index: int = 0
 
     @classmethod
     def from_case(cls, case: EffectInstallCase) -> "CaseShape":
-        return cls(tuple(case.operations), case.intermediate_preparation is not None)
+        return cls(
+            tuple(step.action for step in case.steps),
+            case.intermediate_preparation is not None,
+            case.repair_after_index,
+        )
 
 
 @dataclass(frozen=True)
@@ -54,10 +59,10 @@ def _validated_prefix(shape: CaseShape, facts: CaseFacts) -> tuple[bool, tuple[S
         raise ValueError("Step operations contradict case order")
     initial_preparation.validate(facts.initial)
     statuses: tuple[Status, ...] = tuple(step_lifecycle.status(step) for step in facts.steps)
-    ready = _repair_ready(shape, facts, statuses[0])
+    ready = _repair_ready(shape, facts, statuses[shape.repair_after_index])
     authorized = facts.initial.checkpoint == "ready"
     for index, (step, status) in enumerate(zip(facts.steps, statuses, strict=True)):
-        if index == 1 and not ready:
+        if index == shape.repair_after_index + 1 and not ready:
             authorized = False
         if not authorized and step.phase != "idle":
             raise ValueError("Dependent work requires verified preparation and preceding steps")
@@ -72,7 +77,7 @@ def evaluate(shape: CaseShape, facts: CaseFacts) -> CaseDecision:
         status = initial_preparation.status(facts.initial)
         return CaseDecision(status, "initial_preparation" if status == "incomplete" else None)
     for index, (step, status) in enumerate(zip(facts.steps, statuses, strict=True)):
-        if index == 1 and not ready:
+        if index == shape.repair_after_index + 1 and not ready:
             if facts.repair and facts.repair.outcome == "failed":
                 return CaseDecision("failed", None)
             return CaseDecision("incomplete", "repair")

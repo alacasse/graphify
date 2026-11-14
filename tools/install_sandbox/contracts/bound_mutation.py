@@ -19,6 +19,14 @@ def _replacement(value: object) -> bytes:
     return base64.b64decode(value, validate=True)
 
 
+def _verify_case_observation(digest: str, reference: str, case_bytes: bytes) -> None:
+    if digest != hashlib.sha256(case_bytes).hexdigest():
+        raise ValueError("Operation case digest differs from retained case")
+    case = EffectInstallCase.from_json(case_bytes.decode("utf-8"))
+    if reference != f"steps/{case.repair_after_index}/after.json":
+        raise ValueError("Operation requires the verified target installation observation")
+
+
 @dataclass(frozen=True)
 class BoundMarkdownMutation:
     case_sha256: str
@@ -40,10 +48,7 @@ class BoundMarkdownMutation:
             raise ValueError("Invalid byte bounds")
 
     def verify_binding(self, case_bytes: bytes, first_after: "FilesystemSnapshot") -> bytes:
-        if self.case_sha256 != hashlib.sha256(case_bytes).hexdigest():
-            raise ValueError("Operation case digest differs from retained case")
-        if self.observation_ref != "steps/0/after.json":
-            raise ValueError("Operation requires validated first observation")
+        _verify_case_observation(self.case_sha256, self.observation_ref, case_bytes)
         document = first_after.contents.get((self.destination.root, self.destination.path))
         if (
             document is None
@@ -103,10 +108,7 @@ def _bound_file_bytes(
     case_bytes: bytes,
     first_after: FilesystemSnapshot,
 ) -> bytes:
-    if case_sha256 != hashlib.sha256(case_bytes).hexdigest():
-        raise ValueError("Operation case digest differs from retained case")
-    if observation_ref != "steps/0/after.json":
-        raise ValueError("Operation requires validated first observation")
+    _verify_case_observation(case_sha256, observation_ref, case_bytes)
     entry = first_after.entry(destination.root, destination.path)
     content = first_after.contents.get((destination.root, destination.path))
     if entry is None or entry["kind"] != "file" or content is None:
@@ -173,8 +175,6 @@ class BoundFileReplacement(_BoundExistingFile):
             self.target.to_data()
         if type(self.content) is not bytes:
             raise ValueError("Replacement requires content bytes")
-        if self.observation_ref != "steps/0/after.json":
-            raise ValueError("Replacement requires validated first observation")
 
     def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
         content = super().verify_binding(case_bytes, first_after)
@@ -222,8 +222,6 @@ class BoundFileAppend(_BoundExistingFile):
         super().__post_init__()
         if type(self.suffix) is not bytes or not self.suffix:
             raise ValueError("Append requires nonempty suffix bytes")
-        if self.observation_ref != "steps/0/after.json":
-            raise ValueError("Append requires validated first observation")
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -262,14 +260,12 @@ class BoundFileCreation:
     def __post_init__(self) -> None:
         if re.fullmatch(r"[0-9a-f]{64}", self.case_sha256) is None:
             raise ValueError("Expected exact SHA-256 digest")
-        if self.observation_ref != "steps/0/after.json":
-            raise ValueError("Creation requires validated first observation")
+        relative_path(self.observation_ref)
         if type(self.content) is not bytes:
             raise ValueError("Creation requires content bytes")
 
     def verify_binding(self, case_bytes: bytes, first_after: FilesystemSnapshot) -> bytes:
-        if self.case_sha256 != hashlib.sha256(case_bytes).hexdigest():
-            raise ValueError("Operation case digest differs from retained case")
+        _verify_case_observation(self.case_sha256, self.observation_ref, case_bytes)
         root, path = self.destination.root, self.destination.path
         ancestors = {str(parent) for parent in PurePosixPath(path).parents}
         if (

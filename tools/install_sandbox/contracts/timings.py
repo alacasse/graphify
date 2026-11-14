@@ -44,7 +44,7 @@ def case_timings(case_name: str, step_count: int) -> list[Timing]:
     for index in range(step_count):
         if index:
             record = Timing("step_preparation", index)
-            if case_name == "reinstall":
+            if case_name == "reinstall" and index == step_count - 1:
                 record.diagnostic = "Retain the previous state for reinstallation"
             records.append(record)
         records.extend([Timing("command", index), Timing("checks", index)])

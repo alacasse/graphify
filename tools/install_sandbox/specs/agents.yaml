@@ -8,5 +8,9 @@ scopes:
     source: skill-agents.md
     references: skills/agents/references
   user:
-    state: unconstructible
-    reason: User-scope expected effects have not been converted.
+  - effect_id: skill
+    family: skill
+    root: HOME
+    path: .agents/skills/graphify
+    source: skill-agents.md
+    references: skills/agents/references

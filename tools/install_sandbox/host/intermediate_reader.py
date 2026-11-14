@@ -11,6 +11,7 @@ from tools.install_sandbox.contracts.evidence_layout import (
     classify_staging,
 )
 from tools.install_sandbox.contracts.observation import FilesystemSnapshot
+from tools.install_sandbox.contracts.effect_case import EffectInstallCase
 from tools.install_sandbox.contracts.results import InstallTestResult, RepairCheckpoint
 from tools.install_sandbox.host.evidence_reader import (
     check_snapshot,
@@ -30,12 +31,15 @@ def replay_intermediate(
 ) -> Inspection:
     published = result.intermediate_preparation
     assert published is not None
-    inventory, staged = _inventory(output, snapshot)
+    case = EffectInstallCase.from_json(inputs.case_bytes.decode("utf-8"))
+    inventory, staged = _inventory(output, snapshot, len(case.steps))
     return inspect(inputs, RepairCheckpoint.from_data(published), inventory, staged)
 
 
 def _inventory(
-    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
+    output: Path,
+    snapshot: Callable[[Path, str], FilesystemSnapshot],
+    step_count: int = 2,
 ) -> tuple[dict[str, object], tuple[StagedEvidence, ...]]:
     entries = _physical_entries(output)
     inventory, referenced = _load_artifacts(output, snapshot)
@@ -45,14 +49,19 @@ def _inventory(
         if entry.kind == "file"
         and entry.relative in {"expectations/initial.json", "expectations/install.json"}
     }
+    foreign = tuple(
+        ArtifactLocation(f"expectations/step-{index}.json", "json")
+        for index in range(1, step_count - 1)
+    )
     staged = classify_staging(
         entries,
         tuple(ArtifactLocation(item.reference, item.transport) for item in ARTIFACTS)
-        + tuple(INITIAL_ARTIFACTS.values()),
+        + tuple(INITIAL_ARTIFACTS.values())
+        + foreign,
         referenced,
         known_files,
     )
-    initial = {item.reference for item in INITIAL_ARTIFACTS.values()}
+    initial = {item.reference for item in (*INITIAL_ARTIFACTS.values(), *foreign)}
     return inventory, tuple(item for item in staged if not item.owners & initial)
 
 
@@ -81,7 +90,9 @@ def _physical_entries(output: Path) -> tuple[FilesystemEntry, ...]:
 
 
 def _load_artifacts(
-    output: Path, snapshot: Callable[[Path, str], FilesystemSnapshot]
+    output: Path,
+    snapshot: Callable[[Path, str], FilesystemSnapshot],
+    step_count: int = 2,
 ) -> tuple[dict[str, object], set[str]]:
     inventory: dict[str, object] = {}
     referenced: set[str] = set()

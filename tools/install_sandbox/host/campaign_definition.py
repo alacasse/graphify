@@ -1,7 +1,7 @@
 """Enumerate the obligations of one declaration, then project the requested keys."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -14,7 +14,12 @@ from tools.install_sandbox.contracts.effect_case import (
     build_effect_cases,
     unique_object,
 )
-from tools.install_sandbox.contracts.effects import EffectSpec, JsonHooksEffect, ToolDeclaration
+from tools.install_sandbox.contracts.effects import (
+    EffectSpec,
+    JsonHooksEffect,
+    SkillEffect,
+    ToolDeclaration,
+)
 from tools.install_sandbox.contracts.spec import fields, text
 from tools.install_sandbox.host.effect_reader import EffectSpecReader
 
@@ -39,12 +44,16 @@ class CampaignDefinition:
 
     @property
     def effects(self) -> tuple[EffectSpec, ...]:
-        selected = {case.scope for case in self.built.cases}
-        return tuple(
-            scope.effects
-            for scope in self.declaration.scopes
-            if scope.effects is not None and (self.prepare_only or scope.scope in selected)
-        )
+        if self.prepare_only:
+            return tuple(
+                scope.effects for scope in self.declaration.scopes if scope.effects is not None
+            )
+        effects: list[EffectSpec] = []
+        for case in self.built.cases:
+            for specification in case.step_effects:
+                if specification not in effects:
+                    effects.append(specification)
+        return tuple(effects)
 
 
 def _operations(value: object) -> tuple[str, ...]:
@@ -72,7 +81,24 @@ def _inventory(declaration: ToolDeclaration, context: SubjectContext) -> tuple[E
                 )
             )
         else:
-            entries.extend(build_effect_cases(scope.effects, context, declaration.tool).entries)
+            participant = f"{declaration.tool}:{scope.scope}"
+            prerequisite = context.prerequisites.get(participant)
+            if prerequisite is None and participant in context.uninstall_invocations:
+                prerequisite = f"{declaration.tool}:user"
+            effects = None
+            if prerequisite is not None:
+                for candidate in declaration.scopes:
+                    if prerequisite == f"{declaration.tool}:{candidate.scope}":
+                        effects = candidate.effects
+            entries.extend(
+                build_effect_cases(
+                    scope.effects,
+                    context,
+                    declaration.tool,
+                    prerequisite_effects=effects,
+                    prerequisite_participant=prerequisite,
+                ).entries
+            )
     return tuple(entries)
 
 
@@ -142,7 +168,7 @@ def define_campaign(
         "format spec context prepare_only operations request catalog",
     )
     if (
-        data["format"] not in {"tool-campaign-v1", "tool-campaign-v2"}
+        data["format"] not in {"tool-campaign-v1", "tool-campaign-v2", "tool-campaign-v3"}
         or type(data["prepare_only"]) is not bool
     ):
         raise ValueError("Unsupported campaign definition")
@@ -156,6 +182,31 @@ def define_campaign(
     context = (SubjectContext.from_archive_data if archived else SubjectContext.from_data)(
         data["context"]
     )
+    if data["format"] == "tool-campaign-v3":
+        if context.prerequisites:
+            raise ValueError("Campaign prerequisites are derived from declared scopes")
+        pair = {scope.scope: scope.effects for scope in declaration.scopes}
+        project, user = pair.get("project"), pair.get("user")
+        if (
+            project is not None
+            and user is not None
+            and len(project.effects) == len(user.effects) == 1
+            and isinstance(project.effects[0], SkillEffect)
+            and isinstance(user.effects[0], SkillEffect)
+        ):
+            project_participant = f"{declaration.tool}:project"
+            # Binding the user step replaces the scalar invocation in its case transport.
+            # Retain the resolved project command for the preceding installation.
+            invocations = dict(context.invocations)
+            if context.invocation:
+                invocations.setdefault(project_participant, context.invocation)
+            context = replace(
+                context,
+                invocations=invocations,
+                prerequisites={f"{declaration.tool}:user": project_participant},
+            )
+    elif context.prerequisites or context.uninstall_invocations:
+        raise ValueError("Historical campaign definitions do not support cross-scope operations")
     operations = None if data["operations"] is None else _operations(data["operations"])
     if operations is not None and request is not None:
         raise ValueError("--case and --request cannot be combined")
@@ -198,7 +249,7 @@ def load_campaign_definition(
     spec_source = spec_file.read_text(encoding="utf-8")
     return define_campaign(
         {
-            "format": "tool-campaign-v2",
+            "format": "tool-campaign-v3",
             "catalog": {},
             "spec": spec_source,
             "context": json.loads(

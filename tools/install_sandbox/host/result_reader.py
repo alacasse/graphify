@@ -74,7 +74,7 @@ def _read_result(output_directory: Path, case: EffectInstallCase) -> InstallTest
     if status not in ("passed", "failed", "not_run", "incomplete"):
         raise ValueError("Invalid case result status")
     steps = [_step(item, output_directory) for item in _list(data["steps"])]
-    if [step.operation for step in steps] != case.operations:
+    if [step.operation for step in steps] != [step.action for step in case.steps]:
         raise ValueError("Result steps do not match the requested operations")
     result = InstallTestResult(
         expected,

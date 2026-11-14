@@ -47,9 +47,8 @@ a destination preserves the effect's identity.
 
 A scope whose effects await conversion carries `state: unconstructible` and a
 reason. A scope the product explicitly does not support carries
-`state: not_applicable` and a reason. The six catalog specs currently declare
-unconverted user effects. An unfiltered run exercises project and reports the
-outstanding user obligation. A project-only request can establish full project
+`state: not_applicable` and a reason. Agents declares executable project and user skill effects. The five other
+converted specs still report an outstanding user obligation. A project-only request can establish full project
 coverage within a partial campaign.
 
 The subject context is a separate JSON object. Its fields are described below.
@@ -58,6 +57,10 @@ The subject context is a separate JSON object. Its fields are described below.
 - `revision` and `package_root`: exact Git commit and package-relative source
   directory for a packaged subject; `package_root` is `graphify` for this product.
 - `invocations`: a map from participant (such as `birch:user`) to the argument words following the prepared executable. A single `invocation` remains supported for project contexts.
+- `uninstall_invocations`: optional map from a project participant to its targeted
+  removal command. For a project and user pair with one skill each, the
+  engine prepares and verifies the user installation before installing and
+  removing the project skill.
 - `version_source`: relative source path containing distribution metadata with
   one `Version` header. Every context supplies this path. A skill effect reads
   the metadata to verify the installed version.
@@ -130,9 +133,33 @@ in that order, independently of the Markdown count. Without a skill, the campaig
 reports those cases as `not_applicable`.
 Each declared JSON hook adds one `missing-json-hook` case keyed by effect and
 member. Without a JSON hook effect this operation is `not_applicable`. Each
-executable case has two dependent installer calls. CodeBuddy has 11 project
+ordinary project installation or repair case has two dependent installer calls. CodeBuddy has 11 project
 cases (22 calls), Amp has 9 (18 calls), and Agents, Copilot, Kimi and Pi each
 have 7 (14 calls). This gives 48 executable project cases across the six specs.
+
+When both scopes declare a single skill, every user case first installs the
+project skill in the same environment and verifies its package bytes, version,
+references and lock. The two user calls must preserve that project installation.
+For Agents on the product revision above, the installation bindings are:
+
+```json
+{
+  "invocations": {
+    "agents:project": ["install", "--platform", "agents", "--project"],
+    "agents:user": ["install", "--platform", "agents"]
+  }
+}
+```
+
+Use these fields in the subject context along with the package, version and rules
+shown below. The full installation campaign exercises seven project cases and
+seven user cases in 35 commands. To include targeted removal, also supply
+`"uninstall_invocations": {"agents:project": ["uninstall", "--project", "--platform", "agents"]}`.
+The full campaign then exercises 15 cases in 38 commands. The removal must
+delete the project skill document, version stamp and entire references directory.
+Both locks, the user installation, the personal project skill backup and the
+personal files in the skill, beside it and in `graphify-out/` must survive.
+Use `--case uninstall` to diagnose only that case with partial coverage.
 
 The hook repair fixture seeds the selected member beside a personal command,
 with an explicit group attribute. A second group with the same matcher holds
@@ -264,9 +291,9 @@ corresponding command.
 
 The verifier compares explicit expectations with observations. It does not
 reconstruct installation destinations or versions and does not infer the phase.
-The second step runs only after the first command and verification succeed.
-Reinstall preservation uses that independently validated first observation;
-managed content still comes from the original retained sources.
+Each dependent step runs after the previous command and verification succeed.
+Reinstall preservation uses the verified target installation. The
+managed content comes from the original retained sources.
 
 Use `tools.install_sandbox.host.campaign_replay.replay_campaign(path_to_zip)` to
 verify the complete or partial report. The ZIP reader limits temporary extraction
@@ -294,7 +321,9 @@ per-participant results after interruption, and for archives from that revision
 that include the legacy reference staging scenario. Earlier archives retain
 their historical readers.
 
-The current formats are case `explicit-expectations-v12`, expectations
+Cross-scope cases use `explicit-expectations-v13` and retain the prerequisite
+participant and its effects. Ordinary cases use `explicit-expectations-v12`.
+The other current formats are expectations
 `explicit-expectations-v4`, prepared operation `prepared-mutation-v4`, performed
 result `performed-mutation-v3`, and case evidence `explicit-expectations-v13`.
 The `kind` field identifies the operation as `markdown`, `file-removal`,

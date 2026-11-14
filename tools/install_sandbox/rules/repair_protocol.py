@@ -114,7 +114,7 @@ class RepairSession:
         case = EffectInstallCase.from_json(inputs.case_bytes.decode("utf-8"))
         plan = repair_scenario_from_case(case, self._inputs.sources).bind(
             self._inputs.first_after,
-            "steps/0/after.json",
+            f"steps/{case.repair_after_index}/after.json",
             verdict,
             self._inputs.installed,
             self._inputs.case_bytes,

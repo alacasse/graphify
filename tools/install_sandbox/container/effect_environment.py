@@ -10,7 +10,7 @@ from tools.install_sandbox.contracts.observation import FilesystemSnapshot
 
 def source_paths(case: EffectInstallCase) -> list[str]:
     sources: list[str] = []
-    for effect in case.effects.effects:
+    for effect in (effect for effects in case.step_effects for effect in effects.effects):
         if isinstance(effect, SkillEffect):
             sources.extend((effect.source, effect.references, case.subject.version_source))
         elif isinstance(effect, MarkdownSectionEffect):
